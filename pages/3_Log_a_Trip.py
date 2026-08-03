@@ -5,7 +5,7 @@ from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots,
 from core.scoring import score_day
 from core.lures import WATER_CLARITY_OPTIONS, STRUCTURE_TYPES, FORAGE_OPTIONS, DEFAULT_FORAGE
 from core.thermocline import estimate_thermocline_band_ft
-from core.storage import TripEntry, append_trip, commit_and_push
+from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push
 
 st.set_page_config(page_title="Log a Trip - Nolin Lake", page_icon="📝", layout="centered")
 st.title("📝 Log a Trip")
@@ -85,7 +85,7 @@ if submitted:
 
     token = github_token()
     if token:
-        ok, msg = commit_and_push(token, repo_slug(), f"Log trip {entry.trip_id} ({entry.trip_date})")
+        ok, msg = commit_and_push([TRIP_LOG_PATH], token, repo_slug(), f"Log trip {entry.trip_id} ({entry.trip_date})")
         (st.success if ok else st.warning)(msg)
     else:
         st.success("Trip logged locally.")

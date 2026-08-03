@@ -30,6 +30,7 @@ pages/
   2_Lake_Map.py                Click-anywhere map + location-specific recommendation
   3_Log_a_Trip.py               Trip logging form
   4_Trip_History.py             Logged trips + calibration status
+  5_Lure_Inventory.py           Tackle inventory: brand/description/photo/price/qty
 core/
   astro.py                     Moon phase + solunar rise/transit/set (Meeus low-precision algorithm)
   weather.py                    Open-Meteo integration + water-temp estimate
@@ -41,14 +42,19 @@ core/
   spots.py                      Named lake spot data
   lake_map.py                   Folium map builder (contours + spot markers + click target)
   ui.py                         Shared "Lake Setup Options" sidebar + lure-block rendering
-  storage.py                    Trip log read/write + git commit-back
+  storage.py                    Trip log read/write + git commit-back (commit_and_push
+                                 is generic over a list of paths - lure_inventory.py
+                                 reuses it rather than re-implementing git plumbing)
   calibration.py                Weight nudging from logged trip outcomes
-  appstate.py                   Cached weather/weights/spots accessors, secrets handling
+  lure_inventory.py             Tackle inventory read/write + photo storage
+  appstate.py                   Cached weather/weights/spots/inventory accessors, secrets handling
 data/
   nolin_channel.json             River-channel centerline anchoring the modeled bathymetry
   nolin_spots.json                Named lake spots
   quickdraw/                      Angler-dropped Quickdraw CSV exports (ships empty)
   trip_log.csv                    Logged trips (grows over time, committed back to the repo)
+  lure_inventory.csv              Tackle inventory (grows over time, committed back to the repo)
+  lure_images/                    User-uploaded/captured lure photos (committed back to the repo)
 tests/                          pytest unit tests, one file per core module
 ```
 
@@ -124,6 +130,23 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     issue. Connected the user's local `~/Fishing` folder so they can drop
     new exports there over time; the workflow is: user drops a CSV, tells
     Claude, Claude copies it into `data/quickdraw/`, rebuilds/tests/pushes.
+12. **Lure inventory page** - new `pages/5_Lure_Inventory.py` + `core/lure_inventory.py`,
+    intentionally separate from `core/lures.py` (the recommendation rule engine) - this
+    is a physical tackle-box tracker, not a scoring input. Seeded from the user's Cabela's
+    order #W283763341 (20 lure line items; a spool of braided line and a tackle-storage
+    box from the same order were excluded as not being lures) by reading the order-history
+    page via the Claude in Chrome browser tools (the user was already logged in) and
+    pulling brand/description/SKU/price/qty plus each item's Bass Pro CDN product-photo
+    URL. Those photo URLs are linked directly rather than downloaded into the repo -
+    verified the CDN URL works unauthenticated with a year-long cache header, so it's a
+    stable public link, and linking (vs. storing a copy of the vendor's product
+    photography) is the lighter-touch choice, consistent with this project's existing
+    stance on not reproducing third-party proprietary content. Manually-added items work
+    differently: the user's own uploaded/camera-captured photos are real user data, so
+    those get saved into `data/lure_images/` and committed to the repo, same treatment
+    as Quickdraw CSVs. Refactored `core/storage.py`'s `commit_and_push()` to take a list
+    of paths (was hardcoded to just the trip log) so `lure_inventory.py` could reuse the
+    same git commit-back plumbing instead of duplicating it.
 
 ## Key design decisions & rationale
 

@@ -1,0 +1,85 @@
+from core.lure_inventory import (
+    LureItem, append_item, delete_item, read_all_items, save_image, update_item,
+)
+
+
+def test_empty_inventory_returns_empty_list(tmp_path):
+    path = tmp_path / "inv.csv"
+    assert read_all_items(path) == []
+
+
+def test_append_and_read_item(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Strike King", description="Test crankbait", price=8.99, quantity=2)
+    append_item(item, path)
+    rows = read_all_items(path)
+    assert len(rows) == 1
+    assert rows[0]["brand"] == "Strike King"
+    assert rows[0]["description"] == "Test crankbait"
+    assert rows[0]["price"] == "8.99"
+    assert rows[0]["quantity"] == "2"
+    assert rows[0]["item_id"] == item.item_id
+
+
+def test_update_item_changes_quantity_and_price(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Zoom", description="Worm", price=5.49, quantity=1)
+    append_item(item, path)
+
+    found = update_item(item.item_id, path, quantity=5, price=4.99)
+    assert found is True
+
+    rows = read_all_items(path)
+    assert rows[0]["quantity"] == "5"
+    assert rows[0]["price"] == "4.99"
+
+
+def test_update_item_missing_id_returns_false(tmp_path):
+    path = tmp_path / "inv.csv"
+    assert update_item("nonexistent", path, quantity=9) is False
+
+
+def test_delete_item_removes_row(tmp_path):
+    path = tmp_path / "inv.csv"
+    item1 = LureItem(brand="Rapala", description="Jerkbait", price=10.99, quantity=1)
+    item2 = LureItem(brand="Z-Man", description="Jighead", price=6.99, quantity=2)
+    append_item(item1, path)
+    append_item(item2, path)
+
+    assert delete_item(item1.item_id, path) is True
+    rows = read_all_items(path)
+    assert len(rows) == 1
+    assert rows[0]["item_id"] == item2.item_id
+
+
+def test_delete_item_missing_id_returns_false(tmp_path):
+    path = tmp_path / "inv.csv"
+    assert delete_item("nonexistent", path) is False
+
+
+def test_delete_item_removes_associated_local_image(tmp_path):
+    path = tmp_path / "inv.csv"
+    images_dir = tmp_path / "images"
+    item = LureItem(brand="Strike King", description="Swimjig", price=13.99, quantity=1)
+    filename = save_image(item.item_id, b"fake-bytes", "jpg", images_dir)
+    item.image_filename = filename
+    append_item(item, path)
+
+    img_path = images_dir / filename
+    assert img_path.exists()
+
+    delete_item(item.item_id, path, images_dir)
+    assert not img_path.exists()
+
+
+def test_save_image_writes_file_and_returns_filename(tmp_path):
+    images_dir = tmp_path / "images"
+    filename = save_image("abc123", b"\x89PNG-fake", "PNG", images_dir)
+    assert filename == "abc123.png"
+    assert (images_dir / filename).read_bytes() == b"\x89PNG-fake"
+
+
+def test_save_image_defaults_to_jpg_when_no_extension(tmp_path):
+    images_dir = tmp_path / "images"
+    filename = save_image("xyz", b"data", "", images_dir)
+    assert filename == "xyz.jpg"
