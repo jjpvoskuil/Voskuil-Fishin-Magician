@@ -4,6 +4,7 @@ from datetime import date
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
 from core.scoring import score_week
 from core.lures import recommend, WATER_CLARITY_OPTIONS, STRUCTURE_TYPES
+from core.videos import get_videos_for
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 st.title("📅 7-Day Largemouth Bass Forecast")
@@ -68,10 +69,27 @@ for day in week:
                 st.markdown(f"**{seg.name}** ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - "
                             f"score {seg.score}/10")
                 lc1, lc2, lc3 = st.columns(3)
-                lc1.write(f"**Lures:** {', '.join(rec.primary_lures)}")
-                lc2.write(f"**Colors:** {', '.join(rec.colors)}")
-                lc3.write(f"**Depth:** {rec.target_depth}")
+                lc1.write(f"**Colors:** {', '.join(rec.colors)}")
+                lc2.write(f"**Depth:** {rec.target_depth}")
+                lc3.write(f"**Retrieve:** {rec.retrieve}")
                 st.write(f"**Technique:** {rec.technique}")
-                st.write(f"**Retrieve:** {rec.retrieve}")
+
+                st.caption("**Lures** (tap one for a couple of how-to videos):")
+                lure_cols = st.columns(len(rec.primary_lures))
+                for lc, lure in zip(lure_cols, rec.primary_lures):
+                    with lc:
+                        with st.popover(lure, use_container_width=True):
+                            for v in get_videos_for(lure):
+                                st.markdown(f"- [{v['title']}]({v['url']})")
+
+                if rec.also_worth_trying:
+                    st.caption("**Also worth trying:**")
+                    also_cols = st.columns(len(rec.also_worth_trying))
+                    for ac, lure in zip(also_cols, rec.also_worth_trying):
+                        with ac:
+                            with st.popover(lure, use_container_width=True):
+                                for v in get_videos_for(lure):
+                                    st.markdown(f"- [{v['title']}]({v['url']})")
+
                 if rec.rationale:
                     st.caption(" · ".join(rec.rationale))

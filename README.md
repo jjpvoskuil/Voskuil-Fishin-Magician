@@ -10,8 +10,11 @@ A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built
   best window(s) to fish each day.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
   water clarity, and structure type.
-- **Interactive lake map** of named Nolin Lake spots - click one to get a
-  location-specific recommendation for any day/time in the forecast window.
+- **Zoomable contour map** of Nolin Lake with modeled depth contour lines - click
+  *anywhere* on the lake (not just preset spots) to get a location-specific
+  recommendation for any day/time in the forecast window.
+- **Instructional videos** - tap any recommended lure/technique to pull up a couple of
+  real how-to videos for it.
 - **Trip logging** - record what actually happened (lures, catches) so the model can
   calibrate its weights against your own results over time.
 
@@ -36,6 +39,18 @@ lure/color/technique rule table.
   **These are planning approximations, not survey-grade positions.** If you have exact
   waypoints from your own chartplotter/Navionics, edit that file to improve accuracy -
   it's the single source of truth the map and lure engine read from.
+- Depth contours (`data/nolin_channel.json`, `core/bathymetry.py`): there is no free,
+  downloadable full-lake bathymetric survey for Nolin Lake (checked USACE eHydro -
+  navigation channels only - and USGS, which only has a partial 2016 water-quality
+  study). Commercial charts exist but their data is proprietary and can't be scraped or
+  embedded here. Instead, depth is **modeled** from a hand-defined river-channel
+  centerline anchored at the same verified points as the spot list, with a Gaussian
+  cross-section tapering to shore. It's clearly labeled as modeled in the app, and it's
+  designed to improve: real depth readings you log from a trip can blend into the model
+  over time, the same way the forecast weights calibrate from logged trips.
+- Instructional videos (`core/videos.py`): a curated table of real, verified YouTube
+  links per lure/technique. A couple of techniques without a confidently-verified direct
+  link fall back to a live YouTube search link instead of a guessed URL.
 - Summer/normal pool elevation used for the map context: 515 ft, ~5,795 surface acres
   (confirmed against USACE data), vs. ~2,890 acres at winter pool.
 

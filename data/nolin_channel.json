@@ -1,0 +1,29 @@
+{
+  "note": "Modeled river-channel centerline for Nolin River Lake, used to generate an approximate depth surface (not a survey). Points anchor to verified locations (USACE gauge at the dam, KY State Parks GNIS coordinate, Census TIGER geocodes for Dog Creek and Wax) with the channel path and depth/width values between them modeled on typical dendritic-reservoir geometry. Coverage is the main lake body and the two major arms with verified access points (Dog Creek, Wax) - it does not extend into the narrow upper river arm, where data confidence drops off.",
+  "branches": {
+    "main": {
+      "points": [
+        {"lat": 37.2783, "lon": -86.2475, "depth_ft": 85, "half_width_m": 500, "label": "Dam (verified anchor)"},
+        {"lat": 37.2860, "lon": -86.2380, "depth_ft": 72, "half_width_m": 470},
+        {"lat": 37.2960, "lon": -86.2250, "depth_ft": 60, "half_width_m": 430},
+        {"lat": 37.3047, "lon": -86.2136, "depth_ft": 50, "half_width_m": 380, "label": "Nolin Lake State Park (verified anchor)"},
+        {"lat": 37.3100, "lon": -86.2000, "depth_ft": 42, "half_width_m": 320},
+        {"lat": 37.3130, "lon": -86.1950, "depth_ft": 38, "half_width_m": 300, "label": "Junction - branches split here"},
+        {"lat": 37.3260, "lon": -86.1750, "depth_ft": 30, "half_width_m": 240},
+        {"lat": 37.3400, "lon": -86.1500, "depth_ft": 22, "half_width_m": 180},
+        {"lat": 37.3526, "lon": -86.1325, "depth_ft": 15, "half_width_m": 130, "label": "Wax (verified anchor)"},
+        {"lat": 37.3640, "lon": -86.1180, "depth_ft": 8, "half_width_m": 80}
+      ]
+    },
+    "dog_creek": {
+      "points": [
+        {"lat": 37.3130, "lon": -86.1950, "depth_ft": 38, "half_width_m": 300, "label": "Junction (shared with main)"},
+        {"lat": 37.3155, "lon": -86.1700, "depth_ft": 28, "half_width_m": 230},
+        {"lat": 37.3191, "lon": -86.1341, "depth_ft": 17, "half_width_m": 160, "label": "Dog Creek (verified anchor)"},
+        {"lat": 37.3245, "lon": -86.1150, "depth_ft": 7, "half_width_m": 70}
+      ]
+    }
+  },
+  "summer_pool_elevation_ft": 515,
+  "modeled_max_depth_note": "~85 ft modeled near the dam at summer pool. Published lake statistics vary source to source; treat as an approximation."
+}

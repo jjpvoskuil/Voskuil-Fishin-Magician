@@ -1,0 +1,217 @@
+"""
+Modeled bathymetry for Nolin River Lake.
+
+There is no free, downloadable, full-lake bathymetric survey for Nolin Lake
+(checked USACE eHydro - navigation channels only; USGS - only a partial
+2016 water-quality study). Commercial charts exist (Navionics, Fishidy,
+GPS Nautical Charts) but their compiled depth data is proprietary and
+can't be scraped/embedded here.
+
+Instead, this builds a MODELED depth surface from a hand-defined river
+channel centerline (data/nolin_channel.json), anchored at verified points
+(USACE gauge, KY State Parks GNIS coordinate, Census TIGER geocodes) with
+a Gaussian cross-section that tapers from channel depth to the shoreline.
+It's clearly a model, not a measurement - labeled as such everywhere it
+surfaces in the UI. It's also designed to improve: `depth_ft_reading`
+values captured via trip logging can be blended in over time (see
+`calibration_depth_points` below) the same way the forecast model learns
+from logged trips.
+"""
+from __future__ import annotations
+import json
+import math
+from pathlib import Path
+from functools import lru_cache
+
+import numpy as np
+from skimage import measure
+
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "nolin_channel.json"
+
+GRID_RESOLUTION = 220  # cells across the longer axis - good detail without being slow
+METERS_PER_DEG_LAT = 111_320.0
+
+
+def _meters_per_deg_lon(lat_deg: float) -> float:
+    return METERS_PER_DEG_LAT * math.cos(math.radians(lat_deg))
+
+
+def load_channel() -> dict:
+    with open(DATA_PATH) as f:
+        return json.load(f)
+
+
+def _densify_branch(points: list, step_m: float = 40.0) -> list:
+    """Linearly interpolate extra points along a branch so segments aren't too coarse."""
+    if len(points) < 2:
+        return points
+    lat0 = points[0]["lat"]
+    m_per_lon = _meters_per_deg_lon(lat0)
+    dense = [points[0]]
+    for a, b in zip(points, points[1:]):
+        dx = (b["lon"] - a["lon"]) * m_per_lon
+        dy = (b["lat"] - a["lat"]) * METERS_PER_DEG_LAT
+        seg_len = math.hypot(dx, dy)
+        n = max(1, int(seg_len // step_m))
+        for i in range(1, n + 1):
+            t = i / n
+            dense.append({
+                "lat": a["lat"] + (b["lat"] - a["lat"]) * t,
+                "lon": a["lon"] + (b["lon"] - a["lon"]) * t,
+                "depth_ft": a["depth_ft"] + (b["depth_ft"] - a["depth_ft"]) * t,
+                "half_width_m": a["half_width_m"] + (b["half_width_m"] - a["half_width_m"]) * t,
+            })
+    return dense
+
+
+@lru_cache(maxsize=1)
+def _dense_channel_points() -> list:
+    data = load_channel()
+    pts = []
+    for branch in data["branches"].values():
+        pts.extend(_densify_branch(branch["points"]))
+    return pts
+
+
+@lru_cache(maxsize=1)
+def _bounds():
+    pts = _dense_channel_points()
+    lats = [p["lat"] for p in pts]
+    lons = [p["lon"] for p in pts]
+    max_half_width_deg_lat = 700 / METERS_PER_DEG_LAT  # pad by widest plausible half-width + margin
+    pad_lat = max_half_width_deg_lat * 1.6
+    pad_lon = pad_lat  # close enough near this latitude after lon-scaling below
+    return (min(lats) - pad_lat, max(lats) + pad_lat, min(lons) - pad_lon, max(lons) + pad_lon)
+
+
+@lru_cache(maxsize=1)
+def _depth_grid():
+    """
+    Returns (lat_axis, lon_axis, depth_grid) where depth_grid[i, j] is the
+    modeled depth in feet at (lat_axis[i], lon_axis[j]), or np.nan outside
+    the modeled lake polygon.
+    """
+    lat_min, lat_max, lon_min, lon_max = _bounds()
+    lat_axis = np.linspace(lat_min, lat_max, GRID_RESOLUTION)
+    # Scale lon resolution so grid cells are roughly square in meters
+    lon_span_m = (lon_max - lon_min) * _meters_per_deg_lon((lat_min + lat_max) / 2)
+    lat_span_m = (lat_max - lat_min) * METERS_PER_DEG_LAT
+    n_lon = max(2, int(GRID_RESOLUTION * lon_span_m / max(lat_span_m, 1e-6)))
+    lon_axis = np.linspace(lon_min, lon_max, n_lon)
+
+    lon_grid, lat_grid = np.meshgrid(lon_axis, lat_axis)  # shape (len(lat_axis), len(lon_axis))
+    m_per_lon = _meters_per_deg_lon(float(np.mean(lat_axis)))
+
+    pts = _dense_channel_points()
+    channel_lat = np.array([p["lat"] for p in pts])
+    channel_lon = np.array([p["lon"] for p in pts])
+    channel_depth = np.array([p["depth_ft"] for p in pts])
+    channel_halfw = np.array([p["half_width_m"] for p in pts])
+
+    depth = np.full(lat_grid.shape, np.nan)
+
+    # For performance, process in row chunks
+    for i in range(lat_grid.shape[0]):
+        row_lat = lat_grid[i, :]
+        row_lon = lon_grid[i, :]
+        dy = (row_lat[:, None] - channel_lat[None, :]) * METERS_PER_DEG_LAT
+        dx = (row_lon[:, None] - channel_lon[None, :]) * m_per_lon
+        dist = np.sqrt(dx ** 2 + dy ** 2)  # (n_lon, n_channel_pts)
+        nearest_idx = np.argmin(dist, axis=1)
+        nearest_dist = dist[np.arange(dist.shape[0]), nearest_idx]
+        target_depth = channel_depth[nearest_idx]
+        half_w = channel_halfw[nearest_idx]
+
+        # Gaussian cross-section falloff from channel centerline to shoreline.
+        # k tuned so depth reaches ~0 close to half_width (shoreline).
+        k = 1.4
+        row_depth = target_depth * np.exp(-k * (nearest_dist / np.maximum(half_w, 1.0)) ** 2)
+        row_depth = np.where(nearest_dist <= half_w * 1.15, row_depth, np.nan)
+        depth[i, :] = row_depth
+
+    return lat_axis, lon_axis, depth
+
+
+def get_depth_at_ft(lat: float, lon: float):
+    """Nearest-cell modeled depth in feet, or None if outside the modeled area."""
+    lat_axis, lon_axis, depth = _depth_grid()
+    if not (lat_axis[0] <= lat <= lat_axis[-1] and lon_axis[0] <= lon <= lon_axis[-1]):
+        return None
+    i = int(np.clip(np.searchsorted(lat_axis, lat), 0, len(lat_axis) - 1))
+    j = int(np.clip(np.searchsorted(lon_axis, lon), 0, len(lon_axis) - 1))
+    val = depth[i, j]
+    return None if np.isnan(val) else round(float(val), 1)
+
+
+def _local_gradient_ft_per_100m(lat: float, lon: float):
+    lat_axis, lon_axis, depth = _depth_grid()
+    i = int(np.clip(np.searchsorted(lat_axis, lat), 1, len(lat_axis) - 2))
+    j = int(np.clip(np.searchsorted(lon_axis, lon), 1, len(lon_axis) - 2))
+    window = depth[i - 1:i + 2, j - 1:j + 2]
+    if np.all(np.isnan(window)):
+        return 0.0
+    cell_m_lat = (lat_axis[1] - lat_axis[0]) * METERS_PER_DEG_LAT
+    gy, gx = np.gradient(np.nan_to_num(window, nan=np.nanmean(window)))
+    grad_mag_per_m = math.hypot(float(gy[1, 1]), float(gx[1, 1])) / max(cell_m_lat, 1.0)
+    return grad_mag_per_m * 100  # ft of depth change per 100m
+
+
+def infer_structure_type(lat: float, lon: float) -> str:
+    """
+    Heuristic structure-type guess from the modeled depth surface: combines
+    local depth with local slope (steepness). This is a starting suggestion
+    the user can always override in the UI - it's not a substitute for
+    reading your electronics on the water.
+    """
+    depth = get_depth_at_ft(lat, lon)
+    if depth is None:
+        return "Flat"
+    slope = _local_gradient_ft_per_100m(lat, lon)
+    if slope >= 6:
+        return "Creek channel / ledge"
+    if depth <= 6:
+        return "Cove / pocket (shallow cover)"
+    if depth <= 12:
+        return "Flat"
+    if depth <= 25:
+        return "Main-lake point"
+    return "Creek channel / ledge"  # deep basin / old river channel itself
+
+
+def contour_lines(levels=(5, 10, 15, 20, 30, 40, 50, 60, 70, 80)):
+    """
+    Returns [{"depth_ft": d, "paths": [[(lat, lon), ...], ...]}, ...] using
+    marching squares (skimage) on the modeled depth grid.
+    """
+    lat_axis, lon_axis, depth = _depth_grid()
+    filled = np.nan_to_num(depth, nan=-1.0)
+    results = []
+    for level in levels:
+        if level >= np.nanmax(depth[~np.isnan(depth)]) if np.any(~np.isnan(depth)) else True:
+            if np.isnan(depth).all() or level > np.nanmax(depth):
+                continue
+        contours = measure.find_contours(filled, level=level)
+        paths = []
+        for c in contours:
+            # c is array of (row, col) float indices into the grid
+            rows = np.clip(c[:, 0].astype(int), 0, len(lat_axis) - 1)
+            cols = np.clip(c[:, 1].astype(int), 0, len(lon_axis) - 1)
+            # sub-cell precision via linear interpolation of axis values
+            row_frac = c[:, 0] - np.floor(c[:, 0])
+            col_frac = c[:, 1] - np.floor(c[:, 1])
+            row_lo = np.clip(np.floor(c[:, 0]).astype(int), 0, len(lat_axis) - 1)
+            row_hi = np.clip(row_lo + 1, 0, len(lat_axis) - 1)
+            col_lo = np.clip(np.floor(c[:, 1]).astype(int), 0, len(lon_axis) - 1)
+            col_hi = np.clip(col_lo + 1, 0, len(lon_axis) - 1)
+            lat_vals = lat_axis[row_lo] * (1 - row_frac) + lat_axis[row_hi] * row_frac
+            lon_vals = lon_axis[col_lo] * (1 - col_frac) + lon_axis[col_hi] * col_frac
+            if len(lat_vals) >= 2:
+                paths.append(list(zip(lat_vals.tolist(), lon_vals.tolist())))
+        if paths:
+            results.append({"depth_ft": level, "paths": paths})
+    return results
+
+
+def lake_center():
+    lat_axis, lon_axis, _ = _depth_grid()
+    return float(np.mean(lat_axis)), float(np.mean(lon_axis))
