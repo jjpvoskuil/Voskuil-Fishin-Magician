@@ -75,9 +75,21 @@ lure/color/technique rule table.
   study). Commercial charts exist but their data is proprietary and can't be scraped or
   embedded here. Instead, depth is **modeled** from a hand-defined river-channel
   centerline anchored at the same verified points as the spot list, with a Gaussian
-  cross-section tapering to shore. It's clearly labeled as modeled in the app, and it's
-  designed to improve: real depth readings you log from a trip can blend into the model
-  over time, the same way the forecast weights calibrate from logged trips.
+  cross-section tapering to shore. It's clearly labeled as modeled in the app.
+
+  It's also designed to improve with your own real soundings: if you record Garmin
+  Quickdraw Contours, export them with [qdc-converter](https://github.com/interlark/qdc-converter)
+  (`.qdc`/`.qcc` -> CSV of lon/lat/depth) and drop the CSV into `data/quickdraw/` (see
+  that folder's README for the exact steps) - any number of files is fine, so you can
+  add more as you explore more of the lake. `core/survey_points.py` loads and
+  deduplicates every CSV there, and `core/bathymetry.py` blends the real readings into
+  the modeled grid: real data wins (inverse-distance weighted) within ~50m of where you
+  actually recorded it, fading smoothly back to the model beyond that, and can extend
+  the map into coves/arms the hand-modeled channel doesn't cover at all. The Lake Map
+  page's info box shows how many real points are currently blended in. Since it's your
+  own recorded sonar data (not a scraped commercial chart), there's no copyright issue
+  using it directly - it plugs into the same real basemap (streets/shoreline) the map
+  already renders on, so it lines up automatically.
 - Instructional videos (`core/videos.py`): a curated table of real, verified YouTube
   links per lure/technique. A couple of techniques without a confidently-verified direct
   link fall back to a live YouTube search link instead of a guessed URL.

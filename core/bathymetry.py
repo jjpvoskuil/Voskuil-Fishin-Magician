@@ -12,10 +12,16 @@ channel centerline (data/nolin_channel.json), anchored at verified points
 (USACE gauge, KY State Parks GNIS coordinate, Census TIGER geocodes) with
 a Gaussian cross-section that tapers from channel depth to the shoreline.
 It's clearly a model, not a measurement - labeled as such everywhere it
-surfaces in the UI. It's also designed to improve: `depth_ft_reading`
-values captured via trip logging can be blended in over time (see
-`calibration_depth_points` below) the same way the forecast model learns
-from logged trips.
+surfaces in the UI.
+
+It's also designed to improve: real depth soundings the angler has recorded
+themselves (Garmin Quickdraw Contours, see core/survey_points.py and
+data/quickdraw/README.md) are blended in on top of the modeled surface -
+real data wins near where it was actually recorded (inverse-distance
+weighted, fading smoothly back to the model within REAL_DATA_BLEND_RADIUS_M),
+and can extend coverage into areas the hand-modeled channel doesn't reach at
+all (side coves/arms not represented in nolin_channel.json). Everywhere the
+angler hasn't recorded real data yet, the modeled surface is unchanged.
 """
 from __future__ import annotations
 import json
@@ -24,12 +30,23 @@ from pathlib import Path
 from functools import lru_cache
 
 import numpy as np
+from scipy.spatial import cKDTree
 from skimage import measure
+
+from .survey_points import load_survey_points
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "nolin_channel.json"
 
 GRID_RESOLUTION = 220  # cells across the longer axis - good detail without being slow
 METERS_PER_DEG_LAT = 111_320.0
+
+# Within this many meters of a real recorded depth point, that point's
+# reading is blended in (fading smoothly from 100% real at 0m to 100%
+# modeled at this radius).
+REAL_DATA_BLEND_RADIUS_M = 50.0
+# How many nearest real points to average (inverse-distance weighted) at
+# each grid cell - smooths out single noisy pings without over-smoothing.
+REAL_DATA_NEIGHBORS = 6
 
 
 def _meters_per_deg_lon(lat_deg: float) -> float:
@@ -84,12 +101,63 @@ def _bounds():
     return (min(lats) - pad_lat, max(lats) + pad_lat, min(lons) - pad_lon, max(lons) + pad_lon)
 
 
+def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, depth_pts):
+    """
+    Blends real recorded depth points into the modeled grid: inverse-
+    distance weighted average of the nearest real readings, fully
+    replacing the model at 0m and fading back to it by
+    REAL_DATA_BLEND_RADIUS_M. Where the model has no coverage at all
+    (np.nan) but real data exists nearby, the real reading is used
+    directly - this lets logged trips extend the map into un-modeled
+    coves/arms, not just refine the existing channel.
+    """
+    if len(lat_pts) == 0:
+        return depth_grid
+
+    lat0 = float(np.mean(lat_axis))
+    m_per_lon = _meters_per_deg_lon(lat0)
+    lon_grid, lat_grid = np.meshgrid(lon_axis, lat_axis)
+
+    grid_x = (lon_grid - lon_axis[0]) * m_per_lon
+    grid_y = (lat_grid - lat_axis[0]) * METERS_PER_DEG_LAT
+    pts_x = (lon_pts - lon_axis[0]) * m_per_lon
+    pts_y = (lat_pts - lat_axis[0]) * METERS_PER_DEG_LAT
+
+    tree = cKDTree(np.column_stack([pts_x, pts_y]))
+    query_pts = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+    k = min(REAL_DATA_NEIGHBORS, len(lat_pts))
+    dists, idxs = tree.query(query_pts, k=k)
+    if k == 1:
+        dists = dists[:, None]
+        idxs = idxs[:, None]
+
+    weights = 1.0 / np.clip(dists, 1.0, None) ** 2
+    real_estimate = np.sum(weights * depth_pts[idxs], axis=1) / np.sum(weights, axis=1)
+    real_estimate = real_estimate.reshape(depth_grid.shape)
+
+    nearest_dist = dists[:, 0].reshape(depth_grid.shape)
+    blend_w = np.clip(1.0 - nearest_dist / REAL_DATA_BLEND_RADIUS_M, 0.0, 1.0)
+
+    result = depth_grid.copy()
+    has_real_nearby = blend_w > 0
+    mask_blend = has_real_nearby & ~np.isnan(depth_grid)
+    result[mask_blend] = (
+        blend_w[mask_blend] * real_estimate[mask_blend]
+        + (1 - blend_w[mask_blend]) * depth_grid[mask_blend]
+    )
+    mask_extend = has_real_nearby & np.isnan(depth_grid)
+    result[mask_extend] = real_estimate[mask_extend]
+    return result
+
+
 @lru_cache(maxsize=1)
 def _depth_grid():
     """
     Returns (lat_axis, lon_axis, depth_grid) where depth_grid[i, j] is the
     modeled depth in feet at (lat_axis[i], lon_axis[j]), or np.nan outside
-    the modeled lake polygon.
+    the modeled lake polygon. Real recorded depth points (if any have been
+    dropped into data/quickdraw/) are blended in - see
+    _blend_real_survey_data.
     """
     lat_min, lat_max, lon_min, lon_max = _bounds()
     lat_axis = np.linspace(lat_min, lat_max, GRID_RESOLUTION)
@@ -128,6 +196,9 @@ def _depth_grid():
         row_depth = target_depth * np.exp(-k * (nearest_dist / np.maximum(half_w, 1.0)) ** 2)
         row_depth = np.where(nearest_dist <= half_w * 1.15, row_depth, np.nan)
         depth[i, :] = row_depth
+
+    lat_pts, lon_pts, depth_pts = load_survey_points()
+    depth = _blend_real_survey_data(lat_axis, lon_axis, depth, lat_pts, lon_pts, depth_pts)
 
     return lat_axis, lon_axis, depth
 

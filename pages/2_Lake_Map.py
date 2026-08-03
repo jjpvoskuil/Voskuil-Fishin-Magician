@@ -8,6 +8,7 @@ from core.lures import recommend, STRUCTURE_TYPES
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
+from core.survey_points import survey_point_count, survey_file_count
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
 st.title("🗺️ Nolin Lake Contour Map")
@@ -15,13 +16,28 @@ st.caption(
     "Zoom and pan the map, then click **anywhere on the lake** to get a location-specific "
     "recommendation for the day/time you pick below."
 )
-st.info(
-    "Depth contours are a **modeled approximation** (river-channel + Gaussian cross-section), "
-    "not a survey - there's no free bathymetric dataset for Nolin Lake. It's anchored to a few "
-    "verified points (USACE gauge, KY State Parks coordinate, Census-geocoded Dog Creek/Wax "
-    "access points). Always confirm with your own electronics on the water.",
-    icon="🧭",
-)
+n_points = survey_point_count()
+n_files = survey_file_count()
+if n_points:
+    st.info(
+        f"Depth contours blend **{n_points:,} of your own recorded depth readings** "
+        f"(from {n_files} Quickdraw export{'s' if n_files != 1 else ''}) with a **modeled "
+        f"approximation** everywhere else (river-channel + Gaussian cross-section) - there's "
+        f"no free bathymetric survey for Nolin Lake. Real readings take over near where you've "
+        f"actually recorded them and fade back to the model beyond that. Always confirm with "
+        f"your own electronics on the water.",
+        icon="🧭",
+    )
+else:
+    st.info(
+        "Depth contours are a **modeled approximation** (river-channel + Gaussian cross-section), "
+        "not a survey - there's no free bathymetric dataset for Nolin Lake. It's anchored to a few "
+        "verified points (USACE gauge, KY State Parks coordinate, Census-geocoded Dog Creek/Wax "
+        "access points). Drop your own Garmin Quickdraw exports into data/quickdraw/ to start "
+        "replacing this with real recorded depths. Always confirm with your own electronics "
+        "on the water.",
+        icon="🧭",
+    )
 
 lake_setup = render_lake_setup_sidebar(include_structure=False)
 
