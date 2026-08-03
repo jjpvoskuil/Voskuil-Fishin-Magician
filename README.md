@@ -13,8 +13,10 @@ A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built
 - **Zoomable contour map** of Nolin Lake with modeled depth contour lines - click
   *anywhere* on the lake (not just preset spots) to get a location-specific
   recommendation for any day/time in the forecast window.
-- **Instructional videos** - tap any recommended lure/technique to pull up a couple of
-  real how-to videos for it.
+- **Per-lure recommendation blocks** - each recommended lure (first choice, then a
+  second-choice section) gets its own self-contained block: specific colors for that
+  lure, trailer type/color if one applies, depth to run, presentation style, and a
+  couple of how-to videos - all in one place.
 - **Trip logging** - record what actually happened (lures, catches) so the model can
   calibrate its weights against your own results over time.
 
