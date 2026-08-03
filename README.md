@@ -33,8 +33,17 @@ A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built
   separate "stirred up / muddy" checkbox for after wind or heavy rain - the two combine
   into one effective water-clarity reading that drives lure color choice, independent
   of the base color you picked.
-- **Trip logging** - record what actually happened (lures, catches, water conditions)
-  so the model can calibrate its weights against your own results over time.
+- **Modeled thermocline depth** - a seasonal depth band (none in winter/early spring,
+  forming through May-June, ~13-17 ft at peak summer, breaking down through September)
+  shown alongside each day/location, plus a caveat if the depth you're marking fish at
+  is below it (usually too oxygen-depleted to hold active bass). See "Data sources" below.
+- **Forage selector** - pick which baitfish/prey are actually available (Gizzard Shad
+  and Bluegill/Sunfish are pre-checked as documented Nolin forage; Crawfish and
+  Shiners/Minnows are optional add-ons). Nudges lure color/pattern choice toward what
+  the bass are actually keyed on, and makes sure at least one forage-matched lure
+  shows up in the recommendation.
+- **Trip logging** - record what actually happened (lures, catches, water conditions,
+  forage seen) so the model can calibrate its weights against your own results over time.
 
 ## How the model works (and its limits)
 
@@ -71,6 +80,21 @@ lure/color/technique rule table.
   link fall back to a live YouTube search link instead of a guessed URL.
 - Summer/normal pool elevation used for the map context: 515 ft, ~5,795 surface acres
   (confirmed against USACE data), vs. ~2,890 acres at winter pool.
+- Thermocline depth (`core/thermocline.py`): **modeled**, not measured - Nolin has no
+  public real-time dissolved-oxygen/temperature profile buoy we can call for free (the
+  USACE Louisville District's lake-profile tool has live readings per lake, but it's a
+  manual web page, not an API). Anchored to a real, lake-specific data point: KDFWR
+  (Kentucky Afield Outdoors, Lee McLellan, July 2019) reported Nolin's thermocline at
+  about 15 ft in mid/late summer, grouped with Green River, Barren River, and Rough
+  River as similar mid-depth, relatively clear hill-land reservoirs. Combined with
+  general reservoir-stratification timing (none in winter/early spring, forming in
+  May, established through summer, breaking down each fall) to produce a month-by-month
+  depth band.
+- Forage base (`core/lures.py`'s `FORAGE_OPTIONS`): gizzard shad and bluegill are
+  explicitly documented as Nolin forage in Kentucky Afield Outdoors coverage of the
+  lake's bass fishery; crawfish and shiners/minnows are near-universal secondary forage
+  in Kentucky hill-land reservoirs (craw-pattern jig/worm colors are standard advice
+  for this lake type) offered as optional add-ons.
 
 ## Trip logging & calibration
 
