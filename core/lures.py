@@ -545,7 +545,7 @@ def recommend(
     water_clarity: str = "Brown stained",
     fish_depth_ft: float = None,
     forage: list = None,
-    thermocline_band: tuple = None,
+    thermocline_ft: float = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
@@ -556,7 +556,7 @@ def recommend(
             f"re-ordered and targeted to run 1-2 ft above that reading; bottom baits are targeted to count "
             f"down to it."
         )
-    caveat = thermocline_caveat(thermocline_band, fish_depth_ft)
+    caveat = thermocline_caveat(thermocline_ft, fish_depth_ft)
     if caveat:
         rationale.append(caveat)
 
