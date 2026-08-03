@@ -4,3 +4,4 @@ pandas>=2.0
 folium>=0.16
 streamlit-folium>=0.22
 scikit-image>=0.22
+scipy>=1.11
