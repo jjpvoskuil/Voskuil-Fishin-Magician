@@ -92,7 +92,7 @@ else:
     total_value = sum(float(r["price"] or 0) * int(r["quantity"] or 0) for r in filtered)
     st.caption(f"{len(filtered)} lure(s) shown - {total_qty} total on hand - roughly ${total_value:,.2f} in tackle")
 
-    cols_per_row = 3
+    cols_per_row = 6
     for i in range(0, len(filtered), cols_per_row):
         row_items = filtered[i:i + cols_per_row]
         cols = st.columns(cols_per_row)
