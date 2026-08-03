@@ -118,6 +118,14 @@ def _search_fallback(query_text: str) -> dict:
     return {"title": f"Search YouTube for \"{query_text}\"", "url": f"https://www.youtube.com/results?search_query={q}"}
 
 
+def get_videos_by_key(key: str, display_name: str = "") -> list:
+    """Direct lookup by canonical lure key (see core.lures LURE_PROFILES) with
+    a search-link fallback using display_name if the key has no curated entry."""
+    if key in VIDEO_LIBRARY:
+        return VIDEO_LIBRARY[key]
+    return [_search_fallback(display_name or key.replace("_", " "))]
+
+
 def get_videos_for(lure_text: str) -> list:
     """
     Given a free-text lure/technique string (e.g. "Squarebill crankbait

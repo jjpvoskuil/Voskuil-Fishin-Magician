@@ -5,7 +5,7 @@ from streamlit_folium import st_folium
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
 from core.scoring import score_day
 from core.lures import recommend, WATER_CLARITY_OPTIONS, STRUCTURE_TYPES
-from core.videos import get_videos_for
+from core.ui import render_lure_recommendation
 from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 
@@ -91,25 +91,6 @@ with col_detail:
         rec = recommend(day.season, day.water_temp_f, segment_name, day.pressure_trend_24h,
                          structure_type, clarity)
 
-        st.markdown(f"**Colors:** {', '.join(rec.colors)}")
-        st.markdown(f"**Technique:** {rec.technique}")
-        st.markdown(f"**Retrieve:** {rec.retrieve}")
-        st.markdown(f"**Target depth:** {rec.target_depth}")
-
-        st.caption("**Primary lures** (tap one for how-to videos):")
-        for lure in rec.primary_lures:
-            with st.popover(lure, use_container_width=True):
-                for v in get_videos_for(lure):
-                    st.markdown(f"- [{v['title']}]({v['url']})")
-
-        if rec.also_worth_trying:
-            st.caption("**Also worth trying:**")
-            for lure in rec.also_worth_trying:
-                with st.popover(lure, use_container_width=True):
-                    for v in get_videos_for(lure):
-                        st.markdown(f"- [{v['title']}]({v['url']})")
-
-        if rec.rationale:
-            st.caption(" · ".join(rec.rationale))
+        render_lure_recommendation(rec)
     except ValueError as e:
         st.error(str(e))
