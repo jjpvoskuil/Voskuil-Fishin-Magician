@@ -90,8 +90,9 @@ with col_detail:
         segment_name = st.selectbox("Time of day", [s.name for s in day.segments])
         seg = next(s for s in day.segments if s.name == segment_name)
 
-        temp_label = "Measured water temp" if lake_setup.water_temp_override_f is not None else "Estimated water temp"
-        st.caption(f"{temp_label}: {eff_water_temp}°F")
+        st.caption(f"Water temp (Lake Setup Options): {eff_water_temp}°F"
+                   + (f" - shifts pattern to {eff_season.replace('_', ' ').title()} "
+                      f"(weather-only estimate: {day.season.replace('_', ' ').title()})" if eff_season != day.season else ""))
         st.metric(f"{segment_name} activity score", f"{seg.score}/10")
         rec = recommend(eff_season, eff_water_temp, segment_name, day.pressure_trend_24h,
                          structure_type, clarity, fish_depth_ft=lake_setup.fish_depth_ft)

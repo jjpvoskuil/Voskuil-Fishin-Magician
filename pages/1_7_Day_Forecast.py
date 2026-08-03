@@ -26,7 +26,7 @@ for col, day in zip(cols, week):
 
 st.divider()
 
-lake_setup = render_lake_setup_sidebar(include_structure=True)
+lake_setup = render_lake_setup_sidebar(include_structure=True, default_water_temp_f=week[0].water_temp_f)
 clarity = lake_setup.water_clarity
 structure = lake_setup.structure_type
 
@@ -37,13 +37,12 @@ for day in week:
         c1, c2 = st.columns([2, 1])
         with c1:
             eff_season, eff_water_temp = effective_season_and_temp(day, lake_setup.water_temp_override_f)
-            temp_label = "Measured water temp" if lake_setup.water_temp_override_f is not None else "Estimated water temp"
-            st.write(f"**{temp_label}:** {eff_water_temp}°F  |  "
+            st.write(f"**Water temp (Lake Setup Options):** {eff_water_temp}°F  |  "
                      f"**24h pressure trend:** {day.pressure_trend_24h:+.1f} hPa  |  "
                      f"**Moon illumination:** {day.moon.illumination_pct:.0f}%")
-            if lake_setup.water_temp_override_f is not None and eff_season != day.season:
-                st.caption(f"Your measured temp shifts the seasonal pattern from "
-                           f"{day.season.replace('_', ' ').title()} to {eff_season.replace('_', ' ').title()} for lure selection.")
+            if eff_season != day.season:
+                st.caption(f"Your water temp puts this day in the {eff_season.replace('_', ' ').title()} pattern for "
+                           f"lure selection (the weather-only estimate would be {day.season.replace('_', ' ').title()}).")
             st.write(f"**Sunrise:** {day.sunrise.strftime('%-I:%M %p')}  |  "
                      f"**Sunset:** {day.sunset.strftime('%-I:%M %p')}")
             ws = day.weather_summary

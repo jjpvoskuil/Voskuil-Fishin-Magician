@@ -9,22 +9,32 @@ A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
-  water clarity, and structure type.
+  water color/clarity, structure type, and (when you provide it) the depth you're marking
+  fish at.
 - **Zoomable contour map** of Nolin Lake with modeled depth contour lines - click
   *anywhere* on the lake (not just preset spots) to get a location-specific
   recommendation for any day/time in the forecast window.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
-  couple of how-to videos - all in one place.
-- **Lake Setup Options sidebar** - optionally enter a real surface-temp reading and/or
-  the depth you're marking fish at on your electronics (e.g. a Garmin Livescope/sonar
-  unit). When provided, these override the app's estimates: a temp reading can shift
-  the seasonal pattern used for lure selection, and a fish-depth reading re-ranks and
-  annotates every lure block by how well its typical running depth matches what you're
-  actually seeing. Both carry over across pages for the session.
-- **Trip logging** - record what actually happened (lures, catches) so the model can
-  calibrate its weights against your own results over time.
+  couple of how-to videos - all in one place. Depth guidance accounts for the fact that
+  bass are upward-biased sight feeders (narrow binocular vision cone above/in front of
+  the snout, blind below/behind, upward-hinging jaw) - reaction/"column" lures (crankbaits,
+  jerkbaits, spinnerbaits, etc.) get a target running depth 1-2 ft *above* the depth
+  you're marking fish at, while bottom-contact baits (jigs, Carolina rigs, etc.) get
+  count-down-to-depth guidance instead.
+- **Lake Setup Options sidebar** - two required, direct inputs since Nolin has no live
+  feed for either: your water surface temp reading, and the depth you're marking fish
+  at on your electronics (e.g. a Garmin Livescope/sonar unit). These always drive the
+  seasonal pattern used for lure selection and the depth-to-run/countdown guidance on
+  every lure block, and carry over across pages for the session.
+- **Water color model** - Nolin normally runs a greenish-brown stain (leaning brown).
+  Pick your usual base stain color (Clear / Green stained / Brown stained) plus a
+  separate "stirred up / muddy" checkbox for after wind or heavy rain - the two combine
+  into one effective water-clarity reading that drives lure color choice, independent
+  of the base color you picked.
+- **Trip logging** - record what actually happened (lures, catches, water conditions)
+  so the model can calibrate its weights against your own results over time.
 
 ## How the model works (and its limits)
 

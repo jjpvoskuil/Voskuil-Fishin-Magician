@@ -26,7 +26,7 @@ with st.form("log_trip_form"):
     spot_choice = st.selectbox("Spot fished", spots, format_func=lambda s: s["name"])
     structure_type = st.selectbox("Structure type", STRUCTURE_TYPES,
                                    index=STRUCTURE_TYPES.index(spot_choice["structure_type"]))
-    water_clarity = st.selectbox("Water clarity", WATER_CLARITY_OPTIONS, index=1)
+    water_clarity = st.selectbox("Water clarity that day", WATER_CLARITY_OPTIONS, index=WATER_CLARITY_OPTIONS.index("Brown stained"))
 
     c1, c2 = st.columns(2)
     lure_used = c1.text_input("Lure used", placeholder="e.g. Chartreuse/white spinnerbait")
