@@ -3,7 +3,8 @@ from datetime import date, timedelta
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, github_token, repo_slug
 from core.scoring import score_day
-from core.lures import WATER_CLARITY_OPTIONS, STRUCTURE_TYPES
+from core.lures import WATER_CLARITY_OPTIONS, STRUCTURE_TYPES, FORAGE_OPTIONS, DEFAULT_FORAGE
+from core.thermocline import estimate_thermocline_band_ft
 from core.storage import TripEntry, append_trip, commit_and_push
 
 st.set_page_config(page_title="Log a Trip - Nolin Lake", page_icon="📝", layout="centered")
@@ -27,6 +28,7 @@ with st.form("log_trip_form"):
     structure_type = st.selectbox("Structure type", STRUCTURE_TYPES,
                                    index=STRUCTURE_TYPES.index(spot_choice["structure_type"]))
     water_clarity = st.selectbox("Water clarity that day", WATER_CLARITY_OPTIONS, index=WATER_CLARITY_OPTIONS.index("Brown stained"))
+    forage_seen = st.multiselect("Forage you saw/matched that day", FORAGE_OPTIONS, default=DEFAULT_FORAGE)
 
     c1, c2 = st.columns(2)
     lure_used = c1.text_input("Lure used", placeholder="e.g. Chartreuse/white spinnerbait")
@@ -45,12 +47,15 @@ if submitted:
     try:
         day = score_day(bundle, trip_date, weights=weights)
         seg = next(s for s in day.segments if s.name == segment)
+        thermocline_band = estimate_thermocline_band_ft(trip_date)
         conditions = {
             "pressure_trend_24h": day.pressure_trend_24h,
             "moon_near_new_full": day.moon.is_new_or_full_window,
             "moon_phase": day.moon.name,
             "avg_cloud_pct": day.weather_summary["avg_cloud_pct"],
             "avg_wind_mph": day.weather_summary["avg_wind_mph"],
+            "forage_seen": forage_seen,
+            "modeled_thermocline_band_ft": list(thermocline_band) if thermocline_band else None,
         }
         predicted_score = seg.score
     except ValueError:

@@ -103,3 +103,46 @@ def test_bottom_lure_gets_countdown_guidance_not_offset():
 def test_rationale_explains_strike_up_bias_when_fish_depth_given():
     rec = recommend("summer_peak", 84, "Midday", -1.0, "Flat", "Stained", fish_depth_ft=10)
     assert any("strike up" in r for r in rec.rationale)
+
+
+def test_forage_adds_matched_lure_and_rationale():
+    # Winter pattern doesn't naturally include a crawfish-imitating lure in
+    # either list (football_jig/suspending_jerkbait/blade_bait first,
+    # deep_diving_crankbait second) - selecting Crawfish forage should pull
+    # one of the crawfish-boost lures in as a second choice and explain why.
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", forage=["Crawfish"])
+    keys = {b.key for b in rec.first_choice + rec.second_choice}
+    from core.lures import FORAGE_LURE_BOOST
+    assert keys & set(FORAGE_LURE_BOOST["Crawfish"])
+    assert any("Crawfish" in r or "craw" in r.lower() for r in rec.rationale)
+
+
+def test_forage_none_adds_no_forage_rationale():
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
+    assert not any("forage" in r.lower() or "shad are in play" in r.lower() for r in rec.rationale)
+
+
+def test_forage_does_not_duplicate_already_covered_lure():
+    # Gizzard Shad boost list includes lipless_crankbait, which is already the
+    # first pick in fall_turnover - forage nudge should not add a duplicate.
+    rec = recommend("fall_turnover", 60, "Midday", 0.0, "Creek channel / ledge", "Clear", forage=["Gizzard Shad"])
+    all_keys = [b.key for b in rec.first_choice] + [b.key for b in rec.second_choice]
+    assert len(all_keys) == len(set(all_keys))
+
+
+def test_thermocline_caveat_appears_when_fish_depth_below_band():
+    rec = recommend("summer_peak", 84, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     fish_depth_ft=25, thermocline_band=(13.0, 17.0))
+    assert any("below the modeled thermocline" in r for r in rec.rationale)
+
+
+def test_thermocline_caveat_absent_when_fish_depth_within_band():
+    rec = recommend("summer_peak", 84, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     fish_depth_ft=15, thermocline_band=(13.0, 17.0))
+    assert not any("below the modeled thermocline" in r for r in rec.rationale)
+
+
+def test_thermocline_caveat_absent_when_band_is_none():
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     fish_depth_ft=30, thermocline_band=None)
+    assert not any("below the modeled thermocline" in r for r in rec.rationale)

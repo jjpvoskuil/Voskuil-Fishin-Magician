@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .videos import get_videos_by_key
+from .thermocline import thermocline_caveat
 
 # Base stain color the angler picks (Nolin runs greenish-brown, leaning brown,
 # under normal conditions - "Brown stained" is the default). A separate
@@ -49,6 +50,51 @@ STRUCTURE_TYPES = [
 ]
 
 LIGHT_LOW = {"Dawn", "Dusk", "Night"}
+
+# Forage types actually present/available in Nolin Lake. Gizzard shad and
+# bluegill are both explicitly documented as forage base here (KDFWR/Kentucky
+# Afield Outdoors coverage of Nolin bass fishing calls gizzard shad the main
+# forage fish, with bluegill also serving as forage) - those two are the
+# default selection. Crawfish and shiners/minnows are near-universal
+# secondary forage in Kentucky hill-land reservoirs (craw-pattern jig/worm
+# colors are standard advice for exactly this lake type) and are offered as
+# optional add-ons rather than defaults, since they're less specifically
+# documented for Nolin itself.
+FORAGE_OPTIONS = ["Gizzard Shad", "Bluegill / Sunfish", "Crawfish", "Shiners / Minnows"]
+DEFAULT_FORAGE = ["Gizzard Shad", "Bluegill / Sunfish"]
+
+# Short, forage-specific color/pattern guidance surfaced in the rationale.
+FORAGE_NOTES = {
+    "Gizzard Shad": (
+        "Shad are in play - lean on shad-imitating colors (chrome/pearl/white, "
+        "blue-back) on reaction baits."
+    ),
+    "Bluegill / Sunfish": (
+        "Bluegill are in play - bream-pattern colors (green pumpkin, orange belly, "
+        "black/blue) shine around bedding areas, docks, and bluegill cover."
+    ),
+    "Crawfish": (
+        "Crawfish are in play - craw patterns (green pumpkin, brown, red/orange) "
+        "excel on bottom-contact baits deflecting off rock/wood, especially in cooler water."
+    ),
+    "Shiners / Minnows": (
+        "Shiners/minnows are in play - natural, translucent, silver patterns on "
+        "finesse baits match them well, especially in clearer water."
+    ),
+}
+
+# Lure keys that most directly imitate each forage type - used to make sure at
+# least one forage-matched option shows up even if the seasonal pattern
+# didn't happen to include one.
+FORAGE_LURE_BOOST = {
+    "Gizzard Shad": ["lipless_crankbait", "spinnerbait", "suspending_jerkbait",
+                      "squarebill_crankbait", "deep_diving_crankbait", "swim_jig"],
+    "Bluegill / Sunfish": ["swim_jig", "walking_topwater", "popper",
+                            "squarebill_crankbait", "chatterbait"],
+    "Crawfish": ["football_jig", "texas_rig_creature", "carolina_rig", "squarebill_crankbait"],
+    "Shiners / Minnows": ["finesse_shaky_head", "wacky_rig_senko", "suspending_jerkbait",
+                           "weightless_soft_plastic"],
+}
 
 
 def resolve_water_clarity(base_stain: str, stirred_up: bool) -> str:
@@ -498,6 +544,8 @@ def recommend(
     structure_type: str = "Main-lake point",
     water_clarity: str = "Brown stained",
     fish_depth_ft: float = None,
+    forage: list = None,
+    thermocline_band: tuple = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
@@ -508,6 +556,9 @@ def recommend(
             f"re-ordered and targeted to run 1-2 ft above that reading; bottom baits are targeted to count "
             f"down to it."
         )
+    caveat = thermocline_caveat(thermocline_band, fish_depth_ft)
+    if caveat:
+        rationale.append(caveat)
 
     # --- Seasonal base pattern: which lure keys are first vs second choice -----
     if season == "winter":
@@ -585,6 +636,22 @@ def recommend(
         if "finesse_shaky_head" not in second_keys and "finesse_shaky_head" not in first_keys:
             second_keys.insert(0, "finesse_shaky_head")
         rationale.append("High, stable pressure after a front - added a finesse bait for a tougher bite.")
+
+    # --- Forage nudge: make sure at least one forage-matched lure shows up ------
+    if forage:
+        forage_boost_keys = []
+        for f in forage:
+            for k in FORAGE_LURE_BOOST.get(f, []):
+                if k not in forage_boost_keys:
+                    forage_boost_keys.append(k)
+        already_covered = set(first_keys) | set(second_keys)
+        for k in forage_boost_keys:
+            if k not in already_covered:
+                second_keys.insert(0, k)
+                break
+        forage_notes = [FORAGE_NOTES[f] for f in forage if f in FORAGE_NOTES]
+        if forage_notes:
+            rationale.append(" ".join(forage_notes))
 
     # De-dupe while preserving order, never let a key appear in both lists.
     seen = set()
