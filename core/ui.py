@@ -56,23 +56,21 @@ def render_lake_setup_sidebar(include_structure: bool = True, default_structure_
             structure = st.selectbox("Structure type", STRUCTURE_TYPES, index=default_structure_index, key="lso_structure")
 
         st.divider()
-        st.caption("Optional - readings from your own electronics beat our estimates when provided.")
+        st.caption("Optional - readings from your own electronics beat our estimates when provided. "
+                   "Leave at 0 to skip.")
 
-        has_temp = st.checkbox("I have a surface temp reading", key="lso_has_temp")
-        water_temp_override = None
-        if has_temp:
-            water_temp_override = st.number_input(
-                "Water surface temp (°F)", min_value=32.0, max_value=100.0, value=70.0, step=0.5, key="lso_water_temp"
-            )
+        water_temp_input = st.number_input(
+            "Water surface temp (°F)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="lso_water_temp"
+        )
+        water_temp_override = water_temp_input if water_temp_input > 0 else None
 
-        has_fish_depth = st.checkbox("I'm marking fish on my electronics (Garmin Livescope/sonar)", key="lso_has_fish_depth")
-        fish_depth = None
-        if has_fish_depth:
-            fish_depth = st.number_input(
-                "Depth fish are showing up (ft)", min_value=0.0, max_value=100.0, value=15.0, step=1.0, key="lso_fish_depth"
-            )
+        fish_depth_input = st.number_input(
+            "Depth fish are showing up on your electronics (ft)",
+            min_value=0.0, max_value=100.0, value=0.0, step=1.0, key="lso_fish_depth",
+        )
+        fish_depth = fish_depth_input if fish_depth_input > 0 else None
 
-        if has_temp or has_fish_depth:
+        if water_temp_override or fish_depth:
             st.caption("These carry over to the other pages too.")
 
     return LakeSetupOptions(
