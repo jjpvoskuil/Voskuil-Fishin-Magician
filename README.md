@@ -17,6 +17,12 @@ A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
   couple of how-to videos - all in one place.
+- **Lake Setup Options sidebar** - optionally enter a real surface-temp reading and/or
+  the depth you're marking fish at on your electronics (e.g. a Garmin Livescope/sonar
+  unit). When provided, these override the app's estimates: a temp reading can shift
+  the seasonal pattern used for lure selection, and a fish-depth reading re-ranks and
+  annotates every lure block by how well its typical running depth matches what you're
+  actually seeing. Both carry over across pages for the session.
 - **Trip logging** - record what actually happened (lures, catches) so the model can
   calibrate its weights against your own results over time.
 
