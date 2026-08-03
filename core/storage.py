@@ -9,6 +9,11 @@ pushed back to the repo so it survives app restarts/redeploys. If no
 token is configured (e.g. local development), the app still works - it
 just writes to the local CSV for that session and shows a note that the
 entry wasn't pushed upstream.
+
+commit_and_push() is intentionally generic (takes a list of paths) so
+other modules that follow the same git-backed-persistence pattern - e.g.
+core/lure_inventory.py - can reuse it instead of re-implementing the git
+plumbing.
 """
 from __future__ import annotations
 import csv
@@ -76,24 +81,25 @@ def append_trip(entry: TripEntry):
         writer.writerow(entry.to_row())
 
 
-def commit_and_push(github_token: str, repo_slug: str, commit_message: str, branch: str = "main") -> tuple:
+def commit_and_push(paths: list, github_token: str, repo_slug: str, commit_message: str, branch: str = "main") -> tuple:
     """
-    Commit data/trip_log.csv and push using a fine-grained PAT.
-    Returns (success: bool, message: str). Never raises - designed to be
-    called from Streamlit and surface a friendly warning on failure.
+    Commit the given paths (files or directories, repo-relative or absolute)
+    and push using a fine-grained PAT. Returns (success: bool, message: str).
+    Never raises - designed to be called from Streamlit and surface a
+    friendly warning on failure.
     """
     if not github_token:
-        return False, "No GITHUB_TOKEN configured - entry saved locally only for this session."
+        return False, "No GITHUB_TOKEN configured - saved locally only for this session."
     try:
         remote = f"https://x-access-token:{github_token}@github.com/{repo_slug}.git"
         subprocess.run(["git", "config", "user.email", "fishin-magician@bot.local"], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "config", "user.name", "Fishin' Magician Bot"], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "add", str(TRIP_LOG_PATH)], cwd=REPO_ROOT, check=True)
+        subprocess.run(["git", "add"] + [str(p) for p in paths], cwd=REPO_ROOT, check=True)
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)
         if diff.returncode == 0:
             return True, "No changes to commit."
         subprocess.run(["git", "commit", "-m", commit_message], cwd=REPO_ROOT, check=True)
         subprocess.run(["git", "push", remote, f"HEAD:{branch}"], cwd=REPO_ROOT, check=True, capture_output=True)
-        return True, "Trip logged and pushed to GitHub."
+        return True, "Saved and pushed to GitHub."
     except subprocess.CalledProcessError as e:
         return False, f"Saved locally, but push failed: {e}"

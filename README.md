@@ -51,6 +51,10 @@ key decisions, and known open items.
   shows up in the recommendation.
 - **Trip logging** - record what actually happened (lures, catches, water conditions,
   forage seen) so the model can calibrate its weights against your own results over time.
+- **Lure inventory** - your tackle box, tracked: brand, full description, a photo, the
+  last price paid, and how many you have on hand. Seeded from a Cabela's order history
+  import; add more any time by typing them in or by uploading/taking a photo. See
+  "Lure inventory" below for details.
 
 ## How the model works (and its limits)
 
@@ -129,6 +133,27 @@ session.
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
 History** page in the app for calibration status.
 
+## Lure inventory
+
+The **Lure Inventory** page (`pages/5_Lure_Inventory.py`) is a simple tackle-box tracker,
+independent of the forecast/recommendation engine (`core/lures.py`). For each lure it
+shows brand, full product description, a photo, the last price paid, and current
+quantity on hand. Two ways items get in:
+
+- **Order-history import** - the initial set was seeded from a Cabela's order (order
+  #W283763341), including the vendor's own product photo for each item. Those photos
+  are linked directly from Bass Pro/Cabela's own CDN rather than copied into the repo -
+  this app only needs to *display* the vendor's product photography, not keep a stored
+  copy of it.
+- **Manual entry** - add a lure any time with brand, description, price, and quantity,
+  and optionally attach a photo you upload or take right there with your camera. These
+  photos are yours, so they're stored under `data/lure_images/` and committed to the
+  repo like any other user data.
+
+Quantity and price can be edited (or the item deleted) from each card. Like trip logs,
+inventory changes are committed and pushed back to GitHub when a `GITHUB_TOKEN` is
+configured, so they survive Streamlit Cloud restarts.
+
 ## Running locally
 
 ```bash
@@ -155,18 +180,23 @@ pages/
   2_Lake_Map.py          Click-to-recommend map
   3_Log_a_Trip.py        Trip logging form
   4_Trip_History.py      Logged trips + calibration status
+  5_Lure_Inventory.py    Tackle inventory (brand/description/photo/price/qty)
 core/
   astro.py               Moon phase + solunar rise/transit/set
   weather.py              Open-Meteo integration + water-temp estimate
   scoring.py              1-10 activity scoring engine
   lures.py                Lure/color/technique rule engine
   spots.py                Lake map data + figure builder
-  storage.py              Trip log read/write + git commit-back
+  storage.py              Trip log read/write + git commit-back (generic - reused by
+                           lure_inventory.py too)
   calibration.py          Weight calibration from logged trips
+  lure_inventory.py       Tackle inventory read/write + photo storage
 data/
   nolin_spots.json        Named lake spots (edit to add your own waypoints)
   trip_log.csv            Logged trips (grows over time)
-tests/                    pytest unit tests for astro/scoring/lures
+  lure_inventory.csv      Tackle inventory (grows over time)
+  lure_images/            User-uploaded/captured lure photos
+tests/                    pytest unit tests for astro/scoring/lures/inventory
 ```
 
 ## Disclaimers
