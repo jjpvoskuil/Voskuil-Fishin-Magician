@@ -3,13 +3,20 @@ Lure / color / trailer / depth / presentation recommendation engine for
 largemouth bass on Nolin River Lake.
 
 Design: each lure is a self-contained profile (LURE_PROFILES) carrying its
-own colors-by-water-clarity, trailer (type + color, if one is typically
+own colors-by-water-condition, trailer (type + color, if one is typically
 used with that lure), depth to run, and presentation style. Separately,
 situational rules (season, segment/light level, pressure trend, structure
-type, water clarity) pick which lure keys are the "first choice" picks for
-that exact situation, and which are solid "second choice" alternates -
+type, water condition) pick which lure keys are the "first choice" picks
+for that exact situation, and which are solid "second choice" alternates -
 this is where crankbaits, jerkbaits, and topwater show up across more
 conditions than just their single best-case scenario.
+
+Water condition model: Nolin Lake normally runs a greenish-brown stain
+(leaning brown), but wind/rain can stir it up to muddy regardless of the
+usual color. So the UI captures two independent things - a base stain
+color (Clear / Green stained / Brown stained) and a separate "stirred up"
+flag - and this module resolves them to one of four color-table keys:
+"Clear", "Green stained", "Brown stained", or "Muddy".
 
 `recommend()` returns a LureRecommendation with `first_choice` and
 `second_choice` lists of fully-resolved LureBlock objects - everything
@@ -21,7 +28,15 @@ from dataclasses import dataclass, field
 
 from .videos import get_videos_by_key
 
-WATER_CLARITY_OPTIONS = ["Clear", "Stained", "Muddy"]
+# Base stain color the angler picks (Nolin runs greenish-brown, leaning brown,
+# under normal conditions - "Brown stained" is the default). A separate
+# "stirred up" flag (wind/rain) overrides to "Muddy" regardless of base color.
+BASE_STAIN_OPTIONS = ["Clear", "Green stained", "Brown stained"]
+DEFAULT_BASE_STAIN = "Brown stained"
+
+# Full set of resolved water-condition keys used to look up lure colors.
+WATER_CLARITY_OPTIONS = ["Clear", "Green stained", "Brown stained", "Muddy"]
+
 STRUCTURE_TYPES = [
     "Main-lake point",
     "Creek channel / ledge",
@@ -35,6 +50,14 @@ STRUCTURE_TYPES = [
 
 LIGHT_LOW = {"Dawn", "Dusk", "Night"}
 
+
+def resolve_water_clarity(base_stain: str, stirred_up: bool) -> str:
+    """Combine the base stain color + stirred-up flag into one effective key."""
+    if stirred_up:
+        return "Muddy"
+    return base_stain if base_stain in BASE_STAIN_OPTIONS else DEFAULT_BASE_STAIN
+
+
 # ---------------------------------------------------------------------------
 # Lure library: one profile per lure, independent of any specific day/segment.
 # ---------------------------------------------------------------------------
@@ -42,16 +65,19 @@ LURE_PROFILES = {
     "football_jig": {
         "name": "Football Jig",
         "video_key": "football_jig",
+        "vertical_style": "bottom",
         "colors": {
-            "Clear": ["Green pumpkin", "Brown/orange"],
-            "Stained": ["Brown/orange", "Green pumpkin/chartreuse"],
+            "Clear": ["Green pumpkin", "Watermelon red"],
+            "Green stained": ["Green pumpkin/chartreuse", "Brown/chartreuse"],
+            "Brown stained": ["Brown/orange", "Red craw"],
             "Muddy": ["Black/blue", "Junebug"],
         },
         "trailer": {
             "type": "Craw trailer",
             "colors": {
                 "Clear": ["Green pumpkin", "Watermelon red"],
-                "Stained": ["Brown/orange", "Green pumpkin chartreuse-tip"],
+                "Green stained": ["Green pumpkin chartreuse-tip", "Chartreuse"],
+                "Brown stained": ["Brown/orange", "Red craw"],
                 "Muddy": ["Black/blue", "Black"],
             },
         },
@@ -61,9 +87,11 @@ LURE_PROFILES = {
     "suspending_jerkbait": {
         "name": "Suspending Jerkbait",
         "video_key": "suspending_jerkbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Natural shad", "Ghost minnow"],
-            "Stained": ["Chrome/blue", "Clown (chartreuse/orange)"],
+            "Green stained": ["Chartreuse/black back", "Green shad"],
+            "Brown stained": ["Craw pattern", "Brown/orange"],
             "Muddy": ["Firetiger", "Chartreuse/black"],
         },
         "trailer": None,
@@ -73,9 +101,11 @@ LURE_PROFILES = {
     "blade_bait": {
         "name": "Blade Bait",
         "video_key": "blade_bait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Silver/natural shad"],
-            "Stained": ["Gold/chartreuse"],
+            "Green stained": ["Gold/chartreuse"],
+            "Brown stained": ["Craw/brown-gold"],
             "Muddy": ["Chartreuse/black"],
         },
         "trailer": None,
@@ -85,9 +115,11 @@ LURE_PROFILES = {
     "lipless_crankbait": {
         "name": "Lipless Crankbait",
         "video_key": "lipless_crankbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Natural shad", "Chrome/blue"],
-            "Stained": ["Chartreuse/black back", "Red craw"],
+            "Green stained": ["Chartreuse/black back", "Green shad"],
+            "Brown stained": ["Red craw", "Brown craw"],
             "Muddy": ["Firetiger", "Solid chartreuse"],
         },
         "trailer": None,
@@ -97,16 +129,19 @@ LURE_PROFILES = {
     "chatterbait": {
         "name": "Chatterbait (Bladed Jig)",
         "video_key": "chatterbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Green pumpkin", "Bluegill"],
-            "Stained": ["Chartreuse/white", "Bama craw"],
+            "Green stained": ["Chartreuse/green pumpkin", "Green shad"],
+            "Brown stained": ["Bama craw", "Brown/orange"],
             "Muddy": ["Black/blue", "Firetiger"],
         },
         "trailer": {
             "type": "Paddle-tail swimbait trailer",
             "colors": {
                 "Clear": ["Green pumpkin", "White pearl"],
-                "Stained": ["Chartreuse/white", "White"],
+                "Green stained": ["Chartreuse/white", "White pearl"],
+                "Brown stained": ["White/brown", "Bama craw"],
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
@@ -116,9 +151,11 @@ LURE_PROFILES = {
     "squarebill_crankbait": {
         "name": "Squarebill Crankbait",
         "video_key": "squarebill_crankbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Natural shad", "Green craw"],
-            "Stained": ["Chartreuse/brown craw", "Red craw"],
+            "Green stained": ["Chartreuse/green craw", "Green shad"],
+            "Brown stained": ["Brown craw", "Red craw"],
             "Muddy": ["Firetiger", "Chartreuse/black"],
         },
         "trailer": None,
@@ -128,9 +165,11 @@ LURE_PROFILES = {
     "deep_diving_crankbait": {
         "name": "Deep-Diving Crankbait",
         "video_key": "deep_diving_crankbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Natural shad", "Chrome/blue"],
-            "Stained": ["Chartreuse/black back", "Craw pattern"],
+            "Green stained": ["Chartreuse/black back", "Green shad"],
+            "Brown stained": ["Craw pattern", "Brown/orange"],
             "Muddy": ["Firetiger", "Solid chartreuse"],
         },
         "trailer": None,
@@ -140,9 +179,11 @@ LURE_PROFILES = {
     "texas_rig_creature": {
         "name": "Texas-Rigged Creature Bait",
         "video_key": "texas_rig",
+        "vertical_style": "bottom",
         "colors": {
             "Clear": ["Green pumpkin", "Watermelon red"],
-            "Stained": ["Black/blue", "Junebug"],
+            "Green stained": ["Green pumpkin/chartreuse", "Chartreuse"],
+            "Brown stained": ["Junebug", "Brown/red craw"],
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
@@ -152,9 +193,11 @@ LURE_PROFILES = {
     "texas_rig_worm": {
         "name": "Texas-Rigged Worm",
         "video_key": "texas_rig",
+        "vertical_style": "bottom",
         "colors": {
             "Clear": ["Green pumpkin", "Watermelon"],
-            "Stained": ["Red bug", "June bug"],
+            "Green stained": ["Green pumpkin chartreuse", "Chartreuse"],
+            "Brown stained": ["Red bug", "June bug"],
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
@@ -164,9 +207,11 @@ LURE_PROFILES = {
     "wacky_rig_senko": {
         "name": "Wacky-Rigged Senko",
         "video_key": "wacky_rig_senko",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Green pumpkin", "Watermelon"],
-            "Stained": ["Black", "June bug"],
+            "Green stained": ["Green pumpkin/chartreuse-tip", "Chartreuse"],
+            "Brown stained": ["June bug", "Brown/red"],
             "Muddy": ["Black", "Black/blue"],
         },
         "trailer": None,
@@ -176,9 +221,11 @@ LURE_PROFILES = {
     "weightless_soft_plastic": {
         "name": "Weightless Soft Plastic (Fluke-style)",
         "video_key": "weightless_soft_plastic",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Natural shad", "Pearl white"],
-            "Stained": ["Chartreuse/white", "Bone"],
+            "Green stained": ["Chartreuse/white", "White pearl"],
+            "Brown stained": ["Bone", "Brown shad"],
             "Muddy": ["Black", "Chartreuse"],
         },
         "trailer": None,
@@ -188,16 +235,19 @@ LURE_PROFILES = {
     "spinnerbait": {
         "name": "Spinnerbait",
         "video_key": "spinnerbait",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["White/silver blade", "Natural shad skirt"],
-            "Stained": ["Chartreuse/white skirt", "Gold blade"],
+            "Green stained": ["Chartreuse/white skirt", "Gold blade"],
+            "Brown stained": ["Brown/orange skirt", "Gold blade"],
             "Muddy": ["Black/blue skirt", "Colorado gold blade"],
         },
         "trailer": {
             "type": "Curly-tail grub or trailer hook",
             "colors": {
                 "Clear": ["White", "Natural shad"],
-                "Stained": ["Chartreuse/white"],
+                "Green stained": ["Chartreuse/white"],
+                "Brown stained": ["Brown/orange"],
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
@@ -207,16 +257,19 @@ LURE_PROFILES = {
     "swim_jig": {
         "name": "Swim Jig",
         "video_key": "swim_jig",
+        "vertical_style": "column",
         "colors": {
             "Clear": ["Green pumpkin/shad", "Bluegill"],
-            "Stained": ["Chartreuse/white", "Bama craw"],
+            "Green stained": ["Chartreuse/green pumpkin", "Green shad"],
+            "Brown stained": ["Bama craw", "Brown/orange"],
             "Muddy": ["Black/blue", "Firetiger"],
         },
         "trailer": {
             "type": "Paddle-tail swimbait trailer",
             "colors": {
                 "Clear": ["White pearl", "Green pumpkin"],
-                "Stained": ["Chartreuse/white", "White"],
+                "Green stained": ["Chartreuse/white", "White pearl"],
+                "Brown stained": ["White/brown", "Bama craw"],
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
@@ -226,9 +279,11 @@ LURE_PROFILES = {
     "carolina_rig": {
         "name": "Carolina-Rigged Worm",
         "video_key": "carolina_rig",
+        "vertical_style": "bottom",
         "colors": {
             "Clear": ["Green pumpkin", "Watermelon"],
-            "Stained": ["June bug", "Red bug"],
+            "Green stained": ["Green pumpkin chartreuse", "Chartreuse"],
+            "Brown stained": ["June bug", "Red bug"],
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
@@ -238,16 +293,19 @@ LURE_PROFILES = {
     "buzzbait": {
         "name": "Buzzbait",
         "video_key": "buzzbait",
+        "vertical_style": "surface",
         "colors": {
             "Clear": ["White", "Shad"],
-            "Stained": ["Chartreuse/white", "Black"],
+            "Green stained": ["Chartreuse/white", "White"],
+            "Brown stained": ["White/brown", "Black"],
             "Muddy": ["Black", "Solid chartreuse"],
         },
         "trailer": {
             "type": "Trailer hook, optional soft-plastic trailer (twin-tail grub)",
             "colors": {
                 "Clear": ["White"],
-                "Stained": ["Chartreuse/white"],
+                "Green stained": ["Chartreuse/white"],
+                "Brown stained": ["White"],
                 "Muddy": ["Black"],
             },
         },
@@ -257,9 +315,11 @@ LURE_PROFILES = {
     "walking_topwater": {
         "name": "Walking Topwater (Spook-style)",
         "video_key": "walking_topwater",
+        "vertical_style": "surface",
         "colors": {
             "Clear": ["Bone/white", "Chrome/blue"],
-            "Stained": ["Chartreuse/white", "Bone"],
+            "Green stained": ["Chartreuse/white", "Bone"],
+            "Brown stained": ["Bone", "Brown/orange"],
             "Muddy": ["Black", "Solid white"],
         },
         "trailer": None,
@@ -269,9 +329,11 @@ LURE_PROFILES = {
     "popper": {
         "name": "Popper",
         "video_key": "popper",
+        "vertical_style": "surface",
         "colors": {
             "Clear": ["Shad/natural", "Bone"],
-            "Stained": ["Chartreuse/white", "Firetiger"],
+            "Green stained": ["Chartreuse/white", "Bone"],
+            "Brown stained": ["Firetiger", "Brown/orange"],
             "Muddy": ["Black", "Solid chartreuse"],
         },
         "trailer": None,
@@ -281,9 +343,11 @@ LURE_PROFILES = {
     "hollow_body_frog": {
         "name": "Hollow-Body Frog",
         "video_key": "hollow_body_frog",
+        "vertical_style": "surface",
         "colors": {
             "Clear": ["Natural frog green", "White belly"],
-            "Stained": ["Black", "White"],
+            "Green stained": ["Natural frog green", "Black"],
+            "Brown stained": ["Brown/black", "White belly"],
             "Muddy": ["Black", "Solid white"],
         },
         "trailer": None,
@@ -293,9 +357,11 @@ LURE_PROFILES = {
     "finesse_shaky_head": {
         "name": "Finesse Worm / Shaky Head",
         "video_key": "finesse_shaky_head",
+        "vertical_style": "bottom",
         "colors": {
             "Clear": ["Green pumpkin", "Watermelon"],
-            "Stained": ["June bug", "Green pumpkin/chartreuse"],
+            "Green stained": ["Green pumpkin/chartreuse", "Chartreuse"],
+            "Brown stained": ["June bug", "Brown/red"],
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
@@ -305,14 +371,39 @@ LURE_PROFILES = {
 }
 
 
+# Largemouth bass have a strike window heavily biased forward and UP: binocular
+# vision is limited to a narrow cone in front of and slightly above the snout,
+# there's a blind spot below/behind, and the jaw hinges upward to create suction.
+# Net effect (well documented in bass biology/tackle-industry tutorials): bass
+# strike up at prey far more readily than they dive down for it. So a bait
+# fished level with or a couple feet ABOVE a marked depth is usually a better
+# target than one fished at the same depth or below.
+STRIKE_UP_OFFSET_FT = (1.0, 2.0)  # (min, max) feet above the marked depth to target
+
+
+def _target_depth_for_fish(fish_depth_ft: float, vertical_style: str):
+    """Returns (lo, hi) target running depth in feet for this style of lure."""
+    if vertical_style == "bottom":
+        # Slow/finesse presentations are fished IN the zone, not necessarily above it -
+        # the "up" bias still applies, but these baits give fish time to adjust, so the
+        # actionable advice is where to stop/count it down to, not a strict offset.
+        return (max(0.0, fish_depth_ft - 1), fish_depth_ft)
+    off_lo, off_hi = STRIKE_UP_OFFSET_FT
+    lo = max(0.0, fish_depth_ft - off_hi)
+    hi = max(0.5, fish_depth_ft - off_lo)
+    return (round(lo, 1), round(hi, 1))
+
+
 def _depth_match_score(profile: dict, fish_depth_ft: float) -> float:
-    """0 = fish are right in this lure's zone; positive = how far off (ft)."""
+    """0 = fish are right in this lure's natural zone; positive = how far off (ft)."""
     lo, hi = profile["depth_range_ft"]
+    style = profile.get("vertical_style", "column")
     if lo == 0 and hi == 0:  # surface bait
         return max(0.0, fish_depth_ft - 3)  # topwater still "matches" very shallow fish
-    if lo <= fish_depth_ft <= hi:
+    target_lo, target_hi = _target_depth_for_fish(fish_depth_ft, style)
+    if lo <= target_lo <= hi or lo <= target_hi <= hi or (target_lo <= lo and target_hi >= hi):
         return 0.0
-    return min(abs(fish_depth_ft - lo), abs(fish_depth_ft - hi))
+    return min(abs(target_lo - lo), abs(target_lo - hi), abs(target_hi - lo), abs(target_hi - hi))
 
 
 def _depth_text(profile: dict, fish_depth_ft: float = None) -> str:
@@ -327,23 +418,40 @@ def _depth_text(profile: dict, fish_depth_ft: float = None) -> str:
         return base
 
     if surface:
-        if fish_depth_ft > 3:
-            return base + f" (you're marking fish deeper, around {fish_depth_ft:.0f} ft - topwater may be a tougher bite right now)"
-        return base + " (matches the shallow fish you're marking)"
+        if fish_depth_ft > 6:
+            return base + (f" (you're marking fish deeper, around {fish_depth_ft:.0f} ft - bass can rise "
+                            f"several feet for topwater, but the bite gets tougher the deeper they're holding)")
+        return base + " (matches the shallow fish you're marking - bass strike up, so this is a good call)"
 
-    if lo <= fish_depth_ft <= hi:
-        return base + f" - dialed in to the ~{fish_depth_ft:.0f} ft you're marking fish on your electronics"
+    style = profile.get("vertical_style", "column")
+    if style == "bottom":
+        target_lo, target_hi = _target_depth_for_fish(fish_depth_ft, style)
+        if lo <= fish_depth_ft <= hi:
+            return base + (f" - count it down to about {target_lo:.0f}-{target_hi:.0f} ft before working it, "
+                            f"right where you're marking fish")
+        if fish_depth_ft < lo:
+            return base + f" - you're marking fish shallower (~{fish_depth_ft:.0f} ft); don't let it fall all the way to bottom, work it in that upper zone instead"
+        return base + f" - you're marking fish deeper (~{fish_depth_ft:.0f} ft); let it settle longer before working it"
+
+    # column (reaction/moving baits): target a specific band above the marked depth
+    target_lo, target_hi = _target_depth_for_fish(fish_depth_ft, style)
+    if fish_depth_ft <= 2:
+        return base + " - fish are shallow; run this right at/just above their level"
+    if lo <= target_lo <= hi or lo <= target_hi <= hi:
+        return base + (f" - target ~{target_lo:.0f}-{target_hi:.0f} ft (1-2 ft above the {fish_depth_ft:.0f} ft "
+                        f"you're marking - bass strike up more readily than down)")
     if fish_depth_ft < lo:
-        return base + f" - you're marking fish shallower (~{fish_depth_ft:.0f} ft); slow down/shorten your count-down to get up in the zone"
-    return base + f" - you're marking fish deeper (~{fish_depth_ft:.0f} ft); let it sink longer or slow-roll deeper to reach them"
+        return base + f" - you're marking fish shallower (~{fish_depth_ft:.0f} ft) than this bait's usual zone; slow down/shorten your count-down to get up in range"
+    return base + (f" - you're marking fish deeper (~{fish_depth_ft:.0f} ft); this bait tops out at {hi:.0f} ft, "
+                    f"so let it sink/slow-roll deeper, or lean on a deeper-running option instead")
 
 
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "") -> "LureBlock":
     profile = LURE_PROFILES[key]
-    colors = profile["colors"].get(water_clarity, profile["colors"]["Stained"])
+    colors = profile["colors"].get(water_clarity, profile["colors"][DEFAULT_BASE_STAIN])
     trailer = None
     if profile["trailer"]:
-        t_colors = profile["trailer"]["colors"].get(water_clarity, profile["trailer"]["colors"]["Stained"])
+        t_colors = profile["trailer"]["colors"].get(water_clarity, profile["trailer"]["colors"][DEFAULT_BASE_STAIN])
         trailer = TrailerInfo(type=profile["trailer"]["type"], colors=t_colors)
     return LureBlock(
         key=key,
@@ -388,15 +496,17 @@ def recommend(
     segment_name: str,
     pressure_trend_24h: float,
     structure_type: str = "Main-lake point",
-    water_clarity: str = "Stained",
+    water_clarity: str = "Brown stained",
     fish_depth_ft: float = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
     if fish_depth_ft is not None:
         rationale.append(
-            f"You're marking fish around {fish_depth_ft:.0f} ft - lures below are re-ordered "
-            f"by how well their typical depth matches that reading."
+            f"You're marking fish around {fish_depth_ft:.0f} ft - bass have upward-biased vision and an "
+            f"upward-hinging jaw, so they strike up more readily than down. Reaction/moving baits below are "
+            f"re-ordered and targeted to run 1-2 ft above that reading; bottom baits are targeted to count "
+            f"down to it."
         )
 
     # --- Seasonal base pattern: which lure keys are first vs second choice -----
@@ -465,7 +575,7 @@ def recommend(
 
     # Jerkbaits shine in clearer, cooler water - flag as a second choice outside their primary seasons too.
     if "suspending_jerkbait" not in first_keys and "suspending_jerkbait" not in second_keys:
-        if water_temp_f <= 68 and water_clarity in ("Clear", "Stained"):
+        if water_temp_f <= 68 and water_clarity in ("Clear", "Green stained", "Brown stained"):
             second_keys.append("suspending_jerkbait")
 
     # --- Pressure trend nudge ---------------------------------------------------
@@ -476,7 +586,6 @@ def recommend(
             second_keys.insert(0, "finesse_shaky_head")
         rationale.append("High, stable pressure after a front - added a finesse bait for a tougher bite.")
 
-    # De-dupe while preserving order, and don't let a key appear in both lists.
     # De-dupe while preserving order, never let a key appear in both lists.
     seen = set()
     first_keys_unique = []

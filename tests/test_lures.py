@@ -62,8 +62,9 @@ def test_trailer_only_present_where_defined():
 
 def test_fish_depth_reorders_by_match_quality():
     rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained", fish_depth_ft=18)
-    # All three seasonal picks bracket 18 ft, so order should be unchanged and each annotated.
-    assert all("dialed in" in b.depth for b in rec.first_choice)
+    # All three seasonal picks bracket 18 ft, so each should reference the 18 ft reading
+    # (bottom baits get count-down guidance, column baits get the above-target offset).
+    assert all("18 ft" in b.depth for b in rec.first_choice)
     assert any("marking fish" in r for r in rec.rationale)
 
 
@@ -82,3 +83,23 @@ def test_no_fish_depth_reading_omits_depth_annotation():
     rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained")
     assert not any("marking fish" in b.depth for b in rec.first_choice + rec.second_choice)
     assert not any("marking fish" in r for r in rec.rationale)
+
+
+def test_column_lure_targets_above_marked_fish_depth():
+    rec = recommend("summer_peak", 84, "Dawn", -1.0, "Flat", "Stained", fish_depth_ft=7)
+    jig_block = next(b for b in rec.first_choice + rec.second_choice if b.key == "swim_jig")
+    assert "target ~5-6 ft" in jig_block.depth
+    assert "above the 7 ft" in jig_block.depth
+    assert "strike up" in jig_block.depth
+
+
+def test_bottom_lure_gets_countdown_guidance_not_offset():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained", fish_depth_ft=7)
+    jig_block = next(b for b in rec.first_choice + rec.second_choice if b.key == "football_jig")
+    assert "1-2 ft above" not in jig_block.depth  # bottom baits shouldn't get the reaction-bait offset phrasing
+    assert "7 ft" in jig_block.depth
+
+
+def test_rationale_explains_strike_up_bias_when_fish_depth_given():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Flat", "Stained", fish_depth_ft=10)
+    assert any("strike up" in r for r in rec.rationale)
