@@ -2,6 +2,10 @@
 
 A 7-day largemouth bass fishing forecast app for **Nolin River Lake, KY**, built with Streamlit.
 
+Picking this project back up in a new Claude chat? Use [`NEW_SESSION_PROMPT.md`](NEW_SESSION_PROMPT.md)
+to kick things off, and see [`SESSION_NOTES.md`](SESSION_NOTES.md) for the full development history,
+key decisions, and known open items.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
