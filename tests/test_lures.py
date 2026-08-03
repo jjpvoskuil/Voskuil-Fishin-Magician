@@ -130,19 +130,19 @@ def test_forage_does_not_duplicate_already_covered_lure():
     assert len(all_keys) == len(set(all_keys))
 
 
-def test_thermocline_caveat_appears_when_fish_depth_below_band():
+def test_thermocline_caveat_appears_when_fish_depth_below_input():
     rec = recommend("summer_peak", 84, "Midday", 0.0, "Creek channel / ledge", "Clear",
-                     fish_depth_ft=25, thermocline_band=(13.0, 17.0))
-    assert any("below the modeled thermocline" in r for r in rec.rationale)
+                     fish_depth_ft=25, thermocline_ft=15.0)
+    assert any("below the thermocline depth you've set" in r for r in rec.rationale)
 
 
-def test_thermocline_caveat_absent_when_fish_depth_within_band():
+def test_thermocline_caveat_absent_when_fish_depth_above_input():
     rec = recommend("summer_peak", 84, "Midday", 0.0, "Creek channel / ledge", "Clear",
-                     fish_depth_ft=15, thermocline_band=(13.0, 17.0))
-    assert not any("below the modeled thermocline" in r for r in rec.rationale)
+                     fish_depth_ft=10, thermocline_ft=15.0)
+    assert not any("below the thermocline depth you've set" in r for r in rec.rationale)
 
 
-def test_thermocline_caveat_absent_when_band_is_none():
+def test_thermocline_caveat_absent_when_no_thermocline_value_given():
     rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
-                     fish_depth_ft=30, thermocline_band=None)
-    assert not any("below the modeled thermocline" in r for r in rec.rationale)
+                     fish_depth_ft=30, thermocline_ft=None)
+    assert not any("below the thermocline depth you've set" in r for r in rec.rationale)

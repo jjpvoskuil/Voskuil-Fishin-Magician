@@ -4,8 +4,7 @@ from datetime import date
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
-from core.thermocline import estimate_thermocline_band_ft
-from core.ui import render_lure_recommendation, render_lake_setup_sidebar, render_thermocline_caption
+from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 st.title("📅 7-Day Largemouth Bass Forecast")
@@ -39,13 +38,12 @@ for day in week:
         with c1:
             eff_season, eff_water_temp = effective_season_and_temp(day, lake_setup.water_temp_override_f)
             st.write(f"**Water temp (Lake Setup Options):** {eff_water_temp}°F  |  "
+                     f"**Thermocline (Lake Setup Options):** {lake_setup.thermocline_ft:.0f} ft  |  "
                      f"**24h pressure trend:** {day.pressure_trend_24h:+.1f} hPa  |  "
                      f"**Moon illumination:** {day.moon.illumination_pct:.0f}%")
             if eff_season != day.season:
                 st.caption(f"Your water temp puts this day in the {eff_season.replace('_', ' ').title()} pattern for "
                            f"lure selection (the weather-only estimate would be {day.season.replace('_', ' ').title()}).")
-            thermocline_band = estimate_thermocline_band_ft(day.the_date)
-            render_thermocline_caption(thermocline_band)
             st.write(f"**Sunrise:** {day.sunrise.strftime('%-I:%M %p')}  |  "
                      f"**Sunset:** {day.sunset.strftime('%-I:%M %p')}")
             ws = day.weather_summary
@@ -72,7 +70,7 @@ for day in week:
         for seg in day.segments:
             rec = recommend(eff_season, eff_water_temp, seg.name, day.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
-                             thermocline_band=thermocline_band)
+                             thermocline_ft=lake_setup.thermocline_ft)
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),

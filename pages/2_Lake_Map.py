@@ -5,8 +5,7 @@ from streamlit_folium import st_folium
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
 from core.scoring import score_day, effective_season_and_temp
 from core.lures import recommend, STRUCTURE_TYPES
-from core.thermocline import estimate_thermocline_band_ft
-from core.ui import render_lure_recommendation, render_lake_setup_sidebar, render_thermocline_caption
+from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 
@@ -91,15 +90,14 @@ with col_detail:
         segment_name = st.selectbox("Time of day", [s.name for s in day.segments])
         seg = next(s for s in day.segments if s.name == segment_name)
 
-        st.caption(f"Water temp (Lake Setup Options): {eff_water_temp}°F"
+        st.caption(f"Water temp (Lake Setup Options): {eff_water_temp}°F  |  "
+                   f"Thermocline (Lake Setup Options): {lake_setup.thermocline_ft:.0f} ft"
                    + (f" - shifts pattern to {eff_season.replace('_', ' ').title()} "
                       f"(weather-only estimate: {day.season.replace('_', ' ').title()})" if eff_season != day.season else ""))
-        thermocline_band = estimate_thermocline_band_ft(picked_date)
-        render_thermocline_caption(thermocline_band)
         st.metric(f"{segment_name} activity score", f"{seg.score}/10")
         rec = recommend(eff_season, eff_water_temp, segment_name, day.pressure_trend_24h,
                          structure_type, clarity, fish_depth_ft=lake_setup.fish_depth_ft,
-                         forage=lake_setup.forage, thermocline_band=thermocline_band)
+                         forage=lake_setup.forage, thermocline_ft=lake_setup.thermocline_ft)
 
         render_lure_recommendation(rec)
     except ValueError as e:
