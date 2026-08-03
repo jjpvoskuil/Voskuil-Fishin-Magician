@@ -2,9 +2,9 @@ import streamlit as st
 from datetime import date
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
-from core.scoring import score_week
-from core.lures import recommend, WATER_CLARITY_OPTIONS, STRUCTURE_TYPES
-from core.ui import render_lure_recommendation
+from core.scoring import score_week, effective_season_and_temp
+from core.lures import recommend
+from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 st.title("📅 7-Day Largemouth Bass Forecast")
@@ -26,11 +26,9 @@ for col, day in zip(cols, week):
 
 st.divider()
 
-with st.sidebar:
-    st.header("Lure setup inputs")
-    clarity = st.selectbox("Water clarity", WATER_CLARITY_OPTIONS, index=1)
-    structure = st.selectbox("Structure type", STRUCTURE_TYPES, index=0)
-    st.caption("Nolin doesn't have a live water-clarity feed, so set this from your last trip or local knowledge.")
+lake_setup = render_lake_setup_sidebar(include_structure=True)
+clarity = lake_setup.water_clarity
+structure = lake_setup.structure_type
 
 for day in week:
     with st.expander(f"{day.the_date.strftime('%A, %B %d')} - overall {day.overall_score}/10 | "
@@ -38,9 +36,14 @@ for day in week:
 
         c1, c2 = st.columns([2, 1])
         with c1:
-            st.write(f"**Estimated water temp:** {day.water_temp_f}°F  |  "
+            eff_season, eff_water_temp = effective_season_and_temp(day, lake_setup.water_temp_override_f)
+            temp_label = "Measured water temp" if lake_setup.water_temp_override_f is not None else "Estimated water temp"
+            st.write(f"**{temp_label}:** {eff_water_temp}°F  |  "
                      f"**24h pressure trend:** {day.pressure_trend_24h:+.1f} hPa  |  "
                      f"**Moon illumination:** {day.moon.illumination_pct:.0f}%")
+            if lake_setup.water_temp_override_f is not None and eff_season != day.season:
+                st.caption(f"Your measured temp shifts the seasonal pattern from "
+                           f"{day.season.replace('_', ' ').title()} to {eff_season.replace('_', ' ').title()} for lure selection.")
             st.write(f"**Sunrise:** {day.sunrise.strftime('%-I:%M %p')}  |  "
                      f"**Sunset:** {day.sunset.strftime('%-I:%M %p')}")
             ws = day.weather_summary
@@ -65,7 +68,8 @@ for day in week:
         st.write("**Lure setup by time of day** (expand a window for full lure blocks):")
         best_name = max(day.segments, key=lambda s: s.score).name
         for seg in day.segments:
-            rec = recommend(day.season, day.water_temp_f, seg.name, day.pressure_trend_24h, structure, clarity)
+            rec = recommend(eff_season, eff_water_temp, seg.name, day.pressure_trend_24h, structure, clarity,
+                             fish_depth_ft=lake_setup.fish_depth_ft)
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),

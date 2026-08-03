@@ -58,3 +58,27 @@ def test_trailer_only_present_where_defined():
         assert "type" in profile["trailer"]
         for clarity in WATER_CLARITY_OPTIONS:
             assert clarity in profile["trailer"]["colors"]
+
+
+def test_fish_depth_reorders_by_match_quality():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained", fish_depth_ft=18)
+    # All three seasonal picks bracket 18 ft, so order should be unchanged and each annotated.
+    assert all("dialed in" in b.depth for b in rec.first_choice)
+    assert any("marking fish" in r for r in rec.rationale)
+
+
+def test_fish_depth_flags_mismatch_without_dropping_lure():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained", fish_depth_ft=3)
+    all_blocks = rec.first_choice + rec.second_choice
+    keys = {b.key for b in all_blocks}
+    # same lure set as without a reading - nothing added or removed, just reordered/annotated
+    rec_plain = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained")
+    plain_keys = {b.key for b in rec_plain.first_choice + rec_plain.second_choice}
+    assert keys == plain_keys
+    assert any("marking fish shallower" in b.depth for b in all_blocks)
+
+
+def test_no_fish_depth_reading_omits_depth_annotation():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Stained")
+    assert not any("marking fish" in b.depth for b in rec.first_choice + rec.second_choice)
+    assert not any("marking fish" in r for r in rec.rationale)

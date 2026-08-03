@@ -3,9 +3,9 @@ from datetime import date, timedelta
 from streamlit_folium import st_folium
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
-from core.scoring import score_day
-from core.lures import recommend, WATER_CLARITY_OPTIONS, STRUCTURE_TYPES
-from core.ui import render_lure_recommendation
+from core.scoring import score_day, effective_season_and_temp
+from core.lures import recommend, STRUCTURE_TYPES
+from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 
@@ -22,6 +22,8 @@ st.info(
     "access points). Always confirm with your own electronics on the water.",
     icon="🧭",
 )
+
+lake_setup = render_lake_setup_sidebar(include_structure=False)
 
 spot_data = get_spots()
 spots = spot_data["spots"]
@@ -73,7 +75,7 @@ with col_detail:
         STRUCTURE_TYPES,
         index=STRUCTURE_TYPES.index(inferred_structure) if inferred_structure in STRUCTURE_TYPES else 0,
     )
-    clarity = st.selectbox("Water clarity", WATER_CLARITY_OPTIONS, index=1)
+    clarity = lake_setup.water_clarity
 
     picked_date = st.selectbox(
         "Date", [date.today() + timedelta(days=i) for i in range(7)],
@@ -84,12 +86,15 @@ with col_detail:
     bundle = get_weather_bundle(7)
     try:
         day = score_day(bundle, picked_date, weights=weights)
+        eff_season, eff_water_temp = effective_season_and_temp(day, lake_setup.water_temp_override_f)
         segment_name = st.selectbox("Time of day", [s.name for s in day.segments])
         seg = next(s for s in day.segments if s.name == segment_name)
 
+        temp_label = "Measured water temp" if lake_setup.water_temp_override_f is not None else "Estimated water temp"
+        st.caption(f"{temp_label}: {eff_water_temp}°F")
         st.metric(f"{segment_name} activity score", f"{seg.score}/10")
-        rec = recommend(day.season, day.water_temp_f, segment_name, day.pressure_trend_24h,
-                         structure_type, clarity)
+        rec = recommend(eff_season, eff_water_temp, segment_name, day.pressure_trend_24h,
+                         structure_type, clarity, fish_depth_ft=lake_setup.fish_depth_ft)
 
         render_lure_recommendation(rec)
     except ValueError as e:

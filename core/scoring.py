@@ -71,6 +71,19 @@ def season_stage(day_of_year: int, water_temp_f: float) -> str:
     return "fall_feed_up"
 
 
+def effective_season_and_temp(day: "DayForecast", water_temp_override_f: float = None):
+    """
+    If the angler supplied a real surface-temp reading (from their own
+    electronics), use it in place of the estimated water temp for anything
+    downstream (lure/season selection) - a measured reading beats our
+    air-temp-based estimate. Returns (season, water_temp_f).
+    """
+    if water_temp_override_f is None:
+        return day.season, day.water_temp_f
+    day_of_year = day.the_date.timetuple().tm_yday
+    return season_stage(day_of_year, water_temp_override_f), water_temp_override_f
+
+
 @dataclass
 class SegmentForecast:
     name: str

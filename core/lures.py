@@ -55,7 +55,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black/blue", "Black"],
             },
         },
-        "depth": "12-30 ft, dragged/hopped on bottom",
+        "depth_range_ft": (12, 30), "depth_style": "dragged/hopped on bottom",
         "presentation": "Long cast, let it settle to bottom, then drag/hop slowly with the rod tip at 9-10 o'clock, reeling up slack between strokes. Most bites come on the fall or the pause.",
     },
     "suspending_jerkbait": {
@@ -67,7 +67,7 @@ LURE_PROFILES = {
             "Muddy": ["Firetiger", "Chartreuse/black"],
         },
         "trailer": None,
-        "depth": "2-8 ft, suspended in the water column",
+        "depth_range_ft": (2, 8), "depth_style": "suspended in the water column",
         "presentation": "Jerk-jerk-pause cadence with the rod tip down - let it sit motionless on the pause (longer pause in colder water). Most strikes come on the pause, not the jerk.",
     },
     "blade_bait": {
@@ -79,7 +79,7 @@ LURE_PROFILES = {
             "Muddy": ["Chartreuse/black"],
         },
         "trailer": None,
-        "depth": "Bottom to 20 ft",
+        "depth_range_ft": (0, 20), "depth_style": "lift-and-fall (yo-yo), bottom to mid-depth",
         "presentation": "Let it sink to bottom on semi-slack line, then lift-and-fall (yo-yo) vertically or on a slow retrieve - the vibration comes on the fall, so stay in contact for subtle bites.",
     },
     "lipless_crankbait": {
@@ -91,7 +91,7 @@ LURE_PROFILES = {
             "Muddy": ["Firetiger", "Solid chartreuse"],
         },
         "trailer": None,
-        "depth": "2-10 ft (grass flats/humps)",
+        "depth_range_ft": (2, 10), "depth_style": "burned over grass flats/humps",
         "presentation": "Steady burn over grass with occasional bottom contact, or yo-yo (rip it free, let it flutter back down) when fish are less aggressive - most bites come on the flutter fall.",
     },
     "chatterbait": {
@@ -110,7 +110,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
-        "depth": "1-6 ft over grass/cover",
+        "depth_range_ft": (1, 6), "depth_style": "swum just above grass/cover",
         "presentation": "Steady retrieve just above cover so it ticks the tops of grass/wood; occasional rip-and-fall when it hangs up triggers reaction strikes.",
     },
     "squarebill_crankbait": {
@@ -122,7 +122,7 @@ LURE_PROFILES = {
             "Muddy": ["Firetiger", "Chartreuse/black"],
         },
         "trailer": None,
-        "depth": "2-6 ft, deflecting off cover",
+        "depth_range_ft": (2, 6), "depth_style": "deflecting off cover",
         "presentation": "Stop-and-go retrieve that bumps wood/rock/riprap - deflection off cover is what triggers the strike, so aim to hit something on every cast.",
     },
     "deep_diving_crankbait": {
@@ -134,7 +134,7 @@ LURE_PROFILES = {
             "Muddy": ["Firetiger", "Solid chartreuse"],
         },
         "trailer": None,
-        "depth": "15-25+ ft, grinding bottom",
+        "depth_range_ft": (15, 25), "depth_style": "grinding bottom/ledges",
         "presentation": "Long cast, reel down to get it to depth, then grind bottom contact through ledges/humps - deflecting off hard bottom triggers reaction bites.",
     },
     "texas_rig_creature": {
@@ -146,7 +146,7 @@ LURE_PROFILES = {
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
-        "depth": "1-8 ft, pitched/flipped to cover",
+        "depth_range_ft": (1, 8), "depth_style": "pitched/flipped to cover",
         "presentation": "Pitch or flip to isolated cover/beds, let it sink on slack line, then hop/shake in place - most bites happen on the initial fall or right after it settles.",
     },
     "texas_rig_worm": {
@@ -158,7 +158,7 @@ LURE_PROFILES = {
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
-        "depth": "2-10 ft along shoreline cover",
+        "depth_range_ft": (2, 10), "depth_style": "dragged along shoreline cover",
         "presentation": "Cast past cover, drag/hop it along the bottom back to the boat, pausing over wood or grass edges.",
     },
     "wacky_rig_senko": {
@@ -170,7 +170,7 @@ LURE_PROFILES = {
             "Muddy": ["Black", "Black/blue"],
         },
         "trailer": None,
-        "depth": "0-6 ft, weightless fall",
+        "depth_range_ft": (0, 6), "depth_style": "weightless fall",
         "presentation": "Cast to cover and let it sink with a slow, shimmying fall on slack line - most strikes happen before it hits bottom, so watch your line.",
     },
     "weightless_soft_plastic": {
@@ -182,7 +182,7 @@ LURE_PROFILES = {
             "Muddy": ["Black", "Chartreuse"],
         },
         "trailer": None,
-        "depth": "0-4 ft, near surface",
+        "depth_range_ft": (0, 4), "depth_style": "near surface",
         "presentation": "Twitch-twitch-pause so it darts and glides just under the surface, imitating a dying baitfish.",
     },
     "spinnerbait": {
@@ -201,7 +201,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
-        "depth": "1-10 ft depending on retrieve speed",
+        "depth_range_ft": (1, 10), "depth_style": "depending on retrieve speed/slow-roll depth",
         "presentation": "Slow-roll along the bottom near cover in cold/tough conditions, or burn it just under the surface over grass when fish are active.",
     },
     "swim_jig": {
@@ -220,7 +220,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
-        "depth": "1-6 ft through/over grass and wood",
+        "depth_range_ft": (1, 6), "depth_style": "through/over grass and wood",
         "presentation": "Steady swim just fast enough to keep it ticking the top of cover; pause briefly when it deflects off wood to trigger a reaction bite.",
     },
     "carolina_rig": {
@@ -232,7 +232,7 @@ LURE_PROFILES = {
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
-        "depth": "8-20 ft, dragged behind the weight on bottom",
+        "depth_range_ft": (8, 20), "depth_style": "dragged behind the weight on bottom",
         "presentation": "Long cast, drag the rig slowly along the bottom with sweeps of the rod - the clacking weight/bead calls fish in, then the trailing bait gets eaten.",
     },
     "buzzbait": {
@@ -251,7 +251,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black"],
             },
         },
-        "depth": "Surface",
+        "depth_range_ft": (0, 0), "depth_style": "",
         "presentation": "Cast past cover, start the retrieve the instant it lands so it plans out on top, and keep a steady-to-slow retrieve so it gurgles across the surface.",
     },
     "walking_topwater": {
@@ -263,7 +263,7 @@ LURE_PROFILES = {
             "Muddy": ["Black", "Solid white"],
         },
         "trailer": None,
-        "depth": "Surface",
+        "depth_range_ft": (0, 0), "depth_style": "",
         "presentation": "Steady 'walk-the-dog' cadence with rod tip down, snapping slack rhythmically so the bait zig-zags side to side.",
     },
     "popper": {
@@ -275,7 +275,7 @@ LURE_PROFILES = {
             "Muddy": ["Black", "Solid chartreuse"],
         },
         "trailer": None,
-        "depth": "Surface",
+        "depth_range_ft": (0, 0), "depth_style": "",
         "presentation": "Sharp pop-pause-pop with occasional long pauses over calm water/isolated cover - most strikes happen right after the pause, not the pop itself.",
     },
     "hollow_body_frog": {
@@ -287,7 +287,7 @@ LURE_PROFILES = {
             "Muddy": ["Black", "Solid white"],
         },
         "trailer": None,
-        "depth": "Surface, over mats/pads/grass",
+        "depth_range_ft": (0, 0), "depth_style": "over mats/pads/grass",
         "presentation": "Walk or hop it across matted grass/pads with pauses over holes in the cover; wait for the fish to fully engulf it before setting the hook.",
     },
     "finesse_shaky_head": {
@@ -299,13 +299,46 @@ LURE_PROFILES = {
             "Muddy": ["Black/blue", "Black"],
         },
         "trailer": None,
-        "depth": "8-20 ft (deeper), or shallow cover in clear water",
+        "depth_range_ft": (6, 20), "depth_style": "dragged/shaken in place",
         "presentation": "Cast out, let it hit bottom, then shake it in place with the rod tip without moving it far - a subtle, tough-bite bait for high-pressure days.",
     },
 }
 
 
-def _build_block(key: str, water_clarity: str, note: str = "") -> "LureBlock":
+def _depth_match_score(profile: dict, fish_depth_ft: float) -> float:
+    """0 = fish are right in this lure's zone; positive = how far off (ft)."""
+    lo, hi = profile["depth_range_ft"]
+    if lo == 0 and hi == 0:  # surface bait
+        return max(0.0, fish_depth_ft - 3)  # topwater still "matches" very shallow fish
+    if lo <= fish_depth_ft <= hi:
+        return 0.0
+    return min(abs(fish_depth_ft - lo), abs(fish_depth_ft - hi))
+
+
+def _depth_text(profile: dict, fish_depth_ft: float = None) -> str:
+    lo, hi = profile["depth_range_ft"]
+    surface = lo == 0 and hi == 0
+    if surface:
+        base = f"Surface, {profile['depth_style']}" if profile["depth_style"] else "Surface"
+    else:
+        base = f"{lo}-{hi} ft, {profile['depth_style']}"
+
+    if fish_depth_ft is None:
+        return base
+
+    if surface:
+        if fish_depth_ft > 3:
+            return base + f" (you're marking fish deeper, around {fish_depth_ft:.0f} ft - topwater may be a tougher bite right now)"
+        return base + " (matches the shallow fish you're marking)"
+
+    if lo <= fish_depth_ft <= hi:
+        return base + f" - dialed in to the ~{fish_depth_ft:.0f} ft you're marking fish on your electronics"
+    if fish_depth_ft < lo:
+        return base + f" - you're marking fish shallower (~{fish_depth_ft:.0f} ft); slow down/shorten your count-down to get up in the zone"
+    return base + f" - you're marking fish deeper (~{fish_depth_ft:.0f} ft); let it sink longer or slow-roll deeper to reach them"
+
+
+def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "") -> "LureBlock":
     profile = LURE_PROFILES[key]
     colors = profile["colors"].get(water_clarity, profile["colors"]["Stained"])
     trailer = None
@@ -317,7 +350,7 @@ def _build_block(key: str, water_clarity: str, note: str = "") -> "LureBlock":
         name=profile["name"],
         colors=colors,
         trailer=trailer,
-        depth=profile["depth"],
+        depth=_depth_text(profile, fish_depth_ft),
         presentation=profile["presentation"],
         videos=get_videos_by_key(profile["video_key"], profile["name"]),
         note=note,
@@ -356,9 +389,15 @@ def recommend(
     pressure_trend_24h: float,
     structure_type: str = "Main-lake point",
     water_clarity: str = "Stained",
+    fish_depth_ft: float = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
+    if fish_depth_ft is not None:
+        rationale.append(
+            f"You're marking fish around {fish_depth_ft:.0f} ft - lures below are re-ordered "
+            f"by how well their typical depth matches that reading."
+        )
 
     # --- Seasonal base pattern: which lure keys are first vs second choice -----
     if season == "winter":
@@ -438,16 +477,27 @@ def recommend(
         rationale.append("High, stable pressure after a front - added a finesse bait for a tougher bite.")
 
     # De-dupe while preserving order, and don't let a key appear in both lists.
+    # De-dupe while preserving order, never let a key appear in both lists.
     seen = set()
-    first_choice = []
+    first_keys_unique = []
     for k in first_keys:
         if k not in seen:
-            first_choice.append(_build_block(k, water_clarity))
+            first_keys_unique.append(k)
             seen.add(k)
-    second_choice = []
+    second_keys_unique = []
     for k in second_keys:
         if k not in seen:
-            second_choice.append(_build_block(k, water_clarity))
+            second_keys_unique.append(k)
             seen.add(k)
+
+    # If we have a sonar depth reading, reorder each list (best depth match first)
+    # without changing which lures are in play - season/structure/pressure still
+    # decide *what*, the depth reading just decides *which of those, first*.
+    if fish_depth_ft is not None:
+        first_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
+        second_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
+
+    first_choice = [_build_block(k, water_clarity, fish_depth_ft) for k in first_keys_unique]
+    second_choice = [_build_block(k, water_clarity, fish_depth_ft) for k in second_keys_unique]
 
     return LureRecommendation(first_choice=first_choice, second_choice=second_choice, rationale=rationale)
