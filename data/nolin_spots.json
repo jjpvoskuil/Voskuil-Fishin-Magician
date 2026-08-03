@@ -1,0 +1,87 @@
+{
+  "lake_note": "Nolin River Lake, KY - summer/normal pool elevation 515 ft, ~5,795 surface acres at summer pool (winter pool draws down to ~2,890 acres for flood storage). Coordinates below are anchored to verified public locations (USACE gauge, Kentucky State Parks GNIS record, and U.S. Census TIGER address geocoding) with nearby fishing-relevant sub-spots placed a short distance from each anchor. These are PLANNING approximations, not survey-grade positions - always confirm with your own GPS/chartplotter on the water.",
+  "summer_pool_elevation_ft": 515,
+  "summer_pool_acres": 5795,
+  "spots": [
+    {
+      "id": "dam_tailwater",
+      "name": "Dam / Tailwater Riprap",
+      "lat": 37.2783,
+      "lon": -86.2475,
+      "structure_type": "Riprap / dam face",
+      "depth_range_ft": [10, 35],
+      "source": "USACE water-level sensor location (verified)",
+      "notes": "Deep water close to shore. Good cold-front and summer midday fallback - fish stack on the rock."
+    },
+    {
+      "id": "dam_main_basin_point",
+      "name": "Main Basin Point near Dam",
+      "lat": 37.2825,
+      "lon": -86.2410,
+      "structure_type": "Main-lake point",
+      "depth_range_ft": [8, 25],
+      "source": "Approximate, offset from verified dam anchor",
+      "notes": "First big main-lake point above the dam - classic staging/summer ledge spot."
+    },
+    {
+      "id": "state_park_beach_point",
+      "name": "Nolin Lake State Park Point",
+      "lat": 37.3047,
+      "lon": -86.2136,
+      "structure_type": "Main-lake point",
+      "depth_range_ft": [4, 20],
+      "source": "Kentucky State Parks / Wikipedia GNIS coordinate (verified: 37 18 17 N, 86 12 49 W)",
+      "notes": "Park swim-beach point and boat ramp area; gentle taper into the main basin."
+    },
+    {
+      "id": "moutardier_marina_cove",
+      "name": "Moutardier Marina Cove",
+      "lat": 37.3060,
+      "lon": -86.2175,
+      "structure_type": "Boat dock",
+      "depth_range_ft": [3, 15],
+      "source": "Co-located with Nolin Lake State Park (Moutardier Marina sits within the park)",
+      "notes": "Marina docks and boat slips - reliable shade/cover, especially early and late in the day."
+    },
+    {
+      "id": "dog_creek_arm",
+      "name": "Dog Creek Arm",
+      "lat": 37.3191,
+      "lon": -86.1341,
+      "structure_type": "Cove / pocket (shallow cover)",
+      "depth_range_ft": [2, 12],
+      "source": "U.S. Census Bureau TIGER geocode of Dog Creek Rd boat ramp/campground (verified)",
+      "notes": "Shallow creek arm with a boat ramp and fishing pier - good spawning-season pocket."
+    },
+    {
+      "id": "dog_creek_channel",
+      "name": "Dog Creek Channel Bend",
+      "lat": 37.3140,
+      "lon": -86.1420,
+      "structure_type": "Creek channel / ledge",
+      "depth_range_ft": [10, 22],
+      "source": "Approximate, offset from verified Dog Creek anchor toward the main channel",
+      "notes": "Where Dog Creek arm channels back into the main lake - a natural summer ledge."
+    },
+    {
+      "id": "wax_arm",
+      "name": "Wax Creek Arm",
+      "lat": 37.3526,
+      "lon": -86.1325,
+      "structure_type": "Flat",
+      "depth_range_ft": [3, 14],
+      "source": "U.S. Census Bureau TIGER geocode of Wax Campground/Marina address (verified)",
+      "notes": "Upper-mid lake arm near Wax Marina - wide flats good for covering water in fall/spring."
+    },
+    {
+      "id": "wax_timber",
+      "name": "Wax Standing Timber",
+      "lat": 37.3560,
+      "lon": -86.1260,
+      "structure_type": "Standing timber",
+      "depth_range_ft": [5, 18],
+      "source": "Approximate, offset from verified Wax anchor",
+      "notes": "Flooded timber pockets off the Wax arm - classic largemouth ambush cover."
+    }
+  ]
+}
