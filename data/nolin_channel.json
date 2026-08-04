@@ -8,64 +8,74 @@
           "lon": -86.2475,
           "depth_ft": 69,
           "half_width_m": 500,
-          "label": "Dam (verified anchor)"
+          "label": "Dam (verified anchor)",
+          "depth_source": "benchmark"
         },
         {
           "lat": 37.286,
           "lon": -86.238,
           "depth_ft": 20,
-          "half_width_m": 470
+          "half_width_m": 470,
+          "depth_source": "contour_read"
         },
         {
           "lat": 37.296,
           "lon": -86.225,
           "depth_ft": 22,
-          "half_width_m": 430
+          "half_width_m": 430,
+          "depth_source": "contour_read"
         },
         {
           "lat": 37.3047,
           "lon": -86.2136,
           "depth_ft": 17,
           "half_width_m": 380,
-          "label": "Nolin Lake State Park (verified anchor)"
+          "label": "Nolin Lake State Park (verified anchor)",
+          "depth_source": "contour_read"
         },
         {
           "lat": 37.31,
           "lon": -86.2,
           "depth_ft": 15,
-          "half_width_m": 320
+          "half_width_m": 320,
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.313,
           "lon": -86.195,
           "depth_ft": 13,
           "half_width_m": 300,
-          "label": "Junction - branches split here"
+          "label": "Junction - branches split here",
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.326,
           "lon": -86.175,
           "depth_ft": 10,
-          "half_width_m": 240
+          "half_width_m": 240,
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.34,
           "lon": -86.15,
           "depth_ft": 7,
-          "half_width_m": 180
+          "half_width_m": 180,
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.3526,
           "lon": -86.1325,
           "depth_ft": 5,
           "half_width_m": 130,
-          "label": "Wax (verified anchor)"
+          "label": "Wax (verified anchor)",
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.364,
           "lon": -86.118,
           "depth_ft": 3,
-          "half_width_m": 80
+          "half_width_m": 80,
+          "depth_source": "extrapolated"
         }
       ]
     },
@@ -76,26 +86,30 @@
           "lon": -86.195,
           "depth_ft": 13,
           "half_width_m": 300,
-          "label": "Junction (shared with main)"
+          "label": "Junction (shared with main)",
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.3155,
           "lon": -86.17,
           "depth_ft": 12,
-          "half_width_m": 230
+          "half_width_m": 230,
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.3191,
           "lon": -86.1341,
           "depth_ft": 10,
           "half_width_m": 160,
-          "label": "Dog Creek (verified anchor)"
+          "label": "Dog Creek (verified anchor)",
+          "depth_source": "extrapolated"
         },
         {
           "lat": 37.3245,
           "lon": -86.115,
           "depth_ft": 4,
-          "half_width_m": 70
+          "half_width_m": 70,
+          "depth_source": "extrapolated"
         }
       ]
     }
