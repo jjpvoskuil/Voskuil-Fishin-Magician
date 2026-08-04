@@ -239,6 +239,50 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     topo cove points from `data/historic_bathymetry.csv` as small blue dots. Both
     default to visible alongside the existing contour/spot layers.
 
+15. **Fix: contours crossing dry land** - the user reported (with a screenshot of the
+    live map) that contour lines were rendering as diagonal streaks crossing both land
+    and water, not following the real shoreline. Root cause: `data/nolin_channel.json`
+    is only ~8-10 hand-placed anchor points joined by straight lines with a Gaussian
+    cross-section - that centerline doesn't reliably run through the real (highly
+    winding) lake; checked distances from each anchor to the real shoreline and found
+    them off by 50m to over 1km in places. The old model's depth/contour extent was
+    entirely defined by that centerline, so wherever the real lake bends away from the
+    straight line between two anchors, the model kept reporting "water" over dry land.
+
+    Fix: dug up real shoreline geometry instead of trusting the channel model's shape.
+    Used the same cached 1966 post-dam USGS topo GeoTIFFs from entry 13 (Nolin
+    Reservoir/Dickeys Mills quad + Bee Spring quad), re-thresholded for the water fill
+    color (plus a second, lighter cyan tone used on the photo-revision patch directly
+    over the pool at the dam, which the original threshold missed), extracted ~1,350
+    shoreline polygons with OpenCV contour detection, filtered to the lake's known
+    footprint to drop unrelated farm ponds elsewhere on the same map sheets, and saved
+    them as `data/nolin_shoreline.geojson` (public domain, same USGS source as
+    everything else in this bathymetry chain). New module `core/shoreline.py` loads
+    these polygons and provides `shoreline_mask()` - a fast point-in-polygon test
+    against a lat/lon grid (bbox-restricted per polygon so ~1,350 polygons against a
+    220x252 grid still runs in ~0.02s).
+
+    `core/bathymetry.py`'s `_depth_grid()` was restructured so WHERE there's water
+    comes from this real shoreline (not the channel model's corridor shape anymore),
+    and the channel anchors now only supply depth *values*: each wet grid cell gets the
+    nearest anchor's target depth, ramped in (smoothstep) from 0 at the shore over a
+    capped ~180m so mid-channel areas reliably reach full depth. The channel-anchor
+    corridor is still used as a narrow fallback, but only where the real shoreline has
+    zero coverage within 250m (covers small scan gaps) - it's deliberately not unioned
+    in everywhere, since that would just reintroduce the original bug. Verified anchor
+    points (Dam, Nolin Lake State Park, Wax, Dog Creek) get their small grid
+    neighborhood pinned directly to their documented depth, since those are real
+    surveyed/read values and shouldn't depend on how the shore-ramp happens to fall
+    near them. `core/lake_map.py` gained a third (off-by-default) layer drawing the
+    real shoreline outline itself, so turning it on next to the contour layer is a
+    direct visual check that contours stay inside it.
+
+    Verified via a matplotlib rendering of the raw grid + contours + real shoreline
+    outline (no basemap) before and after - the "before" image showed a smooth diagonal
+    tube ignoring the real winding shape; "after" shows contours hugging the actual
+    coves and following the dendritic shoreline. `get_depth_at_ft` at all four verified
+    anchors now returns their documented depth exactly.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -268,6 +312,21 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   search - functionally fine once real Quickdraw data is dense along a
   traveled path, but worth tightening if single-point precision ever
   matters more.
+- The real shoreline digitization (`data/nolin_shoreline.geojson`, entry 15)
+  is only as good as its source color threshold - it was widened once
+  already to catch a second water tint at the dam, but other spots on the
+  two source quads could in principle have their own unusual symbology and
+  end up as a small gap (filled only if within 250m of a channel anchor via
+  the corridor fallback, otherwise just missing from the map rather than
+  wrongly shown as land - a gap reads as "no data," which is a safe
+  direction to fail in). If a user-reported spot looks wrong, check
+  `core/shoreline.py`'s color thresholds against that specific area of the
+  source GeoTIFFs first.
+- Depth values away from the four verified anchors (Dam, Nolin Lake State
+  Park, Wax, Dog Creek) are still a smoothstep ramp from shore to the
+  nearest anchor's target depth, capped at ~180m - a modeling
+  simplification, not a measurement, same caveat as always for anything
+  that isn't Quickdraw/historic-topo real data.
 - `data/quickdraw/` ships empty - no real survey data has been ingested
   yet. Next step is the user exporting their first Quickdraw trip and
   handing it over.
