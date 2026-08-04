@@ -85,6 +85,25 @@ lure/color/technique rule table.
   centerline anchored at the same verified points as the spot list, with a Gaussian
   cross-section tapering to shore. It's clearly labeled as modeled in the app.
 
+  The channel's depth values are grounded in real elevation data where possible: Nolin
+  Lake was impounded in 1963, and USGS's Historical Topographic Map Collection (public
+  domain, free via TopoView/The National Map) has 7.5' quad sheets surveyed just before
+  the dam - e.g. Dickeys Mills, KY 1954 (the cell later re-surveyed and renamed Nolin
+  Lake/Nolin Reservoir once the lake existed) and Bee Spring, KY 1953 - showing the
+  original ground contours for what's now lake bed, at a 20 ft contour interval, plus a
+  surveyed benchmark (446 ft) right at the dam. Reading those against the 1966 post-dam
+  sheets (which print the 515' summer pool shoreline directly) gives real depth values
+  at the dam and through the open valley just upstream of it; points further up the
+  channel, where the model's smoothed centerline diverges from the actual historic
+  river meander, are extrapolated along the general gradient rather than read directly.
+  `core/historic_bathymetry.py` / `data/historic_bathymetry.csv` also carries a small
+  set of real digitized depth points for two coves at the western edge of the lake
+  (from the same Bee Spring sheet) that blend in the same way described below. Full
+  automated contour-line digitization across the whole lake was attempted and
+  abandoned - gaps in the historical scans (text labels, roads crossing contour lines)
+  make flood-fill region tracing unreliable past a small, clean area - see
+  SESSION_NOTES.md for what was tried.
+
   It's also designed to improve with your own real soundings: if you record Garmin
   Quickdraw Contours, export them with [qdc-converter](https://github.com/interlark/qdc-converter)
   (`.qdc`/`.qcc` -> CSV of lon/lat/depth) and drop the CSV into `data/quickdraw/` (see
@@ -94,10 +113,10 @@ lure/color/technique rule table.
   the modeled grid: real data wins (inverse-distance weighted) within ~50m of where you
   actually recorded it, fading smoothly back to the model beyond that, and can extend
   the map into coves/arms the hand-modeled channel doesn't cover at all. The Lake Map
-  page's info box shows how many real points are currently blended in. Since it's your
-  own recorded sonar data (not a scraped commercial chart), there's no copyright issue
-  using it directly - it plugs into the same real basemap (streets/shoreline) the map
-  already renders on, so it lines up automatically.
+  page's info box shows how many real and historic points are currently blended in.
+  Since it's your own recorded sonar data (not a scraped commercial chart), there's no
+  copyright issue using it directly - it plugs into the same real basemap (streets/
+  shoreline) the map already renders on, so it lines up automatically.
 - Instructional videos (`core/videos.py`): a curated table of real, verified YouTube
   links per lure/technique. A couple of techniques without a confidently-verified direct
   link fall back to a live YouTube search link instead of a guessed URL.
@@ -191,8 +210,13 @@ core/
                            lure_inventory.py too)
   calibration.py          Weight calibration from logged trips
   lure_inventory.py       Tackle inventory read/write + photo storage
+  bathymetry.py            Modeled depth grid + historic-topo + real-data blending
+  historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps
+  survey_points.py         Loads the angler's own Quickdraw CSV exports
 data/
   nolin_spots.json        Named lake spots (edit to add your own waypoints)
+  nolin_channel.json      Modeled river-channel centerline anchoring the bathymetry
+  historic_bathymetry.csv Depth points read from pre-dam USGS historical topo maps
   trip_log.csv            Logged trips (grows over time)
   lure_inventory.csv      Tackle inventory (grows over time)
   lure_images/            User-uploaded/captured lure photos

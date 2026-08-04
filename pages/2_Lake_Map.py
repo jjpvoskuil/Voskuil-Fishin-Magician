@@ -9,6 +9,7 @@ from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 from core.survey_points import survey_point_count, survey_file_count
+from core.historic_bathymetry import historic_point_count
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
 st.title("🗺️ Nolin Lake Contour Map")
@@ -18,14 +19,27 @@ st.caption(
 )
 n_points = survey_point_count()
 n_files = survey_file_count()
+n_historic = historic_point_count()
+
+sources = []
 if n_points:
+    sources.append(
+        f"**{n_points:,} of your own recorded depth readings** (from {n_files} Quickdraw "
+        f"export{'s' if n_files != 1 else ''})"
+    )
+if n_historic:
+    sources.append(
+        f"**{n_historic:,} points read from pre-dam USGS historical topo maps** "
+        f"(1953-54 sheets, against the 515' post-dam shoreline)"
+    )
+
+if sources:
     st.info(
-        f"Depth contours blend **{n_points:,} of your own recorded depth readings** "
-        f"(from {n_files} Quickdraw export{'s' if n_files != 1 else ''}) with a **modeled "
-        f"approximation** everywhere else (river-channel + Gaussian cross-section) - there's "
-        f"no free bathymetric survey for Nolin Lake. Real readings take over near where you've "
-        f"actually recorded them and fade back to the model beyond that. Always confirm with "
-        f"your own electronics on the water.",
+        f"Depth contours blend {' and '.join(sources)} with a **modeled approximation** "
+        f"everywhere else (river-channel + Gaussian cross-section, now anchored at a real "
+        f"USGS benchmark near the dam) - there's no free bathymetric survey for Nolin Lake. "
+        f"Real/historical data takes over near where it applies and fades back to the model "
+        f"beyond that. Always confirm with your own electronics on the water.",
         icon="🧭",
     )
 else:
