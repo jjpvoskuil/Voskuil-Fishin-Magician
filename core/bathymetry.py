@@ -14,14 +14,16 @@ a Gaussian cross-section that tapers from channel depth to the shoreline.
 It's clearly a model, not a measurement - labeled as such everywhere it
 surfaces in the UI.
 
-It's also designed to improve: real depth soundings the angler has recorded
-themselves (Garmin Quickdraw Contours, see core/survey_points.py and
-data/quickdraw/README.md) are blended in on top of the modeled surface -
-real data wins near where it was actually recorded (inverse-distance
-weighted, fading smoothly back to the model within REAL_DATA_BLEND_RADIUS_M),
-and can extend coverage into areas the hand-modeled channel doesn't reach at
-all (side coves/arms not represented in nolin_channel.json). Everywhere the
-angler hasn't recorded real data yet, the modeled surface is unchanged.
+It's also designed to improve: points read from pre-dam USGS historical
+topo sheets (core/historic_bathymetry.py, data/historic_bathymetry.csv -
+public domain, see that module for the full method) blend in the same way,
+followed by real depth soundings the angler has recorded themselves (Garmin
+Quickdraw Contours, see core/survey_points.py and data/quickdraw/README.md)
+on top of that - real data wins near where it was actually recorded
+(inverse-distance weighted, fading smoothly back to the model), and both
+sources can extend coverage into areas the hand-modeled channel doesn't
+reach at all (side coves/arms not represented in nolin_channel.json).
+Everywhere neither source has data yet, the modeled surface is unchanged.
 """
 from __future__ import annotations
 import json
@@ -34,6 +36,7 @@ from scipy.spatial import cKDTree
 from skimage import measure
 
 from .survey_points import load_survey_points
+from .historic_bathymetry import load_historic_points
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "nolin_channel.json"
 
@@ -47,6 +50,15 @@ REAL_DATA_BLEND_RADIUS_M = 50.0
 # How many nearest real points to average (inverse-distance weighted) at
 # each grid cell - smooths out single noisy pings without over-smoothing.
 REAL_DATA_NEIGHBORS = 6
+
+# Historic-topo-derived points are sparser and cover a small area (see
+# core/historic_bathymetry.py) - a wider fade radius lets a handful of
+# points blend into a continuous patch rather than staying isolated dots.
+HISTORIC_BLEND_RADIUS_M = 60.0
+# Fewer neighbors than REAL_DATA_NEIGHBORS: the historic point cloud is small
+# and lopsided (many shoreline 0-ft points, few deeper ones per pocket), so
+# averaging over too many neighbors washes out the deeper readings.
+HISTORIC_NEIGHBORS = 3
 
 
 def _meters_per_deg_lon(lat_deg: float) -> float:
@@ -92,16 +104,47 @@ def _dense_channel_points() -> list:
 
 @lru_cache(maxsize=1)
 def _bounds():
+    """
+    Grid extent. Padded around the channel model's own points, but also
+    widened to cover any real survey/historic-topo points that fall outside
+    that padding - otherwise a trip logged (or a historic point read) in an
+    un-modeled cove west/east of the channel model's own footprint could
+    sit right at the edge of - or just outside - the grid, where nearest-
+    cell lookups and boundary blending get unreliable. See
+    core/historic_bathymetry.py and core/survey_points.py.
+    """
     pts = _dense_channel_points()
     lats = [p["lat"] for p in pts]
     lons = [p["lon"] for p in pts]
     max_half_width_deg_lat = 700 / METERS_PER_DEG_LAT  # pad by widest plausible half-width + margin
     pad_lat = max_half_width_deg_lat * 1.6
     pad_lon = pad_lat  # close enough near this latitude after lon-scaling below
-    return (min(lats) - pad_lat, max(lats) + pad_lat, min(lons) - pad_lon, max(lons) + pad_lon)
+    lat_min, lat_max = min(lats) - pad_lat, max(lats) + pad_lat
+    lon_min, lon_max = min(lons) - pad_lon, max(lons) + pad_lon
+
+    extra_lat, extra_lon = [], []
+    hist_lat, hist_lon, _ = load_historic_points()
+    extra_lat.extend(hist_lat.tolist())
+    extra_lon.extend(hist_lon.tolist())
+    real_lat, real_lon, _ = load_survey_points()
+    extra_lat.extend(real_lat.tolist())
+    extra_lon.extend(real_lon.tolist())
+
+    if extra_lat:
+        # small fixed margin (~100m) around any real/historic point outside
+        # the channel-model padding, so it's never right at the grid edge
+        margin_lat = 100 / METERS_PER_DEG_LAT
+        margin_lon = margin_lat
+        lat_min = min(lat_min, min(extra_lat) - margin_lat)
+        lat_max = max(lat_max, max(extra_lat) + margin_lat)
+        lon_min = min(lon_min, min(extra_lon) - margin_lon)
+        lon_max = max(lon_max, max(extra_lon) + margin_lon)
+
+    return (lat_min, lat_max, lon_min, lon_max)
 
 
-def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, depth_pts):
+def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, depth_pts,
+                             blend_radius_m=REAL_DATA_BLEND_RADIUS_M, neighbors=REAL_DATA_NEIGHBORS):
     """
     Blends real recorded depth points into the modeled grid: inverse-
     distance weighted average of the nearest real readings, fully
@@ -125,7 +168,7 @@ def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, de
 
     tree = cKDTree(np.column_stack([pts_x, pts_y]))
     query_pts = np.column_stack([grid_x.ravel(), grid_y.ravel()])
-    k = min(REAL_DATA_NEIGHBORS, len(lat_pts))
+    k = min(neighbors, len(lat_pts))
     dists, idxs = tree.query(query_pts, k=k)
     if k == 1:
         dists = dists[:, None]
@@ -136,7 +179,7 @@ def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, de
     real_estimate = real_estimate.reshape(depth_grid.shape)
 
     nearest_dist = dists[:, 0].reshape(depth_grid.shape)
-    blend_w = np.clip(1.0 - nearest_dist / REAL_DATA_BLEND_RADIUS_M, 0.0, 1.0)
+    blend_w = np.clip(1.0 - nearest_dist / blend_radius_m, 0.0, 1.0)
 
     result = depth_grid.copy()
     has_real_nearby = blend_w > 0
@@ -196,6 +239,10 @@ def _depth_grid():
         row_depth = target_depth * np.exp(-k * (nearest_dist / np.maximum(half_w, 1.0)) ** 2)
         row_depth = np.where(nearest_dist <= half_w * 1.15, row_depth, np.nan)
         depth[i, :] = row_depth
+
+    hist_lat, hist_lon, hist_depth = load_historic_points()
+    depth = _blend_real_survey_data(lat_axis, lon_axis, depth, hist_lat, hist_lon, hist_depth,
+                                     blend_radius_m=HISTORIC_BLEND_RADIUS_M, neighbors=HISTORIC_NEIGHBORS)
 
     lat_pts, lon_pts, depth_pts = load_survey_points()
     depth = _blend_real_survey_data(lat_axis, lon_axis, depth, lat_pts, lon_pts, depth_pts)

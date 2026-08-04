@@ -38,7 +38,8 @@ core/
   lures.py                      Lure/color/trailer/depth/presentation rule engine
   thermocline.py                Seasonal thermocline estimate (feeds sidebar default)
   survey_points.py              Loads angler's own Quickdraw CSV exports
-  bathymetry.py                 Modeled depth grid + real-data blending + contour extraction
+  historic_bathymetry.py        Loads depth points read from pre-dam USGS historical topo maps
+  bathymetry.py                 Modeled depth grid + historic-topo + real-data blending + contour extraction
   spots.py                      Named lake spot data
   lake_map.py                   Folium map builder (contours + spot markers + click target)
   ui.py                         Shared "Lake Setup Options" sidebar + lure-block rendering
@@ -51,6 +52,7 @@ core/
 data/
   nolin_channel.json             River-channel centerline anchoring the modeled bathymetry
   nolin_spots.json                Named lake spots
+  historic_bathymetry.csv         Depth points read from pre-dam USGS historical topo maps
   quickdraw/                      Angler-dropped Quickdraw CSV exports (ships empty)
   trip_log.csv                    Logged trips (grows over time, committed back to the repo)
   lure_inventory.csv              Tackle inventory (grows over time, committed back to the repo)
@@ -148,6 +150,84 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     of paths (was hardcoded to just the trip log) so `lure_inventory.py` could reuse the
     same git commit-back plumbing instead of duplicating it.
 
+13. **Historic-topo-derived bathymetry** - the user proposed building a bathymetry
+    layer from pre-dam USGS topographic maps (Nolin River Lake was impounded in 1963):
+    take a topo map from before the dam, take the post-dam map showing the 515' summer
+    pool shoreline, and interpolate between them. Investigated USGS's Historical
+    Topographic Map Collection (public domain, free via TopoView/The National Map) and
+    found real pre-dam quads covering parts of the lake: Bee Spring, KY 1953 and
+    Dickeys Mills, KY 1954 (the latter is literally the same map cell later re-surveyed
+    and renamed Nolin Lake/Nolin Reservoir, KY 1966 once the dam was built - printed
+    right on the 1966 sheet as "(FORMERLY DICKEYS MILLS QUAD)"). First attempt requested
+    the wrong neighboring quad (Rhoda, KY) based on a bad guess at the tiling - it turned
+    out to cover the Green River gorge through Mammoth Cave National Park, nowhere near
+    Nolin Lake; corrected by cross-referencing the existing channel model's anchor
+    coordinates against quad bounding boxes from the USGS API instead of guessing.
+
+    Built a real pipeline: downloaded GeoTIFFs (user fetched them from USGS's S3-hosted
+    archive and uploaded, since this sandbox's network is allowlisted and can't reach
+    USGS/S3 directly - only the TNM metadata API via the fetch tool), warped pre/post-dam
+    editions of the same quad onto a common pixel grid with `rasterio`, and verified
+    alignment by eye (features line up pixel-for-pixel across editions). Confirmed the
+    515' shoreline is directly labeled on the 1966/1966 sheets next to the blue water
+    fill - no need to guess it. Built a region-adjacency-graph method to read 1953/1954
+    ground elevations against that shoreline: threshold the scan for brown contour-line
+    pixels, label the flat regions between lines, build a region graph via
+    `skimage.segmentation.expand_labels`, then BFS the ring-distance (in 20 ft contour
+    intervals) from the regions touching the current shoreline inward. Worked cleanly
+    on a small, clean test area (two coves clipped at the western edge of the Bee Spring
+    quad - see `data/historic_bathymetry.csv`, ~27 points, blended into
+    `core/bathymetry.py` the same way Quickdraw data is).
+
+    The same method broke down at the scale of the main lake basin (Dickeys Mills/Nolin
+    Reservoir quad): text labels, roads, and stream crossings interrupt the scanned
+    contour lines often enough that flood-fill region tracing leaks across gaps and
+    merges dozens of elevation bands into one, collapsing the whole basin's estimated
+    depth back to near-zero. A second attempt (ray-casting from each point to its
+    nearest shore pixel, counting contour crossings) was more robust to isolated gaps
+    but geometrically unsound in a winding valley - the nearest shore point isn't
+    necessarily downhill-connected to where you're standing. Abandoned automated
+    whole-basin digitization rather than ship numbers built on a shaky method.
+
+    Pivoted (with the user's go-ahead) to a smaller, verifiable win: read real
+    elevations directly off the 1954 Dickeys Mills sheet at (or near) the channel
+    model's existing anchor points in `data/nolin_channel.json`, replacing guessed
+    `depth_ft` values with historically-grounded ones. Found the channel model's
+    anchors are a *smoothed* path, not a literal trace of the historic river - several
+    anchors (Wax, a point near "Junction") land on hillsides 200-300+ ft above the
+    valley floor, so reading elevation *at* those exact coordinates isn't meaningful.
+    Traced the actual river through a montage of 31 crops from the dam upstream instead.
+    Found a surveyed USGS benchmark (446 ft) right at Kyrock/Dismal Rock, essentially at
+    the dam - high confidence, replaces the old 85 ft guess with a real 69 ft. The open
+    valley stretch just upstream reads consistently ~490-500 ft off contour lines
+    hugging the river (medium confidence). Beyond where the smoothed path leaves the
+    river (roughly State Park onward), values are extrapolated along the general
+    gradient rather than read directly (lower confidence) - `data/nolin_channel.json`
+    and `data/historic_bathymetry.csv` document the source/confidence per point/batch.
+    Net effect: the lake is now modeled as meaningfully *shallower* through most of the
+    channel than the original guessed profile, with the true deep point concentrated
+    tightly at the dam/gorge rather than spread gradually over the first mile.
+
+    The user offered twice more during this session to supply depth data from other
+    sources: once from "a contour app" (a commercial charting app) - declined, same
+    reasoning as the earlier proprietary-chart declines (a personal subscription
+    doesn't carry reproduction rights over the vendor's compiled data, doesn't matter
+    if it's a few points instead of a full export) - and once to manually record
+    lat/long/depth with their own depth finder, which is exactly what
+    `core/survey_points.py`/`data/quickdraw/` already exists for. Generated
+    `nolin_depth_points_needed.csv` (delivered to the user, not committed - it's an
+    empty template for them to fill in) listing the specific low/medium-confidence
+    channel points where a real reading would help most.
+
+    Also fixed a latent bug surfaced by this work: `core/bathymetry.py`'s `_bounds()`
+    only padded around the channel model's own points, so a real/historic point
+    sitting outside that padding (like the Bee Spring coves, well west of the channel
+    model's own footprint) could land right at or just outside the modeled grid's edge,
+    where nearest-cell lookups and IDW blending get unreliable. `_bounds()` now widens
+    to cover any historic/survey point outside the channel padding, with its own small
+    margin - this was always a risk for Quickdraw data extending into new coves too,
+    just hadn't been hit yet since `data/quickdraw/` still ships empty.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -180,6 +260,22 @@ trip-log entries back to the repo (see `secrets.toml.example`).
 - `data/quickdraw/` ships empty - no real survey data has been ingested
   yet. Next step is the user exporting their first Quickdraw trip and
   handing it over.
+- Historic-topo bathymetry only covers the dam/channel anchor points
+  (`data/nolin_channel.json`) plus two small coves at the western edge of
+  the Bee Spring quad (`data/historic_bathymetry.csv`, ~27 points) - most
+  of the lake is still the Gaussian channel model, now anchored to better
+  depth values but not shaped by real contours off the channel centerline.
+  Full automated contour digitization across the main basin was tried and
+  abandoned (see dev log entry 13) - gaps in the historical scans break
+  flood-fill region tracing past a small, clean area. Extending real
+  coverage further means either: (a) the user filling in
+  `nolin_depth_points_needed.csv` (delivered separately, not committed -
+  ask the user if they still have it) with their own depth-finder readings
+  at the listed low/medium-confidence points, which is the fastest path
+  and reuses the existing Quickdraw blending, or (b) a more careful
+  semi-manual digitization pass (hand-correcting contour line gaps in the
+  problem areas before running the region-graph method) if someone wants
+  to pick the automated approach back up.
 - `pages/3_Log_a_Trip.py` uses a flat water-clarity dropdown (defaulting
   to "Brown stained") rather than the base-stain + stirred-up toggle used
   on pages 1 & 2 - intentional, since it's recording a historical
