@@ -24,6 +24,14 @@ on top of that - real data wins near where it was actually recorded
 sources can extend coverage into areas the hand-modeled channel doesn't
 reach at all (side coves/arms not represented in nolin_channel.json).
 Everywhere neither source has data yet, the modeled surface is unchanged.
+
+Because the channel model is only a handful of anchor points joined by
+straight lines, its corridor doesn't follow Nolin Lake's real winding
+shoreline - left alone it would show depth (and contour lines) cutting
+across necks of land. core/shoreline.py holds real shoreline polygons
+digitized from the same USGS topo sheets (data/nolin_shoreline.geojson),
+and every stage below is clipped to them so nothing is ever reported
+outside the lake's actual footprint.
 """
 from __future__ import annotations
 import json
@@ -33,10 +41,12 @@ from functools import lru_cache
 
 import numpy as np
 from scipy.spatial import cKDTree
+from scipy.ndimage import distance_transform_edt
 from skimage import measure
 
 from .survey_points import load_survey_points
 from .historic_bathymetry import load_historic_points
+from .shoreline import shoreline_mask, shoreline_polygon_count
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "nolin_channel.json"
 
@@ -144,7 +154,8 @@ def _bounds():
 
 
 def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, depth_pts,
-                             blend_radius_m=REAL_DATA_BLEND_RADIUS_M, neighbors=REAL_DATA_NEIGHBORS):
+                             blend_radius_m=REAL_DATA_BLEND_RADIUS_M, neighbors=REAL_DATA_NEIGHBORS,
+                             allowed_mask=None):
     """
     Blends real recorded depth points into the modeled grid: inverse-
     distance weighted average of the nearest real readings, fully
@@ -152,7 +163,11 @@ def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, de
     REAL_DATA_BLEND_RADIUS_M. Where the model has no coverage at all
     (np.nan) but real data exists nearby, the real reading is used
     directly - this lets logged trips extend the map into un-modeled
-    coves/arms, not just refine the existing channel.
+    coves/arms, not just refine the existing channel. If allowed_mask is
+given (True = inside the real shoreline, see core/shoreline.py), that
+extension is only allowed where allowed_mask is True - real data can
+still refine existing modeled cells anywhere, but can't paint new depth
+onto dry land.
     """
     if len(lat_pts) == 0:
         return depth_grid
@@ -189,6 +204,8 @@ def _blend_real_survey_data(lat_axis, lon_axis, depth_grid, lat_pts, lon_pts, de
         + (1 - blend_w[mask_blend]) * depth_grid[mask_blend]
     )
     mask_extend = has_real_nearby & np.isnan(depth_grid)
+    if allowed_mask is not None:
+        mask_extend = mask_extend & allowed_mask
     result[mask_extend] = real_estimate[mask_extend]
     return result
 
@@ -219,33 +236,99 @@ def _depth_grid():
     channel_depth = np.array([p["depth_ft"] for p in pts])
     channel_halfw = np.array([p["half_width_m"] for p in pts])
 
-    depth = np.full(lat_grid.shape, np.nan)
+    # Nearest-channel-anchor lookup for every grid cell. The channel anchors
+    # (data/nolin_channel.json) now only supply depth *values* and a rough
+    # corridor *fallback* - not the primary water/land boundary, since the
+    # anchors are hand-placed and their straight-line centerline doesn't
+    # reliably run through the real lake everywhere (checked: off by 50m to
+    # over 1km in places). half_w is each cell's nearest anchor's
+    # half_width_m, used below as the distance over which depth ramps up
+    # from shore to full target depth.
+    tree = cKDTree(np.column_stack([channel_lat * METERS_PER_DEG_LAT, channel_lon * m_per_lon]))
+    query_pts = np.column_stack([lat_grid.ravel() * METERS_PER_DEG_LAT, lon_grid.ravel() * m_per_lon])
+    nearest_channel_dist, nearest_idx = tree.query(query_pts)
+    nearest_channel_dist = nearest_channel_dist.reshape(lat_grid.shape)
+    nearest_idx = nearest_idx.reshape(lat_grid.shape)
+    target_depth = channel_depth[nearest_idx]
+    half_w = np.maximum(channel_halfw[nearest_idx], 1.0)
+    corridor_mask = nearest_channel_dist <= half_w * 1.15
+    # Cap how far from the real shoreline depth has to ramp before reaching
+    # the nearest anchor's full target depth. channel_halfw values were
+    # tuned for the old hand-drawn corridor's assumed cross-section, not the
+    # real (and locally variable) width of the digitized lake - using them
+    # directly here made most of the lake read as shallow because the real
+    # water body is often narrower than that assumed half-width at any given
+    # point. Capping keeps the ramp reaching full depth within a plausible
+    # distance regardless.
+    ramp_dist_m = np.minimum(half_w, 180.0)
 
-    # For performance, process in row chunks
-    for i in range(lat_grid.shape[0]):
-        row_lat = lat_grid[i, :]
-        row_lon = lon_grid[i, :]
-        dy = (row_lat[:, None] - channel_lat[None, :]) * METERS_PER_DEG_LAT
-        dx = (row_lon[:, None] - channel_lon[None, :]) * m_per_lon
-        dist = np.sqrt(dx ** 2 + dy ** 2)  # (n_lon, n_channel_pts)
-        nearest_idx = np.argmin(dist, axis=1)
-        nearest_dist = dist[np.arange(dist.shape[0]), nearest_idx]
-        target_depth = channel_depth[nearest_idx]
-        half_w = channel_halfw[nearest_idx]
+    shore = None
+    if shoreline_polygon_count():
+        shore = shoreline_mask(lat_grid, lon_grid)
 
-        # Gaussian cross-section falloff from channel centerline to shoreline.
-        # k tuned so depth reaches ~0 close to half_width (shoreline).
-        k = 1.4
-        row_depth = target_depth * np.exp(-k * (nearest_dist / np.maximum(half_w, 1.0)) ** 2)
-        row_depth = np.where(nearest_dist <= half_w * 1.15, row_depth, np.nan)
-        depth[i, :] = row_depth
+    if shore is not None and shore.any():
+        # Real digitized shoreline (core/shoreline.py) is the water extent -
+        # the channel-anchor corridor is only used as a fallback for the rare
+        # spot the digitized shoreline has zero coverage anywhere nearby
+        # (e.g. a small scan gap), so a verified anchor point is never
+        # dropped entirely just because of a local extraction blind spot.
+        # This is deliberately NOT a blanket union: the corridor's own
+        # straight-line shape is what originally produced contours crossing
+        # dry land, so it should only fill in where the real shoreline is
+        # silent, not override it.
+        cell_lat_m0 = METERS_PER_DEG_LAT * abs(lat_axis[1] - lat_axis[0]) if len(lat_axis) > 1 else 1.0
+        cell_lon_m0 = m_per_lon * abs(lon_axis[1] - lon_axis[0]) if len(lon_axis) > 1 else 1.0
+        dist_to_shore0 = distance_transform_edt(~shore, sampling=(cell_lat_m0, cell_lon_m0))
+        far_from_shore = dist_to_shore0 > 250.0  # meters
+        water_mask = shore | (corridor_mask & far_from_shore)
+    else:
+        water_mask = corridor_mask
+
+    # Depth ramps from 0 at the water/land boundary up to the nearest
+    # anchor's target depth, reached over roughly that anchor's half-width,
+    # then holds at target depth further from shore/in wider open water.
+    cell_lat_m = METERS_PER_DEG_LAT * abs(lat_axis[1] - lat_axis[0]) if len(lat_axis) > 1 else 1.0
+    cell_lon_m = m_per_lon * abs(lon_axis[1] - lon_axis[0]) if len(lon_axis) > 1 else 1.0
+    dist_to_boundary_m = distance_transform_edt(water_mask, sampling=(cell_lat_m, cell_lon_m))
+    t = np.clip(dist_to_boundary_m / ramp_dist_m, 0.0, 1.0)
+    smooth_t = 3 * t ** 2 - 2 * t ** 3  # smoothstep: eases in at the edge, eases out at full depth
+    depth = np.where(water_mask, target_depth * smooth_t, np.nan)
+
+    # Verified anchor points (data/nolin_channel.json labels containing
+    # "verified anchor") are real surveyed/read depths - a USACE benchmark
+    # elevation, a contour read, etc - not shore-ramp estimates. Pin the
+    # small neighborhood of grid cells nearest each one directly to its
+    # known depth so point lookups there are exact and match what's
+    # documented as "verified," and include those cells in water_mask so
+    # they connect smoothly into the surrounding contours instead of
+    # sitting as an isolated island if the shore ramp alone would have
+    # made that spot read shallower (e.g. an anchor near the edge of the
+    # digitized shoreline rather than dead center of the deepest water).
+    raw_points = []
+    for branch in load_channel()["branches"].values():
+        raw_points.extend(branch["points"])
+    for p in raw_points:
+        if "verified anchor" not in p.get("label", "").lower():
+            continue
+        i = int(np.clip(np.searchsorted(lat_axis, p["lat"]), 0, len(lat_axis) - 1))
+        j = int(np.clip(np.searchsorted(lon_axis, p["lon"]), 0, len(lon_axis) - 1))
+        if i > 0 and abs(lat_axis[i - 1] - p["lat"]) < abs(lat_axis[i] - p["lat"]):
+            i -= 1
+        if j > 0 and abs(lon_axis[j - 1] - p["lon"]) < abs(lon_axis[j] - p["lon"]):
+            j -= 1
+        i0, i1 = max(0, i - 1), min(len(lat_axis), i + 2)
+        j0, j1 = max(0, j - 1), min(len(lon_axis), j + 2)
+        depth[i0:i1, j0:j1] = p["depth_ft"]
+        water_mask[i0:i1, j0:j1] = True
 
     hist_lat, hist_lon, hist_depth = load_historic_points()
     depth = _blend_real_survey_data(lat_axis, lon_axis, depth, hist_lat, hist_lon, hist_depth,
-                                     blend_radius_m=HISTORIC_BLEND_RADIUS_M, neighbors=HISTORIC_NEIGHBORS)
+                                     blend_radius_m=HISTORIC_BLEND_RADIUS_M, neighbors=HISTORIC_NEIGHBORS,
+                                     allowed_mask=water_mask)
 
     lat_pts, lon_pts, depth_pts = load_survey_points()
-    depth = _blend_real_survey_data(lat_axis, lon_axis, depth, lat_pts, lon_pts, depth_pts)
+    depth = _blend_real_survey_data(lat_axis, lon_axis, depth, lat_pts, lon_pts, depth_pts,
+                                     allowed_mask=water_mask)
 
     return lat_axis, lon_axis, depth
 

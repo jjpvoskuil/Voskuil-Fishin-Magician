@@ -13,12 +13,19 @@ gradient), and the small set of real digitized points from pre-dam USGS
 topo sheets (data/historic_bathymetry.csv). Both are off the beaten path
 of "just draw contours" but make it obvious at a glance which parts of
 the lake are backed by something more than the Gaussian channel guess.
+
+A third, off-by-default layer draws the real digitized shoreline itself
+(data/nolin_shoreline.geojson, see core/shoreline.py) as a thin outline -
+this is the actual clip boundary the depth model is now confined to, so
+turning it on next to the contour layer is a direct visual check that
+contours stay inside the real lake edge.
 """
 from __future__ import annotations
 import folium
 
 from .bathymetry import contour_lines, lake_center, get_depth_at_ft, load_channel
 from .historic_bathymetry import load_historic_points
+from .shoreline import shoreline_polygons
 
 # Light (shallow) to dark navy (deep) - a look reminiscent of real chart plotters.
 DEPTH_COLOR_STOPS = [
@@ -107,6 +114,16 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
                 popup=folium.Popup(popup, max_width=260),
             ).add_to(channel_group)
     channel_group.add_to(m)
+
+    shoreline_group = folium.FeatureGroup(name="Real digitized shoreline (reference)", show=False)
+    for poly in shoreline_polygons():
+        folium.PolyLine(
+            locations=[(lat, lon) for lon, lat in poly],
+            color="#000000",
+            weight=1,
+            opacity=0.5,
+        ).add_to(shoreline_group)
+    shoreline_group.add_to(m)
 
     hist_lat, hist_lon, hist_depth = load_historic_points()
     if len(hist_lat):
