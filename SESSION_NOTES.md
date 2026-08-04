@@ -228,6 +228,17 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     margin - this was always a risk for Quickdraw data extending into new coves too,
     just hadn't been hit yet since `data/quickdraw/` still ships empty.
 
+14. **Map page: visualize the data sources** - after entry 13's bathymetry work, the
+    user asked to update the Lake Map page to actually illustrate the new data rather
+    than leave it as invisible numbers behind the same-looking contour lines. Added
+    `depth_source` to every point in `data/nolin_channel.json` ("benchmark" /
+    "contour_read" / "extrapolated" - matches the confidence notes already written as
+    inline comments during entry 13, now made structured/renderable instead of just
+    prose). `core/lake_map.py` gained two new toggleable Folium layers: channel anchor
+    points as colored circle markers (green/orange/gray by source), and the historic-
+    topo cove points from `data/historic_bathymetry.csv` as small blue dots. Both
+    default to visible alongside the existing contour/spot layers.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

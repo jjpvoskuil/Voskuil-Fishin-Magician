@@ -17,7 +17,11 @@ key decisions, and known open items.
   fish at.
 - **Zoomable contour map** of Nolin Lake with modeled depth contour lines - click
   *anywhere* on the lake (not just preset spots) to get a location-specific
-  recommendation for any day/time in the forecast window.
+  recommendation for any day/time in the forecast window. Toggleable layers show
+  exactly where the depth data comes from: channel-model anchor points colored by
+  source (green = surveyed USGS benchmark, orange = read off historic topo contour
+  lines, gray = extrapolated), and the small set of real digitized points from
+  pre-dam USGS topo sheets (blue dots, western coves).
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
