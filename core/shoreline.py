@@ -23,7 +23,7 @@ from pathlib import Path as FsPath
 from functools import lru_cache
 
 import numpy as np
-from matplotlib.path import Path as MplPath
+from skimage.measure import points_in_poly
 
 DATA_PATH = FsPath(__file__).resolve().parent.parent / "data" / "nolin_shoreline.geojson"
 
@@ -91,7 +91,7 @@ def shoreline_mask(lat_grid: np.ndarray, lon_grid: np.ndarray) -> np.ndarray:
         sub_lat = lat_grid[i0:i1, j0:j1]
         sub_lon = lon_grid[i0:i1, j0:j1]
         pts = np.column_stack([sub_lon.ravel(), sub_lat.ravel()])
-        inside = MplPath(poly).contains_points(pts)
+        inside = points_in_poly(pts, poly)
         if inside.any():
             mask[i0:i1, j0:j1] |= inside.reshape(sub_lat.shape)
 
