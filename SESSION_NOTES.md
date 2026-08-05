@@ -330,6 +330,40 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     coves, wind/fetch scoring, user-contributed structure pins) are queued for future
     rounds, prioritized by the user as needed.
 
+17. **Real fish attractor data from Kentucky Fish & Wildlife (KDFWR)** - mid-request,
+    the user asked if a Kentucky government site had a lake map with underwater
+    structure they remembered finding before. Searched and found
+    fw.ky.gov/Fish/Pages/fish_attractor_lakes.aspx: KDFWR publishes GPS-tagged fish
+    attractor locations (brush piles, Christmas trees, pallet stacks, plastic
+    structures, rock piles, reef balls) per lake, as GPX downloads meant for anglers to
+    load straight into a GPS/depth finder - a genuinely different category of source
+    than everything declined so far, since it's a state agency's own placement
+    records published for exactly this public use, not a proprietary chart product.
+
+    Could not fetch the actual GPX file automatically - `mcp__workspace__web_fetch`
+    reached the KDFWR page fine but returned the linked .gpx as opaque binary content,
+    and the Google My Maps mirror KDFWR also links to is on a domain the browser tool
+    blocks navigation to. Asked the user to download it themselves and upload it -
+    they did. Parsed with `xml.etree.ElementTree`: 346 waypoints, 7 structure types
+    (177 Brush, 74 Christmas Trees, 53 Pallet Stack, 30 Plastic, 9 Spider Hump, 2 Reef
+    Ball, 1 Rock), saved as `data/nolin_fish_attractors.csv` (ident, lat, lon,
+    structure_type - about 40 idents are synthetic NRL-NOID-### placeholders where the
+    source GPX had an embedded photo instead of a KDFWR ident string). New module
+    `core/fish_attractors.py` mirrors the existing loader pattern.
+
+    Sanity-checked positions against the real digitized shoreline (entry 15): about a
+    third of the 346 points fall outside it, some by several hundred meters. Concluded
+    this is expected (attractors are often placed intentionally close to the bank in
+    shallow water) rather than a data problem on either side, and kept all 346 points
+    unfiltered - this is the most authoritative point data in the project, real
+    placements rather than anything derived or modeled, so it shouldn't be filtered
+    against a less-precise derived shoreline.
+
+    `core/lake_map.py` gained a new toggleable layer (on by default) plotting all 346
+    attractors as colored CircleMarkers by structure type, with popups showing type
+    and KDFWR ident. `pages/2_Lake_Map.py`'s info banner now mentions the attractor
+    count alongside the cover-layer description.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

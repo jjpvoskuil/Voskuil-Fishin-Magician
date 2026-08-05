@@ -19,10 +19,14 @@ key decisions, and known open items.
   *anywhere* on the lake (not just preset spots) to get a location-specific
   recommendation for any day/time in the forecast window. No numeric depth contour
   lines are drawn (two attempts at modeling them from public data didn't hold up well
-  enough to trust). Instead, the primary layer is real **pre-dam bottom cover**
-  (`data/nolin_cover.csv`): every cell of the lake bottom classified as wooded (likely
-  standing timber), cleared (likely open bottom), or the original stream channel,
-  read directly off the same 1953/54 USGS topo sheets used elsewhere in this project.
+  enough to trust). Instead, the primary layers are: real **pre-dam bottom cover**
+  (`data/nolin_cover.csv`) - every cell of the lake bottom classified as wooded (likely
+  standing timber), cleared (likely open bottom), or the original stream channel, read
+  directly off the same 1953/54 USGS topo sheets used elsewhere in this project - and
+  **346 real fish attractors** (`data/nolin_fish_attractors.csv`) GPS-placed by
+  Kentucky Fish & Wildlife (brush piles, Christmas trees, pallet stacks, plastic
+  structures, rock piles, reef balls) - the most authoritative point data in the app,
+  since it's a state agency's own placement records, not anything derived or modeled.
   Other toggleable layers show where the (still-present, but de-emphasized) depth
   model's anchor values come from: channel-model anchor points colored by source
   (green = surveyed USGS benchmark, orange = read off historic topo contour lines,
@@ -245,11 +249,13 @@ core/
   survey_points.py         Loads the angler's own Quickdraw CSV exports
   shoreline.py              Real digitized lake shoreline + point-in-polygon clip mask
   cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
+  fish_attractors.py        Loads real KY Fish & Wildlife fish attractor GPS data
 data/
   nolin_spots.json        Named lake spots (edit to add your own waypoints)
   nolin_channel.json      Modeled river-channel centerline anchoring the bathymetry
   historic_bathymetry.csv Depth points read from pre-dam USGS historical topo maps
   nolin_cover.csv         Pre-dam bottom-cover cells, read from the same USGS topo sheets
+  nolin_fish_attractors.csv Real fish attractors placed by KY Fish & Wildlife (KDFWR)
   nolin_shoreline.geojson Real lake shoreline, digitized from 1966 post-dam USGS topo sheets
   trip_log.csv            Logged trips (grows over time)
   lure_inventory.csv      Tackle inventory (grows over time)

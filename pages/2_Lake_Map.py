@@ -11,6 +11,7 @@ from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 from core.survey_points import survey_point_count, survey_file_count
 from core.historic_bathymetry import historic_point_count
 from core.cover import get_cover_at, cover_cell_count
+from core.fish_attractors import fish_attractor_count
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
 st.title("🗺️ Nolin Lake Map")
@@ -22,6 +23,7 @@ n_points = survey_point_count()
 n_files = survey_file_count()
 n_historic = historic_point_count()
 n_cover = cover_cell_count()
+n_attractors = fish_attractor_count()
 
 sources = []
 if n_points:
@@ -41,7 +43,9 @@ st.info(
     f"draw depth contour lines right now. What it does show is real: the **bottom cover layer** "
     f"({n_cover:,} cells) classifies what each part of the lake bottom looked like on the 1953-54 "
     f"pre-dam USGS topo sheets - wooded (likely standing timber) vs. cleared (likely open bottom) "
-    f"vs. the original stream channel - clipped to the real digitized shoreline. "
+    f"vs. the original stream channel - clipped to the real digitized shoreline. Also shown: "
+    f"**{n_attractors:,} real fish attractors** (brush piles, Christmas trees, pallet stacks, and "
+    f"more) GPS-placed by Kentucky Fish & Wildlife - the most authoritative point data on this map. "
     + (f"Also blended in: {' and '.join(sources)}. " if sources else "")
     + "A 'Modeled depth' estimate still appears below when you click a point, but treat it as a "
     "rough guess, not a chart - always confirm with your own electronics on the water.",

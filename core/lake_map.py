@@ -16,6 +16,12 @@ bottom), or the original stream channel. Land-cover classification only
 needs the color/symbol on the scan, not precise elevation, so it tolerates
 the same registration slop that broke the depth work.
 
+Also shown: real, GPS-tagged fish attractors (brush piles, Christmas
+trees, pallet stacks, etc.) placed by Kentucky Fish & Wildlife
+(data/nolin_fish_attractors.csv, core/fish_attractors.py) - the most
+authoritative point data in this whole project, since it's a state
+agency's own placement records rather than anything derived or modeled.
+
 Two more toggleable layers show provenance: channel-model anchor points
 colored by how their depth_ft was sourced (data/nolin_channel.json's
 "depth_source" field), and the real digitized shoreline itself
@@ -26,6 +32,7 @@ import folium
 
 from .bathymetry import lake_center, load_channel, METERS_PER_DEG_LAT, _meters_per_deg_lon
 from .cover import load_cover_cells, get_cover_at
+from .fish_attractors import load_fish_attractors
 from .historic_bathymetry import load_historic_points
 from .shoreline import shoreline_polygons
 
@@ -34,6 +41,17 @@ COVER_STYLE = {
     "cleared": {"color": "#d9a441", "label": "Cleared/open before flooding - likely open bottom"},
     "water":   {"color": "#3d8bcc", "label": "Original stream channel"},
 }
+
+ATTRACTOR_STYLE = {
+    "Brush":           "#6b3e26",
+    "Christmas Trees": "#1a7a3c",
+    "Pallet Stack":    "#8a5a2b",
+    "Plastic":         "#c0392b",
+    "Spider Hump":     "#7a5299",
+    "Reef Ball":       "#555555",
+    "Rock":            "#777777",
+}
+ATTRACTOR_DEFAULT_COLOR = "#333333"
 
 
 def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.Map:
@@ -125,6 +143,29 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
                 popup=folium.Popup(popup, max_width=260),
             ).add_to(channel_group)
     channel_group.add_to(m)
+
+    attractors = load_fish_attractors()
+    if attractors:
+        attractor_group = folium.FeatureGroup(
+            name=f"KY Fish & Wildlife attractors ({len(attractors)} pts)", show=True
+        )
+        for a in attractors:
+            color = ATTRACTOR_STYLE.get(a["structure_type"], ATTRACTOR_DEFAULT_COLOR)
+            folium.CircleMarker(
+                location=[a["lat"], a["lon"]],
+                radius=4,
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.9,
+                weight=1,
+                tooltip=f"{a['structure_type']} ({a['ident']})",
+                popup=(
+                    f"<b>{a['structure_type']}</b><br>ID: {a['ident']}<br>"
+                    f"<i>Kentucky Fish &amp; Wildlife fish attractor</i>"
+                ),
+            ).add_to(attractor_group)
+        attractor_group.add_to(m)
 
     shoreline_group = folium.FeatureGroup(name="Real digitized shoreline (reference)", show=False)
     for poly in shoreline_polygons():
