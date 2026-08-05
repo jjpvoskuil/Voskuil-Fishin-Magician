@@ -10,9 +10,10 @@ from core.lake_map import build_folium_map
 from core.bathymetry import get_depth_at_ft, infer_structure_type, lake_center
 from core.survey_points import survey_point_count, survey_file_count
 from core.historic_bathymetry import historic_point_count
+from core.cover import get_cover_at, cover_cell_count
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
-st.title("🗺️ Nolin Lake Contour Map")
+st.title("🗺️ Nolin Lake Map")
 st.caption(
     "Zoom and pan the map, then click **anywhere on the lake** to get a location-specific "
     "recommendation for the day/time you pick below."
@@ -20,6 +21,7 @@ st.caption(
 n_points = survey_point_count()
 n_files = survey_file_count()
 n_historic = historic_point_count()
+n_cover = cover_cell_count()
 
 sources = []
 if n_points:
@@ -33,25 +35,18 @@ if n_historic:
         f"(1953-54 sheets, against the 515' post-dam shoreline)"
     )
 
-if sources:
-    st.info(
-        f"Depth contours blend {' and '.join(sources)} with a **modeled approximation** "
-        f"everywhere else (river-channel + Gaussian cross-section, now anchored at a real "
-        f"USGS benchmark near the dam) - there's no free bathymetric survey for Nolin Lake. "
-        f"Real/historical data takes over near where it applies and fades back to the model "
-        f"beyond that. Always confirm with your own electronics on the water.",
-        icon="🧭",
-    )
-else:
-    st.info(
-        "Depth contours are a **modeled approximation** (river-channel + Gaussian cross-section), "
-        "not a survey - there's no free bathymetric dataset for Nolin Lake. It's anchored to a few "
-        "verified points (USACE gauge, KY State Parks coordinate, Census-geocoded Dog Creek/Wax "
-        "access points). Drop your own Garmin Quickdraw exports into data/quickdraw/ to start "
-        "replacing this with real recorded depths. Always confirm with your own electronics "
-        "on the water.",
-        icon="🧭",
-    )
+st.info(
+    f"There's no free bathymetric survey for Nolin Lake, and two attempts at modeling smooth "
+    f"depth contours from public data didn't hold up well enough to trust - so this map doesn't "
+    f"draw depth contour lines right now. What it does show is real: the **bottom cover layer** "
+    f"({n_cover:,} cells) classifies what each part of the lake bottom looked like on the 1953-54 "
+    f"pre-dam USGS topo sheets - wooded (likely standing timber) vs. cleared (likely open bottom) "
+    f"vs. the original stream channel - clipped to the real digitized shoreline. "
+    + (f"Also blended in: {' and '.join(sources)}. " if sources else "")
+    + "A 'Modeled depth' estimate still appears below when you click a point, but treat it as a "
+    "rough guess, not a chart - always confirm with your own electronics on the water.",
+    icon="🧭",
+)
 
 lake_setup = render_lake_setup_sidebar(include_structure=False)
 
@@ -92,13 +87,24 @@ with col_detail:
 
     depth = get_depth_at_ft(click["lat"], click["lon"])
     inferred_structure = infer_structure_type(click["lat"], click["lon"])
+    cover_hit = get_cover_at(click["lat"], click["lon"])
 
-    if depth is None:
-        st.warning("This point is outside the modeled lake area (likely shoreline/land or an "
-                    "un-modeled upper arm) - pick a point within the blue contour lines, or a "
-                    "named spot, for a depth-based recommendation.")
-    else:
-        st.metric("Modeled depth", f"{depth} ft")
+    col_depth, col_cover = st.columns(2)
+    with col_depth:
+        if depth is None:
+            st.caption("Modeled depth: no data at this point")
+        else:
+            st.metric("Modeled depth (rough guess)", f"{depth} ft")
+    with col_cover:
+        if cover_hit is None:
+            st.caption("Bottom cover: no pre-dam data at this point")
+        else:
+            cover_label = {
+                "wooded": "Wooded (likely timber)",
+                "cleared": "Cleared (likely open)",
+                "water": "Old stream channel",
+            }.get(cover_hit["dominant_class"], cover_hit["dominant_class"].title())
+            st.metric("Bottom cover (pre-dam)", cover_label)
 
     structure_type = st.selectbox(
         "Structure type (auto-suggested, override if you know better)",

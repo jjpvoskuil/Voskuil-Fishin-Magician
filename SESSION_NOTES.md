@@ -283,6 +283,53 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     coves and following the dendritic shoreline. `get_depth_at_ft` at all four verified
     anchors now returns their documented depth exactly.
 
+16. **Pivot: drop depth contours, add real bottom-cover from the same topo sheets** -
+    despite entry 15's fix, the user reported the live map still looked wrong ("none of
+    the contours are accurate and most of it is on land"). Rather than attempt a third
+    variation of depth-contour modeling, stepped back and reframed the actual goal: the
+    user wants the app to forecast daily hotspots (wind, cover, structure, depth
+    changes combined), not necessarily a standalone bathymetric chart. Presented a
+    multi-phase strategy (structure/cover from topo, old-channel breakline, shoreline-
+    geometry points/coves, wind/fetch scoring, user-contributed structure pins, all
+    feeding a hotspot score) and let the user pick where to start via AskUserQuestion -
+    chose "structure/cover from topo" first, and "no contour lines on the map for now,
+    let's see what we get" for the depth question.
+
+    Mid-request, the user also asked about https://usa.fishermap.org/depth-map/ as a
+    possible data source ("it's a .org site so maybe it's OK"). Checked it: its depth
+    data comes from Navionics and iBoating, repackaged onto a different domain - same
+    proprietary compiled-chart problem already declined twice, domain TLD doesn't
+    change the underlying data's licensing. Told the user directly and moved on.
+
+    Implementation: reused the cached pre-dam 1953/54 USGS topo GeoTIFFs (same source
+    as entries 13/15) but for a completely different signal - land cover, not
+    elevation. Sampled colors and found the source sheets classify cleanly into wooded
+    (green, G-R and G-B both large), cleared/cropland (near-white, all channels high
+    and close together), and the original stream channel (blue, B channel elevated
+    over R) - verified visually against both quads before committing to thresholds.
+    Classified every pixel, aggregated into ~55m cells (majority-vote dominant class +
+    per-class fraction + source pixel count as a rough confidence signal), filtered to
+    cells falling inside the real digitized shoreline (data/nolin_shoreline.geojson,
+    entry 15), and saved as `data/nolin_cover.csv` (3,068 cells: 605 wooded, 2,352
+    cleared, 111 original-channel). New module `core/cover.py` (`get_cover_at`,
+    `load_cover_cells`, mirrors the historic_bathymetry.py/shoreline.py loader pattern,
+    cKDTree-backed nearest-cell lookup with an 80m default max distance).
+
+    `core/lake_map.py`: removed the "Modeled depth contours" layer entirely; added a
+    "Pre-dam bottom cover" layer instead (folium.Rectangle per cell, colored by
+    dominant class, on by default) - this is now the map's primary content. The
+    clicked-location popup shows bottom cover instead of a modeled depth claim.
+    `pages/2_Lake_Map.py`: renamed from "Contour Map" to "Map", rewrote the info banner
+    to describe the cover layer and explicitly caveat the still-present "Modeled
+    depth" metric as a rough guess rather than a chart, and added a "Bottom cover"
+    metric alongside it in the click-detail panel (`core/cover.get_cover_at`). Did NOT
+    remove `core/bathymetry.py`'s depth model itself, or its use in
+    `infer_structure_type`/lure recommendations - only the map's rendered depth-contour
+    layer and the framing of the depth number shown to the user changed. The remaining
+    phases of the hotspot strategy (old-channel breakline, shoreline-geometry points/
+    coves, wind/fetch scoring, user-contributed structure pins) are queued for future
+    rounds, prioritized by the user as needed.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -326,7 +373,34 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   Park, Wax, Dog Creek) are still a smoothstep ramp from shore to the
   nearest anchor's target depth, capped at ~180m - a modeling
   simplification, not a measurement, same caveat as always for anything
-  that isn't Quickdraw/historic-topo real data.
+  that isn't Quickdraw/historic-topo real data. As of entry 16, this is no
+  longer rendered as contour lines on the map (see below) but still backs
+  `get_depth_at_ft`/`infer_structure_type` and the "Modeled depth" metric
+  on the Lake Map page - both explicitly labeled as a rough guess now.
+- (entry 16) No depth contour lines are drawn on the map - two attempts at
+  deriving them from public data didn't hold up well enough to trust. The
+  map's primary layer is now real bottom cover (`data/nolin_cover.csv`,
+  `core/cover.py`) instead. This is intentionally a pivot away from trying
+  to fix the depth-contour approach a third time, not a temporary gap -
+  re-adding rendered depth contours would need either real survey data or
+  a materially different modeling approach, not just another tuning pass
+  on the existing one.
+- `data/nolin_cover.csv` cells are only as good as the same color
+  thresholds used for the shoreline work - same caveat as above about
+  unusual symbology on the source sheets producing a gap (reads as no
+  data, not wrong data). `n_px` in each row is a rough per-cell confidence
+  signal (more classified source pixels = less noisy majority vote); low
+  `n_px` cells near contour-line-dense terrain are the least trustworthy.
+- Remaining phases of the hotspot-forecast strategy discussed with the
+  user but not yet built: an old-channel/breakline reference line traced
+  from the same pre-dam topo (tractable as a single line per branch, not a
+  full depth surface), shoreline-curvature-derived points/coves (no new
+  data needed, just geometry analysis on data/nolin_shoreline.geojson),
+  wind/fetch exposure scoring per candidate spot using the real shoreline
+  plus the existing weather integration, and a way for the user to drop
+  pins for docks/brush piles/timber they know about (extending the
+  Quickdraw pattern) - all queued, prioritize with the user before
+  starting any of them.
 - `data/quickdraw/` ships empty - no real survey data has been ingested
   yet. Next step is the user exporting their first Quickdraw trip and
   handing it over.

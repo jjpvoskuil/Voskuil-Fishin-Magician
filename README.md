@@ -15,15 +15,20 @@ key decisions, and known open items.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
   water color/clarity, structure type, and (when you provide it) the depth you're marking
   fish at.
-- **Zoomable contour map** of Nolin Lake with modeled depth contour lines, clipped to
-  the real digitized lake shoreline (not just the channel model's own straight-line
-  shape) so contours stay inside the actual lake edge - click *anywhere* on the lake
-  (not just preset spots) to get a location-specific recommendation for any day/time
-  in the forecast window. Toggleable layers show exactly where the depth data comes
-  from: channel-model anchor points colored by source (green = surveyed USGS
-  benchmark, orange = read off historic topo contour lines, gray = extrapolated), the
-  small set of real digitized points from pre-dam USGS topo sheets (blue dots, western
-  coves), and the real shoreline outline itself (off by default).
+- **Zoomable lake map** of Nolin Lake, clipped to the real digitized shoreline - click
+  *anywhere* on the lake (not just preset spots) to get a location-specific
+  recommendation for any day/time in the forecast window. No numeric depth contour
+  lines are drawn (two attempts at modeling them from public data didn't hold up well
+  enough to trust). Instead, the primary layer is real **pre-dam bottom cover**
+  (`data/nolin_cover.csv`): every cell of the lake bottom classified as wooded (likely
+  standing timber), cleared (likely open bottom), or the original stream channel,
+  read directly off the same 1953/54 USGS topo sheets used elsewhere in this project.
+  Other toggleable layers show where the (still-present, but de-emphasized) depth
+  model's anchor values come from: channel-model anchor points colored by source
+  (green = surveyed USGS benchmark, orange = read off historic topo contour lines,
+  gray = extrapolated), the small set of real digitized depth points from pre-dam USGS
+  topo sheets (blue dots, western coves), and the real shoreline outline itself (off
+  by default).
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -114,9 +119,20 @@ lure/color/technique rule table.
   channel model's own shape: `data/nolin_shoreline.geojson` (`core/shoreline.py`) is
   the real lake shoreline, digitized from the water fill on the same 1966 post-dam USGS
   sheets. The channel centerline is only ~8-10 hand-placed points joined by straight
-  lines, so it doesn't reliably follow Nolin Lake's actual winding shape - the real
-  shoreline is what keeps depth contours from being drawn across necks of land. The
-  channel anchors now only supply *how deep*, not *where the water is*.
+  lines, so it doesn't reliably follow Nolin Lake's actual winding shape.
+
+  Despite that shoreline fix, two attempts at deriving smooth numeric depth contours
+  from this public data didn't produce results worth trusting - there's no actual
+  bathymetric survey for Nolin Lake, and public sources can't support depth isolines
+  at the fidelity anglers need. The map no longer draws them. What the same source
+  data (the pre-dam 1953/54 USGS sheets) *can* support reliably is bottom-cover
+  classification, which only needs the color/symbol on the scan rather than precise
+  elevation: `core/cover.py` / `data/nolin_cover.csv` classifies every ~55m cell of the
+  real lake footprint as wooded (likely standing timber), cleared (likely open
+  bottom), or the original stream channel, and this is now the map's primary layer.
+  The depth model (`core/bathymetry.py`) still exists and still backs the "Modeled
+  depth" number and structure-type auto-suggestion on the Lake Map page - both are
+  explicitly labeled as a rough guess, not a chart.
 
   It's also designed to improve with your own real soundings: if you record Garmin
   Quickdraw Contours, export them with [qdc-converter](https://github.com/interlark/qdc-converter)
@@ -228,10 +244,12 @@ core/
   historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps
   survey_points.py         Loads the angler's own Quickdraw CSV exports
   shoreline.py              Real digitized lake shoreline + point-in-polygon clip mask
+  cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
 data/
   nolin_spots.json        Named lake spots (edit to add your own waypoints)
   nolin_channel.json      Modeled river-channel centerline anchoring the bathymetry
   historic_bathymetry.csv Depth points read from pre-dam USGS historical topo maps
+  nolin_cover.csv         Pre-dam bottom-cover cells, read from the same USGS topo sheets
   nolin_shoreline.geojson Real lake shoreline, digitized from 1966 post-dam USGS topo sheets
   trip_log.csv            Logged trips (grows over time)
   lure_inventory.csv      Tackle inventory (grows over time)
