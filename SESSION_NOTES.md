@@ -364,6 +364,30 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and KDFWR ident. `pages/2_Lake_Map.py`'s info banner now mentions the attractor
     count alongside the cover-layer description.
 
+18. **Fix: map fades/goes transparent when zoomed in** - the ~3,068-cell bottom-cover
+    layer draws one `folium.Rectangle` per cell (weight=0, so no border stroke at
+    all), sized to exactly meet its neighbors edge-to-edge in lat/lon space. Cell
+    centers were laid out on a regular grid in the source topo sheet's own projected
+    CRS, then converted to lat/lon - a projection that isn't perfectly axis-aligned
+    with lat/lon, so an exact edge-to-edge fit left sub-pixel seams between adjacent
+    rectangles. Invisible zoomed out, but as you zoom in far enough that a few meters
+    becomes several screen pixels, those seams show the basemap through them, reading
+    as the layer "fading." Checked nearest-neighbor cell-center spacing directly
+    (scipy cKDTree): ~91% of cells are within 55m of their nearest neighbor. Fixed by
+    (a) padding each rectangle's half-size from 27.4m to 30m so neighboring cells in
+    the tightly-packed regions now overlap by a few meters instead of meeting exactly
+    edge-to-edge, (b) giving each rectangle a `weight=1` border in its own fill color
+    instead of no border, so any still-residual gap gets bridged by a matching-color
+    line rather than showing blank map, and (c) `prefer_canvas=True` on the Folium
+    map, the standard fix for SVG-per-shape anti-aliasing seams across many adjacent
+    vector shapes. Genuinely isolated cells (no data within ~90m, mostly boundary/
+    sparse-coverage cells, about 9% of the total) still render as separate rectangles
+    with real gaps between them - that's accurate, not a rendering bug, since there's
+    no cover data to fill in there. No headless-browser tooling is available in this
+    sandbox to screenshot-verify pixel-by-pixel, so this was verified by direct
+    nearest-neighbor distance analysis against the new rectangle size, not visually -
+    worth a look on the live app to confirm.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

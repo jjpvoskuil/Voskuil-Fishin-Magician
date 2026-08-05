@@ -57,7 +57,7 @@ ATTRACTOR_DEFAULT_COLOR = "#333333"
 def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.Map:
     center_lat, center_lon = lake_center()
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start, tiles="OpenStreetMap",
-                    control_scale=True, max_zoom=19)
+                    control_scale=True, max_zoom=19, prefer_canvas=True)
 
     cover_cells = load_cover_cells()
     if cover_cells:
@@ -66,7 +66,17 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
         )
         lat0 = sum(c["lat"] for c in cover_cells) / len(cover_cells)
         m_per_lon = _meters_per_deg_lon(lat0)
-        half_m = 27.4  # half the ~55m aggregation cell used to build data/nolin_cover.csv
+        # Half the ~55m aggregation cell, padded a few meters past the exact
+        # midpoint so neighboring cells overlap slightly instead of leaving a
+        # hairline gap. Lat/lon rectangles are drawn axis-aligned, but the
+        # cells were laid out on the source topo sheet's own (differently
+        # oriented) projected grid, so an exact edge-to-edge fit in lat/lon
+        # space can leave sub-pixel seams - invisible zoomed out, but visible
+        # as the basemap showing through once you zoom in enough that a few
+        # meters is several screen pixels. A small guaranteed overlap and a
+        # matching-color border (instead of no stroke at all) both close
+        # that gap; overlap between same-colored fills isn't visible.
+        half_m = 30.0
         half_lat = half_m / METERS_PER_DEG_LAT
         half_lon = half_m / m_per_lon
         for c in cover_cells:
@@ -85,7 +95,8 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
             folium.Rectangle(
                 bounds=bounds,
                 color=style["color"],
-                weight=0,
+                weight=1,
+                opacity=0.55,
                 fill=True,
                 fill_color=style["color"],
                 fill_opacity=0.55,
