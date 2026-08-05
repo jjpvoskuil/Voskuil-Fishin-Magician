@@ -1,49 +1,39 @@
 """
-Folium-based interactive map for Nolin River Lake: modeled depth contour
-lines you can zoom into, named reference spots, and support for capturing
-an arbitrary click location anywhere on the lake (not just on a marker) -
-handled by streamlit-folium in the page that renders this map.
+Folium-based interactive map for Nolin River Lake: named reference spots,
+a real-shoreline-restricted pre-dam bottom-cover layer, and support for
+capturing an arbitrary click location anywhere on the lake (not just on a
+marker) - handled by streamlit-folium in the page that renders this map.
 
-Two extra toggleable layers show where the depth model's data actually
-comes from (see core/bathymetry.py's module docstring for the full
-picture): channel-model anchor points colored by how their depth_ft was
-sourced (data/nolin_channel.json's "depth_source" field - surveyed
-benchmark, read off historic contour lines, or extrapolated along the
-gradient), and the small set of real digitized points from pre-dam USGS
-topo sheets (data/historic_bathymetry.csv). Both are off the beaten path
-of "just draw contours" but make it obvious at a glance which parts of
-the lake are backed by something more than the Gaussian channel guess.
+No numeric depth contour lines are rendered here (see core/bathymetry.py's
+module docstring) - two attempts at deriving smooth depth isolines from
+public data both produced results that didn't hold up, and continuing to
+render them implied a precision the underlying data can't support. What IS
+shown, and IS defensible from the same public USGS sources, is bottom
+cover: core/cover.py classifies each cell of the real lake footprint
+(data/nolin_shoreline.geojson) by what it looked like on the pre-dam
+topo sheets - wooded (likely standing timber), cleared (likely open
+bottom), or the original stream channel. Land-cover classification only
+needs the color/symbol on the scan, not precise elevation, so it tolerates
+the same registration slop that broke the depth work.
 
-A third, off-by-default layer draws the real digitized shoreline itself
-(data/nolin_shoreline.geojson, see core/shoreline.py) as a thin outline -
-this is the actual clip boundary the depth model is now confined to, so
-turning it on next to the contour layer is a direct visual check that
-contours stay inside the real lake edge.
+Two more toggleable layers show provenance: channel-model anchor points
+colored by how their depth_ft was sourced (data/nolin_channel.json's
+"depth_source" field), and the real digitized shoreline itself
+(data/nolin_shoreline.geojson) as a thin reference outline.
 """
 from __future__ import annotations
 import folium
 
-from .bathymetry import contour_lines, lake_center, get_depth_at_ft, load_channel
+from .bathymetry import lake_center, load_channel, METERS_PER_DEG_LAT, _meters_per_deg_lon
+from .cover import load_cover_cells, get_cover_at
 from .historic_bathymetry import load_historic_points
 from .shoreline import shoreline_polygons
 
-# Light (shallow) to dark navy (deep) - a look reminiscent of real chart plotters.
-DEPTH_COLOR_STOPS = [
-    (0, "#cfe8ff"),
-    (10, "#8fc4f0"),
-    (20, "#5aa0e0"),
-    (30, "#2f78c8"),
-    (45, "#1c56a5"),
-    (60, "#123a78"),
-    (85, "#0a2450"),
-]
-
-
-def _color_for_depth(depth_ft: float) -> str:
-    for (d0, c0), (d1, c1) in zip(DEPTH_COLOR_STOPS, DEPTH_COLOR_STOPS[1:]):
-        if d0 <= depth_ft <= d1:
-            return c1
-    return DEPTH_COLOR_STOPS[-1][1] if depth_ft > DEPTH_COLOR_STOPS[-1][0] else DEPTH_COLOR_STOPS[0][1]
+COVER_STYLE = {
+    "wooded":  {"color": "#2d7a2d", "label": "Wooded before flooding - likely standing timber"},
+    "cleared": {"color": "#d9a441", "label": "Cleared/open before flooding - likely open bottom"},
+    "water":   {"color": "#3d8bcc", "label": "Original stream channel"},
+}
 
 
 def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.Map:
@@ -51,19 +41,40 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start, tiles="OpenStreetMap",
                     control_scale=True, max_zoom=19)
 
-    contour_group = folium.FeatureGroup(name="Modeled depth contours (ft)", show=True)
-    for level in contour_lines():
-        color = _color_for_depth(level["depth_ft"])
-        weight = 1 + level["depth_ft"] / 20
-        for path in level["paths"]:
-            folium.PolyLine(
-                locations=path,
-                color=color,
-                weight=weight,
-                opacity=0.85,
-                tooltip=f"~{level['depth_ft']} ft",
-            ).add_to(contour_group)
-    contour_group.add_to(m)
+    cover_cells = load_cover_cells()
+    if cover_cells:
+        cover_group = folium.FeatureGroup(
+            name=f"Pre-dam bottom cover ({len(cover_cells)} cells, USGS topo)", show=True
+        )
+        lat0 = sum(c["lat"] for c in cover_cells) / len(cover_cells)
+        m_per_lon = _meters_per_deg_lon(lat0)
+        half_m = 27.4  # half the ~55m aggregation cell used to build data/nolin_cover.csv
+        half_lat = half_m / METERS_PER_DEG_LAT
+        half_lon = half_m / m_per_lon
+        for c in cover_cells:
+            style = COVER_STYLE.get(c["dominant_class"], COVER_STYLE["cleared"])
+            bounds = [
+                [c["lat"] - half_lat, c["lon"] - half_lon],
+                [c["lat"] + half_lat, c["lon"] + half_lon],
+            ]
+            popup = (
+                f"<b>{c['dominant_class'].title()}</b><br>"
+                f"{style['label']}<br>"
+                f"wooded {c['wooded_frac']*100:.0f}% / cleared {c['cleared_frac']*100:.0f}% / "
+                f"stream {c['water_frac']*100:.0f}%<br>"
+                f"<i>from {c['n_px']} classified source pixels</i>"
+            )
+            folium.Rectangle(
+                bounds=bounds,
+                color=style["color"],
+                weight=0,
+                fill=True,
+                fill_color=style["color"],
+                fill_opacity=0.55,
+                tooltip=f"{c['dominant_class']} ({style['label']})",
+                popup=folium.Popup(popup, max_width=260),
+            ).add_to(cover_group)
+        cover_group.add_to(m)
 
     spot_group = folium.FeatureGroup(name="Named reference spots", show=True)
     for s in spots:
@@ -145,12 +156,16 @@ def build_folium_map(spots: list, clicked=None, zoom_start: int = 13) -> folium.
         historic_group.add_to(m)
 
     if clicked:
-        depth = get_depth_at_ft(clicked["lat"], clicked["lon"])
-        depth_txt = f"~{depth} ft (modeled)" if depth is not None else "no data at this point"
+        cover_hit = get_cover_at(clicked["lat"], clicked["lon"])
+        if cover_hit:
+            style = COVER_STYLE.get(cover_hit["dominant_class"], COVER_STYLE["cleared"])
+            cover_txt = f"{cover_hit['dominant_class'].title()} pre-flooding - {style['label']}"
+        else:
+            cover_txt = "no pre-dam cover data at this point"
         folium.Marker(
             location=[clicked["lat"], clicked["lon"]],
             tooltip="Selected location",
-            popup=f"Selected location<br>Depth: {depth_txt}",
+            popup=f"Selected location<br>Bottom cover: {cover_txt}",
             icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
         ).add_to(m)
 
