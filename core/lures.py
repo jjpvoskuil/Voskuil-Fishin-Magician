@@ -572,6 +572,8 @@ def _group_owned_by_category(inventory: list) -> dict:
             "description": row.get("description", ""),
             "quantity": qty,
             "sku": row.get("sku", ""),
+            "image_url": row.get("image_url", ""),
+            "image_filename": row.get("image_filename", ""),
         })
     return grouped
 

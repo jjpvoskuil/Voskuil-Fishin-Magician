@@ -133,3 +133,18 @@ def save_image(item_id: str, file_bytes: bytes, extension: str, images_dir: Path
     with open(images_dir / filename, "wb") as f:
         f.write(file_bytes)
     return filename
+
+
+def resolve_image_source(item: dict, images_dir: Path = IMAGES_DIR) -> Optional[str]:
+    """Given an inventory row/dict (with image_filename/image_url keys), return
+    whatever st.image() should be pointed at: a local file path if the user's
+    own uploaded/captured photo exists on disk, else the vendor's linked CDN
+    URL, else None if there's no photo at all. Shared by the Lure Inventory
+    page and the forecast/map "owned lure" rendering (core/ui.py) so both
+    follow the exact same local-photo-wins-over-link rule."""
+    filename = item.get("image_filename")
+    if filename:
+        path = images_dir / filename
+        if path.exists():
+            return str(path)
+    return item.get("image_url") or None

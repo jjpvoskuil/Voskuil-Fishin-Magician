@@ -459,6 +459,17 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     crank-eligible structures x a fixed depth/temp that the pre-existing "ensure a
     crank" nudge never fires (confirming it was safe to leave alone) before adding the
     new swap-based mechanism.
+22. **Photo thumbnails on owned-lure blocks** - immediate follow-up to entry 21: the
+    "In your tackle box" flag was text-only, and the user asked for an actual photo of
+    each owned lure in the recommendation itself. Extracted the Lure Inventory page's
+    existing local-photo-wins-over-vendor-link fallback logic into a shared
+    `core.lure_inventory.resolve_image_source(item, images_dir)` helper (the page itself
+    was refactored to call it too, replacing its inline duplicate of the same fallback),
+    added `image_url`/`image_filename` to the dicts `core.lures._group_owned_by_category()`
+    builds, and had `core/ui.py`'s `render_lure_block()` render up to 4 thumbnails (in
+    columns, each captioned brand + description) per lure block, with a "+N more" note
+    if a category has more owned items than that. No inventory/forecast-matching logic
+    changed - this is purely a rendering addition on top of entry 21's `owned_items`.
 
 ## Key design decisions & rationale
 

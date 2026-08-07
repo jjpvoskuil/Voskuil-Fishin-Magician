@@ -169,13 +169,16 @@ def test_inventory_annotates_owned_lure_block():
     # football_jig is a first-choice pick for winter conditions.
     inventory = [
         {"brand": "Strike King", "description": "Tour Grade Football Jig - Black/Blue",
-         "category": "football_jig", "quantity": "2", "sku": "1534654"},
+         "category": "football_jig", "quantity": "2", "sku": "1534654",
+         "image_url": "https://example.com/jig.jpg", "image_filename": ""},
     ]
     rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
     jig_block = next(b for b in rec.first_choice if b.key == "football_jig")
     assert jig_block.owned is True
     assert jig_block.owned_items[0]["brand"] == "Strike King"
     assert jig_block.owned_items[0]["quantity"] == 2
+    assert jig_block.owned_items[0]["image_url"] == "https://example.com/jig.jpg"
+    assert jig_block.owned_items[0]["image_filename"] == ""
     # Nothing else in this recommendation was tagged as owned.
     other_blocks = [b for b in rec.first_choice + rec.second_choice if b.key != "football_jig"]
     assert all(not b.owned for b in other_blocks)

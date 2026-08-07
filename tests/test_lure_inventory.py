@@ -1,5 +1,5 @@
 from core.lure_inventory import (
-    LureItem, append_item, delete_item, read_all_items, save_image, update_item,
+    LureItem, append_item, delete_item, read_all_items, resolve_image_source, save_image, update_item,
 )
 
 
@@ -111,3 +111,22 @@ def test_save_image_defaults_to_jpg_when_no_extension(tmp_path):
     images_dir = tmp_path / "images"
     filename = save_image("xyz", b"data", "", images_dir)
     assert filename == "xyz.jpg"
+
+
+def test_resolve_image_source_prefers_local_file_over_url(tmp_path):
+    images_dir = tmp_path / "images"
+    filename = save_image("abc", b"fake-bytes", "jpg", images_dir)
+    item = {"image_filename": filename, "image_url": "https://example.com/product.jpg"}
+    assert resolve_image_source(item, images_dir) == str(images_dir / filename)
+
+
+def test_resolve_image_source_falls_back_to_url_when_local_missing(tmp_path):
+    images_dir = tmp_path / "images"
+    item = {"image_filename": "does_not_exist.jpg", "image_url": "https://example.com/product.jpg"}
+    assert resolve_image_source(item, images_dir) == "https://example.com/product.jpg"
+
+
+def test_resolve_image_source_none_when_no_photo(tmp_path):
+    images_dir = tmp_path / "images"
+    item = {"image_filename": "", "image_url": ""}
+    assert resolve_image_source(item, images_dir) is None

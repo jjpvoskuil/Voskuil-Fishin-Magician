@@ -73,10 +73,11 @@ key decisions, and known open items.
   below for details.
 - **Inventory-aware lure suggestions** - the 7-Day Forecast and Lake Map pages check
   every recommended lure against your tackle inventory: lures you already own are
-  flagged (✅ "In your tackle box", with the specific brand/description/quantity) and
-  sorted to the top of each choice tier, while ones you don't have yet stay in the list
-  underneath as pick-up suggestions (🛒). Nothing is added or hidden based on ownership -
-  the season/structure/pressure/forage logic still decides what's recommended; ownership
+  flagged (✅ "In your tackle box", with the specific brand/description/quantity **and
+  a photo thumbnail** of the owned item(s), up to 4 per lure block) and sorted to the
+  top of each choice tier, while ones you don't have yet stay in the list underneath as
+  pick-up suggestions (🛒). Nothing is added or hidden based on ownership - the
+  season/structure/pressure/forage logic still decides what's recommended; ownership
   only decides what's flagged and what floats to the top.
 
 ## How the model works (and its limits)
@@ -237,8 +238,11 @@ trip logs, inventory changes are committed and pushed back to GitHub when a
 `core.lures.recommend()` takes an optional `inventory` argument (the same rows this page
 reads/writes) and, for each lure it would otherwise recommend, checks whether any
 in-hand item (quantity > 0) shares that lure's category. If so, the block is flagged
-✅ **"In your tackle box"** with the specific brand/description/quantity, and that block
-is stable-sorted to the front of its choice tier (first choice or second choice) - so the
+✅ **"In your tackle box"** with the specific brand/description/quantity - plus a photo
+thumbnail per owned item (up to 4; extras are just counted) using `core.lure_inventory.
+resolve_image_source()`, the same local-photo-wins-over-vendor-link rule the Lure
+Inventory page itself uses - and that block is stable-sorted to the front of its choice
+tier (first choice or second choice) - so the
 best options you actually own surface first. Lures you don't have are left in place
 tagged 🛒 as still-worth-trying suggestions. This only reorders and annotates; it never
 adds, removes, or changes *which* lures a given day/segment/structure/forage combination
