@@ -387,6 +387,20 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     sandbox to screenshot-verify pixel-by-pixel, so this was verified by direct
     nearest-neighbor distance analysis against the new rectangle size, not visually -
     worth a look on the live app to confirm.
+19. **Cart import for Lure Inventory** - added a second batch of 13 lures (15 units,
+    $139.85) to `data/lure_inventory.csv`, read live from the Cabela's cart via a
+    connected browser session (the cart page requires the user's own login, which
+    Claude has no way to access on its own). Followed the existing order-history
+    import's row format exactly, including the same product-photo CDN URL pattern
+    (SKU-keyed, just a different query-string tag: `$BPSSite_CartTN$` vs. the
+    original `$BPSSite_orderhistory$`, both point at the same Bass Pro asset). Two
+    SKUs (1784868, 3243224) were already in inventory from the original order and
+    also sitting in the cart - kept as separate rows rather than deduped/merged,
+    since the codebase has no existing dedup logic and the two batches represent
+    different purchase events. Cart items aren't yet a confirmed purchase, so this
+    batch is tagged with a distinct source string ("Cabela's cart (2026-08-07)")
+    rather than an order number - worth reconciling against the real order once it
+    ships, in case anything changes between cart and checkout.
 
 ## Key design decisions & rationale
 
