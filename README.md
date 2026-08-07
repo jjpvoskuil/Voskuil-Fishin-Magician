@@ -193,11 +193,17 @@ independent of the forecast/recommendation engine (`core/lures.py`). For each lu
 shows brand, full product description, a photo, the last price paid, and current
 quantity on hand. Two ways items get in:
 
-- **Order-history import** - the initial set was seeded from a Cabela's order (order
-  #W283763341), including the vendor's own product photo for each item. Those photos
-  are linked directly from Bass Pro/Cabela's own CDN rather than copied into the repo -
-  this app only needs to *display* the vendor's product photography, not keep a stored
-  copy of it.
+- **Order-history / cart import** - the initial set was seeded from a Cabela's order
+  (order #W283763341), and a second batch was pulled from the items sitting in the
+  Cabela's cart (source: "Cabela's cart (2026-08-07)") - not yet purchased at the time
+  they were added, so treat that batch as a wishlist/on-order snapshot rather than
+  confirmed on-hand stock until reconciled against an actual order. Both import batches
+  include the vendor's own product photo for each item, linked directly from Bass
+  Pro/Cabela's own CDN rather than copied into the repo - this app only needs to
+  *display* the vendor's product photography, not keep a stored copy of it. Two SKUs
+  (1784868, 3243224) appear in both batches since they were also sitting in the cart;
+  they're kept as separate rows rather than merged, consistent with how repeat items
+  within a single order are already handled.
 - **Manual entry** - add a lure any time with brand, description, price, and quantity,
   and optionally attach a photo you upload or take right there with your camera. These
   photos are yours, so they're stored under `data/lure_images/` and committed to the
