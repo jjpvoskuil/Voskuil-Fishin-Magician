@@ -9,7 +9,10 @@ from .lures import (
     LureBlock, BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, STRUCTURE_TYPES,
     resolve_water_clarity, FORAGE_OPTIONS, DEFAULT_FORAGE,
 )
+from .lure_inventory import resolve_image_source
 from .thermocline import estimate_thermocline_ft, default_thermocline_input_ft
+
+MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
 
 
 def render_lure_block(block: LureBlock):
@@ -21,6 +24,18 @@ def render_lure_block(block: LureBlock):
                 for it in block.owned_items
             )
             st.success(f"✅ In your tackle box: {owned_desc}")
+
+            photos = [(it, resolve_image_source(it)) for it in block.owned_items]
+            photos = [(it, src) for it, src in photos if src]
+            if photos:
+                shown, extra = photos[:MAX_OWNED_THUMBNAILS], photos[MAX_OWNED_THUMBNAILS:]
+                cols = st.columns(len(shown))
+                for col, (it, src) in zip(cols, shown):
+                    with col:
+                        caption = f"{it['brand']} – {it['description']}"
+                        st.image(src, width='stretch', caption=caption[:60])
+                if extra:
+                    st.caption(f"+ {len(extra)} more owned item(s) in this category (see Lure Inventory for photos).")
         else:
             st.caption("🛒 Not in your inventory yet - worth picking one up for this presentation.")
         st.write(f"Colors: {', '.join(block.colors)}")
