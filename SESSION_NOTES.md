@@ -401,6 +401,9 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     batch is tagged with a distinct source string ("Cabela's cart (2026-08-07)")
     rather than an order number - worth reconciling against the real order once it
     ships, in case anything changes between cart and checkout.
+20. **Second cart import** - same request, same day: 7 more lures (7 units, $38.53)
+    added from a refreshed Cabela's cart, none overlapping the 31 SKUs already in
+    inventory at that point. Same row format and CDN photo-URL pattern as entry 19.
 
 ## Key design decisions & rationale
 
