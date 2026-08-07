@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import date, timedelta
 from streamlit_folium import st_folium
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
+from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory
 from core.scoring import score_day, effective_season_and_temp
 from core.lures import recommend, STRUCTURE_TYPES
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar
@@ -137,7 +137,8 @@ with col_detail:
         st.metric(f"{segment_name} activity score", f"{seg.score}/10")
         rec = recommend(eff_season, eff_water_temp, segment_name, day.pressure_trend_24h,
                          structure_type, clarity, fish_depth_ft=lake_setup.fish_depth_ft,
-                         forage=lake_setup.forage, thermocline_ft=lake_setup.thermocline_ft)
+                         forage=lake_setup.forage, thermocline_ft=lake_setup.thermocline_ft,
+                         inventory=get_inventory())
 
         render_lure_recommendation(rec)
     except ValueError as e:

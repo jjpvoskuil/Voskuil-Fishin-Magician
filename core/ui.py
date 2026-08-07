@@ -15,6 +15,14 @@ from .thermocline import estimate_thermocline_ft, default_thermocline_input_ft
 def render_lure_block(block: LureBlock):
     with st.container(border=True):
         st.markdown(f"**{block.name}**")
+        if block.owned_items:
+            owned_desc = "; ".join(
+                f"{it['brand']} – {it['description']} (qty {it['quantity']})"
+                for it in block.owned_items
+            )
+            st.success(f"✅ In your tackle box: {owned_desc}")
+        else:
+            st.caption("🛒 Not in your inventory yet - worth picking one up for this presentation.")
         st.write(f"Colors: {', '.join(block.colors)}")
         if block.trailer:
             st.write(f"Trailer: {block.trailer.type} - {', '.join(block.trailer.colors)}")

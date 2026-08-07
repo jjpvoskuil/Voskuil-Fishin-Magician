@@ -146,3 +146,91 @@ def test_thermocline_caveat_absent_when_no_thermocline_value_given():
     rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
                      fish_depth_ft=30, thermocline_ft=None)
     assert not any("below the thermocline depth you've set" in r for r in rec.rationale)
+
+
+def test_threadfin_shad_and_stonerollers_are_valid_forage_options():
+    from core.lures import FORAGE_OPTIONS, FORAGE_NOTES, FORAGE_LURE_BOOST
+    for forage_type in ("Threadfin Shad", "Stonerollers"):
+        assert forage_type in FORAGE_OPTIONS
+        assert forage_type in FORAGE_NOTES
+        assert forage_type in FORAGE_LURE_BOOST
+        rec = recommend("summer_peak", 84, "Midday", 0.0, "Flat", "Clear", forage=[forage_type])
+        assert any(FORAGE_NOTES[forage_type].split(" - ")[0] in r for r in rec.rationale)
+
+
+def test_no_inventory_leaves_blocks_unowned():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Clear")
+    for block in rec.first_choice + rec.second_choice:
+        assert block.owned is False
+        assert block.owned_items == []
+
+
+def test_inventory_annotates_owned_lure_block():
+    # football_jig is a first-choice pick for winter conditions.
+    inventory = [
+        {"brand": "Strike King", "description": "Tour Grade Football Jig - Black/Blue",
+         "category": "football_jig", "quantity": "2", "sku": "1534654"},
+    ]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    jig_block = next(b for b in rec.first_choice if b.key == "football_jig")
+    assert jig_block.owned is True
+    assert jig_block.owned_items[0]["brand"] == "Strike King"
+    assert jig_block.owned_items[0]["quantity"] == 2
+    # Nothing else in this recommendation was tagged as owned.
+    other_blocks = [b for b in rec.first_choice + rec.second_choice if b.key != "football_jig"]
+    assert all(not b.owned for b in other_blocks)
+
+
+def test_inventory_zero_quantity_is_not_owned():
+    inventory = [
+        {"brand": "Strike King", "description": "Tour Grade Football Jig - Black/Blue",
+         "category": "football_jig", "quantity": "0", "sku": "1534654"},
+    ]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    jig_block = next(b for b in rec.first_choice if b.key == "football_jig")
+    assert jig_block.owned is False
+
+
+def test_inventory_unrecognized_category_is_ignored():
+    inventory = [
+        {"brand": "No Name", "description": "Mystery bait", "category": "not_a_real_category",
+         "quantity": "5", "sku": ""},
+    ]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    assert all(not b.owned for b in rec.first_choice + rec.second_choice)
+
+
+def test_owned_lures_sort_before_unowned_within_each_tier():
+    # winter first-choice keys (unsorted by depth since no fish_depth_ft given) are
+    # football_jig, suspending_jerkbait, blade_bait - own only blade_bait and confirm
+    # it moves to the front of the list once inventory is supplied.
+    inventory = [
+        {"brand": "Rapala", "description": "Rippin Rap", "category": "blade_bait",
+         "quantity": "1", "sku": ""},
+    ]
+    rec_plain = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
+    assert [b.key for b in rec_plain.first_choice][0] == "football_jig"
+
+    rec_owned = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    assert rec_owned.first_choice[0].key == "blade_bait"
+    assert rec_owned.first_choice[0].owned is True
+    # same set of lures either way - inventory only reorders, never adds/removes
+    assert {b.key for b in rec_owned.first_choice} == {b.key for b in rec_plain.first_choice}
+
+
+def test_medium_diving_crankbait_profile_is_complete():
+    from core.lures import LURE_PROFILES, WATER_CLARITY_OPTIONS
+    profile = LURE_PROFILES["medium_diving_crankbait"]
+    assert profile["name"]
+    assert profile["depth_range_ft"] == (6, 12)
+    for clarity in WATER_CLARITY_OPTIONS:
+        assert clarity in profile["colors"]
+
+
+def test_medium_diving_crankbait_preferred_when_fish_depth_matches():
+    # "Boat dock" isn't in the crank-ensure nudge's structure list, so use one that is,
+    # with a season/segment combo that doesn't already include a crank pick, and a fish
+    # depth reading squarely in the medium-diving zone.
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Clear", fish_depth_ft=9)
+    keys = {b.key for b in rec.first_choice + rec.second_choice}
+    assert "medium_diving_crankbait" in keys

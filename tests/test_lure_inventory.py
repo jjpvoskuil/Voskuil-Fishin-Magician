@@ -21,6 +21,34 @@ def test_append_and_read_item(tmp_path):
     assert rows[0]["item_id"] == item.item_id
 
 
+def test_append_and_read_item_with_category(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Strike King", description="Test crankbait", price=8.99, quantity=2,
+                     category="squarebill_crankbait")
+    append_item(item, path)
+    rows = read_all_items(path)
+    assert rows[0]["category"] == "squarebill_crankbait"
+
+
+def test_item_defaults_to_uncategorized(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="No Name", description="Mystery bait", price=1.0, quantity=1)
+    append_item(item, path)
+    rows = read_all_items(path)
+    assert rows[0]["category"] == ""
+
+
+def test_update_item_changes_category(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Strike King", description="Swim jig", price=7.99, quantity=1)
+    append_item(item, path)
+
+    found = update_item(item.item_id, path, category="swim_jig")
+    assert found is True
+    rows = read_all_items(path)
+    assert rows[0]["category"] == "swim_jig"
+
+
 def test_update_item_changes_quantity_and_price(tmp_path):
     path = tmp_path / "inv.csv"
     item = LureItem(brand="Zoom", description="Worm", price=5.49, quantity=1)

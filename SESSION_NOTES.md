@@ -404,6 +404,61 @@ trip-log entries back to the repo (see `secrets.toml.example`).
 20. **Second cart import** - same request, same day: 7 more lures (7 units, $38.53)
     added from a refreshed Cabela's cart, none overlapping the 31 SKUs already in
     inventory at that point. Same row format and CDN photo-URL pattern as entry 19.
+21. **Tackle inventory feeds the forecast's lure suggestions; three new forage types** -
+    the user wanted the 7-Day Forecast (and, for consistency with this project's
+    "every page feeds the same shared inputs" rule, Lake Map too) to check its lure
+    recommendations against the real tackle inventory (entry 12): show which
+    recommended lures/plastics the angler already owns, while still suggesting ones
+    they don't have. Mid-request, also added Threadfin Shad and Stonerollers to the
+    forage multiselect (`FORAGE_OPTIONS`) - both offered as optional add-ons like
+    Crawfish/Shiners rather than pre-checked defaults, since (unlike gizzard shad/
+    bluegill) they aren't specifically documented as Nolin forage in the sources used
+    elsewhere in this app.
+
+    Design: added a `category` column to `data/lure_inventory.csv`/`LureItem`
+    (`core/lure_inventory.py`) holding one of `core.lures.LURE_PROFILES`' keys - a
+    plain string, not an enum/foreign key, so `lure_inventory.py` stays independent of
+    `lures.py`; the matching happens on the `lures.py` side
+    (`_group_owned_by_category()`). `recommend()` gained an optional `inventory`
+    argument; when supplied, each resulting `LureBlock` is annotated with any owned
+    item(s) sharing its category (`owned`/`owned_items`), and each choice tier
+    (first/second) is stable-sorted so owned lures bubble to the top - the *set* of
+    lures a given day/segment/structure/forage combination recommends is completely
+    unchanged by inventory; ownership only affects flagging and ordering. `core/ui.py`
+    renders a green "✅ In your tackle box: brand – description (qty N)" line when
+    owned, or a muted "🛒 Not in your inventory yet" line otherwise. Both
+    `pages/1_7_Day_Forecast.py` and `pages/2_Lake_Map.py` now pass `get_inventory()`
+    through to every `recommend()` call.
+
+    All 40 existing inventory rows (order-history + two cart imports, entries 12/19/20)
+    were auto-tagged with a best-guess category based on product name/brand (e.g.
+    "Thunder Cricket Swimjig" -> `chatterbait`, "KVD Rattling Square Bill" ->
+    `squarebill_crankbait`). The Lure Inventory page got a required-at-a-glance
+    Category selector on the add form, an editable Category dropdown in each item's
+    Edit expander, a Category caption on every card, and a Category filter - so any
+    auto-tag that looks wrong is a one-click fix, not a code change.
+
+    One real gap surfaced during categorization: four items (two Strike King 3XD,
+    a Rapala DT-8, a Bandit 300) are genuine medium-diving crankbaits (~6-12 ft) that
+    didn't fit either existing crankbait profile (Squarebill 2-6 ft, Deep-Diving
+    15-25 ft) - forcing them into either would have attached wrong depth guidance to
+    a real product. Added a new `medium_diving_crankbait` profile to
+    `core/lures.py`'s `LURE_PROFILES` rather than mis-tag them. It's deliberately
+    *not* wired into any season's default first/second-choice picks (that would have
+    meant auditing/re-testing all seven seasonal branches for a tackle-inventory
+    feature) - instead, checked empirically that the existing "make sure a crankbait
+    shows up" nudge never actually fires (every seasonal branch already includes one),
+    so hanging the new profile off that nudge would have been dead code. Instead,
+    added a separate, narrower mechanism: when a real sonar reading (`fish_depth_ft`,
+    Lake Setup Options sidebar) falls in the 6-12 ft zone and no medium-diving crank is
+    already picked, swap the first shallower/deeper crankbait already in that day's
+    list for the medium-diving one. This is a genuine depth-accuracy fix independent
+    of inventory (a squarebill or deep-diver picked by season alone may not match a
+    9 ft sonar reading nearly as well), and it's also what lets an owned medium-diving
+    crank ever get suggested/flagged. Verified against all 7 seasons x 6 segments x 5
+    crank-eligible structures x a fixed depth/temp that the pre-existing "ensure a
+    crank" nudge never fires (confirming it was safe to leave alone) before adding the
+    new swap-based mechanism.
 
 ## Key design decisions & rationale
 
@@ -503,6 +558,18 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   yet fed back into `core/calibration.py`'s weight-nudging - only pressure
   trend, moon phase, cloud cover, and wind currently participate in
   calibration.
+- (entry 21) All 40 existing `data/lure_inventory.csv` rows were auto-tagged with a
+  best-guess `category` from product name/brand, not hand-verified item by item -
+  spot-check on the Lure Inventory page (search/filter by category) and correct any
+  that look wrong; a wrong category just means that item won't get matched to the
+  right forecast suggestion, not a functional error. Any newly manually-added item
+  defaults to "Not categorized / other" until you pick one.
+- (entry 21) `medium_diving_crankbait` only ever gets suggested via the fish-depth
+  swap (sonar reading in the 6-12 ft zone) - it has no seasonal first/second-choice
+  picks of its own the way the other crankbait types do. If it should show up more
+  often (e.g. as part of specific seasonal patterns rather than only a depth-driven
+  swap), that's a follow-up worth doing deliberately (touching all 7 seasonal
+  branches + their tests), not something this round did opportunistically.
 - No automated CI - verification is manual: `pytest tests/ -q`, an
   `AppTest`-based smoke test across all 5 pages (including sidebar
   interaction), and a fresh `git clone` + re-test before every push, done
