@@ -19,6 +19,16 @@ Two ways a photo gets attached to an item:
 - image_filename: a photo the user uploaded or took themselves, stored
   under data/lure_images/ and committed to the repo like any other
   user-owned data (same treatment as Quickdraw survey CSVs).
+
+The `category` field (added when the 7-Day Forecast/Lake Map ownership
+feature was built) is a free-form string that, when it matches one of
+core.lures.LURE_PROFILES' keys, lets the recommendation engine
+(core.lures.recommend()) know you already own tackle that fits a given
+lure suggestion. It's intentionally just a plain string column here (not
+an enum/foreign key) so this module stays independent of core.lures - the
+matching happens on the lures.py side via
+core.lures._group_owned_by_category(). Blank/unrecognized values just mean
+"not matched to a forecast category," not an error.
 """
 from __future__ import annotations
 import csv
@@ -33,7 +43,7 @@ INVENTORY_PATH = REPO_ROOT / "data" / "lure_inventory.csv"
 IMAGES_DIR = REPO_ROOT / "data" / "lure_images"
 
 FIELDNAMES = [
-    "item_id", "added_at", "updated_at", "brand", "description", "sku",
+    "item_id", "added_at", "updated_at", "brand", "description", "category", "sku",
     "price", "quantity", "image_url", "image_filename", "source",
 ]
 
@@ -44,6 +54,7 @@ class LureItem:
     description: str
     price: Optional[float]
     quantity: int
+    category: str = ""  # one of core.lures.LURE_PROFILES' keys, or "" if not (yet) categorized
     sku: str = ""
     image_url: str = ""
     image_filename: str = ""

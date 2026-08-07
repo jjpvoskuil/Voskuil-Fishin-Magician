@@ -59,8 +59,15 @@ LIGHT_LOW = {"Dawn", "Dusk", "Night"}
 # secondary forage in Kentucky hill-land reservoirs (craw-pattern jig/worm
 # colors are standard advice for exactly this lake type) and are offered as
 # optional add-ons rather than defaults, since they're less specifically
-# documented for Nolin itself.
-FORAGE_OPTIONS = ["Gizzard Shad", "Bluegill / Sunfish", "Crawfish", "Shiners / Minnows"]
+# documented for Nolin itself. Threadfin shad are also a common reservoir
+# baitfish, but (unlike gizzard shad) aren't specifically documented for
+# Nolin in the sources used elsewhere in this app, and they're more
+# cold-sensitive than gizzard shad, so they're offered as an optional
+# add-on rather than a default - check it if you're actually seeing them.
+# Stonerollers (small bottom-grazing minnows around gravel/rock) are a
+# similar optional add-on - present in Kentucky hill-land reservoir
+# tributaries generally, but not a documented Nolin-specific default.
+FORAGE_OPTIONS = ["Gizzard Shad", "Threadfin Shad", "Bluegill / Sunfish", "Crawfish", "Shiners / Minnows", "Stonerollers"]
 DEFAULT_FORAGE = ["Gizzard Shad", "Bluegill / Sunfish"]
 
 # Short, forage-specific color/pattern guidance surfaced in the rationale.
@@ -68,6 +75,10 @@ FORAGE_NOTES = {
     "Gizzard Shad": (
         "Shad are in play - lean on shad-imitating colors (chrome/pearl/white, "
         "blue-back) on reaction baits."
+    ),
+    "Threadfin Shad": (
+        "Threadfin shad are in play - similar to gizzard shad but smaller and slimmer; lean on "
+        "smaller shad-imitating profiles/colors (chrome/pearl/white, blue-back) on reaction baits."
     ),
     "Bluegill / Sunfish": (
         "Bluegill are in play - bream-pattern colors (green pumpkin, orange belly, "
@@ -81,6 +92,11 @@ FORAGE_NOTES = {
         "Shiners/minnows are in play - natural, translucent, silver patterns on "
         "finesse baits match them well, especially in clearer water."
     ),
+    "Stonerollers": (
+        "Stonerollers are in play - these are small, dark, bottom-grazing minnows found around "
+        "gravel/rock (creek arms, riprap, tributary mouths); dark natural/brown minnow patterns on "
+        "bottom-contact or bottom-hugging baits match them well."
+    ),
 }
 
 # Lure keys that most directly imitate each forage type - used to make sure at
@@ -89,11 +105,14 @@ FORAGE_NOTES = {
 FORAGE_LURE_BOOST = {
     "Gizzard Shad": ["lipless_crankbait", "spinnerbait", "suspending_jerkbait",
                       "squarebill_crankbait", "deep_diving_crankbait", "swim_jig"],
+    "Threadfin Shad": ["lipless_crankbait", "spinnerbait", "suspending_jerkbait",
+                        "squarebill_crankbait", "medium_diving_crankbait", "swim_jig"],
     "Bluegill / Sunfish": ["swim_jig", "walking_topwater", "popper",
                             "squarebill_crankbait", "chatterbait"],
     "Crawfish": ["football_jig", "texas_rig_creature", "carolina_rig", "squarebill_crankbait"],
     "Shiners / Minnows": ["finesse_shaky_head", "wacky_rig_senko", "suspending_jerkbait",
                            "weightless_soft_plastic"],
+    "Stonerollers": ["football_jig", "carolina_rig", "finesse_shaky_head", "squarebill_crankbait"],
 }
 
 
@@ -207,6 +226,20 @@ LURE_PROFILES = {
         "trailer": None,
         "depth_range_ft": (2, 6), "depth_style": "deflecting off cover",
         "presentation": "Stop-and-go retrieve that bumps wood/rock/riprap - deflection off cover is what triggers the strike, so aim to hit something on every cast.",
+    },
+    "medium_diving_crankbait": {
+        "name": "Medium-Diving Crankbait",
+        "video_key": "medium_diving_crankbait",
+        "vertical_style": "column",
+        "colors": {
+            "Clear": ["Natural shad", "Chrome/blue"],
+            "Green stained": ["Chartreuse/black back", "Green shad"],
+            "Brown stained": ["Craw pattern", "Brown/orange"],
+            "Muddy": ["Firetiger", "Solid chartreuse"],
+        },
+        "trailer": None,
+        "depth_range_ft": (6, 12), "depth_style": "grinding mid-depth cover, ledges, and secondary points",
+        "presentation": "Long cast, reel down to get it into the 6-12 ft zone, then hold bottom/cover contact through the retrieve - deflection off wood or rock at this depth is what triggers reaction strikes.",
     },
     "deep_diving_crankbait": {
         "name": "Deep-Diving Crankbait",
@@ -492,7 +525,8 @@ def _depth_text(profile: dict, fish_depth_ft: float = None) -> str:
                     f"so let it sink/slow-roll deeper, or lean on a deeper-running option instead")
 
 
-def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "") -> "LureBlock":
+def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
+                  owned_items: list = None) -> "LureBlock":
     profile = LURE_PROFILES[key]
     colors = profile["colors"].get(water_clarity, profile["colors"][DEFAULT_BASE_STAIN])
     trailer = None
@@ -508,7 +542,38 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         presentation=profile["presentation"],
         videos=get_videos_by_key(profile["video_key"], profile["name"]),
         note=note,
+        owned_items=list(owned_items) if owned_items else [],
     )
+
+
+def _group_owned_by_category(inventory: list) -> dict:
+    """Group in-hand tackle-inventory rows (data/lure_inventory.csv, via
+    core.lure_inventory) by their `category` field, which is one of the
+    LURE_PROFILES keys - keeps the tackle box (a separate, physical
+    inventory) matched to the recommendation engine's lure taxonomy without
+    the two modules depending on each other's internals. Rows with no
+    category, an unrecognized category, or zero quantity on hand are
+    skipped (not currently owned)."""
+    grouped: dict = {}
+    if not inventory:
+        return grouped
+    for row in inventory:
+        category = (row.get("category") or "").strip()
+        if category not in LURE_PROFILES:
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0:
+            continue
+        grouped.setdefault(category, []).append({
+            "brand": row.get("brand", ""),
+            "description": row.get("description", ""),
+            "quantity": qty,
+            "sku": row.get("sku", ""),
+        })
+    return grouped
 
 
 @dataclass
@@ -527,6 +592,11 @@ class LureBlock:
     videos: list
     trailer: TrailerInfo = None
     note: str = ""
+    owned_items: list = field(default_factory=list)  # list[dict]: brand/description/quantity/sku you have on hand
+
+    @property
+    def owned(self) -> bool:
+        return bool(self.owned_items)
 
 
 @dataclass
@@ -546,6 +616,7 @@ def recommend(
     fish_depth_ft: float = None,
     forage: list = None,
     thermocline_ft: float = None,
+    inventory: list = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
@@ -610,7 +681,7 @@ def recommend(
 
     # Crankbaits are broadly useful on hard cover/rock/wood regardless of season -
     # make sure one shows up as a second-choice option whenever it isn't already picked.
-    crank_keys = {"squarebill_crankbait", "lipless_crankbait", "deep_diving_crankbait"}
+    crank_keys = {"squarebill_crankbait", "lipless_crankbait", "deep_diving_crankbait", "medium_diving_crankbait"}
     if not (crank_keys & set(first_keys) | crank_keys & set(second_keys)) and structure_type in (
         "Riprap / dam face", "Bridge piling", "Flat", "Main-lake point", "Creek channel / ledge"
     ) and season != "winter":
@@ -653,6 +724,22 @@ def recommend(
         if forage_notes:
             rationale.append(" ".join(forage_notes))
 
+    # --- Depth-driven crank swap -------------------------------------------------
+    # Every seasonal pattern above already includes some crankbait, but its depth
+    # range is picked for the season/light in general, not for the specific sonar
+    # reading you gave us. If that reading (6-12 ft) actually falls in the
+    # medium-diving crank's zone instead, swap the first shallower/deeper crank
+    # already in play for it - a genuine depth-accuracy improvement independent of
+    # inventory, and what lets an owned medium-diving crank ever get suggested.
+    if (fish_depth_ft is not None and 6 <= fish_depth_ft <= 12
+            and "medium_diving_crankbait" not in first_keys and "medium_diving_crankbait" not in second_keys):
+        for keys_list in (first_keys, second_keys):
+            swap_at = next((i for i, k in enumerate(keys_list)
+                             if k in ("squarebill_crankbait", "deep_diving_crankbait")), None)
+            if swap_at is not None:
+                keys_list[swap_at] = "medium_diving_crankbait"
+                break
+
     # De-dupe while preserving order, never let a key appear in both lists.
     seen = set()
     first_keys_unique = []
@@ -673,7 +760,34 @@ def recommend(
         first_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
         second_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
 
-    first_choice = [_build_block(k, water_clarity, fish_depth_ft) for k in first_keys_unique]
-    second_choice = [_build_block(k, water_clarity, fish_depth_ft) for k in second_keys_unique]
+    # --- Tackle-box inventory: annotate + surface what you actually have --------
+    # This never adds/removes/reorders-by-situation which lures are recommended -
+    # season/structure/pressure/forage/depth above already decided that. It only
+    # tags each resulting block with any matching inventory you own (category
+    # field on data/lure_inventory.csv rows, see core.lure_inventory), then, only
+    # when inventory was passed in, stable-sorts each tier so owned lures bubble
+    # to the top ("best options you have") while unowned ones stay in the list
+    # right behind them as pick-up suggestions.
+    owned_by_category = _group_owned_by_category(inventory)
+
+    first_choice = [
+        _build_block(k, water_clarity, fish_depth_ft, owned_items=owned_by_category.get(k))
+        for k in first_keys_unique
+    ]
+    second_choice = [
+        _build_block(k, water_clarity, fish_depth_ft, owned_items=owned_by_category.get(k))
+        for k in second_keys_unique
+    ]
+
+    if owned_by_category:
+        first_choice.sort(key=lambda b: not b.owned)
+        second_choice.sort(key=lambda b: not b.owned)
 
     return LureRecommendation(first_choice=first_choice, second_choice=second_choice, rationale=rationale)
+
+
+# (key, display name) pairs for every lure category the recommendation engine
+# knows about - used by the Lure Inventory page to let you tag/re-tag each
+# tackle item with the category it matches here, so ownership can be matched
+# up against the forecast's lure suggestions.
+LURE_CATEGORY_OPTIONS = [(key, profile["name"]) for key, profile in LURE_PROFILES.items()]

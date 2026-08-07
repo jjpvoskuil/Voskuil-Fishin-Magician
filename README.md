@@ -60,16 +60,24 @@ key decisions, and known open items.
   oxygen-depleted to hold active bass). See "Data sources" below for how the estimate
   is built.
 - **Forage selector** - pick which baitfish/prey are actually available (Gizzard Shad
-  and Bluegill/Sunfish are pre-checked as documented Nolin forage; Crawfish and
-  Shiners/Minnows are optional add-ons). Nudges lure color/pattern choice toward what
-  the bass are actually keyed on, and makes sure at least one forage-matched lure
-  shows up in the recommendation.
+  and Bluegill/Sunfish are pre-checked as documented Nolin forage; Threadfin Shad,
+  Crawfish, Shiners/Minnows, and Stonerollers are optional add-ons). Nudges lure
+  color/pattern choice toward what the bass are actually keyed on, and makes sure at
+  least one forage-matched lure shows up in the recommendation.
 - **Trip logging** - record what actually happened (lures, catches, water conditions,
   forage seen) so the model can calibrate its weights against your own results over time.
-- **Lure inventory** - your tackle box, tracked: brand, full description, a photo, the
-  last price paid, and how many you have on hand. Seeded from a Cabela's order history
-  import; add more any time by typing them in or by uploading/taking a photo. See
-  "Lure inventory" below for details.
+- **Lure inventory** - your tackle box, tracked: brand, full description, a category
+  (matching it to one of the forecast engine's lure types), a photo, the last price
+  paid, and how many you have on hand. Seeded from a Cabela's order history import; add
+  more any time by typing them in or by uploading/taking a photo. See "Lure inventory"
+  below for details.
+- **Inventory-aware lure suggestions** - the 7-Day Forecast and Lake Map pages check
+  every recommended lure against your tackle inventory: lures you already own are
+  flagged (✅ "In your tackle box", with the specific brand/description/quantity) and
+  sorted to the top of each choice tier, while ones you don't have yet stay in the list
+  underneath as pick-up suggestions (🛒). Nothing is added or hidden based on ownership -
+  the season/structure/pressure/forage logic still decides what's recommended; ownership
+  only decides what's flagged and what floats to the top.
 
 ## How the model works (and its limits)
 
@@ -169,9 +177,10 @@ lure/color/technique rule table.
   month-by-month default - override it any time with your own reading.
 - Forage base (`core/lures.py`'s `FORAGE_OPTIONS`): gizzard shad and bluegill are
   explicitly documented as Nolin forage in Kentucky Afield Outdoors coverage of the
-  lake's bass fishery; crawfish and shiners/minnows are near-universal secondary forage
-  in Kentucky hill-land reservoirs (craw-pattern jig/worm colors are standard advice
-  for this lake type) offered as optional add-ons.
+  lake's bass fishery; threadfin shad, crawfish, shiners/minnows, and stonerollers are
+  near-universal secondary/alternate forage in Kentucky hill-land reservoirs (craw-pattern
+  jig/worm colors are standard advice for this lake type) offered as optional add-ons,
+  since they aren't specifically documented for Nolin the way gizzard shad/bluegill are.
 
 ## Trip logging & calibration
 
@@ -188,10 +197,11 @@ History** page in the app for calibration status.
 
 ## Lure inventory
 
-The **Lure Inventory** page (`pages/5_Lure_Inventory.py`) is a simple tackle-box tracker,
-independent of the forecast/recommendation engine (`core/lures.py`). For each lure it
-shows brand, full product description, a photo, the last price paid, and current
-quantity on hand. Two ways items get in:
+The **Lure Inventory** page (`pages/5_Lure_Inventory.py`) is a tackle-box tracker that
+also feeds the forecast/recommendation engine (`core/lures.py`) - the two stay loosely
+coupled through a single `category` field rather than sharing internals. For each lure
+it shows brand, full product description, a category, a photo, the last price paid, and
+current quantity on hand. Two ways items get in:
 
 - **Order-history / cart import** - the initial set was seeded from a Cabela's order
   (order #W283763341), and two further batches were pulled from the items sitting in
@@ -204,14 +214,45 @@ quantity on hand. Two ways items get in:
   copy of it. Two SKUs (1784868, 3243224) appear in both the original order and the
   first cart batch; they're kept as separate rows rather than merged, consistent with
   how repeat items within a single order are already handled.
-- **Manual entry** - add a lure any time with brand, description, price, and quantity,
-  and optionally attach a photo you upload or take right there with your camera. These
-  photos are yours, so they're stored under `data/lure_images/` and committed to the
-  repo like any other user data.
+- **Manual entry** - add a lure any time with brand, description, price, quantity, and
+  category, and optionally attach a photo you upload or take right there with your
+  camera. These photos are yours, so they're stored under `data/lure_images/` and
+  committed to the repo like any other user data.
 
-Quantity and price can be edited (or the item deleted) from each card. Like trip logs,
-inventory changes are committed and pushed back to GitHub when a `GITHUB_TOKEN` is
-configured, so they survive Streamlit Cloud restarts.
+**Category** is what links a tackle item to the forecast engine's lure suggestions - it's
+one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
+Crankbait, Wacky-Rigged Senko, and so on), picked from a dropdown when you add or edit an
+item. The 40 items imported from Cabela's were auto-tagged with a best-guess category
+based on the product name; spot-check them (search/filter by category on this page) and
+correct anything that looks off - a wrong category just means that item won't get
+matched to the right forecast suggestion, not a real error. Items left "Not categorized /
+other" simply don't participate in the ownership matching described below.
+
+Quantity, price, and category can be edited (or the item deleted) from each card. Like
+trip logs, inventory changes are committed and pushed back to GitHub when a
+`GITHUB_TOKEN` is configured, so they survive Streamlit Cloud restarts.
+
+### How inventory feeds the forecast
+
+`core.lures.recommend()` takes an optional `inventory` argument (the same rows this page
+reads/writes) and, for each lure it would otherwise recommend, checks whether any
+in-hand item (quantity > 0) shares that lure's category. If so, the block is flagged
+✅ **"In your tackle box"** with the specific brand/description/quantity, and that block
+is stable-sorted to the front of its choice tier (first choice or second choice) - so the
+best options you actually own surface first. Lures you don't have are left in place
+tagged 🛒 as still-worth-trying suggestions. This only reorders and annotates; it never
+adds, removes, or changes *which* lures a given day/segment/structure/forage combination
+recommends - that's still entirely the season/structure/pressure/forage logic described
+above.
+
+One addition specifically for this: a **Medium-Diving Crankbait** lure type (6-12 ft,
+e.g. Strike King 3XD, Rapala DT-8) was added to `core/lures.py` alongside the existing
+Squarebill/Lipless/Deep-Diving crankbait types, since several inventory items are exactly
+that depth class and neither existing crankbait profile fit them accurately. It's not
+part of any season's default picks, but when your sonar reading (Lake Setup Options
+sidebar) falls in its 6-12 ft zone, it swaps in for whichever shallower/deeper crankbait
+the season pattern would otherwise have suggested - a depth-accuracy improvement on its
+own, and also what lets an owned medium-diving crank actually get surfaced.
 
 ## Running locally
 
@@ -239,17 +280,18 @@ pages/
   2_Lake_Map.py          Click-to-recommend map
   3_Log_a_Trip.py        Trip logging form
   4_Trip_History.py      Logged trips + calibration status
-  5_Lure_Inventory.py    Tackle inventory (brand/description/photo/price/qty)
+  5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
 core/
   astro.py               Moon phase + solunar rise/transit/set
   weather.py              Open-Meteo integration + water-temp estimate
   scoring.py              1-10 activity scoring engine
-  lures.py                Lure/color/technique rule engine
+  lures.py                Lure/color/technique rule engine + tackle-inventory ownership matching
   spots.py                Lake map data + figure builder
   storage.py              Trip log read/write + git commit-back (generic - reused by
                            lure_inventory.py too)
   calibration.py          Weight calibration from logged trips
-  lure_inventory.py       Tackle inventory read/write + photo storage
+  lure_inventory.py       Tackle inventory read/write + photo storage (category field
+                           links each item to a core.lures lure type)
   bathymetry.py            Modeled depth grid + historic-topo + real-data blending
   historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps
   survey_points.py         Loads the angler's own Quickdraw CSV exports
@@ -264,7 +306,8 @@ data/
   nolin_fish_attractors.csv Real fish attractors placed by KY Fish & Wildlife (KDFWR)
   nolin_shoreline.geojson Real lake shoreline, digitized from 1966 post-dam USGS topo sheets
   trip_log.csv            Logged trips (grows over time)
-  lure_inventory.csv      Tackle inventory (grows over time)
+  lure_inventory.csv      Tackle inventory (grows over time; category column links
+                           each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
 tests/                    pytest unit tests for astro/scoring/lures/inventory
 ```

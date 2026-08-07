@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import date
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots
+from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar
@@ -12,12 +12,19 @@ st.title("📅 7-Day Largemouth Bass Forecast")
 weights, n_trips = get_calibrated_weights()
 bundle = get_weather_bundle(7)
 week = score_week(bundle, date.today(), 7, weights=weights)
+inventory = get_inventory()
 
 st.caption(
     "Scores are 1 (least active) to 10 (most active), built from pressure trend, moon phase, "
     "solunar windows, cloud cover, wind, and season. " +
     (f"Calibrated using {n_trips} logged trips." if n_trips else "Using default weights - log trips to calibrate.")
 )
+if inventory:
+    st.caption(
+        "🧰 Lure blocks below are checked against your Lure Inventory - ones you already own are "
+        "flagged and bubble to the top of each list; the rest are still shown as suggestions worth "
+        "picking up."
+    )
 
 cols = st.columns(7)
 for col, day in zip(cols, week):
@@ -70,7 +77,7 @@ for day in week:
         for seg in day.segments:
             rec = recommend(eff_season, eff_water_temp, seg.name, day.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
-                             thermocline_ft=lake_setup.thermocline_ft)
+                             thermocline_ft=lake_setup.thermocline_ft, inventory=inventory)
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),
