@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import date, timedelta
+from datetime import timedelta
 from streamlit_folium import st_folium
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory
@@ -12,6 +12,7 @@ from core.survey_points import survey_point_count, survey_file_count
 from core.historic_bathymetry import historic_point_count
 from core.cover import get_cover_at, cover_cell_count
 from core.fish_attractors import fish_attractor_count
+from core.weather import lake_today
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
 st.title("🗺️ Nolin Lake Map")
@@ -118,7 +119,7 @@ with col_detail:
     clarity = lake_setup.water_clarity
 
     picked_date = st.selectbox(
-        "Date", [date.today() + timedelta(days=i) for i in range(7)],
+        "Date", [lake_today() + timedelta(days=i) for i in range(7)],
         format_func=lambda d: d.strftime("%A, %B %d"),
     )
 

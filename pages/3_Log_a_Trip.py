@@ -1,11 +1,12 @@
 import streamlit as st
-from datetime import date, timedelta
+from datetime import timedelta
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, github_token, repo_slug
 from core.scoring import score_day
 from core.lures import WATER_CLARITY_OPTIONS, STRUCTURE_TYPES, FORAGE_OPTIONS, DEFAULT_FORAGE
 from core.thermocline import estimate_thermocline_band_ft
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push
+from core.weather import lake_today
 
 st.set_page_config(page_title="Log a Trip - Nolin Lake", page_icon="📝", layout="centered")
 st.title("📝 Log a Trip")
@@ -20,9 +21,10 @@ weights, _ = get_calibrated_weights()
 bundle = get_weather_bundle(7)
 
 with st.form("log_trip_form"):
-    trip_date = st.date_input("Trip date", value=date.today(),
-                               min_value=date.today() - timedelta(days=6),
-                               max_value=date.today() + timedelta(days=6))
+    today = lake_today()
+    trip_date = st.date_input("Trip date", value=today,
+                               min_value=today - timedelta(days=6),
+                               max_value=today + timedelta(days=6))
     segment = st.selectbox("Time of day fished", ["Dawn", "Morning", "Midday", "Afternoon", "Dusk", "Night"])
     spot_choice = st.selectbox("Spot fished", spots, format_func=lambda s: s["name"])
     structure_type = st.selectbox("Structure type", STRUCTURE_TYPES,

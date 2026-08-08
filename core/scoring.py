@@ -268,4 +268,19 @@ def score_day(
 
 
 def score_week(bundle: WeatherBundle, start: date, days: int = 7, weights: dict = None):
-    return [score_day(bundle, start + timedelta(days=i), weights=weights) for i in range(days)]
+    """Score each day in [start, start+days). Skips (rather than raising for)
+    any individual day the weather bundle doesn't cover, instead of letting
+    score_day's ValueError abort the whole week - e.g. a cached bundle that
+    briefly lags one day behind right at the lake's local-day rollover would
+    otherwise take down the entire page for a day it does have data for, just
+    because a later day in the requested range is momentarily missing.
+    Callers should check len(result) against `days` and let the user know if
+    it came back short."""
+    results = []
+    for i in range(days):
+        d = start + timedelta(days=i)
+        try:
+            results.append(score_day(bundle, d, weights=weights))
+        except ValueError:
+            continue
+    return results
