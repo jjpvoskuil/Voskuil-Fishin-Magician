@@ -1,18 +1,31 @@
 import streamlit as st
-from datetime import date
 
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar
+from core.weather import lake_today
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 st.title("📅 7-Day Largemouth Bass Forecast")
 
+today = lake_today()
 weights, n_trips = get_calibrated_weights()
 bundle = get_weather_bundle(7)
-week = score_week(bundle, date.today(), 7, weights=weights)
+week = score_week(bundle, today, 7, weights=weights)
 inventory = get_inventory()
+
+if not week:
+    st.error(
+        "No forecast days are available right now - the weather data may not have refreshed yet. "
+        "Try refreshing this page in a moment."
+    )
+    st.stop()
+if len(week) < 7:
+    st.warning(
+        f"Only {len(week)} of 7 days had weather data available just now (usually a brief gap right "
+        "at the forecast window's edge) - showing what's available. Refresh in a bit for the full week."
+    )
 
 st.caption(
     "Scores are 1 (least active) to 10 (most active), built from pressure trend, moon phase, "
@@ -26,7 +39,7 @@ if inventory:
         "picking up."
     )
 
-cols = st.columns(7)
+cols = st.columns(len(week))
 for col, day in zip(cols, week):
     with col:
         st.metric(day.the_date.strftime("%a %m/%d"), f"{day.overall_score}/10")
@@ -39,7 +52,7 @@ structure = lake_setup.structure_type
 
 for day in week:
     with st.expander(f"{day.the_date.strftime('%A, %B %d')} - overall {day.overall_score}/10 | "
-                      f"{day.season.replace('_', ' ').title()} | {day.moon.name}", expanded=(day.the_date == date.today())):
+                      f"{day.season.replace('_', ' ').title()} | {day.moon.name}", expanded=(day.the_date == today)):
 
         c1, c2 = st.columns([2, 1])
         with c1:

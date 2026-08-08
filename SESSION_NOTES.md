@@ -470,6 +470,43 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     columns, each captioned brand + description) per lure block, with a "+N more" note
     if a category has more owned items than that. No inventory/forecast-matching logic
     changed - this is purely a rendering addition on top of entry 21's `owned_items`.
+23. **Fix: 7-Day Forecast crashing with "No weather data available for {d}"** - the user
+    hit a hard crash (full-page Streamlit traceback, not a graceful in-app error) on the
+    live deployed app. Root cause: every page computed "today" with a plain
+    `date.today()`, which returns the *server's* local date - Streamlit Community Cloud
+    runs its containers on UTC, while Nolin Lake is America/Chicago (UTC-5/-6). For
+    roughly 5-6 hours every day (right around UTC midnight), the server's `date.today()`
+    is already "tomorrow" relative to Chicago. Meanwhile `core/weather.py`'s
+    `fetch_forecast()` asks Open-Meteo for `forecast_days=7` starting from the lake's own
+    calendar day (`timezone=LAKE_TZ`), so during that window `pages/1_7_Day_Forecast.py`'s
+    `score_week(bundle, date.today(), 7, ...)` was asking for one day past the last day
+    Open-Meteo actually returned - `core/scoring.py`'s `score_day()` correctly raises
+    `ValueError("No weather data available for {d}")` for that day, but nothing on that
+    page (or `app.py`'s landing page) caught it, so the whole page crashed instead of
+    degrading gracefully the way `pages/2_Lake_Map.py` already did (it wraps its
+    `score_day()` call in `try/except ValueError` -> `st.error()`).
+
+    Fix, two parts: (1) added `core.weather.lake_today()` (`datetime.now(ZoneInfo(
+    "America/Chicago")).date()`) and replaced every "what's today at the lake" use of
+    `date.today()` with it - `app.py`, both date pickers on `pages/1_7_Day_Forecast.py`
+    and `pages/2_Lake_Map.py`, `pages/3_Log_a_Trip.py`'s trip-date bounds, and
+    `core/ui.py`'s thermocline-default calls. Added `tzdata` to `requirements.txt` since
+    some minimal Linux images (including, per this bug, whatever Streamlit Community
+    Cloud's build uses) don't ship a system IANA tzdata database that `zoneinfo` can find
+    on its own - the PyPI `tzdata` package makes `zoneinfo` resolve reliably regardless of
+    the underlying OS. (2) Independent of the tz root cause, made the failure mode
+    non-fatal: `score_week()` now skips (rather than raising for) any individual day
+    outside the bundle's coverage, returning whatever days *are* available instead of
+    aborting the whole list - covers this same symptom from any other cause too (a
+    transient Open-Meteo gap, `get_weather_bundle`'s 1-hour cache TTL still holding a
+    bundle fetched just before the lake's local-day rollover, etc.). `app.py` now catches
+    `ValueError` around its single `score_day()` call with a friendly `st.warning()`
+    instead of the misleading "Couldn't fetch weather data" message its outer
+    `try/except Exception` was giving it (which implied the *fetch* failed, when really
+    the fetch succeeded and only the date was wrong). `pages/1_7_Day_Forecast.py` now
+    checks `len(week)` and shows `st.error()` + `st.stop()` if it's empty, or a
+    `st.warning()` noting how many of 7 days came back if it's partial, rather than
+    crashing on `week[0]` or silently rendering a shorter week with no explanation.
 
 ## Key design decisions & rationale
 

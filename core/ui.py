@@ -2,7 +2,6 @@
 identical on the 7-Day Forecast page and the Lake Map page."""
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import date
 import streamlit as st
 
 from .lures import (
@@ -11,6 +10,7 @@ from .lures import (
 )
 from .lure_inventory import resolve_image_source
 from .thermocline import estimate_thermocline_ft, default_thermocline_input_ft
+from .weather import lake_today
 
 MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
 
@@ -137,10 +137,10 @@ def render_lake_setup_sidebar(
             min_value=0.0, max_value=100.0, value=default_fish_depth_ft, step=1.0, key="lso_fish_depth",
         )
 
-        modeled_estimate = estimate_thermocline_ft(date.today())
+        modeled_estimate = estimate_thermocline_ft(lake_today())
         thermocline_ft = st.number_input(
             "Thermocline depth (ft)",
-            min_value=0.0, max_value=100.0, value=default_thermocline_input_ft(date.today()),
+            min_value=0.0, max_value=100.0, value=default_thermocline_input_ft(lake_today()),
             step=1.0, key="lso_thermocline",
             help="Where warm, oxygenated water gives way to cold, low-oxygen water below - read it off a "
                  "temp/DO probe if you have one. Pre-filled with a seasonal estimate otherwise.",

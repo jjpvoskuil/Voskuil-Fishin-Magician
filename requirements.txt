@@ -9,6 +9,10 @@ streamlit>=1.36
 # Verified working combo: streamlit==1.61.0 + starlette==1.3.1.
 starlette<1.4.0
 requests>=2.31
+# Ensures zoneinfo (core/weather.py's lake_today()) can resolve "America/Chicago"
+# even on minimal Linux images that don't ship a system tzdata database - some
+# Streamlit Community Cloud build images don't.
+tzdata
 pandas>=2.0
 folium>=0.16
 streamlit-folium>=0.22

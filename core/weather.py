@@ -9,6 +9,7 @@ Lake's approximate center point.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import requests
 
 # Approx center of Nolin River Lake at summer pool, KY (near the dam / main basin)
@@ -16,6 +17,7 @@ LAKE_LAT = 37.2783
 LAKE_LON = -86.2475
 LAKE_TZ = "America/Chicago"  # Nolin Lake, KY is in the Central time zone
 LAKE_TZ_UTC_OFFSET_HOURS = -5  # CDT (summer); adjust to -6 for CST if needed
+LAKE_ZONEINFO = ZoneInfo(LAKE_TZ)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -41,6 +43,20 @@ class WeatherBundle:
     hourly: dict  # raw Open-Meteo hourly dict (parallel lists)
     daily: dict   # raw Open-Meteo daily dict (parallel lists)
     fetched_at: datetime = field(default_factory=datetime.utcnow)
+
+
+def lake_today() -> date:
+    """Today's calendar date AT THE LAKE (America/Chicago), not the server's
+    local date. Streamlit Community Cloud runs its server clock on UTC, and
+    a plain `date.today()` there is already "tomorrow" (relative to Chicago)
+    for roughly 5-6 hours every day, right around UTC midnight - since
+    Chicago is UTC-5/-6. fetch_forecast() requests forecast_days starting
+    from the lake's own calendar day (timezone=LAKE_TZ), so scoring code
+    that used a server-local date.today() as the start of that same window
+    could ask for one day past the last day Open-Meteo actually returned,
+    raising "No weather data available" for that last day. Use this instead
+    of date.today() anywhere "today at the lake" is meant."""
+    return datetime.now(LAKE_ZONEINFO).date()
 
 
 def fetch_forecast(days: int = 7, lat: float = LAKE_LAT, lon: float = LAKE_LON) -> WeatherBundle:

@@ -48,3 +48,34 @@ def test_score_day_raises_outside_window():
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def _bundle_with_partial_daily_coverage(full_days=9, daily_days=5):
+    # Same hourly shape as _fake_bundle, but daily/sunrise/sunset only cover
+    # the first `daily_days` days - simulates a cached weather bundle that's
+    # briefly a day (or more) short at the tail of the requested window (e.g.
+    # right at the lake's local-day rollover, or an Open-Meteo hiccup).
+    today = date.today()
+    bundle = _fake_bundle(days=full_days)
+    bundle.daily = {
+        "time": [(today + timedelta(days=i)).isoformat() for i in range(daily_days)],
+        "sunrise": [(datetime(today.year, today.month, today.day) + timedelta(days=i, hours=6, minutes=20)).isoformat() for i in range(daily_days)],
+        "sunset": [(datetime(today.year, today.month, today.day) + timedelta(days=i, hours=20, minutes=15)).isoformat() for i in range(daily_days)],
+        "temperature_2m_max": [90] * daily_days,
+        "temperature_2m_min": [72] * daily_days,
+    }
+    return bundle
+
+
+def test_score_week_skips_days_missing_from_the_bundle_instead_of_raising():
+    bundle = _bundle_with_partial_daily_coverage(daily_days=5)
+    week = score_week(bundle, date.today(), 7)
+    assert len(week) == 5
+    for day in week:
+        assert 1 <= day.overall_score <= 10
+
+
+def test_score_week_returns_empty_list_when_nothing_is_available():
+    bundle = _bundle_with_partial_daily_coverage(daily_days=0)
+    week = score_week(bundle, date.today(), 7)
+    assert week == []
