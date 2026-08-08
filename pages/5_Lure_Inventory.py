@@ -4,11 +4,13 @@ import streamlit as st
 
 from core.appstate import get_inventory, github_token, repo_slug
 from core.lure_inventory import (
-    IMAGES_DIR, INVENTORY_PATH, LureItem, append_item, delete_item, resolve_image_source,
-    save_image, update_item,
+    IMAGES_DIR, INVENTORY_PATH, LureItem, append_item, delete_item, save_image, update_item,
 )
 from core.lures import LURE_CATEGORY_OPTIONS
 from core.storage import commit_and_push
+from core.ui import render_square_thumbnail
+
+CARD_THUMBNAIL_PX = 160
 
 st.set_page_config(page_title="Lure Inventory - Nolin Lake", page_icon="🧰", layout="wide")
 st.title("🧰 Lure Inventory")
@@ -130,10 +132,7 @@ else:
         for col, row in zip(cols, row_items):
             with col:
                 with st.container(border=True):
-                    img_src = resolve_image_source(row)
-                    if img_src:
-                        st.image(img_src, width='stretch')
-                    else:
+                    if not render_square_thumbnail(row, size_px=CARD_THUMBNAIL_PX):
                         st.caption("No photo yet")
 
                     st.markdown(f"**{row['brand']}**")

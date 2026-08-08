@@ -1,5 +1,6 @@
 from core.lure_inventory import (
-    LureItem, append_item, delete_item, read_all_items, resolve_image_source, save_image, update_item,
+    LureItem, append_item, delete_item, image_data_uri_or_url, read_all_items,
+    resolve_image_source, save_image, update_item,
 )
 
 
@@ -130,3 +131,28 @@ def test_resolve_image_source_none_when_no_photo(tmp_path):
     images_dir = tmp_path / "images"
     item = {"image_filename": "", "image_url": ""}
     assert resolve_image_source(item, images_dir) is None
+
+
+def test_image_data_uri_or_url_passes_through_remote_urls_unchanged():
+    url = "https://example.com/product.jpg"
+    assert image_data_uri_or_url(url) == url
+
+
+def test_image_data_uri_or_url_encodes_local_file_as_data_uri(tmp_path):
+    images_dir = tmp_path / "images"
+    filename = save_image("abc", b"\x89PNG-fake-bytes", "png", images_dir)
+    local_path = str(images_dir / filename)
+    result = image_data_uri_or_url(local_path)
+    assert result.startswith("data:image/png;base64,")
+    import base64
+    encoded_part = result.split(",", 1)[1]
+    assert base64.b64decode(encoded_part) == b"\x89PNG-fake-bytes"
+
+
+def test_image_data_uri_or_url_none_for_missing_local_file(tmp_path):
+    assert image_data_uri_or_url(str(tmp_path / "nope.jpg")) is None
+
+
+def test_image_data_uri_or_url_none_for_empty_input():
+    assert image_data_uri_or_url("") is None
+    assert image_data_uri_or_url(None) is None
