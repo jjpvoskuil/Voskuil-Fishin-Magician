@@ -31,6 +31,7 @@ core.lures._group_owned_by_category(). Blank/unrecognized values just mean
 "not matched to a forecast category," not an error.
 """
 from __future__ import annotations
+import base64
 import csv
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
@@ -148,3 +149,32 @@ def resolve_image_source(item: dict, images_dir: Path = IMAGES_DIR) -> Optional[
         if path.exists():
             return str(path)
     return item.get("image_url") or None
+
+
+_MIME_BY_EXTENSION = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "webp": "webp"}
+
+
+def image_data_uri_or_url(image_source: Optional[str]) -> Optional[str]:
+    """Turn whatever resolve_image_source() returned into something directly
+    usable as an HTML <img> tag's src attribute (core.ui's fixed-size square
+    thumbnail rendering needs raw HTML/CSS to crop-and-fit consistently,
+    since st.image() has no crop-to-square option). A remote vendor URL is
+    passed through unchanged - the browser fetches it itself, exactly like
+    st.image() would, so this never adds a new server-side network call. A
+    local file path can't be reached by the browser directly (it only knows
+    the Streamlit server's rendered page, not its filesystem), so it's
+    base64-encoded into an inline `data:` URI instead - still just reading
+    bytes we already have on disk, no extra network or image-processing
+    dependency. Returns None for a falsy/missing source or an unreadable
+    local file."""
+    if not image_source:
+        return None
+    if image_source.startswith("http://") or image_source.startswith("https://"):
+        return image_source
+    path = Path(image_source)
+    if not path.exists() or not path.is_file():
+        return None
+    extension = path.suffix.lstrip(".").lower()
+    mime = _MIME_BY_EXTENSION.get(extension, "jpeg")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/{mime};base64,{encoded}"

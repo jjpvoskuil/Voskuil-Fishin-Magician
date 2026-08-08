@@ -507,6 +507,35 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     checks `len(week)` and shows `st.error()` + `st.stop()` if it's empty, or a
     `st.warning()` noting how many of 7 days came back if it's partial, rather than
     crashing on `week[0]` or silently rendering a shorter week with no explanation.
+24. **Smaller, consistently-sized, crisper lure photos** - the user asked for the lure
+    images (owned-lure thumbnails on the forecast pages, entry 21/22, and the Lure
+    Inventory grid) to be smaller, uniform in size, and less blurry. Root cause of all
+    three complaints: `st.image(src, width='stretch')` scales an image to fill its
+    entire column - stretching/upscaling a modest-resolution vendor photo past its real
+    resolution (blurry), and leaving every thumbnail a different height, since only the
+    width is controlled and height just follows whatever the source photo's own aspect
+    ratio happens to be (inconsistent sizing). `st.image()` has no built-in crop-to-square
+    option to fix that.
+
+    Fix: added `core.lure_inventory.image_data_uri_or_url()` (turns whatever
+    `resolve_image_source()` returned into something an `<img>` tag's `src` can point
+    at directly - a remote vendor URL passes through unchanged, still fetched
+    client-side by the browser exactly as before, no new server-side network call; a
+    local user-uploaded photo gets base64-encoded into an inline `data:` URI, since the
+    browser can't reach the Streamlit server's filesystem path directly) and
+    `core.ui.render_square_thumbnail()` (renders that as a fixed-size `<div>` with
+    `object-fit: cover` via `st.markdown(..., unsafe_allow_html=True)` - crops to a
+    perfect square at a size the caller picks, regardless of the source photo's
+    resolution/aspect ratio). Deliberately did NOT reach for Pillow/`requests`-based
+    server-side image downloading+cropping - the CSS approach gets the same visual
+    result (fixed square, no upscale-blur) with strictly less surface area: no new
+    dependency, no new network call, and no cache-invalidation-on-file-change edge case
+    to think about.
+
+    Replaced both call sites: `core/ui.py`'s `render_lure_block()` (owned-lure
+    thumbnails, now 64px, still capped at `MAX_OWNED_THUMBNAILS`) and
+    `pages/5_Lure_Inventory.py`'s inventory grid (now 160px). Neither page calls
+    `st.image()` for lure photos anymore.
 
 ## Key design decisions & rationale
 

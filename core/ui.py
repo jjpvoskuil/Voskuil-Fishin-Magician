@@ -8,11 +8,40 @@ from .lures import (
     LureBlock, BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, STRUCTURE_TYPES,
     resolve_water_clarity, FORAGE_OPTIONS, DEFAULT_FORAGE,
 )
-from .lure_inventory import resolve_image_source
+from .lure_inventory import resolve_image_source, image_data_uri_or_url
 from .thermocline import estimate_thermocline_ft, default_thermocline_input_ft
 from .weather import lake_today
 
 MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
+OWNED_THUMBNAIL_PX = 64   # small on purpose - these are ownership flags, not the card's focus
+
+
+def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
+    """Render one inventory item's photo (if it has one) as a fixed-size,
+    center-cropped square via inline HTML/CSS (object-fit: cover). Returns
+    False (renders nothing) if the item has no usable photo, so callers can
+    fall back to a "no photo" caption.
+
+    st.image(..., width='stretch') - the previous approach - stretched every
+    photo to fill its full column width, which (a) blurs any photo whose
+    native resolution is smaller than that column (upscaling), and (b) left
+    each thumbnail a different height, since it just scales width and lets
+    height follow the source photo's own aspect ratio. Cropping to a fixed
+    square here fixes both: every thumbnail is the same size, and the
+    on-screen size no longer depends on the surrounding layout, so a modest,
+    consistently-sized image never gets stretched past its real resolution.
+    """
+    src = image_data_uri_or_url(resolve_image_source(item))
+    if not src:
+        return False
+    st.markdown(
+        f'<div style="width:{size_px}px;height:{size_px}px;overflow:hidden;'
+        f'border-radius:6px;margin:0 auto;background:#eee;">'
+        f'<img src="{src}" style="width:100%;height:100%;object-fit:cover;display:block;" />'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    return True
 
 
 def render_lure_block(block: LureBlock):
@@ -25,15 +54,14 @@ def render_lure_block(block: LureBlock):
             )
             st.success(f"✅ In your tackle box: {owned_desc}")
 
-            photos = [(it, resolve_image_source(it)) for it in block.owned_items]
-            photos = [(it, src) for it, src in photos if src]
+            photos = [it for it in block.owned_items if resolve_image_source(it)]
             if photos:
                 shown, extra = photos[:MAX_OWNED_THUMBNAILS], photos[MAX_OWNED_THUMBNAILS:]
                 cols = st.columns(len(shown))
-                for col, (it, src) in zip(cols, shown):
+                for col, it in zip(cols, shown):
                     with col:
-                        caption = f"{it['brand']} – {it['description']}"
-                        st.image(src, width='stretch', caption=caption[:60])
+                        render_square_thumbnail(it, size_px=OWNED_THUMBNAIL_PX)
+                        st.caption(f"{it['brand']} – {it['description']}"[:60])
                 if extra:
                     st.caption(f"+ {len(extra)} more owned item(s) in this category (see Lure Inventory for photos).")
         else:
