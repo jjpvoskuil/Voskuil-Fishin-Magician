@@ -199,3 +199,94 @@ def test_segment_time_ranges_covers_every_segment_with_a_real_bundle():
 def test_segment_time_ranges_degrades_gracefully_outside_coverage():
     bundle = _bundle_with_partial_daily_coverage(daily_days=0)
     assert segment_time_ranges(bundle, date.today()) is None
+
+
+# --- New "beyond pressure trend and moon phase" manual-only factors --------------
+
+def test_manual_segment_score_breakdown_starts_with_base_and_sums_to_raw_score():
+    result = manual_segment_score("Dawn", "summer_peak", 40, 7)
+    assert result.breakdown[0][0] == "Base"
+    assert result.breakdown[0][1] == 5.0
+    raw_total = sum(delta for _, delta, _ in result.breakdown)
+    # Nothing here should clamp, so the breakdown's own arithmetic should match the
+    # returned score exactly - this is the "how was this derived" tooltip's whole
+    # premise, so it needs to actually add up.
+    assert round(raw_total, 1) == result.score
+
+
+def test_manual_segment_score_water_temp_prime_band_gives_a_bonus():
+    cold = manual_segment_score("Dawn", "winter", 40, 7, water_temp_f=45.0)
+    prime = manual_segment_score("Dawn", "winter", 40, 7, water_temp_f=70.0)
+    extreme = manual_segment_score("Dawn", "winter", 40, 7, water_temp_f=90.0)
+    assert prime.score > cold.score
+    assert any(label == "Water temperature" for label, _, _ in prime.breakdown)
+    assert any(label == "Water temperature" and delta < 0 for label, delta, _ in cold.breakdown)
+    assert any(label == "Water temperature" and delta < 0 for label, delta, _ in extreme.breakdown)
+
+
+def test_manual_segment_score_water_temp_summer_stratified_band_is_neutral():
+    # 77-84F ("Summer Stratified") intentionally has no dedicated weight - it's
+    # already partially covered by the season_summer_midday_penalty factor.
+    result = manual_segment_score("Midday", "summer_peak", 40, 7, water_temp_f=80.0)
+    assert not any(label == "Water temperature" for label, _, _ in result.breakdown)
+
+
+def test_manual_segment_score_water_clarity_stained_bonus_and_muddy_penalty():
+    stained = manual_segment_score("Dawn", "summer_peak", 40, 7, water_clarity="Green stained")
+    muddy = manual_segment_score("Dawn", "summer_peak", 40, 7, water_clarity="Muddy")
+    clear = manual_segment_score("Dawn", "summer_peak", 40, 7, water_clarity="Clear")
+    assert stained.score > clear.score > muddy.score
+    assert not any(label == "Water clarity" for label, _, _ in clear.breakdown)
+
+
+def test_manual_segment_score_forage_present_gives_a_small_bonus():
+    seen = manual_segment_score("Dawn", "summer_peak", 40, 7, forage_present=True)
+    not_seen = manual_segment_score("Dawn", "summer_peak", 40, 7, forage_present=False)
+    neither = manual_segment_score("Dawn", "summer_peak", 40, 7)
+    assert seen.score > not_seen.score
+    assert not_seen.score == neither.score  # absence isn't scored as a penalty
+
+
+def test_manual_segment_score_without_the_new_extras_is_unaffected():
+    # None of the new manual-only factors should fire when the caller doesn't pass
+    # them, same as before they existed.
+    result = manual_segment_score("Dawn", "summer_peak", 40, 7)
+    labels = {label for label, _, _ in result.breakdown}
+    assert not labels & {"Water temperature", "Water clarity", "Forage"}
+
+
+def test_manual_segment_score_light_rain_gives_a_small_bonus_short_of_storm():
+    dry = manual_segment_score("Dawn", "summer_peak", 40, 7, total_precip_in=0.0, max_precip_prob_pct=0.0)
+    light_rain = manual_segment_score("Dawn", "summer_peak", 40, 7, total_precip_in=0.3, max_precip_prob_pct=40.0)
+    storm = manual_segment_score("Dawn", "summer_peak", 40, 7, total_precip_in=1.5, max_precip_prob_pct=95.0)
+    assert light_rain.score > dry.score
+    assert storm.score < dry.score
+    assert any(label == "Precipitation" for label, _, _ in light_rain.breakdown)
+
+
+def test_score_day_is_unaffected_by_the_new_manual_only_factors():
+    # score_day() never supplies water_temp_f/water_clarity/forage_present to
+    # _segment_score(), so none of those labels should ever show up in its
+    # per-segment breakdown - confirms the forecast-driven path's behavior really
+    # is untouched by this round of manual-only additions.
+    bundle = _fake_bundle()
+    day = score_day(bundle, date.today())
+    for seg in day.segments:
+        labels = {label for label, _, _ in seg.breakdown}
+        assert not labels & {"Water temperature", "Water clarity", "Forage"}
+        assert seg.breakdown[0] == ("Base", 5.0, "Starting point before any factors below.")
+
+
+def test_score_day_light_rain_bonus_is_a_shared_enhancement():
+    # Unlike the manual-only factors, light rain is meant to apply to BOTH paths -
+    # build a bundle with a burst of light (not stormy) rain and confirm at least
+    # one segment picks up the bonus.
+    bundle = _fake_bundle()
+    for i in range(len(bundle.hourly["precipitation"])):
+        bundle.hourly["precipitation"][i] = 0.02  # ~0.5in/day-ish, short of storm level
+        bundle.hourly["precipitation_probability"][i] = 40
+    day = score_day(bundle, date.today())
+    assert any(
+        any(label == "Precipitation" and delta > 0 for label, delta, _ in seg.breakdown)
+        for seg in day.segments
+    )
