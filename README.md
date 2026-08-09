@@ -15,24 +15,27 @@ key decisions, and known open items.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
   water color/clarity, structure type, and (when you provide it) the depth you're marking
   fish at.
-- **Zoomable lake map** of Nolin Lake, clipped to the real digitized shoreline - click
-  *anywhere* on the lake (not just preset spots) to get a location-specific
-  recommendation for any day/time in the forecast window. No numeric depth contour
-  lines are drawn (two attempts at modeling them from public data didn't hold up well
-  enough to trust). Instead, the primary layers are: real **pre-dam bottom cover**
-  (`data/nolin_cover.csv`) - every cell of the lake bottom classified as wooded (likely
-  standing timber), cleared (likely open bottom), or the original stream channel, read
-  directly off the same 1953/54 USGS topo sheets used elsewhere in this project - and
-  **346 real fish attractors** (`data/nolin_fish_attractors.csv`) GPS-placed by
-  Kentucky Fish & Wildlife (brush piles, Christmas trees, pallet stacks, plastic
-  structures, rock piles, reef balls) - the most authoritative point data in the app,
-  since it's a state agency's own placement records, not anything derived or modeled.
-  Other toggleable layers show where the (still-present, but de-emphasized) depth
-  model's anchor values come from: channel-model anchor points colored by source
-  (green = surveyed USGS benchmark, orange = read off historic topo contour lines,
-  gray = extrapolated), the small set of real digitized depth points from pre-dam USGS
-  topo sheets (blue dots, western coves), and the real shoreline outline itself (off
-  by default).
+- **Zoomable lake map** of Nolin Lake showing two things, always on, no layer
+  checkboxes to manage: **346 real fish attractors** (`data/nolin_fish_attractors.csv`)
+  GPS-placed by Kentucky Fish & Wildlife (brush piles, Christmas trees, pallet stacks,
+  plastic structures, rock piles, reef balls) - the most authoritative point data in
+  the app, since it's a state agency's own placement records, not anything derived or
+  modeled - and your own **saved spots** (see below). Earlier versions of this map also
+  drew a modeled pre-dam bottom-cover layer, channel-depth anchor points, historic-topo
+  depth points, and the real shoreline outline, all behind togglable checkboxes and an
+  explanatory dialog about where that data came from; all of that was removed in favor
+  of this simpler map.
+- **Personal spot catalog** - click anywhere on the Lake Map to drop a pin and record
+  what you know about that exact spot: a name you choose, the type of location (main-
+  lake point, flat, rock face/bluff, dock, creek channel/ledge, and more), what the
+  bottom is actually made of (rocky, gravel, mud/silt, weeds, standing timber,
+  brush/laydowns, stumps, and more - pick as many as apply), the depth of the main
+  area, the depth of the transition/drop-off nearby, how sharp that transition is
+  (high/medium/low grade), and free-form notes for anything else worth remembering.
+  Click an existing pin (or jump to it from the dropdown) to view or edit it. Spots are
+  stored in `data/lake_spots.csv` and, like the trip log and lure inventory, committed
+  back to GitHub when a `GITHUB_TOKEN` is configured so they survive Streamlit Cloud
+  restarts.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -71,7 +74,7 @@ key decisions, and known open items.
   paid, and how many you have on hand. Seeded from a Cabela's order history import; add
   more any time by typing them in or by uploading/taking a photo. See "Lure inventory"
   below for details.
-- **Inventory-aware lure suggestions** - the 7-Day Forecast and Lake Map pages check
+- **Inventory-aware lure suggestions** - the 7-Day Forecast page checks
   every recommended lure against your tackle inventory: lures you already own are
   flagged (✅ "In your tackle box", with the specific brand/description/quantity **and
   a photo thumbnail** of the owned item(s), up to 4 per lure block) and sorted to the
@@ -103,12 +106,13 @@ lure/color/technique rule table.
 - Water temperature: **estimated**, not measured (Nolin Lake has no live buoy feed) -
   blended from recent air temperature and a seasonal baseline curve. Always shown as an
   estimate in the UI.
-- Lake spot coordinates (`data/nolin_spots.json`): anchored to verified public sources
-  (USACE gauge location, Kentucky State Parks/GNIS coordinate, U.S. Census TIGER address
-  geocoding) with a few nearby fishing-relevant sub-spots offset from those anchors.
-  **These are planning approximations, not survey-grade positions.** If you have exact
-  waypoints from your own chartplotter/Navionics, edit that file to improve accuracy -
-  it's the single source of truth the map and lure engine read from.
+- Lake spot coordinates (`data/nolin_spots.json`): a handful of general reference spots
+  anchored to verified public sources (USACE gauge location, Kentucky State Parks/GNIS
+  coordinate, U.S. Census TIGER address geocoding), used on the Log a Trip page when
+  recording which general area of the lake a trip happened in. **These are planning
+  approximations, not survey-grade positions.** This is separate from your own
+  **saved spots** on the Lake Map page (`data/lake_spots.csv`, see above) - those are
+  exact pins you drop yourself, not this curated reference list.
 - Depth contours (`data/nolin_channel.json`, `core/bathymetry.py`): there is no free,
   downloadable full-lake bathymetric survey for Nolin Lake (checked USACE eHydro -
   navigation channels only - and USGS, which only has a partial 2016 water-quality
@@ -145,29 +149,25 @@ lure/color/technique rule table.
   Despite that shoreline fix, two attempts at deriving smooth numeric depth contours
   from this public data didn't produce results worth trusting - there's no actual
   bathymetric survey for Nolin Lake, and public sources can't support depth isolines
-  at the fidelity anglers need. The map no longer draws them. What the same source
-  data (the pre-dam 1953/54 USGS sheets) *can* support reliably is bottom-cover
-  classification, which only needs the color/symbol on the scan rather than precise
-  elevation: `core/cover.py` / `data/nolin_cover.csv` classifies every ~55m cell of the
-  real lake footprint as wooded (likely standing timber), cleared (likely open
-  bottom), or the original stream channel, and this is now the map's primary layer.
-  The depth model (`core/bathymetry.py`) still exists and still backs the "Modeled
-  depth" number and structure-type auto-suggestion on the Lake Map page - both are
-  explicitly labeled as a rough guess, not a chart.
+  at the fidelity anglers need. What the same source data (the pre-dam 1953/54 USGS
+  sheets) *can* support reliably is bottom-cover classification, which only needs the
+  color/symbol on the scan rather than precise elevation: `core/cover.py` /
+  `data/nolin_cover.csv` classifies every ~55m cell of the real lake footprint as
+  wooded (likely standing timber), cleared (likely open bottom), or the original
+  stream channel.
 
-  It's also designed to improve with your own real soundings: if you record Garmin
-  Quickdraw Contours, export them with [qdc-converter](https://github.com/interlark/qdc-converter)
-  (`.qdc`/`.qcc` -> CSV of lon/lat/depth) and drop the CSV into `data/quickdraw/` (see
-  that folder's README for the exact steps) - any number of files is fine, so you can
-  add more as you explore more of the lake. `core/survey_points.py` loads and
-  deduplicates every CSV there, and `core/bathymetry.py` blends the real readings into
-  the modeled grid: real data wins (inverse-distance weighted) within ~50m of where you
-  actually recorded it, fading smoothly back to the model beyond that, and can extend
-  the map into coves/arms the hand-modeled channel doesn't cover at all. The Lake Map
-  page's info box shows how many real and historic points are currently blended in.
-  Since it's your own recorded sonar data (not a scraped commercial chart), there's no
-  copyright issue using it directly - it plugs into the same real basemap (streets/
-  shoreline) the map already renders on, so it lines up automatically.
+  As of this modeled-depth/bottom-cover/channel-point/historic-point/shoreline layer
+  set, none of it is currently rendered on the Lake Map page - per user feedback, that
+  page was simplified down to just real fish attractors and your own saved spots (see
+  above), since the modeled/derived layers added complexity without anything
+  survey-grade to show for it. The modules and data (`core/bathymetry.py`,
+  `core/cover.py`, `core/historic_bathymetry.py`, `core/shoreline.py`,
+  `core/survey_points.py`) are still here, still tested, and still able to blend in
+  your own real Garmin Quickdraw Contour soundings (export with
+  [qdc-converter](https://github.com/interlark/qdc-converter), drop the CSV into
+  `data/quickdraw/`) - they're just not wired into the map's UI right now. Re-adding a
+  depth/cover layer to the map (behind an opt-in toggle, not the always-on checkboxes
+  it used to have) would be a deliberate follow-up, not something this round did.
 - Instructional videos (`core/videos.py`): a curated table of real, verified YouTube
   links per lure/technique. A couple of techniques without a confidently-verified direct
   link fall back to a live YouTube search link instead of a guessed URL.
@@ -303,7 +303,7 @@ streamlit run app.py
 app.py                  Landing page - today at a glance
 pages/
   1_7_Day_Forecast.py   Full week, drill into any day
-  2_Lake_Map.py          Click-to-recommend map
+  2_Lake_Map.py          Fish attractors + your own saved spots (click to add/edit)
   3_Log_a_Trip.py        Trip logging form
   4_Trip_History.py      Logged trips + calibration status
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
@@ -312,20 +312,25 @@ core/
   weather.py              Open-Meteo integration + water-temp estimate
   scoring.py              1-10 activity scoring engine
   lures.py                Lure/color/technique rule engine + tackle-inventory ownership matching
-  spots.py                Lake map data + figure builder
+  spots.py                Curated general reference spots (data/nolin_spots.json),
+                           used by the Log a Trip page
+  lake_map.py              Folium map builder - fish attractors + your saved spots
+  lake_spots.py             Your own saved-spot pins: read/write + git commit-back
   storage.py              Trip log read/write + git commit-back (generic - reused by
-                           lure_inventory.py too)
+                           lure_inventory.py and lake_spots.py too)
   calibration.py          Weight calibration from logged trips
   lure_inventory.py       Tackle inventory read/write + photo storage (category field
                            links each item to a core.lures lure type)
   bathymetry.py            Modeled depth grid + historic-topo + real-data blending
+                           (not currently rendered on the Lake Map page - see "Data sources")
   historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps
   survey_points.py         Loads the angler's own Quickdraw CSV exports
   shoreline.py              Real digitized lake shoreline + point-in-polygon clip mask
   cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
   fish_attractors.py        Loads real KY Fish & Wildlife fish attractor GPS data
 data/
-  nolin_spots.json        Named lake spots (edit to add your own waypoints)
+  nolin_spots.json        Curated general reference spots, used by Log a Trip
+  lake_spots.csv          Your own saved Lake Map pins (grows over time)
   nolin_channel.json      Modeled river-channel centerline anchoring the bathymetry
   historic_bathymetry.csv Depth points read from pre-dam USGS historical topo maps
   nolin_cover.csv         Pre-dam bottom-cover cells, read from the same USGS topo sheets
@@ -335,7 +340,7 @@ data/
   lure_inventory.csv      Tackle inventory (grows over time; category column links
                            each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
-tests/                    pytest unit tests for astro/scoring/lures/inventory
+tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots
 ```
 
 ## Disclaimers
