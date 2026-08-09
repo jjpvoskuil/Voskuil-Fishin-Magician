@@ -23,13 +23,19 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
+from .lures import STRUCTURE_TYPES
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPOTS_PATH = REPO_ROOT / "data" / "lake_spots.csv"
 
 # What kind of physical spot this is. Deliberately its own vocabulary,
 # separate from core.lures.STRUCTURE_TYPES (which describes fishing
-# situations for the day/segment recommendation engine) - this is a
-# personal spot catalog, not an input to that engine.
+# situations for the day/segment recommendation engine, and doesn't
+# distinguish e.g. a natural rock bluff from man-made riprap the way an
+# angler cataloging real spots would want to) - this is a personal spot
+# catalog first. LOCATION_TYPE_TO_STRUCTURE_TYPE below bridges the two
+# vocabularies for the one place that needs both: getting lure suggestions
+# for a specific saved spot (pages/6_Spot_Session.py).
 LOCATION_TYPES = [
     "Main-lake point",
     "Secondary / pocket point",
@@ -59,6 +65,31 @@ BOTTOM_STRUCTURE_OPTIONS = [
 # along a short stretch, while a gradual ("Low") taper spreads them out
 # over a wider area.
 TRANSITION_GRADE_OPTIONS = ["High (steep break)", "Medium", "Low (gradual taper)"]
+
+# Bridges a saved spot's location_type to the closest core.lures.STRUCTURE_TYPES
+# value, for the one place that needs it: pages/6_Spot_Session.py passes a
+# saved spot's structure into core.lures.recommend() to get lure suggestions
+# for that exact spot. Every LOCATION_TYPES value has an entry so lookups
+# never need a fallback default; several map to the same STRUCTURE_TYPES
+# value where the recommendation engine doesn't distinguish further (e.g.
+# both point types just mean "Main-lake point" to the lure engine).
+LOCATION_TYPE_TO_STRUCTURE_TYPE = {
+    "Main-lake point": "Main-lake point",
+    "Secondary / pocket point": "Main-lake point",
+    "Flat": "Flat",
+    "Creek channel / ledge": "Creek channel / ledge",
+    "Rock face / bluff": "Riprap / dam face",
+    "Riprap": "Riprap / dam face",
+    "Boat dock": "Boat dock",
+    "Bridge piling": "Bridge piling",
+    "Cove / pocket (shallow cover)": "Cove / pocket (shallow cover)",
+    "Standing timber": "Standing timber",
+    "Roadbed / old ford": "Flat",
+    "Other": "Main-lake point",
+}
+
+assert set(LOCATION_TYPE_TO_STRUCTURE_TYPE) == set(LOCATION_TYPES)
+assert set(LOCATION_TYPE_TO_STRUCTURE_TYPE.values()) <= set(STRUCTURE_TYPES)
 
 FIELDNAMES = [
     "spot_id", "added_at", "updated_at", "name", "lat", "lon",

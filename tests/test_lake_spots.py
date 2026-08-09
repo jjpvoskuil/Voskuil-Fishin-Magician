@@ -1,8 +1,9 @@
 from core.lake_spots import (
-    LakeSpot, LOCATION_TYPES, BOTTOM_STRUCTURE_OPTIONS, TRANSITION_GRADE_OPTIONS,
-    append_spot, delete_spot, nearest_spot_within, read_all_spots, split_bottom_structure,
-    update_spot,
+    LakeSpot, LOCATION_TYPES, LOCATION_TYPE_TO_STRUCTURE_TYPE, BOTTOM_STRUCTURE_OPTIONS,
+    TRANSITION_GRADE_OPTIONS, append_spot, delete_spot, nearest_spot_within, read_all_spots,
+    split_bottom_structure, update_spot,
 )
+from core.lures import STRUCTURE_TYPES
 
 
 def test_empty_spots_file_returns_empty_list(tmp_path):
@@ -122,3 +123,12 @@ def test_location_and_bottom_structure_option_lists_are_nonempty():
     assert len(LOCATION_TYPES) > 5
     assert len(BOTTOM_STRUCTURE_OPTIONS) > 5
     assert len(TRANSITION_GRADE_OPTIONS) == 3
+
+
+def test_every_location_type_maps_to_a_valid_structure_type():
+    # pages/6_Spot_Session.py relies on every LOCATION_TYPES value having an
+    # entry here (no fallback needed) so a saved spot's type always resolves
+    # to something core.lures.recommend() understands.
+    assert set(LOCATION_TYPE_TO_STRUCTURE_TYPE) == set(LOCATION_TYPES)
+    for structure_type in LOCATION_TYPE_TO_STRUCTURE_TYPE.values():
+        assert structure_type in STRUCTURE_TYPES

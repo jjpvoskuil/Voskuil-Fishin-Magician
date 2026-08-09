@@ -37,6 +37,16 @@ key decisions, and known open items.
   stored in `data/lake_spots.csv` and, like the trip log and lure inventory, committed
   back to GitHub when a `GITHUB_TOKEN` is configured so they survive Streamlit Cloud
   restarts.
+- **Spot Session page** - from any saved spot's detail panel on the Lake Map, click
+  "🎯 Fish this spot now" to open a page dedicated to that pin. Enter what you're
+  actually seeing on the water right now (water temp, visibility/Secchi depth + stain
+  color if it's in the ambiguous mid-range, wind, light condition, precipitation,
+  exact start time, and time-of-day window), and it scores that moment and calls the
+  same lure/color recommendation engine the 7-Day Forecast page uses - just fed by a
+  live reading instead of a forecast. A second form on the same page lets you log what
+  actually happened (lures, catches, notes), writing into the same shared trip log the
+  Log a Trip page uses. See "How the model works" below for the condition bands behind
+  this page's inputs.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -191,6 +201,13 @@ lure/color/technique rule table.
   near-universal secondary/alternate forage in Kentucky hill-land reservoirs (craw-pattern
   jig/worm colors are standard advice for this lake type) offered as optional add-ons,
   since they aren't specifically documented for Nolin the way gizzard shad/bluegill are.
+- On-the-water condition bands (`core/onwater.py`), used by the Spot Session page: light
+  conditions (lux-based - Night, Crepuscular/Dawn-Dusk, Overcast/Diffuse Day, Direct High
+  Sun), wind (mph - Glassy, Light Ripple, Moderate Chop/Action Trigger, Heavy/Turbulent),
+  water visibility (Secchi depth - Clear, Stained, Dirty/Muddy), and water temperature
+  (metabolic state - Cold/Lethargic, Pre-Spawn Transition, Peak Optimal Prime, Summer
+  Stratified, Extreme Thermal Load) - all supplied by the angler from general bass-biology
+  reference bands, not derived from a Nolin-specific source.
 
 ## Trip logging & calibration
 
@@ -308,15 +325,21 @@ pages/
   3_Log_a_Trip.py        Trip logging form
   4_Trip_History.py      Logged trips + calibration status
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
+  6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
 core/
   astro.py               Moon phase + solunar rise/transit/set
   weather.py              Open-Meteo integration + water-temp estimate
-  scoring.py              1-10 activity scoring engine
+  scoring.py              1-10 activity scoring engine (shared by the forecast and
+                           Spot Session pages via manual_segment_score())
+  onwater.py               On-the-water condition bands (light/wind/visibility/water
+                           temp/precipitation) used by the Spot Session page
   lures.py                Lure/color/technique rule engine + tackle-inventory ownership matching
   spots.py                Curated general reference spots (data/nolin_spots.json),
                            used by the Log a Trip page
   lake_map.py              Folium map builder - fish attractors + your saved spots
-  lake_spots.py             Your own saved-spot pins: read/write + git commit-back
+  lake_spots.py             Your own saved-spot pins: read/write + git commit-back;
+                           also bridges a spot's location type to the recommendation
+                           engine's structure-type vocabulary for Spot Session
   storage.py              Trip log read/write + git commit-back (generic - reused by
                            lure_inventory.py and lake_spots.py too)
   calibration.py          Weight calibration from logged trips
@@ -341,7 +364,7 @@ data/
   lure_inventory.csv      Tackle inventory (grows over time; category column links
                            each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
-tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots
+tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater
 ```
 
 ## Disclaimers

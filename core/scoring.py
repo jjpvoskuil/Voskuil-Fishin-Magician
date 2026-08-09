@@ -34,9 +34,22 @@ from .weather import (
     LAKE_LAT,
     LAKE_LON,
     LAKE_TZ_UTC_OFFSET_HOURS,
+    LAKE_ZONEINFO,
 )
 
 SEGMENTS = ["Dawn", "Morning", "Midday", "Afternoon", "Dusk", "Night"]
+
+
+def lake_now_naive() -> datetime:
+    """Current wall-clock time at the lake (America/Chicago) as a naive
+    datetime, matching the convention this module already uses internally -
+    score_day() passes naive local-time datetimes (not true UTC, despite
+    some parameter names) to astro.moon_phase()/pressure_trend_hpa_per_24h()
+    because the weather bundle's own hourly timestamps come back in the
+    lake's local timezone (Open-Meteo's `timezone=LAKE_TZ` request param),
+    not UTC. Used by manual_segment_score()/realtime_context_from_bundle()
+    so "right now" lines up with that same convention."""
+    return datetime.now(LAKE_ZONEINFO).replace(tzinfo=None)
 
 DEFAULT_WEIGHTS = {
     "pressure_falling": 2.5,
@@ -138,6 +151,74 @@ def _clamp(v, lo=1.0, hi=10.0):
     return max(lo, min(hi, v))
 
 
+def _segment_score(
+    name: str, p_trend: float, moon: "astro.MoonPhase", overlap: Optional[str],
+    avg_cloud: float, avg_wind: float, season: str, total_precip: float,
+    max_precip_prob: float, weights: dict,
+) -> tuple:
+    """The actual 1-10 scoring formula for one time-of-day segment, factored
+    out of score_day() so it can be driven either by real hourly/daily
+    weather-bundle data (score_day's normal path) or by conditions someone
+    reports by hand while standing at the water (core.scoring.
+    manual_segment_score(), used by the spot-specific "fish this spot now"
+    page) - both paths produce a score using the exact same weights/rules,
+    just from different sources for the same handful of inputs. Returns
+    (score, notes)."""
+    w = weights
+    score = 5.0
+    notes = []
+
+    # Pressure
+    if p_trend <= -1.5:
+        score += w["pressure_falling"]
+        notes.append("Falling pressure ahead of a front - bite often turns on.")
+    elif p_trend >= 2.0:
+        score += w["pressure_high_stable_post_front"]
+        notes.append("High, rising pressure post-front - expect a tougher, slower bite.")
+    elif 0.3 < p_trend < 2.0:
+        score += w["pressure_rising_slow"]
+
+    # Moon
+    if moon.is_new_or_full_window:
+        score += w["moon_new_full_bonus"]
+        notes.append(f"{moon.name} - near new/full moon, historically more active feeding.")
+
+    # Solunar overlay (segment-level)
+    if overlap == "major":
+        score += w["solunar_major_bonus"]
+        notes.append("Overlaps a solunar major period.")
+    elif overlap == "minor":
+        score += w["solunar_minor_bonus"]
+        notes.append("Overlaps a solunar minor period.")
+
+    # Cloud cover
+    if avg_cloud >= 60:
+        score += w["cloud_overcast_bonus"]
+        notes.append("Overcast skies - fish often roam and feed more actively/shallow.")
+
+    # Wind
+    if 4 <= avg_wind <= 14:
+        score += w["wind_sweet_spot_bonus"]
+        notes.append("Light-moderate wind/chop - good for reaction baits and windblown banks.")
+    elif avg_wind < 2 or avg_wind > 20:
+        score += w["wind_calm_or_high_penalty"]
+
+    # Season / segment interplay
+    if season in ("spawn", "pre_spawn", "fall_feed_up"):
+        score += w["season_spring_fall_bonus"]
+    if season == "summer_peak" and name in ("Midday", "Afternoon"):
+        score += w["season_summer_midday_penalty"]
+        notes.append("Summer heat - fish likely pushed to deeper, cooler structure midday.")
+    if season == "winter":
+        score += w["season_winter_penalty"]
+
+    # Storm penalty applies lake-wide regardless of other bonuses
+    if total_precip > 1.0 or max_precip_prob > 85:
+        score += w["storm_penalty"]
+
+    return round(_clamp(score), 1), notes
+
+
 def score_day(
     bundle: WeatherBundle,
     d: date,
@@ -177,25 +258,8 @@ def score_day(
     windows = _segment_windows(sunrise, sunset, d)
     segments = []
     for name, start, end in windows:
-        score = 5.0
-        notes = []
-
-        # Pressure
-        if p_trend <= -1.5:
-            score += w["pressure_falling"]
-            notes.append("Falling pressure ahead of a front - bite often turns on.")
-        elif p_trend >= 2.0:
-            score += w["pressure_high_stable_post_front"]
-            notes.append("High, rising pressure post-front - expect a tougher, slower bite.")
-        elif 0.3 < p_trend < 2.0:
-            score += w["pressure_rising_slow"]
-
-        # Moon
-        if moon.is_new_or_full_window:
-            score += w["moon_new_full_bonus"]
-            notes.append(f"{moon.name} - near new/full moon, historically more active feeding.")
-
-        # Solunar overlay (segment-level)
+        # Solunar overlay (segment-level) - needs this segment's actual start/end,
+        # so it's resolved here rather than inside the shared _segment_score() helper.
         overlap = None
         for ms, me in sol.major_periods:
             if _overlaps(start, end, ms, me):
@@ -204,43 +268,14 @@ def score_day(
             for ms, me in sol.minor_periods:
                 if _overlaps(start, end, ms, me):
                     overlap = "minor"
-        if overlap == "major":
-            score += w["solunar_major_bonus"]
-            notes.append("Overlaps a solunar major period.")
-        elif overlap == "minor":
-            score += w["solunar_minor_bonus"]
-            notes.append("Overlaps a solunar minor period.")
 
-        # Cloud cover
-        if avg_cloud >= 60:
-            score += w["cloud_overcast_bonus"]
-            notes.append("Overcast skies - fish often roam and feed more actively/shallow.")
-
-        # Wind
-        if 4 <= avg_wind <= 14:
-            score += w["wind_sweet_spot_bonus"]
-            notes.append("Light-moderate wind/chop - good for reaction baits and windblown banks.")
-        elif avg_wind < 2 or avg_wind > 20:
-            score += w["wind_calm_or_high_penalty"]
-
-        # Season / segment interplay
-        if season in ("spawn", "pre_spawn", "fall_feed_up"):
-            score += w["season_spring_fall_bonus"]
-        if season == "summer_peak" and name in ("Midday", "Afternoon"):
-            score += w["season_summer_midday_penalty"]
-            notes.append("Summer heat - fish likely pushed to deeper, cooler structure midday.")
-        if season == "winter":
-            score += w["season_winter_penalty"]
-
-        # Storm penalty applies lake-wide regardless of other bonuses
-        if total_precip > 1.0 or max_precip_prob > 85:
-            score += w["storm_penalty"]
+        score, notes = _segment_score(
+            name, p_trend, moon, overlap, avg_cloud, avg_wind, season,
+            total_precip, max_precip_prob, w,
+        )
 
         segments.append(
-            SegmentForecast(
-                name=name, start=start, end=end, score=round(_clamp(score), 1),
-                solunar_overlap=overlap, notes=notes,
-            )
+            SegmentForecast(name=name, start=start, end=end, score=score, solunar_overlap=overlap, notes=notes)
         )
 
     overall = round(_clamp(sum(s.score for s in segments) / len(segments)), 1)
@@ -265,6 +300,107 @@ def score_day(
         },
         warnings=warnings,
     )
+
+
+@dataclass
+class ManualScoreResult:
+    score: float
+    notes: list
+    moon: astro.MoonPhase
+    warnings: list
+
+
+def manual_segment_score(
+    segment_name: str,
+    season: str,
+    avg_cloud_pct: float,
+    avg_wind_mph: float,
+    total_precip_in: float = 0.0,
+    max_precip_prob_pct: float = 0.0,
+    pressure_trend_24h: float = 0.0,
+    moon: Optional["astro.MoonPhase"] = None,
+    solunar_overlap: Optional[str] = None,
+    weights: dict = None,
+) -> ManualScoreResult:
+    """Same 1-10 activity score as score_day()/score_week(), but driven by
+    conditions someone reports by hand while standing at the water (the
+    spot-specific "fish this spot now" page) instead of an Open-Meteo
+    forecast bundle for a whole day.
+
+    Real moon phase needs only the current moment, not a weather API, so
+    it's computed here (via core.astro, UTC "now") unless the caller
+    already has one; everything else the caller must supply - typically
+    approximated from the angler's own observations at the water
+    (core.onwater.py's band helpers turn "Overcast / Diffuse Day" or
+    "Heavy / Turbulent" wind into the same avg_cloud_pct/avg_wind_mph/
+    precip inputs score_day() would have extracted from a real bundle) or
+    a real pressure-trend reading if a weather bundle happens to be
+    available (core.weather.pressure_trend_hpa_per_24h against "now").
+    Solunar major/minor overlap needs today's real sunrise/sunset, which
+    also requires a weather bundle - pass None (the default) when one
+    isn't available, and this simply skips that bonus rather than
+    guessing."""
+    w = {**DEFAULT_WEIGHTS, **(weights or {})}
+    moon = moon or astro.moon_phase(lake_now_naive())
+
+    score, notes = _segment_score(
+        segment_name, pressure_trend_24h, moon, solunar_overlap, avg_cloud_pct, avg_wind_mph,
+        season, total_precip_in, max_precip_prob_pct, w,
+    )
+
+    warnings = []
+    if total_precip_in > 1.0 or max_precip_prob_pct > 85:
+        warnings.append("Storms/heavy rain possible - check local radar and lightning before heading out.")
+
+    return ManualScoreResult(score=score, notes=notes, moon=moon, warnings=warnings)
+
+
+def realtime_context_from_bundle(
+    bundle: Optional[WeatherBundle], segment_name: str, d: date,
+    lat: float = LAKE_LAT, lon: float = LAKE_LON, tz_offset_hours: float = LAKE_TZ_UTC_OFFSET_HOURS,
+) -> dict:
+    """Best-effort real pressure-trend + solunar-overlap lookup for "right
+    now", for manual_segment_score() callers that happen to have an
+    already-fetched weather bundle handy (e.g. the spot-specific session
+    page also shows the 7-Day Forecast elsewhere in the app, so the bundle
+    is usually already cached) - a nice-to-have enhancement layered on top
+    of otherwise fully hand-entered conditions, not a requirement. Returns
+    {"pressure_trend_24h": float, "solunar_overlap": str|None}, falling back
+    to 0.0/None for anything that can't be resolved (no bundle, today's date
+    outside the bundle's coverage, etc.) rather than raising."""
+    result = {"pressure_trend_24h": 0.0, "solunar_overlap": None}
+    if bundle is None:
+        return result
+
+    now = lake_now_naive()
+    try:
+        result["pressure_trend_24h"] = round(pressure_trend_hpa_per_24h(bundle, now), 2)
+    except Exception:
+        pass
+
+    try:
+        daily = daily_row_for_date(bundle, d)
+        if daily and daily.get("sunrise") and daily.get("sunset"):
+            window = next(
+                ((s, e) for name, s, e in _segment_windows(daily["sunrise"], daily["sunset"], d) if name == segment_name),
+                None,
+            )
+            if window:
+                start, end = window
+                sol = astro.solunar_times(d, lat, lon, tz_offset_hours)
+                overlap = None
+                for ms, me in sol.major_periods:
+                    if _overlaps(start, end, ms, me):
+                        overlap = "major"
+                if overlap is None:
+                    for ms, me in sol.minor_periods:
+                        if _overlaps(start, end, ms, me):
+                            overlap = "minor"
+                result["solunar_overlap"] = overlap
+    except Exception:
+        pass
+
+    return result
 
 
 def score_week(bundle: WeatherBundle, start: date, days: int = 7, weights: dict = None):
