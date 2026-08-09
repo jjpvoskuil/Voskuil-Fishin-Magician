@@ -4,6 +4,38 @@ from core.scoring import (
     score_week, score_day, manual_segment_score, realtime_context_from_bundle,
     segment_time_ranges, lake_now_naive, SEGMENTS,
 )
+from core import onwater
+from core import astro
+
+
+def _fake_bundle_with_air_temp(air_temp_f: float, d: date, days=9):
+    """Same shape as _fake_bundle(), but every hourly reading is a fixed air
+    temp and the window is anchored around `d` - used to force
+    estimate_water_temp_f() toward a specific, deterministic metabolic band
+    regardless of what day the test suite happens to run on."""
+    times, temps, pres, cloud, wind, wdir, pprob, precip = [], [], [], [], [], [], [], []
+    t0 = datetime(d.year, d.month, d.day) - timedelta(days=6)
+    for h in range(24 * days):
+        dt = t0 + timedelta(hours=h)
+        times.append(dt.isoformat())
+        temps.append(air_temp_f)
+        pres.append(1015 - 0.05 * h)
+        cloud.append(40)
+        wind.append(7)
+        wdir.append(180)
+        pprob.append(10)
+        precip.append(0)
+    hourly = {"time": times, "temperature_2m": temps, "surface_pressure": pres, "cloudcover": cloud,
+              "windspeed_10m": wind, "winddirection_10m": wdir, "precipitation_probability": pprob,
+              "precipitation": precip}
+    daily = {
+        "time": [(d + timedelta(days=i)).isoformat() for i in range(7)],
+        "sunrise": [(datetime(d.year, d.month, d.day) + timedelta(days=i, hours=6, minutes=20)).isoformat() for i in range(7)],
+        "sunset": [(datetime(d.year, d.month, d.day) + timedelta(days=i, hours=20, minutes=15)).isoformat() for i in range(7)],
+        "temperature_2m_max": [air_temp_f + 10] * 7,
+        "temperature_2m_min": [air_temp_f - 10] * 7,
+    }
+    return WeatherBundle(hourly=hourly, daily=daily)
 
 
 def _fake_bundle(days=9):
@@ -264,17 +296,76 @@ def test_manual_segment_score_light_rain_gives_a_small_bonus_short_of_storm():
     assert any(label == "Precipitation" for label, _, _ in light_rain.breakdown)
 
 
-def test_score_day_is_unaffected_by_the_new_manual_only_factors():
-    # score_day() never supplies water_temp_f/water_clarity/forage_present to
-    # _segment_score(), so none of those labels should ever show up in its
-    # per-segment breakdown - confirms the forecast-driven path's behavior really
-    # is untouched by this round of manual-only additions.
+def test_manual_segment_score_moon_is_now_genuinely_two_sided():
+    # 2026 rebalance: moon phase went from a one-way "bonus near new/full,
+    # nothing otherwise" to a real two-sided nudge with a matching penalty
+    # near the quarter moons - see core/scoring.py's module docstring for why.
+    near_full = astro.MoonPhase(14.5, 0.5, 100.0, "Full Moon", is_new_or_full_window=True, is_quarter_window=False)
+    near_quarter = astro.MoonPhase(7.4, 0.25, 50.0, "First Quarter", is_new_or_full_window=False, is_quarter_window=True)
+    neither = astro.MoonPhase(11.0, 0.37, 75.0, "Waxing Gibbous", is_new_or_full_window=False, is_quarter_window=False)
+    bonus_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_full)
+    penalty_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_quarter)
+    neutral_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=neither)
+    assert bonus_result.score > neutral_result.score > penalty_result.score
+    assert any(label == "Moon phase" and delta > 0 for label, delta, _ in bonus_result.breakdown)
+    assert any(label == "Moon phase" and delta < 0 for label, delta, _ in penalty_result.breakdown)
+    assert not any(label == "Moon phase" for label, _, _ in neutral_result.breakdown)
+
+
+def test_manual_segment_score_cloud_cover_is_now_genuinely_two_sided():
+    # 2026 rebalance: clear/bright ("bluebird") skies now score an explicit
+    # penalty instead of just missing out on the overcast bonus.
+    overcast = manual_segment_score("Dawn", "summer_peak", 70, 7)
+    clear = manual_segment_score("Dawn", "summer_peak", 10, 7)
+    partly = manual_segment_score("Dawn", "summer_peak", 40, 7)
+    assert overcast.score > partly.score > clear.score
+    assert any(label == "Cloud cover" and delta > 0 for label, delta, _ in overcast.breakdown)
+    assert any(label == "Cloud cover" and delta < 0 for label, delta, _ in clear.breakdown)
+    assert not any(label == "Cloud cover" for label, _, _ in partly.breakdown)
+
+
+def test_score_day_still_never_applies_water_clarity_or_forage():
+    # water_clarity/forage_present stay manual-entry-only (no forecast-API
+    # equivalent for either) - score_day() never supplies them, so those two
+    # labels should never show up in its per-segment breakdown.
     bundle = _fake_bundle()
     day = score_day(bundle, date.today())
     for seg in day.segments:
         labels = {label for label, _, _ in seg.breakdown}
-        assert not labels & {"Water temperature", "Water clarity", "Forage"}
+        assert not labels & {"Water clarity", "Forage"}
         assert seg.breakdown[0] == ("Base", 5.0, "Starting point before any factors below.")
+
+
+def test_score_day_now_applies_water_temp_band_scoring():
+    # Unlike water_clarity/forage_present, water_temp_f IS now a shared
+    # enhancement - score_day() passes its own estimated water temp through
+    # to _segment_score(), same as manual_segment_score() always has (a real
+    # study found temperature to be the one environmental factor that
+    # actually predicted catch rate - see core/scoring.py's module docstring).
+    # Force a cold-water estimate (well below the Peak Optimal Prime band) so
+    # the penalty branch is deterministically exercised regardless of what
+    # date the test suite happens to run on.
+    d = date(2026, 1, 15)
+    bundle = _fake_bundle_with_air_temp(28.0, d)
+    day = score_day(bundle, d)
+    assert onwater.water_temp_band(day.water_temp_f)["label"] == "Cold / Lethargic"
+    for seg in day.segments:
+        labels_and_deltas = {label: delta for label, delta, _ in seg.breakdown}
+        assert "Water temperature" in labels_and_deltas
+        assert labels_and_deltas["Water temperature"] < 0
+
+
+def test_score_day_water_temp_summer_stratified_band_stays_neutral():
+    # 77-84F intentionally has no dedicated weight (already partially covered
+    # by season_summer_midday_penalty) - confirm score_day() respects that too,
+    # not just manual_segment_score().
+    d = date(2026, 7, 15)
+    bundle = _fake_bundle_with_air_temp(84.0, d)
+    day = score_day(bundle, d)
+    assert onwater.water_temp_band(day.water_temp_f)["label"] == "Summer Stratified"
+    for seg in day.segments:
+        labels = {label for label, _, _ in seg.breakdown}
+        assert "Water temperature" not in labels
 
 
 def test_score_day_light_rain_bonus_is_a_shared_enhancement():

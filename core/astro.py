@@ -58,6 +58,7 @@ class MoonPhase:
     illumination_pct: float  # 0-100
     name: str
     is_new_or_full_window: bool  # within ~2 days of new or full (best fishing per solunar lore)
+    is_quarter_window: bool  # within ~2 days of first or last quarter (traditionally the slowest window)
 
 
 def moon_phase(dt_utc: datetime) -> MoonPhase:
@@ -68,7 +69,13 @@ def moon_phase(dt_utc: datetime) -> MoonPhase:
     name = next(n for lo, hi, n in PHASE_NAMES if lo <= fraction < hi)
     near_new = age <= 2 or age >= SYNODIC_MONTH - 2
     near_full = abs(age - SYNODIC_MONTH / 2) <= 2
-    return MoonPhase(age, fraction, illum, name, near_new or near_full)
+    near_first_quarter = abs(age - SYNODIC_MONTH / 4) <= 2
+    near_last_quarter = abs(age - 3 * SYNODIC_MONTH / 4) <= 2
+    return MoonPhase(
+        age, fraction, illum, name,
+        is_new_or_full_window=near_new or near_full,
+        is_quarter_window=near_first_quarter or near_last_quarter,
+    )
 
 
 # ---------------------------------------------------------------------------
