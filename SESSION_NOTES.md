@@ -980,6 +980,56 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `AppTest` script (not committed) that logged a trip against the one real saved
     spot with a deliberately stale `spot_name`, confirming the Location filter shows
     only the spot's current name and never the stale one.
+36. **Clean up the 7-Day Forecast page's Lake Setup Options sidebar** - four requests
+    landed together: drop the thermocline input, turn structure-type picking into a
+    saved-spot-aware "Location" picker, stop pre-checking any forage, and tighten the
+    whole sidebar's vertical footprint.
+
+    The thermocline `st.number_input` (plus its seasonal-estimate caption) is gone,
+    mirroring the same removal already done for Spot Session's conditions form back in
+    entry 32 - `core.lures.recommend()` keeps its optional `thermocline_ft` parameter
+    and caveat logic (still exercised directly by `tests/test_lures.py`), it's just
+    that no page passes it anymore. `core/thermocline.py` is left in place, matching
+    this codebase's pattern for other now-unwired modules (`core/spots.py`, entry 34) -
+    it's a bigger piece of domain modeling than felt right to delete over a UI change,
+    and a future page could still opt back into passing `thermocline_ft` without any
+    changes to `recommend()` itself.
+
+    "Structure type" is replaced with a **Location** dropdown listing the angler's own
+    saved spots (`core.appstate.get_lake_spots()`, the same catalog the Lake Map page
+    reads/writes) plus an "Other" option. Picking a saved spot resolves its structure
+    type automatically via `core.lake_spots.LOCATION_TYPE_TO_STRUCTURE_TYPE` - the
+    exact same lookup Spot Session already uses (entry 27) - so a spot's structure only
+    needs to be recorded once, on the Lake Map page, and it's simply correct everywhere
+    else it's used. Picking "Other" reveals a second, plain `STRUCTURE_TYPES` dropdown
+    (the same list/default this page always had) for a spot that isn't saved, or isn't
+    a specific spot at all. "Other" is the default selection, so behavior for anyone
+    not using saved spots is unchanged from before.
+
+    Forage's `multiselect` default changed from `DEFAULT_FORAGE` (Gizzard Shad +
+    Bluegill/Sunfish pre-checked) to `[]`, matching the same "don't presume an answer
+    the angler hasn't confirmed" change already made to Spot Session's forage picker
+    (entry 32) - an empty selection now means "not specified" to the lure engine rather
+    than silently asserting a forage base.
+
+    Layout tightening: water stain + stirred-up, and water temp + fish depth, are each
+    now a `st.columns(2)` pair instead of stacked full-width fields; both `st.divider()`
+    calls and two multi-line captions ("Enter your own readings...", "These carry over
+    to the other pages too" - the latter was also just stale, since Lake Map stopped
+    calling this same sidebar function once Spot Session took over on-the-water
+    recommendations) are gone, with their explanatory text folded into each widget's
+    `help=` tooltip instead of a separate line - font size and every label stay exactly
+    as they were, only the surrounding whitespace and standalone caption lines shrink.
+
+    Verified with the full test suite (untouched - no `core/` behavior changed, only
+    which optional arguments a page passes) plus a scratch `AppTest` script (not
+    committed, since `pages/1_7_Day_Forecast.py` itself can't run end-to-end in this
+    sandbox - see the standing Open-Meteo network note) that called
+    `render_lake_setup_sidebar()` directly: confirmed the Location dropdown lists the
+    one real saved spot plus "Other" (defaulting to "Other"), confirmed picking that
+    spot hides the manual Structure Type dropdown and resolves the correct structure
+    from its saved type, confirmed switching back to "Other" brings the manual dropdown
+    back with the right default, and confirmed forage starts empty.
 
 ## Key design decisions & rationale
 
@@ -1164,6 +1214,16 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   existing pattern of leaving unwired modules in place with a documented note (e.g.
   `core/bathymetry.py`) - either wiring it into a page again or removing it outright
   would be a deliberate follow-up, not an incidental cleanup.
+- (entry 36) `core/thermocline.py` (`estimate_thermocline_ft`, `default_thermocline_input_ft`)
+  and `core.lures.recommend()`'s `thermocline_ft` parameter / `thermocline_caveat` logic
+  are now fully unreachable from any page's UI - Spot Session dropped its thermocline
+  input in entry 32, and the 7-Day Forecast page dropped its own in entry 36, and
+  neither page passes `thermocline_ft` to `recommend()` anymore. Only
+  `tests/test_lures.py` still exercises the caveat logic directly. Left in place rather
+  than deleted (same reasoning as the `core/spots.py` note above) since it's real,
+  sourced domain modeling that a future page could wire back in without any changes to
+  `recommend()` itself - just something to know if a report ever says "the thermocline
+  caveat never shows up."
 
 ## Operating notes
 

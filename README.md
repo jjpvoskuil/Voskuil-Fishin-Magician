@@ -68,28 +68,25 @@ key decisions, and known open items.
   jerkbaits, spinnerbaits, etc.) get a target running depth 1-2 ft *above* the depth
   you're marking fish at, while bottom-contact baits (jigs, Carolina rigs, etc.) get
   count-down-to-depth guidance instead.
-- **Lake Setup Options sidebar** - two required, direct inputs since Nolin has no live
+- **Lake Setup Options sidebar** (7-Day Forecast page) - a compact, two-column layout
+  so it fits without scrolling. Two required, direct inputs since Nolin has no live
   feed for either: your water surface temp reading, and the depth you're marking fish
-  at on your electronics (e.g. a Garmin Livescope/sonar unit). These always drive the
+  at on your electronics (e.g. a Garmin Livescope/sonar unit) - these always drive the
   seasonal pattern used for lure selection and the depth-to-run/countdown guidance on
-  every lure block, and carry over across pages for the session.
+  every lure block. A **Location** dropdown lists your own saved spots (from the Lake
+  Map page) - pick one and its structure type is filled in automatically, the same way
+  Spot Session resolves it; pick "Other" to set a structure type by hand instead.
 - **Water color model** - Nolin normally runs a greenish-brown stain (leaning brown).
   Pick your usual base stain color (Clear / Green stained / Brown stained) plus a
   separate "stirred up / muddy" checkbox for after wind or heavy rain - the two combine
   into one effective water-clarity reading that drives lure color choice, independent
   of the base color you picked.
-- **Thermocline depth input** - a required, direct sidebar input (like water temp and
-  fish depth), pre-filled with a seasonal estimate (none in winter/early spring, forming
-  through May-June, ~13-17 ft at peak summer, breaking down through September) but always
-  editable with your own electronics/temp-probe reading. Flags a caveat on the lure
-  recommendation if the depth you're marking fish at is below it (usually too
-  oxygen-depleted to hold active bass). See "Data sources" below for how the estimate
-  is built.
-- **Forage selector** - pick which baitfish/prey are actually available (Gizzard Shad
-  and Bluegill/Sunfish are pre-checked as documented Nolin forage; Threadfin Shad,
-  Crawfish, Shiners/Minnows, and Stonerollers are optional add-ons). Nudges lure
-  color/pattern choice toward what the bass are actually keyed on, and makes sure at
-  least one forage-matched lure shows up in the recommendation.
+- **Forage selector** - pick which baitfish/prey are actually available (Gizzard Shad,
+  Threadfin Shad, Bluegill/Sunfish, Crawfish, Shiners/Minnows, Stonerollers). Nothing is
+  pre-checked - an empty selection means "not specified" rather than assuming a forage
+  base you didn't actually confirm. Nudges lure color/pattern choice toward what the
+  bass are actually keyed on, and makes sure at least one forage-matched lure shows up
+  in the recommendation.
 - **Trip logging** - the Spot Session page's log section records what actually happened
   (lures, catches, water conditions, forage seen) so the model can calibrate its
   weights against your own results over time.
@@ -217,17 +214,15 @@ rain/high storm probability on both pages too.
   link fall back to a live YouTube search link instead of a guessed URL.
 - Summer/normal pool elevation used for the map context: 515 ft, ~5,795 surface acres
   (confirmed against USACE data), vs. ~2,890 acres at winter pool.
-- Thermocline depth (`core/thermocline.py`): the sidebar input is a required, direct
-  reading, but its default value is **modeled**, not measured - Nolin has no public
-  real-time dissolved-oxygen/temperature profile buoy we can call for free (the USACE
-  Louisville District's lake-profile tool has live readings per lake, but it's a
-  manual web page, not an API). The default is anchored to a real, lake-specific data
-  point: KDFWR (Kentucky Afield Outdoors, Lee McLellan, July 2019) reported Nolin's
-  thermocline at about 15 ft in mid/late summer, grouped with Green River, Barren
-  River, and Rough River as similar mid-depth, relatively clear hill-land reservoirs.
-  Combined with general reservoir-stratification timing (none in winter/early spring,
-  forming in May, established through summer, breaking down each fall) to seed a
-  month-by-month default - override it any time with your own reading.
+- Thermocline depth (`core/thermocline.py`): no longer wired into any page's UI (both
+  the Spot Session and 7-Day Forecast sidebar inputs for it have since been removed) -
+  see "Known limitations" in `SESSION_NOTES.md`. Its modeled default is anchored to a
+  real, lake-specific data point: KDFWR (Kentucky Afield Outdoors, Lee McLellan, July
+  2019) reported Nolin's thermocline at about 15 ft in mid/late summer, grouped with
+  Green River, Barren River, and Rough River as similar mid-depth, relatively clear
+  hill-land reservoirs, combined with general reservoir-stratification timing (none in
+  winter/early spring, forming in May, established through summer, breaking down each
+  fall) to seed a month-by-month default.
 - Forage base (`core/lures.py`'s `FORAGE_OPTIONS`): gizzard shad and bluegill are
   explicitly documented as Nolin forage in Kentucky Afield Outdoors coverage of the
   lake's bass fishery; threadfin shad, crawfish, shiners/minnows, and stonerollers are
@@ -312,8 +307,8 @@ One addition specifically for this: a **Medium-Diving Crankbait** lure type (6-1
 e.g. Strike King 3XD, Rapala DT-8) was added to `core/lures.py` alongside the existing
 Squarebill/Lipless/Deep-Diving crankbait types, since several inventory items are exactly
 that depth class and neither existing crankbait profile fit them accurately. It's not
-part of any season's default picks, but when your sonar reading (Lake Setup Options
-sidebar) falls in its 6-12 ft zone, it swaps in for whichever shallower/deeper crankbait
+part of any season's default picks, but when your sonar reading (Lake Setup Options)
+falls in its 6-12 ft zone, it swaps in for whichever shallower/deeper crankbait
 the season pattern would otherwise have suggested - a depth-accuracy improvement on its
 own, and also what lets an owned medium-diving crank actually get surfaced.
 

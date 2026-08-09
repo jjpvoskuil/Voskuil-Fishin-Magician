@@ -58,7 +58,6 @@ for day in week:
         with c1:
             eff_season, eff_water_temp = effective_season_and_temp(day, lake_setup.water_temp_override_f)
             st.write(f"**Water temp (Lake Setup Options):** {eff_water_temp}°F  |  "
-                     f"**Thermocline (Lake Setup Options):** {lake_setup.thermocline_ft:.0f} ft  |  "
                      f"**24h pressure trend:** {day.pressure_trend_24h:+.1f} hPa  |  "
                      f"**Moon illumination:** {day.moon.illumination_pct:.0f}%")
             if eff_season != day.season:
@@ -90,7 +89,7 @@ for day in week:
         for seg in day.segments:
             rec = recommend(eff_season, eff_water_temp, seg.name, day.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
-                             thermocline_ft=lake_setup.thermocline_ft, inventory=inventory)
+                             inventory=inventory)
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),
