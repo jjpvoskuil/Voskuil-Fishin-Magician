@@ -550,26 +550,25 @@ def _color_tokens(text: str) -> set:
     return {w for w in words if len(w) >= 3 and w not in _COLOR_MATCH_STOPWORDS}
 
 
-def _annotate_color_matches(owned_items: list, suggested_colors: list) -> list:
-    """Tag each owned item with whether its description shares color/pattern
+def _color_matched_owned_items(owned_items: list, suggested_colors: list) -> list:
+    """Keep only the owned items whose description shares color/pattern
     language with this lure block's suggested colors for today's water
-    clarity, and bubble color-matched items to the front of the list.
+    clarity - owned items in the same lure category but a different color
+    are dropped entirely rather than shown alongside the match.
 
-    Without this, an owned-item photo/description was shown for a lure
-    category regardless of whether its actual color had anything to do with
-    the "Colors:" suggestion below it - e.g. a Chili Craw crankbait would be
-    shown next to a "Chartreuse/black back" suggestion with nothing telling
-    you they don't match. `color_match` on each item is what lets the UI
-    tell those two cases apart."""
+    Earlier version of this showed every owned item in the category
+    regardless of color (a Chili Craw crankbait shown next to a
+    "Chartreuse/black back" suggestion with nothing telling you they don't
+    match), then a version that showed all of them split into matched/
+    unmatched groups. Per follow-up feedback, only the color-matched
+    item(s) are surfaced now - if none of your on-hand items are actually
+    the suggested color, this comes back empty and the block falls back to
+    the normal "not in your inventory" treatment, since owning the right
+    lure type in the wrong color isn't the same as being ready to go."""
     suggested_tokens = set()
     for c in suggested_colors:
         suggested_tokens |= _color_tokens(c)
-    annotated = [
-        {**it, "color_match": bool(_color_tokens(it.get("description", "")) & suggested_tokens)}
-        for it in owned_items
-    ]
-    annotated.sort(key=lambda it: not it["color_match"])
-    return annotated
+    return [it for it in owned_items if _color_tokens(it.get("description", "")) & suggested_tokens]
 
 
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
@@ -589,7 +588,7 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         presentation=profile["presentation"],
         videos=get_videos_by_key(profile["video_key"], profile["name"]),
         note=note,
-        owned_items=_annotate_color_matches(owned_items, colors) if owned_items else [],
+        owned_items=_color_matched_owned_items(owned_items, colors) if owned_items else [],
     )
 
 
@@ -641,17 +640,14 @@ class LureBlock:
     videos: list
     trailer: TrailerInfo = None
     note: str = ""
-    owned_items: list = field(default_factory=list)  # list[dict]: brand/description/quantity/sku you have on hand
+    # list[dict]: brand/description/quantity/sku for on-hand items that both match this
+    # lure's category AND match today's suggested color (see _color_matched_owned_items) -
+    # an item you own in the wrong color for today's water clarity won't appear here.
+    owned_items: list = field(default_factory=list)
 
     @property
     def owned(self) -> bool:
         return bool(self.owned_items)
-
-    @property
-    def owned_color_match(self) -> bool:
-        """True if at least one owned item's description matches today's
-        suggested color for this lure (see _annotate_color_matches)."""
-        return any(it.get("color_match") for it in self.owned_items)
 
 
 @dataclass
