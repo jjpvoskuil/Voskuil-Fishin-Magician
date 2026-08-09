@@ -249,8 +249,8 @@ render_lure_recommendation(rec)
 st.divider()
 st.header("Log actual activity")
 st.caption(
-    "Logged here just like the Log a Trip page - it goes into the same shared trip log, tagged to this "
-    "exact spot and these exact conditions, so it can help calibrate future suggestions."
+    "Goes straight into your trip log, tagged to this exact spot and these exact conditions - see the "
+    "Trip History page to review, filter, and let it calibrate future suggestions."
 )
 
 inventory_items = get_inventory()
@@ -349,9 +349,15 @@ if log_submitted:
         "start_time": cond["start_time"],
         "forage_seen": cond.get("forage_seen"),
         "fish_depth_ft": cond.get("fish_depth_ft"),
+        # lure_category is the raw core.lures.LURE_PROFILES key (e.g. "football_jig"),
+        # not the display name - only set when the lure was picked from inventory, so
+        # Trip History can offer a real "lure type" filter without guessing a
+        # category from free text for manually-entered lures.
+        "lure_category": selected_lure_item.get("category") if selected_lure_item else None,
         "trailer_used": use_trailer,
         "trailer_name": trailer_name or None,
         "trailer_color": trailer_color or None,
+        "trailer_category": selected_trailer_item.get("category") if selected_trailer_item else None,
         "lure_start_time": lure_start_time.isoformat() if lure_start_time else None,
         "lure_end_time": lure_end_time.isoformat() if lure_end_time else None,
         "depth_fished_ft": depth_fished_ft or None,

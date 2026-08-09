@@ -56,8 +56,9 @@ key decisions, and known open items.
   inventory - picking one auto-fills the color field - or enter something not in your
   inventory by hand, plus the time range you fished it, depth(s) fished, how active
   the fish and forage were, and retrieve speed/style. It writes into the same shared
-  trip log the Log a Trip page uses. See "How the model works" below for the
-  condition bands behind this page's inputs.
+  trip log the **Trip History** page reads from - Spot Session is now the only way to
+  log a trip; see "How the model works" below for the condition bands behind this
+  page's inputs.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -89,8 +90,12 @@ key decisions, and known open items.
   Crawfish, Shiners/Minnows, and Stonerollers are optional add-ons). Nudges lure
   color/pattern choice toward what the bass are actually keyed on, and makes sure at
   least one forage-matched lure shows up in the recommendation.
-- **Trip logging** - record what actually happened (lures, catches, water conditions,
-  forage seen) so the model can calibrate its weights against your own results over time.
+- **Trip logging** - the Spot Session page's log section records what actually happened
+  (lures, catches, water conditions, forage seen) so the model can calibrate its
+  weights against your own results over time.
+- **Trip History** - every logged trip in one filterable table: filter by date/date
+  range, time of day, location, lure type, water clarity, structure type, catches-only,
+  or free-text search, plus a per-trip details view and the model's calibration status.
 - **Lure inventory** - your tackle box, tracked: brand, full description, a category
   (matching it to one of the forecast engine's lure types), a photo, the last price
   paid, and how many you have on hand. Seeded from a Cabela's order history import; add
@@ -146,11 +151,12 @@ rain/high storm probability on both pages too.
   estimate in the UI.
 - Lake spot coordinates (`data/nolin_spots.json`): a handful of general reference spots
   anchored to verified public sources (USACE gauge location, Kentucky State Parks/GNIS
-  coordinate, U.S. Census TIGER address geocoding), used on the Log a Trip page when
-  recording which general area of the lake a trip happened in. **These are planning
+  coordinate, U.S. Census TIGER address geocoding). **These are planning
   approximations, not survey-grade positions.** This is separate from your own
   **saved spots** on the Lake Map page (`data/lake_spots.csv`, see above) - those are
-  exact pins you drop yourself, not this curated reference list.
+  exact pins you drop yourself, not this curated reference list. Not currently wired
+  into any page (its last caller, the old Log a Trip page, has been removed in favor
+  of logging from Spot Session) - left in place rather than deleted.
 - Depth contours (`data/nolin_channel.json`, `core/bathymetry.py`): there is no free,
   downloadable full-lake bathymetric survey for Nolin Lake (checked USACE eHydro -
   navigation channels only - and USGS, which only has a partial 2016 water-quality
@@ -353,8 +359,8 @@ home.py                  Landing page content - today at a glance ("Today" in th
 pages/
   1_7_Day_Forecast.py   Full week, drill into any day
   2_Lake_Map.py          Fish attractors + your own saved spots (click to add/edit)
-  3_Log_a_Trip.py        Trip logging form
-  4_Trip_History.py      Logged trips + calibration status
+  4_Trip_History.py      Filterable log of every trip (Spot Session is now the only
+                         way to log one) + per-trip details + calibration status
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
   6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
 core/
@@ -367,8 +373,8 @@ core/
   activity_log.py           Log-form vocabulary + inventory lure/trailer picker
                            helpers used by the Spot Session page's activity log
   lures.py                Lure/color/technique rule engine + tackle-inventory ownership matching
-  spots.py                Curated general reference spots (data/nolin_spots.json),
-                           used by the Log a Trip page
+  spots.py                Curated general reference spots (data/nolin_spots.json) -
+                           orphaned now that Log a Trip (its last caller) is removed
   lake_map.py              Folium map builder - fish attractors + your saved spots
   lake_spots.py             Your own saved-spot pins: read/write + git commit-back;
                            also bridges a spot's location type to the recommendation
@@ -386,7 +392,7 @@ core/
   cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
   fish_attractors.py        Loads real KY Fish & Wildlife fish attractor GPS data
 data/
-  nolin_spots.json        Curated general reference spots, used by Log a Trip
+  nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)
   nolin_channel.json      Modeled river-channel centerline anchoring the bathymetry
   historic_bathymetry.csv Depth points read from pre-dam USGS historical topo maps
