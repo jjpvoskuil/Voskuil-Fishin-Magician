@@ -5,19 +5,35 @@ This is an explainable, rule-based heuristic (not a black box) so results
 can be reasoned about and tuned. It combines:
 
   - Barometric pressure trend (falling pressure ahead of a front = more
-    active feeding; high, stable pressure right after a front = tougher bite)
-  - Moon phase (new/full moon windows historically correlate with
-    increased feeding activity - classic solunar theory)
-  - Solunar major/minor windows (time-of-day overlay)
-  - Cloud cover (overcast = more active, especially shallow/aggressive bite)
+    active feeding; high, stable pressure right after a front = tougher bite) -
+    a believable proxy for a front's real, better-evidenced side effects
+    (cloud/wind/temp shift) rather than a strongly-evidenced factor on its
+    own, so it's weighted accordingly rather than as the single biggest lever.
+  - Moon phase and solunar major/minor windows - classic solunar theory,
+    kept as small, genuinely two-sided nudges (a matching penalty near the
+    quarter moons/no-overlap, not just a one-way bonus) rather than dropped,
+    but weighted as a token acknowledgment: a 2023 peer-reviewed study (SN
+    Applied Sciences) found no significant relationship between solunar
+    predictions and real freshwater catch rates.
+  - Cloud cover (overcast = more active, especially shallow/aggressive bite;
+    clear/bright "bluebird" skies = the classic tough-bite pattern - genuinely
+    two-sided, not bonus-only)
   - Wind (light-moderate wind stirs baitfish/oxygenates - a mild positive;
     dead calm or very strong wind is a mild negative)
-  - Season / estimated water temperature (drives depth & aggression pattern)
+  - Season / estimated water temperature (drives depth & aggression pattern,
+    and - since a real study found temperature to be the one environmental
+    factor that actually predicted catch rate - also scores its own
+    metabolic-band bonus/penalty directly, the same way manual on-the-water
+    readings always have)
   - Precipitation (light/steady rain before a front can be good; the app
     flags heavy storms as unsafe rather than scoring them favorably)
 
-Weights are documented inline. `core/calibration.py` can nudge these
-weights over time using logged trip outcomes.
+See SESSION_NOTES.md's development log for the sources behind the 2026
+weight rebalance (which factors have real evidence vs. which are kept as a
+small nod to popular belief) and the before/after distribution check.
+
+Weights are documented inline. `core/calibration.py` can nudge some of
+these weights over time using logged trip outcomes.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -53,28 +69,61 @@ def lake_now_naive() -> datetime:
     return datetime.now(LAKE_ZONEINFO).replace(tzinfo=None)
 
 DEFAULT_WEIGHTS = {
-    "pressure_falling": 2.5,
-    "pressure_high_stable_post_front": -2.0,
-    "pressure_rising_slow": -0.5,
-    "moon_new_full_bonus": 1.5,
-    "cloud_overcast_bonus": 1.2,
-    "wind_sweet_spot_bonus": 0.8,
-    "wind_calm_or_high_penalty": -0.8,
+    # Pressure trend is a believable PROXY for an approaching/departing front
+    # (which brings real, better-evidenced changes - cloud cover, wind shift,
+    # temperature) rather than a well-established direct mechanism on its own -
+    # a controlled single-lure study (see SESSION_NOTES.md entry on the 2026
+    # rebalance) found no significant catch-rate difference by pressure alone.
+    # Trimmed down from this model's old single biggest lever to something more
+    # proportionate to that mixed evidence, while keeping the direction (still
+    # widely used as a practical proxy by working guides/tournament anglers).
+    "pressure_falling": 1.5,
+    "pressure_high_stable_post_front": -1.5,
+    "pressure_rising_slow": -0.4,
+    # Moon phase: solunar theory's underlying claim. A 2023 peer-reviewed study
+    # (SN Applied Sciences) tested 7 commercial solunar services against 361
+    # real freshwater fishing trips and found no significant relationship to
+    # catch rate at all. Kept as a small, now genuinely two-sided nudge (a
+    # matching penalty near the quarter moons, not just a one-way bonus near
+    # new/full) rather than dropped outright, since it's a near-universal
+    # angler belief worth a token acknowledgment - but the magnitude is cut by
+    # more than half from before to reflect how weak the evidence actually is.
+    "moon_new_full_bonus": 0.6,
+    "moon_quarter_penalty": -0.5,
+    # Cloud cover: bass are light-sensitive sight predators, and "bluebird
+    # skies = tough bite" is near-universal in professional bass-fishing
+    # sources (e.g. Bassmaster's cold-front coverage) - genuinely two-sided
+    # now instead of only ever rewarding overcast.
+    "cloud_overcast_bonus": 1.0,
+    "cloud_clear_sky_penalty": -0.8,
+    # Wind: kept two-sided (it already was), but trimmed slightly further -
+    # the same 2023 peer-reviewed freshwater study that debunked solunar
+    # tables also found wind speed had no measurable effect on catch rate at
+    # all, the weakest evidence of any factor still in this model.
+    "wind_sweet_spot_bonus": 0.5,
+    "wind_calm_or_high_penalty": -0.5,
     "season_spring_fall_bonus": 1.3,
     "season_summer_midday_penalty": -1.5,
     "season_winter_penalty": -1.0,
     "storm_penalty": -3.0,
-    "solunar_major_bonus": 2.0,
-    "solunar_minor_bonus": 1.0,
+    # Solunar major/minor windows: same weak evidence as moon phase above (it's
+    # the same underlying theory) - cut to a small fraction of their old
+    # weight rather than dropped, for the same "token acknowledgment of a
+    # popular belief, not a load-bearing factor" reasoning.
+    "solunar_major_bonus": 0.6,
+    "solunar_minor_bonus": 0.3,
     # Light/steady rain (short of storm level) is a well-documented feeding
     # trigger (reduced light penetration, surface disturbance, less wary fish) -
     # this applies to both score_day() and manual_segment_score(), unlike the
     # manual-only weights below, since total_precip/max_precip_prob are already
     # available from a real forecast bundle too.
     "precip_light_rain_bonus": 0.6,
-    # Water-temperature metabolic bands (core.onwater.water_temp_band) - manual-
-    # entry-only factors (see _segment_score's docstring): score_day()/score_week()
-    # never supply water_temp_f, so these never fire for the forecast-driven path.
+    # Water-temperature metabolic bands (core.onwater.water_temp_band) - the
+    # one factor a real peer-reviewed study actually found to matter (catch
+    # rate rose with temperature). score_day()/score_week() now pass their own
+    # estimated water temp through, same as manual_segment_score() always has -
+    # water_clarity/forage_present below remain manual-entry-only, since
+    # there's no way to estimate either from a weather forecast.
     "water_temp_cold_penalty": -1.0,
     "water_temp_prespawn_bonus": 0.3,
     "water_temp_prime_bonus": 1.0,
@@ -186,14 +235,15 @@ def _segment_score(
     page) - both paths produce a score using the exact same weights/rules,
     just from different sources for the same handful of inputs.
 
-    `water_temp_f`, `water_clarity`, and `forage_present` are optional extras
-    that only manual_segment_score() ever supplies - a real Secchi-depth
-    reading, an exact water-temp reading, or "did you actually see forage"
-    only exist when someone is standing at the water, not from a forecast
-    API. score_day()/score_week() never pass them, so leaving them at their
-    None default makes those two paths' scores byte-for-byte identical to
-    before this was added - this is intentionally NOT a shared enhancement
-    the way the light-rain bonus below is.
+    `water_temp_f` is a shared enhancement (like the light-rain bonus below) -
+    score_day()/score_week() pass their own estimated water temp through here
+    too, since a real peer-reviewed study found temperature to be the one
+    environmental factor that actually predicted catch rate (see SESSION_NOTES.md).
+    `water_clarity` and `forage_present`, by contrast, stay manual-entry-only -
+    a real Secchi-depth reading or "did you actually see forage" only exist
+    when someone is standing at the water, with no equivalent forecast-API
+    estimate to fall back on. Both still default to None, so a caller that
+    doesn't pass them behaves exactly as if they didn't exist.
 
     Returns (score, notes, breakdown) - `notes` is the existing plain-
     language bullet list used elsewhere in the app; `breakdown` is a new
@@ -218,13 +268,18 @@ def _segment_score(
         d = w["pressure_rising_slow"]
         score += d; breakdown.append(("Pressure trend", d, "Slowly rising pressure."))
 
-    # Moon
+    # Moon - a small, genuinely two-sided nudge (see DEFAULT_WEIGHTS comment on
+    # why this is deliberately a token amount, not a load-bearing factor).
     if moon.is_new_or_full_window:
         d = w["moon_new_full_bonus"]
-        note = f"{moon.name} - near new/full moon, historically more active feeding."
+        note = f"{moon.name} - near new/full moon, per solunar lore (mixed real-world evidence)."
+        score += d; notes.append(note); breakdown.append(("Moon phase", d, note))
+    elif moon.is_quarter_window:
+        d = w["moon_quarter_penalty"]
+        note = f"{moon.name} - near a quarter moon, traditionally the slowest solunar window."
         score += d; notes.append(note); breakdown.append(("Moon phase", d, note))
 
-    # Solunar overlay (segment-level)
+    # Solunar overlay (segment-level) - same "small token amount" reasoning as moon phase.
     if overlap == "major":
         d = w["solunar_major_bonus"]
         note = "Overlaps a solunar major period."
@@ -234,10 +289,16 @@ def _segment_score(
         note = "Overlaps a solunar minor period."
         score += d; notes.append(note); breakdown.append(("Solunar", d, note))
 
-    # Cloud cover
+    # Cloud cover - genuinely two-sided: bass are light-sensitive sight
+    # predators, and bright/clear ("bluebird") skies are a well-documented
+    # tough-bite pattern, not just "no bonus."
     if avg_cloud >= 60:
         d = w["cloud_overcast_bonus"]
         note = "Overcast skies - fish often roam and feed more actively/shallow."
+        score += d; notes.append(note); breakdown.append(("Cloud cover", d, note))
+    elif avg_cloud <= 25:
+        d = w["cloud_clear_sky_penalty"]
+        note = "Clear/bright ('bluebird') skies - classic tough-bite pattern, especially midday."
         score += d; notes.append(note); breakdown.append(("Cloud cover", d, note))
 
     # Wind
@@ -360,7 +421,7 @@ def score_day(
 
         score, notes, breakdown = _segment_score(
             name, p_trend, moon, overlap, avg_cloud, avg_wind, season,
-            total_precip, max_precip_prob, w,
+            total_precip, max_precip_prob, w, water_temp_f=water_temp,
         )
 
         segments.append(

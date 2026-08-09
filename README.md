@@ -127,16 +127,48 @@ transparency principle, made visible in the UI rather than just in the source.
 The 1-10 activity score is built from pressure trend, moon phase, solunar major/minor
 windows, cloud cover, wind, season/water-temp, and precipitation (see below for each) -
 every one of these applies on both the 7-Day Forecast page and the Spot Session page,
-since both draw from the same `core.scoring._segment_score()` formula. Three more
-factors - an exact water-temperature metabolic-rate bonus/penalty, a water-clarity
-bonus/penalty, and a small bonus for confirmed forage nearby - only apply on the Spot
-Session page, since they need a real on-the-water reading (Secchi depth, an exact
-thermometer reading, seeing baitfish) that a forecast API has no way to supply; the
-general 7-Day Forecast's water-temp *estimate* isn't precise enough to treat the same
-way. Light/steady rain short of storm level gets a small bonus on both pages (a
-well-documented pattern - reduced light penetration and surface disturbance make fish
-less wary), distinct from the storm penalty that still applies to genuinely heavy
-rain/high storm probability on both pages too.
+since both draw from the same `core.scoring._segment_score()` formula. Two more
+factors - a water-clarity bonus/penalty and a small bonus for confirmed forage nearby -
+only apply on the Spot Session page, since they need a real on-the-water reading
+(Secchi depth, seeing baitfish) that a forecast API has no way to supply. Light/steady
+rain short of storm level gets a small bonus on both pages (a well-documented pattern -
+reduced light penetration and surface disturbance make fish less wary), distinct from
+the storm penalty that still applies to genuinely heavy rain/high storm probability on
+both pages too.
+
+**2026 evidence-based rebalance:** the weights above weren't tuned in a vacuum - after
+noticing forecast scores skewing consistently high (averaging well above the "5 =
+average day" the scale is meant to represent), each factor was checked against outside
+research and reweighted to match how well-supported it actually is, rather than just
+adding symmetric penalties everywhere for the sake of symmetry:
+  - **Solunar major/minor windows and moon phase** (the same underlying "solunar
+    theory") kept only a small, now genuinely two-sided weight - a 2023 peer-reviewed
+    study (*SN Applied Sciences*) tested seven commercial solunar services against 361
+    real freshwater fishing trips and found no significant relationship to catch rate
+    at all. Moon phase now also penalizes the quarter moons, not just bonusing new/full.
+  - **Barometric pressure trend** was trimmed from this model's single biggest lever to
+    something more proportionate - a detailed critique (citing oceanographer Dr. David
+    Ross) argues a realistic barometric swing is trivial next to the pressure change a
+    fish causes itself by moving a few feet vertically, and a controlled 12-month
+    single-lure experiment found no significant catch-rate difference by pressure
+    alone. It's kept as a believable proxy for a front's real, better-evidenced side
+    effects (cloud cover, wind, temperature), just not weighted as if it were the
+    proven mechanism.
+  - **Cloud cover** is now genuinely two-sided - clear/bright ("bluebird") skies score
+    an explicit penalty instead of just missing out on the overcast bonus, matching the
+    near-universal professional-angler pattern of a tough bite after a front clears out.
+  - **Water temperature**'s metabolic-band bonus/penalty (Cold/Lethargic, Pre-Spawn,
+    Peak Optimal, Extreme Thermal Load) now applies to the 7-Day Forecast page too,
+    using its own daily temperature *estimate* - previously it only ran on Spot
+    Session's exact reading. This is the one factor the same peer-reviewed study found
+    to actually predict catch rate (roughly +1% per 10°F warmer).
+  - **Wind** stayed two-sided (it already was) but was trimmed slightly further, since
+    that same study found wind speed had no measurable effect on catch rate at all -
+    the weakest evidence of any factor still in the model.
+
+See `SESSION_NOTES.md`'s development log for the full source list and a before/after
+distribution check (mean dropped from ~7.0 to ~5.7 across a large randomized sample of
+plausible day/segment combinations, with the tails far more balanced).
 
 **Data sources:**
 - Weather (temperature, pressure, cloud cover, wind, precipitation): [Open-Meteo](https://open-meteo.com/) - free, no API key.

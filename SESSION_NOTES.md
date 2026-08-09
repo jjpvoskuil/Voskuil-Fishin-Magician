@@ -1030,6 +1030,86 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     spot hides the manual Structure Type dropdown and resolves the correct structure
     from its saved type, confirmed switching back to "Other" brings the manual dropdown
     back with the right default, and confirmed forage starts empty.
+37. **Evidence-based scoring rebalance** - the user noticed the 7-Day Forecast's scores
+    felt consistently too optimistic. Rather than treat this as something logged trips
+    would eventually correct on their own, a quick Monte Carlo check (20,000 randomized
+    but realistic day/segment combinations run directly through `_segment_score()`,
+    scratch script, not committed) confirmed it quantitatively: mean score 7.0, median
+    7.1, on a scale meant to center around 5 - with 53% of combinations scoring 7+ and
+    only 9% at 4 or below. Per-factor breakdown showed it wasn't one bad weight but six
+    separate factors (solunar, cloud cover, wind, moon phase, season, pressure trend)
+    each mildly-to-moderately bonus-skewed and stacking in the same direction, against
+    only precipitation pulling the other way - `core/calibration.py` can't fix this
+    even given lots of logged data, since it only ever nudges 5 of the ~15 weight keys
+    (`pressure_falling`, `pressure_high_stable_post_front`, `moon_new_full_bonus`,
+    `cloud_overcast_bonus`, `wind_sweet_spot_bonus`) within ±35% of their existing
+    (biased) defaults - it can't touch the base value or the other 8+ factors at all.
+
+    Rather than just adding symmetric penalties everywhere, each factor was checked
+    against outside research first and reweighted to match how well-supported it
+    actually is - see README.md's "How the model works" section for the full
+    citation list (a 2023 peer-reviewed *SN Applied Sciences* study testing 7
+    commercial solunar services against 361 real freshwater trips found no predictive
+    value at all, and found temperature to be the one variable that did predict catch
+    rate; a detailed critique citing oceanographer Dr. David Ross and a controlled
+    12-month single-lure experiment found no significant catch-rate difference by
+    barometric pressure alone; Bassmaster's cold-front coverage confirms the
+    "bluebird sky = tough bite" pattern is near-universal professional-angler
+    consensus). Concretely:
+      - `pressure_falling` 2.5→1.5, `pressure_high_stable_post_front` -2.0→-1.5,
+        `pressure_rising_slow` -0.5→-0.4 - trimmed from the model's single biggest
+        lever to something more proportionate to its contested evidence, while keeping
+        it as a believable proxy for a front's real, better-evidenced side effects.
+      - `solunar_major_bonus` 2.0→0.6, `solunar_minor_bonus` 1.0→0.3 - kept as a small
+        token acknowledgment of a popular belief rather than dropped outright, given
+        how weak the evidence is.
+      - `moon_new_full_bonus` 1.5→0.6, plus a new `moon_quarter_penalty` (-0.5) and a
+        new `MoonPhase.is_quarter_window` field (`core/astro.py`, same ~2-day-window
+        pattern as the existing `is_new_or_full_window`) - moon phase is now genuinely
+        two-sided (a real penalty near the quarter moons) instead of a one-way bonus
+        that fired for about a third of every month with zero effect the other
+        two-thirds. Deliberately kept as a simple discrete threshold+flag (matching
+        every other factor's style) rather than a continuous curve, to stay
+        consistent with the app's "no black box, every rule has a comment" philosophy.
+      - `cloud_overcast_bonus` 1.2→1.0, plus a new `cloud_clear_sky_penalty` (-0.8) for
+        `avg_cloud <= 25%` - genuinely two-sided now instead of bonus-only, matching
+        the well-documented "bluebird skies = tough bite" pattern.
+      - `wind_sweet_spot_bonus` 0.8→0.5, `wind_calm_or_high_penalty` -0.8→-0.5 - already
+        two-sided, trimmed further since wind had literally zero measured effect in
+        the one directly-relevant peer-reviewed study, the weakest evidence of any
+        factor still in the model.
+      - `score_day()`/`score_week()` now pass their own daily *estimated* water temp
+        into `_segment_score()`'s existing metabolic-band bonus/penalty logic
+        (`water_temp_cold_penalty`/`water_temp_prespawn_bonus`/`water_temp_prime_bonus`/
+        `water_temp_extreme_penalty`, `core/onwater.py`'s `WATER_TEMP_BANDS`) - this
+        logic already existed and was already tested for Spot Session's exact
+        reading, it just wasn't wired into the forecast path before. This is the
+        single factor real research found to actually matter, so it's now a shared
+        enhancement rather than manual-only - `water_clarity`/`forage_present` stay
+        manual-only, since neither has a forecast-API equivalent to estimate from.
+      - `season_spring_fall_bonus`/`season_summer_midday_penalty`/`season_winter_penalty`
+        were left untouched - metabolic/spawning-behavior seasonality is the
+        best-evidenced factor in the whole model, not a rebalance target.
+
+    Re-running the same Monte Carlo check afterward (same script, updated to also
+    sample a water temp per iteration) gives mean 5.7, median 5.8 - both tails far
+    more balanced (10-ceiling combinations dropped from 11.3% to 1.1%, 4-or-below
+    combinations rose from 8.9% to 19.9%). Not forced all the way to exactly 5.0,
+    since the remaining lift comes from season (the best-evidenced factor left) and
+    residual wind/cloud effects under realistic input distributions, not from
+    anything that still looks like a design flaw.
+
+    `core/calibration.py` is untouched - it still only calibrates the same 5 legacy
+    factor keys against their new (smaller, less biased) defaults, same known
+    limitation as before regarding the uncalibrated factors (now including the two
+    new ones, `moon_quarter_penalty` and `cloud_clear_sky_penalty`).
+
+    Verified with the full test suite (two new/updated tests for `score_day()`'s new
+    water-temp wiring - one forcing a deterministic cold-water estimate via a custom
+    fake weather bundle regardless of what date the suite runs on, one confirming the
+    intentionally-neutral Summer Stratified band still doesn't fire - plus two new
+    tests confirming moon phase and cloud cover are each genuinely two-sided now) and
+    the AppTest smoke test across all pages that can run in this sandbox.
 
 ## Key design decisions & rationale
 
