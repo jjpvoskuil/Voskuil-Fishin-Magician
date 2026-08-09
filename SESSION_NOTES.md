@@ -536,6 +536,38 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     thumbnails, now 64px, still capped at `MAX_OWNED_THUMBNAILS`) and
     `pages/5_Lure_Inventory.py`'s inventory grid (now 160px). Neither page calls
     `st.image()` for lure photos anymore.
+25. **Flag whether an owned lure actually matches today's suggested color** - user
+    feedback with screenshots: a Medium-Diving Crankbait block suggested "Chartreuse/
+    black back, Green shad" (Green-stained water), but the owned-item photos shown
+    underneath it were a Tennessee Shad, Chili Craw, Bluegill, and Crawfish Orange
+    Belly - none of which are actually chartreuse - with nothing in the UI saying so.
+    Root cause: `_group_owned_by_category()` (entry 21) only ever matched owned items
+    to a lure block by `category` (which lure *type* it is), never by color - every
+    owned item in that category was shown next to the suggestion regardless of
+    whether its real-world color had anything to do with it.
+
+    Fix: added `core.lures._color_tokens()` (splits a color-suggestion or
+    lure-description string into lowercase word tokens, dropping filler words like
+    "back"/"pattern"/"skirt") and `_annotate_color_matches()` (tags each owned item
+    with `color_match: bool` - true if its description shares a color/pattern word
+    with the block's suggested colors for today's water clarity - and sorts matched
+    items first). `_build_block()` now runs owned items through this before building
+    the `LureBlock`. `LureBlock` gained an `owned_color_match` property. This is a
+    simple, explainable keyword match (same "not a black box" philosophy as the rest
+    of the engine) - it has no real notion of color similarity, just shared words, so
+    it's approximate by design, not a precise color model.
+
+    `core/ui.py`'s `render_lure_block()` now splits owned items into matched vs.
+    unmatched: if any owned item matches, it gets its own `st.success()` banner
+    ("✅ Color match in your tackle box: ...") with any non-matching owned items in
+    this category noted separately in a caption; if none match, a single
+    `st.warning()` says so explicitly ("🎨 In your tackle box, but not in the color
+    suggested below: ...") rather than implying every owned photo shown is a color
+    match. Thumbnail captions also get a "✅ " prefix on matched items. Verified this
+    resolves the user's exact reported case: with a Tennessee Shad ("shad" token
+    matches "Green shad"), Chili Craw, Bluegill, and Crawfish Orange Belly crankbaits
+    all owned in `medium_diving_crankbait`, only the Tennessee Shad now flags as a
+    color match, and it sorts first among the photos shown.
 
 ## Key design decisions & rationale
 
@@ -651,6 +683,13 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   `AppTest`-based smoke test across all 5 pages (including sidebar
   interaction), and a fresh `git clone` + re-test before every push, done
   every round in this project.
+- (entry 25) Color-match flagging is keyword-based against each owned item's free-text
+  `description` - it has no structured "color" field to work from, so it can miss a
+  real match if the description uses different wording than the suggestion (e.g. a
+  synonym neither string shares), or very rarely flag an unrelated coincidental word
+  match. If this turns out to be inaccurate often enough to be annoying, the more
+  reliable fix is a structured `color` tag on inventory items (same pattern as the
+  `category` field, entry 21) rather than tuning the keyword list further.
 
 ## Operating notes
 
