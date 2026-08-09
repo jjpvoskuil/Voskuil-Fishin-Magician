@@ -76,6 +76,13 @@ with col_detail:
             if existing.get("notes"):
                 st.write(f"**Notes:** {existing['notes']}")
 
+            if st.button(
+                "🎯 Fish this spot now - conditions & lure suggestions", key=f"session_btn_{existing['spot_id']}",
+                width='stretch',
+            ):
+                st.query_params["spot_id"] = existing["spot_id"]
+                st.switch_page("pages/6_Spot_Session.py")
+
             with st.expander("Edit this spot"):
                 with st.form(f"edit_spot_{existing['spot_id']}"):
                     e_name = st.text_input("Name", value=existing["name"])

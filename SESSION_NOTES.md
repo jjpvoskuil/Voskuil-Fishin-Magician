@@ -645,6 +645,69 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     doesn't match a saved spot) is deliberately added directly to the map, outside both
     feature groups - hiding the "My saved spots" layer while you're mid-way through
     adding a new one shouldn't also hide the pin you're actively placing.
+29. **Per-spot "Spot Session" page: enter on-the-water conditions, get suggestions,
+    log activity** - follow-up to entry 27/28: a saved spot's detail panel on the
+    Lake Map page now has a "🎯 Fish this spot now" button (sets `spot_id` in
+    `st.query_params`, then `st.switch_page`s) that opens a new
+    `pages/6_Spot_Session.py`, dedicated to that one pin.
+
+    New `core/onwater.py` module holds the ecological band vocabulary the user
+    supplied for this page's inputs (credited to the user, not derived): `LIGHT_
+    CONDITIONS` (4 lux-based bands - Night, Crepuscular/Dawn-Dusk, Overcast/Diffuse
+    Day, Direct High Sun - each with a proxy cloud-cover % for feeding the existing
+    cloud-based scoring formula), `WIND_BANDS` (4 mph bands - Glassy, Light Ripple,
+    Moderate Chop/Action Trigger, Heavy/Turbulent), `VISIBILITY_BANDS` (3 Secchi-depth
+    bands - Clear, Stained, Dirty/Muddy), and `WATER_TEMP_BANDS` (5 metabolic bands -
+    Cold/Lethargic, Pre-Spawn Transition, Peak Optimal Prime, Summer Stratified,
+    Extreme Thermal Load). `resolve_water_clarity(secchi_ft, stain_color)` bridges the
+    3-band Secchi system (turbidity only) to the 4-value `core.lures.WATER_CLARITY_
+    OPTIONS` the color engine actually needs (which also encodes stain color): Clear
+    and Dirty/Muddy map 1:1, but the middle "Stained" band is ambiguous about color, so
+    the page asks a follow-up stain-color question only in that case, defaulting to
+    "Brown stained" (Nolin's documented normal stain) if left unset. A small
+    `precipitation_proxy()` turns a plain-language precipitation pick into the
+    total-inches/max-storm-probability pair the storm-warning logic already expects.
+
+    `core/scoring.py` was refactored, not duplicated: the pressure/moon/solunar/cloud/
+    wind/season/storm formula that used to live only inline in `score_day()`'s
+    per-segment loop was pulled out into a new pure `_segment_score(...)` helper, which
+    `score_day()` now calls too (verified behavior-preserving - existing tests still
+    passed immediately after the extraction, before anything new was added). A new
+    `manual_segment_score(segment_name, season, avg_cloud_pct, avg_wind_mph, ...)`
+    calls that same helper from hand-entered/on-the-spot inputs instead of a weather
+    bundle, so the two entry points can never drift apart - a new cross-validation test
+    feeds both paths equivalent inputs and asserts identical scores. `realtime_context_
+    from_bundle()` opportunistically pulls in real pressure-trend and solunar-overlap
+    data from a weather bundle when one is reachable (degrades to neutral defaults -
+    0.0 trend, no solunar overlap - if not, e.g. the forecast API being unreachable).
+    New `lake_now_naive()` returns "now" as a naive datetime in the lake's own
+    timezone, matching this module's existing (if loosely-named) convention of passing
+    naive-but-actually-local timestamps to `core.astro`, rather than introducing a
+    real UTC/local mismatch by reaching for `datetime.utcnow()`.
+
+    A new one-way `LOCATION_TYPE_TO_STRUCTURE_TYPE` dict in `core/lake_spots.py`
+    bridges every `LOCATION_TYPES` value to a `core.lures.STRUCTURE_TYPES` value
+    (asserted complete/valid at import time) - used only by the new page, so the
+    spot catalog itself stays decoupled from the recommendation engine exactly as
+    entry 27 intentionally left it.
+
+    `pages/6_Spot_Session.py` ties it together: a "Conditions right now" form
+    (water temp, Secchi/visibility + conditional stain color, wind, light condition,
+    precipitation, exact start time, time-window segment, plus an optional
+    "Additional details" expander for forage/fish-depth/thermocline) resolves water
+    clarity and structure type, pulls in whatever real-time pressure/solunar context
+    it can get, scores the segment, and calls the same `core.lures.recommend()` +
+    `core.ui.render_lure_recommendation()` used by the 7-Day Forecast page - so this
+    page's suggestions come from the identical lure/color engine, just fed by an
+    on-the-water reading instead of a forecast. Below that, a "Log actual activity"
+    form writes a `core.storage.TripEntry` (spot id/name, resolved structure/clarity,
+    lure/color/technique, fish caught, `predicted_score` from this page's own scoring)
+    into the same shared `data/trip_log.csv` that `pages/3_Log_a_Trip.py` already
+    writes to, tagged `"source": "spot_session"` in its `conditions_json` blob - this
+    is deliberately the same file, not a new one, since the user's stated direction is
+    to eventually fold trip logging into one report database; this round just makes
+    sure both entry points already accumulate into that one place, without touching
+    `pages/3_Log_a_Trip.py` or `pages/4_Trip_History.py` themselves.
 
 ## Key design decisions & rationale
 
@@ -757,9 +820,9 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   swap), that's a follow-up worth doing deliberately (touching all 7 seasonal
   branches + their tests), not something this round did opportunistically.
 - No automated CI - verification is manual: `pytest tests/ -q`, an
-  `AppTest`-based smoke test across all 5 pages (including sidebar
-  interaction), and a fresh `git clone` + re-test before every push, done
-  every round in this project.
+  `AppTest`-based smoke test across the app entry point and all pages
+  (including sidebar interaction), and a fresh `git clone` + re-test before
+  every push, done every round in this project.
 - (entries 25/26) Color matching is keyword-based against each owned item's free-text
   `description` - it has no structured "color" field to work from, so it can miss a
   real match (and now, since entry 26, hide an owned item from a block entirely) if
@@ -781,6 +844,19 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   tolerance, clicking one could resolve to the other. Not expected to come up in
   practice (real fishing spots are rarely that close together), but worth knowing if a
   future report describes "wrong spot's details showing up."
+- (entry 29) The Spot Session page's activity score is an approximation, not a
+  measurement: light condition stands in for cloud cover, the precipitation pick
+  stands in for actual rain totals/storm probability, and pressure trend/solunar
+  overlap only factor in when a weather forecast happens to be reachable at that
+  moment (silently omitted, with a caption saying so, if not). It's meant to be "close
+  enough to suggest a starting lure," not a substitute for the 7-Day Forecast page's
+  API-driven numbers.
+- (entry 29) The user's stated "ultimate" direction - retiring `pages/3_Log_a_Trip.py`
+  in favor of the Spot Session log, and building a report database from accumulated
+  logs to refine future forecasts/suggestions - was explicitly called out as future
+  work, not part of this round. This round only made sure both logging paths write
+  into the same `data/trip_log.csv` so that consolidation stays possible later;
+  `pages/3_Log_a_Trip.py` and `pages/4_Trip_History.py` are untouched.
 
 ## Operating notes
 
