@@ -79,14 +79,14 @@ key decisions, and known open items.
   pick-up suggestions (🛒). Nothing is added or hidden based on ownership - the
   season/structure/pressure/forage logic still decides what's recommended; ownership
   only decides what's flagged and what floats to the top.
-- **Color-match flagging on owned lures** - within a lure block, owned items are
-  further checked against that block's suggested color for today's water clarity: an
-  owned item whose description shares color/pattern words with the suggestion (e.g.
-  "shad" in both) gets its own ✅ "Color match" callout and sorts first among the
-  photos shown; owned items in the same lure category but a different color still
-  show up (nothing is hidden) but under a separate "not in the suggested color"
-  note, so a chartreuse suggestion next to your green-pumpkin crankbait doesn't read
-  as a match when it isn't one.
+- **Color-match filtering on owned lures** - within a lure block, owned items are
+  further checked against that block's suggested color for today's water clarity, and
+  only the ones whose description shares color/pattern words with the suggestion
+  (e.g. "shad" in both "Green shad" and "Tennessee Shad") are shown as ✅ "Color
+  match." An owned item in the same lure category but a different color (e.g. a
+  green-pumpkin crankbait next to a chartreuse suggestion) isn't shown for that
+  block at all - if none of your on-hand items match today's suggested color, the
+  block falls back to the normal 🛒 pick-up-suggestion treatment.
 
 ## How the model works (and its limits)
 
@@ -269,15 +269,16 @@ own, and also what lets an owned medium-diving crank actually get surfaced.
 Category match is only half the story, though - owning *a* Medium-Diving Crankbait
 doesn't mean you own it in *today's suggested color*. So each owned item's free-text
 `description` is also checked against the block's suggested colors for the current
-water clarity (`core.lures._color_tokens()` / `_annotate_color_matches()` - a simple,
-explainable keyword match, same philosophy as the rest of the engine, not a real color
-model). Items that share a color/pattern word with the suggestion (e.g. "shad" in both
-"Green shad" and "Tennessee Shad") get flagged ✅ **"Color match"** and shown first;
-items in the same category but without a shared color word still show up (nothing owned
-is ever hidden) but under their own "not in the suggested color" note instead of being
-implied as a match. Because it's keyword-based against free text rather than a
-structured color field, it can occasionally miss a real match (different wording) or
-flag a coincidental one - it's meant as a helpful signal, not a guarantee.
+water clarity (`core.lures._color_tokens()` / `_color_matched_owned_items()` - a
+simple, explainable keyword match, same philosophy as the rest of the engine, not a
+real color model). Only items that share a color/pattern word with the suggestion
+(e.g. "shad" in both "Green shad" and "Tennessee Shad") are shown as ✅ **"Color
+match"** - an owned item in the same category but a different color is left out of
+that block entirely rather than shown as a maybe-match, and if nothing you own
+matches, the block falls back to the plain 🛒 "not in your inventory" treatment.
+Because it's keyword-based against free text rather than a structured color field,
+it can occasionally miss a real match (different wording) or flag a coincidental
+one - it's meant as a helpful signal, not a guarantee.
 
 ## Running locally
 

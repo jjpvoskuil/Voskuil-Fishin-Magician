@@ -166,9 +166,12 @@ def test_no_inventory_leaves_blocks_unowned():
 
 
 def test_inventory_annotates_owned_lure_block():
-    # football_jig is a first-choice pick for winter conditions.
+    # football_jig is a first-choice pick for winter conditions; football_jig's
+    # "Clear" water color suggestion is "Green pumpkin"/"Watermelon red", so the
+    # owned item's description needs to share one of those color words to be
+    # surfaced (see the color-match gate added after user feedback).
     inventory = [
-        {"brand": "Strike King", "description": "Tour Grade Football Jig - Black/Blue",
+        {"brand": "Strike King", "description": "Tour Grade Football Jig - Green Pumpkin",
          "category": "football_jig", "quantity": "2", "sku": "1534654",
          "image_url": "https://example.com/jig.jpg", "image_filename": ""},
     ]
@@ -206,9 +209,11 @@ def test_inventory_unrecognized_category_is_ignored():
 def test_owned_lures_sort_before_unowned_within_each_tier():
     # winter first-choice keys (unsorted by depth since no fish_depth_ft given) are
     # football_jig, suspending_jerkbait, blade_bait - own only blade_bait and confirm
-    # it moves to the front of the list once inventory is supplied.
+    # it moves to the front of the list once inventory is supplied. blade_bait's
+    # "Clear" water color suggestion is "Silver/natural shad", so the description
+    # needs to share one of those words to pass the color-match gate.
     inventory = [
-        {"brand": "Rapala", "description": "Rippin Rap", "category": "blade_bait",
+        {"brand": "Rapala", "description": "Rippin Rap - Silver", "category": "blade_bait",
          "quantity": "1", "sku": ""},
     ]
     rec_plain = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
@@ -247,10 +252,10 @@ def test_color_tokens_extracts_meaningful_words_and_drops_stopwords():
     assert _color_tokens(None) == set()
 
 
-def test_owned_item_matching_suggested_color_is_flagged():
+def test_owned_item_matching_suggested_color_is_shown():
     # medium_diving_crankbait in "Green stained" water suggests "Chartreuse/black
     # back" and "Green shad" - an owned item described with either color word
-    # should be flagged as a color match.
+    # should show up as owned.
     inventory = [
         {"brand": "Strike King", "description": "3XD Chartreuse Shad",
          "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
@@ -258,14 +263,15 @@ def test_owned_item_matching_suggested_color_is_flagged():
     rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
                      inventory=inventory)
     block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
-    assert block.owned_color_match is True
-    assert block.owned_items[0]["color_match"] is True
+    assert block.owned is True
+    assert block.owned_items[0]["description"] == "3XD Chartreuse Shad"
 
 
-def test_owned_item_not_matching_suggested_color_is_flagged_mismatched():
+def test_owned_item_not_matching_suggested_color_is_hidden():
     # Reproduces the user-reported case: the suggestion is chartreuse/green
-    # shad, but the owned item is a craw pattern - it should still show up
-    # (nothing is hidden), just flagged as not a color match.
+    # shad, but the owned item is a craw pattern - per follow-up feedback,
+    # non-matching owned items are no longer shown at all, so this block
+    # should fall back to the plain "not owned" state.
     inventory = [
         {"brand": "Strike King", "description": "3XD Chili Craw",
          "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
@@ -273,12 +279,11 @@ def test_owned_item_not_matching_suggested_color_is_flagged_mismatched():
     rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
                      inventory=inventory)
     block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
-    assert block.owned is True
-    assert block.owned_color_match is False
-    assert block.owned_items[0]["color_match"] is False
+    assert block.owned is False
+    assert block.owned_items == []
 
 
-def test_color_matched_owned_items_sort_before_mismatched_ones():
+def test_only_color_matched_owned_items_are_shown_others_dropped():
     inventory = [
         {"brand": "Strike King", "description": "3XD Chili Craw",
          "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
@@ -290,12 +295,5 @@ def test_color_matched_owned_items_sort_before_mismatched_ones():
     rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
                      inventory=inventory)
     block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert len(block.owned_items) == 1
     assert block.owned_items[0]["description"] == "300 Green Shad"
-    assert block.owned_items[0]["color_match"] is True
-    assert all(not it["color_match"] for it in block.owned_items[1:])
-
-
-def test_no_owned_items_have_no_color_match_flag_issue():
-    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Clear")
-    for block in rec.first_choice + rec.second_choice:
-        assert block.owned_color_match is False
