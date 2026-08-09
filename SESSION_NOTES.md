@@ -729,6 +729,96 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     flow), query-params-only (bookmark/refresh), and neither set (still shows the
     graceful "no spot selected" placeholder rather than crashing) - all three resolve
     correctly; full suite re-run clean afterward.
+31. **Spot Session refinements: real time-window ranges, descriptive wind, inventory-
+    driven logging, exact-time scoring** - a round of usability feedback on entry
+    29/30's page, once it was actually usable in the browser:
+
+    - **Session start is now manual, not auto-"now"** - `st.time_input(..., value=None)`
+      instead of defaulting to `lake_now_naive().time()`, since the angler might fill
+      this out before heading out or after getting home, not necessarily at the exact
+      moment they started fishing. Required before "Get lure suggestions" proceeds
+      (a blank submit shows a warning instead of silently guessing).
+    - **Wind is now a descriptive band picker, not an mph number** - most anglers can
+      judge "glassy vs. light ripple vs. whitecapping" by eye far more reliably than
+      an actual mph figure. New `core.onwater.WIND_BAND_LABELS`/`wind_mph_for_band()`
+      (a reverse lookup - representative mph within each band) lets the page ask for
+      the band by name while the scoring formula still runs on an mph value
+      underneath, same as a real forecast's `windspeed_10m`.
+    - **Time window options now show today's real clock range** - "Dawn (5:52 AM-7:52
+      AM)" instead of just "Dawn," using new `core.scoring.segment_time_ranges()`
+      (factored out of `realtime_context_from_bundle()`'s existing sunrise/sunset
+      lookup, so both share one implementation) when a weather bundle is reachable;
+      falls back to bare segment names otherwise.
+    - **Stirred-up/muddy checkbox** - `core.onwater.resolve_water_clarity()` gained a
+      `stirred_up: bool = False` parameter that, when true, returns "Muddy" outright
+      regardless of the Secchi reading or stain color - mirrors `core.lures.
+      resolve_water_clarity()`'s existing base-stain + stirred-up-checkbox model used
+      elsewhere in the app, applied to this page's Secchi-based model instead of
+      replacing it.
+    - **Forage no longer pre-populates** - the "Forage seen" multiselect now defaults
+      to `[]` instead of `DEFAULT_FORAGE`, since pre-checking Gizzard Shad/Bluegill
+      implied "seen" when the angler hadn't actually reported seeing anything yet.
+    - **Thermocline input removed** - dropped the "Thermocline depth" field and the
+      `thermocline_ft` argument to `recommend()` (which already defaults to `None`
+      and degrades gracefully - `core.thermocline` itself is untouched, still used by
+      the 7-Day Forecast/Log a Trip pages' sidebar).
+    - **Scoring now uses the angler's entered start time, not wall-clock "now," as
+      "the exact moment"** - previously, `realtime_context_from_bundle()`'s pressure-
+      trend lookup and `manual_segment_score()`'s moon-phase lookup both silently used
+      `lake_now_naive()` (whatever time it happened to be while the form was being
+      filled out) rather than the time window the angler actually cares about. Both
+      functions gained an optional `at_time: datetime` parameter (default `None` -
+      still falls back to "now", so `score_day()`/`score_week()` and existing callers
+      are unaffected); the page now combines today's date with the manually-entered
+      session-start time (entry above) and passes that through, so "for that exact
+      time of day" means the time the angler actually fished, not whenever they
+      happened to be sitting at this page. A caption under the score now says so
+      explicitly ("Scored for about 7:30 AM - your entered session start time").
+    - **Log form: pick the lure (and trailer) from inventory, with color auto-fill** -
+      new `core/activity_log.py` holds the picker/vocabulary helpers. The lure and
+      (conditional) trailer selectboxes live *outside* `st.form(...)`, not inside it -
+      `st.form` only delivers widget values to Python on submit, so a selectbox
+      inside one can't reactively drive another widget's default the moment you pick
+      it; moving the picker outside makes the whole page rerun immediately on
+      selection, and the "Color used"/"Trailer color" text inputs (still inside the
+      form) are keyed off the current pick's index (`key=f"...{lure_idx}"`) so they
+      re-initialize with a fresh default - the picked item's own `description` field,
+      the closest thing to a structured "color" this app has (same field
+      `core.lures._color_tokens()` already keys off of elsewhere) - every time the
+      pick changes, while still leaving the field freely editable afterward. Choosing
+      "Other / not in inventory (enter manually)" (`activity_log.OTHER_LABEL`) shows a
+      plain text field instead. The trailer picker is hidden outright only when the
+      selected lure's inventory `category` maps to a `core.lures.LURE_PROFILES` entry
+      that's positively known to never take one (crankbaits, jerkbaits, topwaters,
+      etc. - `trailer: None`) - it defaults to *shown* for a manually-entered lure or
+      an unrecognized/uncategorized item, since hiding a trailer option that might
+      actually apply is worse than showing one that doesn't.
+    - **New log fields**: time range the lure was fished (start/stop, both optional),
+      depth fished (a primary-depth number plus a free-text "or several depths tried"
+      note, rather than a mode-switching control, to sidestep the same forms-
+      reactivity limitation above for a field that didn't need live auto-population),
+      fish activity (`FISH_ACTIVITY_OPTIONS`, a `st.select_slider` from "Very active"
+      to "Inactive / shut down"), forage type seen at logging time (reuses `core.
+      lures.FORAGE_OPTIONS`, pre-filled from whatever was picked in the conditions
+      form above but independently editable, since forage activity can change over
+      the course of a session) plus forage activity level (`FORAGE_ACTIVITY_OPTIONS`),
+      retrieve speed (`RETRIEVE_SPEED_OPTIONS`: Slow/Medium/Fast), and retrieve style
+      (`RETRIEVE_STYLE_OPTIONS`: straight retrieve, twitch, jerk, stop-and-go, plus a
+      few more common techniques added as a reasonable default set beyond what was
+      explicitly asked for, same as this page's earlier `notes` field). None of this
+      needed a `core/storage.py`/`trip_log.csv` schema change - it all packs into
+      `TripEntry`'s existing flexible `conditions` dict (serialized as
+      `conditions_json`), the same way `modeled_thermocline_ft` already did before
+      this round removed it.
+
+    Verified end-to-end via `AppTest`, simulating real interactions rather than
+    pre-setting values directly (submitting the conditions form, picking an inventory
+    lure and confirming the color field's value updated, picking a trailer-capable vs.
+    trailer-incapable lure and confirming the trailer checkbox appeared/didn't, and
+    submitting the log form and reading back the resulting `trip_log.csv` row) against
+    throwaway spots/log rows, cleaned up afterward; full test suite (148 tests,
+    including new `tests/test_activity_log.py` and additions to `tests/test_onwater.py`
+    / `tests/test_scoring.py`) re-run clean.
 
 ## Key design decisions & rationale
 
@@ -878,6 +968,25 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   work, not part of this round. This round only made sure both logging paths write
   into the same `data/trip_log.csv` so that consolidation stays possible later;
   `pages/3_Log_a_Trip.py` and `pages/4_Trip_History.py` are untouched.
+- (entry 31) The log form's "Color used"/"Trailer color" auto-fill copies the picked
+  item's whole free-text `description` (e.g. `KVD Perfect Plastics Blade Minnow - KVD
+  Magic, 4-1/2", 8-pack`), not an isolated color name - same underlying limitation as
+  entries 25/26's color-match filtering (no structured `color` field on inventory
+  items yet). It's pre-filled and freely editable, so trimming it down to just the
+  color words before submitting is expected, not a bug.
+- (entry 31) `core.activity_log.lure_can_take_trailer()` only knows a lure's trailer
+  eligibility when it maps to a recognized `core.lures.LURE_PROFILES` category - a
+  manually-entered lure name or an inventory item marked "Not categorized / other"
+  always shows the trailer option (permissive default), even for something that
+  obviously wouldn't take one (e.g. typing "topwater popper" by hand). Tightening this
+  would mean guessing a category from free text, which this app deliberately avoids
+  doing anywhere else.
+- (entry 31) "Depth of water fished" in the log form is a plain number plus an
+  independent free-text "or several depths tried" note, rather than a single control
+  that switches modes - a deliberate simplification to avoid a `st.form` reactivity
+  limitation (a mode-switching radio can't hide/show other form fields until the form
+  is submitted) for a field that doesn't need live auto-population the way the lure/
+  color picker does. Both fields are always visible and both optional.
 
 ## Operating notes
 

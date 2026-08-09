@@ -1,16 +1,24 @@
+from datetime import datetime, time as dtime
+
 import streamlit as st
 
 from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, github_token, repo_slug
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
 from core.onwater import (
     LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, cloud_proxy_for_light_condition,
-    wind_band, visibility_band, resolve_water_clarity, STAIN_COLOR_OPTIONS,
-    water_temp_band, PRECIPITATION_OPTIONS, precipitation_proxy,
+    WIND_BANDS, WIND_BAND_LABELS, wind_mph_for_band, resolve_water_clarity, STAIN_COLOR_OPTIONS,
+    water_temp_band, visibility_band, PRECIPITATION_OPTIONS, precipitation_proxy,
 )
-from core.scoring import SEGMENTS, season_stage, manual_segment_score, realtime_context_from_bundle, lake_now_naive
-from core.lures import recommend, FORAGE_OPTIONS, DEFAULT_FORAGE
+from core.scoring import (
+    SEGMENTS, season_stage, manual_segment_score, realtime_context_from_bundle,
+    segment_time_ranges, lake_now_naive,
+)
+from core.activity_log import (
+    lure_picker_options, inventory_item_label, lure_can_take_trailer,
+    FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
+)
+from core.lures import recommend, FORAGE_OPTIONS
 from core.ui import render_lure_recommendation
-from core.thermocline import default_thermocline_input_ft
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push
 from core.weather import lake_today
 
@@ -71,6 +79,26 @@ st.caption(" · ".join(meta_bits) if meta_bits else "No saved details for this s
 if st.button("← Back to Lake Map"):
     st.switch_page("pages/2_Lake_Map.py")
 
+today = lake_today()
+try:
+    bundle = get_weather_bundle(7)
+except Exception:
+    bundle = None
+seg_ranges = segment_time_ranges(bundle, today)
+
+
+def _segment_option_label(name: str) -> str:
+    if seg_ranges and name in seg_ranges:
+        s, e = seg_ranges[name]
+        return f"{name} ({s.strftime('%-I:%M %p')}-{e.strftime('%-I:%M %p')})"
+    return name
+
+
+_wind_help = "\n".join(
+    f"{label} ({lo:g}-{hi:g} mph): {detail}" if hi != float("inf") else f"{label} ({lo:g}+ mph): {detail}"
+    for lo, hi, label, detail in WIND_BANDS
+)
+
 st.divider()
 st.header("Conditions right now")
 st.caption(
@@ -96,11 +124,15 @@ with st.form(f"conditions_form_{spot['spot_id']}"):
         stain_color = st.selectbox(
             "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS, index=1,
         )
+    stirred_up = st.checkbox(
+        "Stirred up / muddy right now (recent wind or rain)",
+        help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color - a "
+             "fresh disturbance can outrun what you can see or measure yet.",
+    )
 
     c3, c4 = st.columns(2)
-    wind_mph = c3.number_input("Wind speed (mph)", min_value=0.0, max_value=60.0, value=6.0, step=1.0)
-    w_band = wind_band(wind_mph)
-    c3.caption(f"**{w_band['label']}** - {w_band['detail']}")
+    wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=1, help=_wind_help)
+    c3.caption(f"≈ {wind_mph_for_band(wind_band_choice):.0f} mph")
     light_condition = c4.selectbox(
         "Light conditions", LIGHT_CONDITIONS, index=2,
         help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
@@ -108,31 +140,39 @@ with st.form(f"conditions_form_{spot['spot_id']}"):
 
     c5, c6 = st.columns(2)
     precipitation = c5.selectbox("Precipitation", PRECIPITATION_OPTIONS)
-    start_time = c6.time_input("Session start time", value=lake_now_naive().time())
+    start_time = c6.time_input(
+        "Session start time (enter manually)", value=None, step=300,
+        help="When you actually started fishing this spot - enter it yourself rather than relying on "
+             "whatever time it happens to be while you're filling this out, since you might do that "
+             "before heading out or after you're done. Used to line up the score/suggestions below with "
+             "that exact moment.",
+    )
 
-    segment_name = st.selectbox("Time window", SEGMENTS, index=SEGMENTS.index(_guess_segment(lake_now_naive().hour)))
+    segment_display_options = [_segment_option_label(s) for s in SEGMENTS]
+    segment_display_choice = st.selectbox(
+        "Time window", segment_display_options,
+        index=SEGMENTS.index(_guess_segment(lake_now_naive().hour)),
+    )
+    segment_name = SEGMENTS[segment_display_options.index(segment_display_choice)]
 
-    with st.expander("Additional details (optional) - sharpens the suggestions further"):
-        forage_seen = st.multiselect("Forage seen", FORAGE_OPTIONS, default=DEFAULT_FORAGE)
-        fc1, fc2 = st.columns(2)
-        fish_depth_ft = fc1.number_input(
-            "Depth fish are showing up on electronics (ft)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
-        )
-        thermocline_ft = fc2.number_input(
-            "Thermocline depth (ft)", min_value=0.0, max_value=100.0,
-            value=default_thermocline_input_ft(lake_today()), step=1.0,
-        )
+    c7, c8 = st.columns(2)
+    forage_seen = c7.multiselect("Forage seen (optional)", FORAGE_OPTIONS, default=[])
+    fish_depth_ft = c8.number_input(
+        "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+    )
 
     submitted = st.form_submit_button("Get lure suggestions", width='stretch')
 
 if submitted:
-    st.session_state.setdefault("spot_session_conditions", {})[spot["spot_id"]] = {
-        "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,
-        "wind_mph": wind_mph, "light_condition": light_condition, "precipitation": precipitation,
-        "start_time": start_time.isoformat(), "segment_name": segment_name,
-        "forage_seen": forage_seen, "fish_depth_ft": fish_depth_ft or None,
-        "thermocline_ft": thermocline_ft or None,
-    }
+    if start_time is None:
+        st.warning("Session start time is required - enter the time you actually started fishing this spot.")
+    else:
+        st.session_state.setdefault("spot_session_conditions", {})[spot["spot_id"]] = {
+            "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,
+            "stirred_up": stirred_up, "wind_band": wind_band_choice, "light_condition": light_condition,
+            "precipitation": precipitation, "start_time": start_time.isoformat(), "segment_name": segment_name,
+            "forage_seen": forage_seen, "fish_depth_ft": fish_depth_ft or None,
+        }
 
 cond = st.session_state.get("spot_session_conditions", {}).get(spot["spot_id"])
 
@@ -140,22 +180,23 @@ if not cond:
     st.info("Fill in the conditions above and click **Get lure suggestions** to continue.")
     st.stop()
 
-water_clarity = resolve_water_clarity(cond["secchi_ft"], cond.get("stain_color"))
+water_clarity = resolve_water_clarity(cond["secchi_ft"], cond.get("stain_color"), cond.get("stirred_up", False))
 structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), "Main-lake point")
-today = lake_today()
 season = season_stage(today.timetuple().tm_yday, cond["water_temp_f"])
 avg_cloud_pct = cloud_proxy_for_light_condition(cond["light_condition"])
+avg_wind_mph = wind_mph_for_band(cond["wind_band"])
 total_precip_in, max_precip_prob_pct = precipitation_proxy(cond["precipitation"])
 
-try:
-    bundle = get_weather_bundle(7)
-except Exception:
-    bundle = None
-rt = realtime_context_from_bundle(bundle, cond["segment_name"], today)
+# The angler's own entered session-start time - not "right now" - is what "for that
+# exact time of day" should mean here, so it overrides the generic wall-clock-now
+# default that pressure-trend/moon-phase lookups would otherwise fall back to.
+at_time = datetime.combine(today, dtime.fromisoformat(cond["start_time"]))
+
+rt = realtime_context_from_bundle(bundle, cond["segment_name"], today, at_time=at_time)
 
 score_result = manual_segment_score(
-    cond["segment_name"], season, avg_cloud_pct, cond["wind_mph"], total_precip_in, max_precip_prob_pct,
-    pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"],
+    cond["segment_name"], season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
+    pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
 )
 
 st.divider()
@@ -168,6 +209,7 @@ m2.write(
     f"**Structure:** {structure_type} (from this spot's saved type)  \n"
     f"**Water clarity:** {water_clarity}"
 )
+st.caption(f"Scored for about {at_time.strftime('%-I:%M %p')} - your entered session start time.")
 if score_result.notes:
     st.caption(" · ".join(score_result.notes))
 for warn in score_result.warnings:
@@ -182,7 +224,7 @@ rec = recommend(
     season, cond["water_temp_f"], cond["segment_name"], rt["pressure_trend_24h"],
     structure_type=structure_type, water_clarity=water_clarity,
     fish_depth_ft=cond.get("fish_depth_ft"), forage=cond.get("forage_seen"),
-    thermocline_ft=cond.get("thermocline_ft"), inventory=get_inventory(),
+    inventory=get_inventory(),
 )
 render_lure_recommendation(rec)
 
@@ -193,11 +235,77 @@ st.caption(
     "exact spot and these exact conditions, so it can help calibrate future suggestions."
 )
 
+inventory_items = get_inventory()
+lure_labels, lure_items = lure_picker_options(inventory_items)
+
+pc1, pc2 = st.columns(2)
+lure_idx = pc1.selectbox(
+    "Lure used", options=list(range(len(lure_labels))), format_func=lambda i: lure_labels[i],
+    key=f"log_lure_idx_{spot['spot_id']}",
+)
+selected_lure_item = lure_items[lure_idx]
+
+use_trailer = False
+if lure_can_take_trailer(selected_lure_item):
+    use_trailer = pc2.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}")
+
+trailer_idx = 0
+selected_trailer_item = None
+if use_trailer:
+    trailer_idx = st.selectbox(
+        "Trailer", options=list(range(len(lure_labels))), format_func=lambda i: lure_labels[i],
+        key=f"log_trailer_idx_{spot['spot_id']}",
+    )
+    selected_trailer_item = lure_items[trailer_idx]
+
 with st.form(f"log_activity_form_{spot['spot_id']}"):
-    lc1, lc2 = st.columns(2)
-    lure_used = lc1.text_input("Lure used", placeholder="e.g. Chartreuse/white spinnerbait")
-    color_used = lc2.text_input("Color used", placeholder="e.g. Chartreuse/white")
+    if selected_lure_item is None:
+        lure_used = st.text_input("Lure name", placeholder="e.g. Chartreuse/white spinnerbait")
+    else:
+        lure_used = inventory_item_label(selected_lure_item)
+        st.caption(f"Lure: **{lure_used}**")
+    color_used = st.text_input(
+        "Color used", value=(selected_lure_item.get("description", "") if selected_lure_item else ""),
+        key=f"log_color_used_{spot['spot_id']}_{lure_idx}", placeholder="e.g. Chartreuse/white",
+    )
+
+    trailer_name, trailer_color = "", ""
+    if use_trailer:
+        tc1, tc2 = st.columns(2)
+        if selected_trailer_item is None:
+            trailer_name = tc1.text_input("Trailer name", placeholder="e.g. Green pumpkin craw trailer")
+        else:
+            trailer_name = inventory_item_label(selected_trailer_item)
+            tc1.caption(f"Trailer: **{trailer_name}**")
+        trailer_color = tc2.text_input(
+            "Trailer color",
+            value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
+            key=f"log_trailer_color_{spot['spot_id']}_{trailer_idx}",
+        )
+
     technique_used = st.text_input("Technique/presentation", placeholder="e.g. Slow-rolled along a windblown point")
+
+    tc3, tc4 = st.columns(2)
+    lure_start_time = tc3.time_input("Started using this lure at (optional)", value=None)
+    lure_end_time = tc4.time_input("Stopped using this lure at (optional)", value=None)
+
+    dc1, dc2 = st.columns(2)
+    depth_fished_ft = dc1.number_input(
+        "Primary depth fished (ft)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+    )
+    depth_fished_varied_note = dc2.text_input(
+        "Or, several depths tried", placeholder="e.g. worked 2-15 ft, fish suspended over the channel",
+    )
+
+    ac1, ac2 = st.columns(2)
+    fish_activity = ac1.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, value="Moderate")
+    retrieve_speed = ac2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1)
+
+    rc1, rc2 = st.columns(2)
+    retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS)
+    forage_activity = rc2.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, value="Moderate")
+
+    forage_type_seen = st.multiselect("Forage type/species seen", FORAGE_OPTIONS, default=cond.get("forage_seen", []))
 
     lc3, lc4 = st.columns(2)
     fish_caught = lc3.number_input("Bass caught", min_value=0, step=1, value=0)
@@ -213,15 +321,28 @@ if log_submitted:
         "moon_near_new_full": score_result.moon.is_new_or_full_window,
         "moon_phase": score_result.moon.name,
         "avg_cloud_pct": avg_cloud_pct,
-        "avg_wind_mph": cond["wind_mph"],
+        "avg_wind_mph": avg_wind_mph,
+        "wind_band": cond["wind_band"],
         "water_temp_f": cond["water_temp_f"],
         "secchi_ft": cond["secchi_ft"],
+        "stirred_up": cond.get("stirred_up", False),
         "light_condition": cond["light_condition"],
         "precipitation": cond["precipitation"],
         "start_time": cond["start_time"],
         "forage_seen": cond.get("forage_seen"),
         "fish_depth_ft": cond.get("fish_depth_ft"),
-        "modeled_thermocline_ft": cond.get("thermocline_ft"),
+        "trailer_used": use_trailer,
+        "trailer_name": trailer_name or None,
+        "trailer_color": trailer_color or None,
+        "lure_start_time": lure_start_time.isoformat() if lure_start_time else None,
+        "lure_end_time": lure_end_time.isoformat() if lure_end_time else None,
+        "depth_fished_ft": depth_fished_ft or None,
+        "depth_fished_varied_note": depth_fished_varied_note or None,
+        "fish_activity": fish_activity,
+        "forage_activity": forage_activity,
+        "forage_type_seen": forage_type_seen,
+        "retrieve_speed": retrieve_speed,
+        "retrieve_style": retrieve_style,
         "source": "spot_session",
     }
     entry = TripEntry(

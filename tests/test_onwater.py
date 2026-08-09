@@ -1,8 +1,8 @@
 from core.lures import WATER_CLARITY_OPTIONS
 from core.onwater import (
-    LIGHT_CONDITIONS, PRECIPITATION_OPTIONS, STAIN_COLOR_OPTIONS,
+    LIGHT_CONDITIONS, PRECIPITATION_OPTIONS, STAIN_COLOR_OPTIONS, WIND_BAND_LABELS, WIND_BANDS,
     cloud_proxy_for_light_condition, precipitation_proxy, resolve_water_clarity,
-    visibility_band, water_temp_band, wind_band,
+    visibility_band, water_temp_band, wind_band, wind_mph_for_band,
 )
 
 
@@ -56,6 +56,26 @@ def test_resolve_water_clarity_always_returns_a_valid_lure_engine_option():
     for secchi in (0.2, 1.0, 1.5, 2.5, 4.0, 6.0):
         for stain in (None, "Green stained", "Brown stained"):
             assert resolve_water_clarity(secchi, stain) in WATER_CLARITY_OPTIONS
+
+
+def test_resolve_water_clarity_stirred_up_overrides_everything():
+    # A clear-water Secchi reading plus an explicit stain color would normally
+    # resolve to Clear/the stain color - the stirred-up flag should win regardless,
+    # since it represents newer information than the Secchi/stain reading.
+    assert resolve_water_clarity(6.0, stirred_up=True) == "Muddy"
+    assert resolve_water_clarity(2.0, "Green stained", stirred_up=True) == "Muddy"
+    assert resolve_water_clarity(0.5, stirred_up=False) == "Muddy"  # unaffected either way
+
+
+def test_wind_mph_for_band_covers_every_label_within_its_own_range():
+    for lo, hi, label, _ in WIND_BANDS:
+        proxy = wind_mph_for_band(label)
+        assert lo <= proxy <= (hi if hi != float("inf") else proxy)
+        assert wind_band(proxy)["label"] == label  # round-trips back to the same band
+
+
+def test_wind_band_labels_matches_wind_bands_order():
+    assert WIND_BAND_LABELS == [label for _, _, label, _ in WIND_BANDS]
 
 
 def test_cloud_proxy_for_light_condition_covers_every_condition():
