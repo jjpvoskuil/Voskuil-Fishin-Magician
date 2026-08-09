@@ -48,11 +48,26 @@ def render_lure_block(block: LureBlock):
     with st.container(border=True):
         st.markdown(f"**{block.name}**")
         if block.owned_items:
-            owned_desc = "; ".join(
-                f"{it['brand']} – {it['description']} (qty {it['quantity']})"
-                for it in block.owned_items
-            )
-            st.success(f"✅ In your tackle box: {owned_desc}")
+            matched = [it for it in block.owned_items if it.get("color_match")]
+            unmatched = [it for it in block.owned_items if not it.get("color_match")]
+
+            if matched:
+                match_desc = "; ".join(
+                    f"{it['brand']} – {it['description']} (qty {it['quantity']})" for it in matched
+                )
+                st.success(f"✅ Color match in your tackle box: {match_desc}")
+                if unmatched:
+                    other_desc = "; ".join(f"{it['brand']} – {it['description']}" for it in unmatched)
+                    st.caption(f"Also on hand in this category, in a different color: {other_desc}")
+            else:
+                owned_desc = "; ".join(
+                    f"{it['brand']} – {it['description']} (qty {it['quantity']})"
+                    for it in block.owned_items
+                )
+                st.warning(
+                    f"🎨 In your tackle box, but not in the color suggested below: {owned_desc}. "
+                    f"Still worth a cast, or pick up the suggested color for a closer match."
+                )
 
             photos = [it for it in block.owned_items if resolve_image_source(it)]
             if photos:
@@ -61,7 +76,8 @@ def render_lure_block(block: LureBlock):
                 for col, it in zip(cols, shown):
                     with col:
                         render_square_thumbnail(it, size_px=OWNED_THUMBNAIL_PX)
-                        st.caption(f"{it['brand']} – {it['description']}"[:60])
+                        badge = "✅ " if it.get("color_match") else ""
+                        st.caption(f"{badge}{it['brand']} – {it['description']}"[:60])
                 if extra:
                     st.caption(f"+ {len(extra)} more owned item(s) in this category (see Lure Inventory for photos).")
         else:

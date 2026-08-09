@@ -24,6 +24,7 @@ needed to render one self-contained block per lure (name, colors,
 trailer, depth, presentation, and a couple of how-to videos).
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass, field
 
 from .videos import get_videos_by_key
@@ -525,6 +526,52 @@ def _depth_text(profile: dict, fish_depth_ft: float = None) -> str:
                     f"so let it sink/slow-roll deeper, or lean on a deeper-running option instead")
 
 
+# Connector/filler words that show up inside the color-suggestion strings
+# (e.g. "Chartreuse/black back", "Craw pattern") but aren't themselves
+# color/pattern words - stripped out before matching so they don't cause
+# false "matches" against unrelated owned-item descriptions.
+_COLOR_MATCH_STOPWORDS = {
+    "and", "the", "with", "back", "belly", "pattern", "skirt", "tip", "solid",
+    "trailer", "blade", "tail",
+}
+
+
+def _color_tokens(text: str) -> set:
+    """Break a color-suggestion or lure-description string into lowercase
+    word tokens for a simple, explainable keyword match. This is NOT a real
+    color model - it has no notion of "close" colors, and a compound name
+    like "green pumpkin" becomes two independent tokens - but it's good
+    enough to flag when an owned item's description shares real color/
+    pattern language with today's suggested color, and, just as usefully,
+    to flag when it doesn't."""
+    if not text:
+        return set()
+    words = re.findall(r"[a-z]+", text.lower())
+    return {w for w in words if len(w) >= 3 and w not in _COLOR_MATCH_STOPWORDS}
+
+
+def _annotate_color_matches(owned_items: list, suggested_colors: list) -> list:
+    """Tag each owned item with whether its description shares color/pattern
+    language with this lure block's suggested colors for today's water
+    clarity, and bubble color-matched items to the front of the list.
+
+    Without this, an owned-item photo/description was shown for a lure
+    category regardless of whether its actual color had anything to do with
+    the "Colors:" suggestion below it - e.g. a Chili Craw crankbait would be
+    shown next to a "Chartreuse/black back" suggestion with nothing telling
+    you they don't match. `color_match` on each item is what lets the UI
+    tell those two cases apart."""
+    suggested_tokens = set()
+    for c in suggested_colors:
+        suggested_tokens |= _color_tokens(c)
+    annotated = [
+        {**it, "color_match": bool(_color_tokens(it.get("description", "")) & suggested_tokens)}
+        for it in owned_items
+    ]
+    annotated.sort(key=lambda it: not it["color_match"])
+    return annotated
+
+
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
                   owned_items: list = None) -> "LureBlock":
     profile = LURE_PROFILES[key]
@@ -542,7 +589,7 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         presentation=profile["presentation"],
         videos=get_videos_by_key(profile["video_key"], profile["name"]),
         note=note,
-        owned_items=list(owned_items) if owned_items else [],
+        owned_items=_annotate_color_matches(owned_items, colors) if owned_items else [],
     )
 
 
@@ -599,6 +646,12 @@ class LureBlock:
     @property
     def owned(self) -> bool:
         return bool(self.owned_items)
+
+    @property
+    def owned_color_match(self) -> bool:
+        """True if at least one owned item's description matches today's
+        suggested color for this lure (see _annotate_color_matches)."""
+        return any(it.get("color_match") for it in self.owned_items)
 
 
 @dataclass

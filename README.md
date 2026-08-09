@@ -79,6 +79,14 @@ key decisions, and known open items.
   pick-up suggestions (🛒). Nothing is added or hidden based on ownership - the
   season/structure/pressure/forage logic still decides what's recommended; ownership
   only decides what's flagged and what floats to the top.
+- **Color-match flagging on owned lures** - within a lure block, owned items are
+  further checked against that block's suggested color for today's water clarity: an
+  owned item whose description shares color/pattern words with the suggestion (e.g.
+  "shad" in both) gets its own ✅ "Color match" callout and sorts first among the
+  photos shown; owned items in the same lure category but a different color still
+  show up (nothing is hidden) but under a separate "not in the suggested color"
+  note, so a chartreuse suggestion next to your green-pumpkin crankbait doesn't read
+  as a match when it isn't one.
 
 ## How the model works (and its limits)
 
@@ -257,6 +265,19 @@ part of any season's default picks, but when your sonar reading (Lake Setup Opti
 sidebar) falls in its 6-12 ft zone, it swaps in for whichever shallower/deeper crankbait
 the season pattern would otherwise have suggested - a depth-accuracy improvement on its
 own, and also what lets an owned medium-diving crank actually get surfaced.
+
+Category match is only half the story, though - owning *a* Medium-Diving Crankbait
+doesn't mean you own it in *today's suggested color*. So each owned item's free-text
+`description` is also checked against the block's suggested colors for the current
+water clarity (`core.lures._color_tokens()` / `_annotate_color_matches()` - a simple,
+explainable keyword match, same philosophy as the rest of the engine, not a real color
+model). Items that share a color/pattern word with the suggestion (e.g. "shad" in both
+"Green shad" and "Tennessee Shad") get flagged ✅ **"Color match"** and shown first;
+items in the same category but without a shared color word still show up (nothing owned
+is ever hidden) but under their own "not in the suggested color" note instead of being
+implied as a match. Because it's keyword-based against free text rather than a
+structured color field, it can occasionally miss a real match (different wording) or
+flag a coincidental one - it's meant as a helpful signal, not a guarantee.
 
 ## Running locally
 

@@ -237,3 +237,65 @@ def test_medium_diving_crankbait_preferred_when_fish_depth_matches():
     rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Clear", fish_depth_ft=9)
     keys = {b.key for b in rec.first_choice + rec.second_choice}
     assert "medium_diving_crankbait" in keys
+
+
+def test_color_tokens_extracts_meaningful_words_and_drops_stopwords():
+    from core.lures import _color_tokens
+    assert _color_tokens("Chartreuse/black back") == {"chartreuse", "black"}
+    assert _color_tokens("Craw pattern") == {"craw"}
+    assert _color_tokens("") == set()
+    assert _color_tokens(None) == set()
+
+
+def test_owned_item_matching_suggested_color_is_flagged():
+    # medium_diving_crankbait in "Green stained" water suggests "Chartreuse/black
+    # back" and "Green shad" - an owned item described with either color word
+    # should be flagged as a color match.
+    inventory = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
+    ]
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
+                     inventory=inventory)
+    block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert block.owned_color_match is True
+    assert block.owned_items[0]["color_match"] is True
+
+
+def test_owned_item_not_matching_suggested_color_is_flagged_mismatched():
+    # Reproduces the user-reported case: the suggestion is chartreuse/green
+    # shad, but the owned item is a craw pattern - it should still show up
+    # (nothing is hidden), just flagged as not a color match.
+    inventory = [
+        {"brand": "Strike King", "description": "3XD Chili Craw",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
+    ]
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
+                     inventory=inventory)
+    block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert block.owned is True
+    assert block.owned_color_match is False
+    assert block.owned_items[0]["color_match"] is False
+
+
+def test_color_matched_owned_items_sort_before_mismatched_ones():
+    inventory = [
+        {"brand": "Strike King", "description": "3XD Chili Craw",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
+        {"brand": "Rapala", "description": "DT Dives-To Bluegill",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
+        {"brand": "Bandit", "description": "300 Green Shad",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": ""},
+    ]
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
+                     inventory=inventory)
+    block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert block.owned_items[0]["description"] == "300 Green Shad"
+    assert block.owned_items[0]["color_match"] is True
+    assert all(not it["color_match"] for it in block.owned_items[1:])
+
+
+def test_no_owned_items_have_no_color_match_flag_issue():
+    rec = recommend("summer_peak", 84, "Midday", -1.0, "Creek channel / ledge", "Clear")
+    for block in rec.first_choice + rec.second_choice:
+        assert block.owned_color_match is False
