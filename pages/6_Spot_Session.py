@@ -197,13 +197,32 @@ rt = realtime_context_from_bundle(bundle, cond["segment_name"], today, at_time=a
 score_result = manual_segment_score(
     cond["segment_name"], season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
     pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
+    water_temp_f=cond["water_temp_f"], water_clarity=water_clarity,
+    forage_present=bool(cond.get("forage_seen")),
 )
+
+
+def _score_breakdown_help(breakdown: list, final_score: float) -> str:
+    lines = ["**How this score was derived:**", ""]
+    raw_total = 0.0
+    for label, delta, detail in breakdown:
+        raw_total += delta
+        sign = "+" if delta >= 0 else ""
+        lines.append(f"- {label}: {sign}{delta:g} — {detail}")
+    if round(raw_total, 1) != final_score:
+        lines.append("")
+        lines.append(f"Raw total {raw_total:g} is clamped to the 1-10 range → **{final_score}/10**.")
+    return "\n".join(lines)
+
 
 st.divider()
 st.header("Suggestions for right now")
 
 m1, m2 = st.columns([1, 2])
-m1.metric(f"{cond['segment_name']} activity score", f"{score_result.score}/10")
+m1.metric(
+    f"{cond['segment_name']} activity score", f"{score_result.score}/10",
+    help=_score_breakdown_help(score_result.breakdown, score_result.score),
+)
 m2.write(
     f"**Season:** {season.replace('_', ' ').title()}  \n"
     f"**Structure:** {structure_type} (from this spot's saved type)  \n"

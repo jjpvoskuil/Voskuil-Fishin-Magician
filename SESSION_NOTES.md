@@ -819,6 +819,61 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     throwaway spots/log rows, cleaned up afterward; full test suite (148 tests,
     including new `tests/test_activity_log.py` and additions to `tests/test_onwater.py`
     / `tests/test_scoring.py`) re-run clean.
+32. **Score beyond pressure/moon: water temp, water clarity, forage, light rain +
+    a "how was this derived" hover** - the user wanted the Spot Session score to
+    actually use the rest of what they enter (water temp, clarity, forage), not just
+    pressure trend and moon phase, and wanted transparency into how the number came
+    together.
+
+    `core.scoring._segment_score()` gained three new optional parameters -
+    `water_temp_f`, `water_clarity`, `forage_present` - each **manual-entry-only**:
+    `score_day()`/`score_week()` never pass them (their call site is unchanged), so
+    the forecast-driven path's numeric output is byte-for-byte identical to before
+    this round (verified by a new test asserting none of these labels ever appear in
+    `score_day()`'s per-segment breakdown, on top of the full existing suite passing
+    unmodified). Only `manual_segment_score()` supplies them, since a real Secchi
+    reading or "did you see forage" observation only exists when someone is standing
+    at the water. Water temperature reuses `core.onwater.water_temp_band()`'s bands
+    (Cold/Lethargic penalty, Pre-Spawn Transition small bonus, Peak Optimal Prime
+    bonus, Summer Stratified deliberately neutral since `season_summer_midday_penalty`
+    already partially covers summer heat, Extreme Thermal Load penalty) - standard
+    bass metabolic-rate-curve reasoning, not a novel model. Water clarity gives stained
+    water (Nolin's documented "power-fishing window") a small bonus and muddy water a
+    small penalty (harder to trigger reaction strikes on sight alone), leaving clear
+    water neutral rather than asserting it's uniformly better or worse. Forage gives a
+    small bonus when the angler reported seeing any forage type - absence isn't
+    penalized, since not seeing forage isn't evidence there's none around.
+
+    One new factor - a small bonus for light/steady rain short of storm level - was
+    added as a **shared** enhancement instead (both `total_precip_in` and
+    `max_precip_prob_pct` already exist in both paths from a real forecast bundle),
+    reflecting the well-documented pattern that light rain reduces light penetration
+    and fish wariness without the storm penalty's downside; a new test confirms
+    `score_day()` picks this up too when a synthetic bundle carries light rain.
+
+    `_segment_score()` now also returns a `breakdown` list - `(label, delta, detail)`
+    for every factor that actually moved the score, base value included - alongside
+    the existing `notes` list (kept as-is, since other code already reads it).
+    `SegmentForecast` and `ManualScoreResult` both gained a `breakdown` field
+    (defaulted via `field(default_factory=list)` so no other construction site needed
+    updating). `pages/6_Spot_Session.py` turns this into the requested "little ? to
+    hover over": `st.metric(..., help=...)` already renders a small hover-info icon
+    next to a metric's value, so no new UI framework/component was needed - the page
+    just formats `score_result.breakdown` into a markdown bullet list (one line per
+    factor, "+delta — detail") and passes it as `help=`, plus a closing line noting
+    the raw-total-vs-clamped-final score when clamping actually changed anything.
+
+    Considered and deliberately left out for now: threading water temp/clarity into
+    `score_day()` too (would change the general 7-Day Forecast's already-tested/
+    deployed scores, which wasn't asked for - the request was specifically about the
+    Spot Session page's own entered data); a light-condition-vs-clarity interaction
+    bonus (e.g. extra penalty for clear water + direct high sun at midday) - the
+    existing cloud-cover-proxy mechanism already captures most of that signal via
+    `avg_cloud_pct`, and stacking a second, correlated bonus/penalty on the same
+    underlying condition risks double-counting rather than adding real information;
+    and species-specific forage bonuses (shad vs. bluegill vs. crawfish) - a single
+    presence/absence signal keeps the rule explainable, matching this app's
+    documented "no black box" scoring philosophy.
 
 ## Key design decisions & rationale
 
@@ -918,6 +973,13 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   yet fed back into `core/calibration.py`'s weight-nudging - only pressure
   trend, moon phase, cloud cover, and wind currently participate in
   calibration.
+- (entry 32) The new water-temp/water-clarity/forage/light-rain scoring factors
+  aren't wired into `core/calibration.py` either, for the same reason as the note
+  above - `_factor_flags()` only tracks the original five factors. Since these new
+  ones are manual-entry-only (only ever populated via Spot Session logs, tagged
+  `"source": "spot_session"` in `conditions_json`), extending calibration to cover
+  them is a clean, scoped follow-up once there's enough spot-session log volume to
+  make it worthwhile - not something this round did.
 - (entry 21) All 40 existing `data/lure_inventory.csv` rows were auto-tagged with a
   best-guess `category` from product name/brand, not hand-verified item by item -
   spot-check on the Lure Inventory page (search/filter by category) and correct any

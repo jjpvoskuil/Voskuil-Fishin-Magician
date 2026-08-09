@@ -47,7 +47,11 @@ key decisions, and known open items.
   scores that moment - using the time you actually entered, not whatever time you
   happened to be filling out the page - and calls the same lure/color recommendation
   engine the 7-Day Forecast page uses, just fed by a live reading instead of a
-  forecast. A second section on the same page lets you log what actually happened:
+  forecast. This score factors in your entered water temperature, water clarity, and
+  whether you reported seeing forage, on top of pressure trend and moon phase (see
+  "How the model works" below for exactly how); hover the small ⓘ next to the score
+  to see the full factor-by-factor breakdown of how it was calculated. A second
+  section on the same page lets you log what actually happened:
   pick the lure (and trailer, if that lure type takes one) straight from your tackle
   inventory - picking one auto-fills the color field - or enter something not in your
   inventory by hand, plus the time range you fished it, depth(s) fished, how active
@@ -114,7 +118,23 @@ key decisions, and known open items.
 This is a transparent, rule-based heuristic - not a black box and not a proprietary
 fishing-app data feed. It's designed to be reasoned about, and to improve as you log
 real trips. See `core/scoring.py` for the documented weights and `core/lures.py` for the
-lure/color/technique rule table.
+lure/color/technique rule table. On the Spot Session page, hovering the ⓘ next to the
+activity score shows exactly which factors fired and by how much - the same
+transparency principle, made visible in the UI rather than just in the source.
+
+The 1-10 activity score is built from pressure trend, moon phase, solunar major/minor
+windows, cloud cover, wind, season/water-temp, and precipitation (see below for each) -
+every one of these applies on both the 7-Day Forecast page and the Spot Session page,
+since both draw from the same `core.scoring._segment_score()` formula. Three more
+factors - an exact water-temperature metabolic-rate bonus/penalty, a water-clarity
+bonus/penalty, and a small bonus for confirmed forage nearby - only apply on the Spot
+Session page, since they need a real on-the-water reading (Secchi depth, an exact
+thermometer reading, seeing baitfish) that a forecast API has no way to supply; the
+general 7-Day Forecast's water-temp *estimate* isn't precise enough to treat the same
+way. Light/steady rain short of storm level gets a small bonus on both pages (a
+well-documented pattern - reduced light penetration and surface disturbance make fish
+less wary), distinct from the storm penalty that still applies to genuinely heavy
+rain/high storm probability on both pages too.
 
 **Data sources:**
 - Weather (temperature, pressure, cloud cover, wind, precipitation): [Open-Meteo](https://open-meteo.com/) - free, no API key.
