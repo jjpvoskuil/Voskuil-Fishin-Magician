@@ -966,6 +966,20 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     catches-only checkbox through `AppTest`, confirmed the filtered count updated
     correctly, confirmed both trip types' expanders rendered without exceptions, then
     restored the original (empty, in this dev environment) trip log from the backup.
+35. **Trip History's "Location" filter now resolves against the live saved-spot
+    catalog** - it previously grouped trips by whatever `spot_name` string got frozen
+    into the trip row at logging time, so renaming a saved spot on the Lake Map page
+    would splinter its trip history across two different filter entries (the old
+    name and the new one). Fixed by looking each trip's `spot_id` up against
+    `core.appstate.get_lake_spots()` (the same live `data/lake_spots.csv` catalog the
+    Lake Map page reads/writes) and using its *current* `name` for the Location
+    filter, the trips table, and each trip-detail expander's title - falling back to
+    the row's stored `spot_name` only when `spot_id` doesn't match any saved spot
+    (a deleted pin, or a legacy row logged against `core.spots`'s separate reference-
+    spot list, which uses its own unrelated ID namespace). Verified with a scratch
+    `AppTest` script (not committed) that logged a trip against the one real saved
+    spot with a deliberately stale `spot_name`, confirming the Location filter shows
+    only the spot's current name and never the stale one.
 
 ## Key design decisions & rationale
 

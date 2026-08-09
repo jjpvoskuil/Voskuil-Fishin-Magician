@@ -10,6 +10,16 @@ core/onwater.py); legacy rows carry a smaller, different set of keys (e.g.
 modeled_thermocline_band_ft). The "Trip details" expander below renders
 whatever keys are actually present for a given row and skips the rest, so
 both kinds of entries display sensibly without special-casing.
+
+The "Location" filter/display resolves each trip's `spot_id` against the
+angler's *current* saved-spot catalog (core.lake_spots / data/lake_spots.csv)
+rather than trusting the `spot_name` string frozen into the trip row at
+logging time - so if a spot gets renamed later, older trips logged against
+it still group under its current name instead of splintering into a
+separate filter entry per historical name. Falls back to the row's stored
+`spot_name` for trips whose `spot_id` no longer matches any saved spot
+(a deleted pin, or a legacy row logged against core.spots's separate
+reference-spot list).
 """
 import json
 from datetime import datetime
@@ -17,6 +27,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from core.appstate import get_lake_spots
 from core.storage import read_all_trips
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES
@@ -55,12 +66,24 @@ def _lure_type_label(cond: dict) -> str:
     return LURE_PROFILES.get(category, {}).get("name", category)
 
 
-# Parse once up front so every row has a usable date, a conditions dict, and
-# a derived lure-type label available for both filtering and display.
+spot_name_by_id = {s["spot_id"]: s["name"] for s in get_lake_spots()}
+
+
+def _location_label(row: dict) -> str:
+    """Current saved-spot name for this trip's spot_id, falling back to
+    whatever spot_name was stored at logging time if that spot_id isn't (or
+    is no longer) in the saved-spot catalog."""
+    return spot_name_by_id.get(row.get("spot_id")) or row.get("spot_name") or "Unknown location"
+
+
+# Parse once up front so every row has a usable date, a conditions dict, a
+# derived lure-type label, and a resolved location name available for both
+# filtering and display.
 for row in rows:
     row["_date"] = _parse_date(row.get("trip_date"))
     row["_conditions"] = _parse_conditions(row)
     row["_lure_type"] = _lure_type_label(row["_conditions"])
+    row["_location"] = _location_label(row)
 
 df = pd.DataFrame(rows)
 
@@ -77,7 +100,7 @@ date_range = f1.date_input(
 ) if min_date else None
 segment_options = sorted(df["segment"].dropna().unique().tolist())
 segments = f2.multiselect("Time of day", segment_options, default=[])
-spot_options = sorted(df["spot_name"].dropna().unique().tolist())
+spot_options = sorted(df["_location"].dropna().unique().tolist())
 spots = f3.multiselect("Location", spot_options, default=[])
 
 f4, f5, f6 = st.columns(3)
@@ -100,7 +123,7 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
 if segments:
     filtered = filtered[filtered["segment"].isin(segments)]
 if spots:
-    filtered = filtered[filtered["spot_name"].isin(spots)]
+    filtered = filtered[filtered["_location"].isin(spots)]
 if lure_types:
     filtered = filtered[filtered["_lure_type"].isin(lure_types)]
 if clarities:
@@ -123,10 +146,10 @@ st.caption(f"Showing {len(filtered)} of {len(df)} logged trips.")
 if filtered.empty:
     st.warning("No trips match these filters.")
 else:
-    display_cols = ["trip_date", "segment", "spot_name", "structure_type", "water_clarity",
+    display_cols = ["trip_date", "segment", "_location", "structure_type", "water_clarity",
                      "_lure_type", "lure_used", "color_used", "technique_used", "fish_caught",
                      "biggest_fish_lb", "predicted_score", "notes"]
-    display_df = filtered[display_cols].rename(columns={"_lure_type": "lure_type"})
+    display_df = filtered[display_cols].rename(columns={"_lure_type": "lure_type", "_location": "location"})
     st.dataframe(display_df.sort_values("trip_date", ascending=False), width='stretch', hide_index=True)
 
     c1, c2, c3 = st.columns(3)
@@ -194,7 +217,7 @@ if filtered.empty:
 else:
     for _, row in filtered.sort_values("trip_date", ascending=False).iterrows():
         cond = row["_conditions"]
-        title = f"{row['trip_date']} · {row['spot_name']} · {row['segment']}"
+        title = f"{row['trip_date']} · {row['_location']} · {row['segment']}"
         with st.expander(title):
             top_bits = [
                 f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
