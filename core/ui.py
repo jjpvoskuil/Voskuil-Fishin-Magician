@@ -1,16 +1,16 @@
 """Shared Streamlit rendering helpers so the lure-block layout is
-identical on the 7-Day Forecast page and the Lake Map page."""
+identical on the 7-Day Forecast page and the Spot Session page."""
 from __future__ import annotations
 from dataclasses import dataclass, field
 import streamlit as st
 
 from .lures import (
     LureBlock, BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, STRUCTURE_TYPES,
-    resolve_water_clarity, FORAGE_OPTIONS, DEFAULT_FORAGE,
+    resolve_water_clarity, FORAGE_OPTIONS,
 )
 from .lure_inventory import resolve_image_source, image_data_uri_or_url
-from .thermocline import estimate_thermocline_ft, default_thermocline_input_ft
-from .weather import lake_today
+from .lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE
+from .appstate import get_lake_spots
 
 MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
 OWNED_THUMBNAIL_PX = 64   # small on purpose - these are ownership flags, not the card's focus
@@ -91,6 +91,12 @@ def render_lure_recommendation(rec, first_label: str = "First choice", second_la
         st.caption(" · ".join(rec.rationale))
 
 
+# Shown in the Location dropdown when the angler isn't fishing (or planning
+# around) one specific saved spot - falls through to a manual structure-type
+# pick instead of a saved spot's own structure type.
+OTHER_LOCATION_LABEL = "Other (pick structure manually)"
+
+
 @dataclass
 class LakeSetupOptions:
     water_clarity: str          # resolved: Clear / Green stained / Brown stained / Muddy
@@ -99,7 +105,6 @@ class LakeSetupOptions:
     structure_type: str
     water_temp_override_f: float
     fish_depth_ft: float
-    thermocline_ft: float
     forage: list = field(default_factory=list)
 
 
@@ -110,86 +115,89 @@ def render_lake_setup_sidebar(
     default_fish_depth_ft: float = 10.0,
 ) -> LakeSetupOptions:
     """
-    Shared "Lake Setup Options" sidebar. Every value returned here is a
-    direct input the angler controls, and every page that shows a lure
-    recommendation (7-Day Forecast, Lake Map) feeds ALL of them - water
-    clarity, structure, water temp, fish depth, thermocline depth, and
-    forage - straight into recommend() so the guidance stays consistent
-    everywhere it's shown.
+    Shared "Lake Setup Options" sidebar (currently only used by the 7-Day
+    Forecast page - Lake Map dropped its own use of this when Spot Session
+    took over on-the-water recommendations, and Spot Session has always had
+    its own, separate condition inputs). Every value returned here is a
+    direct input the angler controls, feeding straight into recommend() so
+    the guidance stays consistent with the rest of the app's rules.
 
     Water color: Nolin normally runs a greenish-brown stain (leaning brown),
     but wind/rain can stir it up to muddy regardless of the usual color -
     so this is two independent inputs (base stain color, and a stirred-up
     flag) resolved into one effective clarity key for the lure engine.
 
+    Location: picking one of the angler's own saved spots (data/lake_spots.csv,
+    same catalog as the Lake Map page) auto-resolves that spot's structure
+    type via core.lake_spots.LOCATION_TYPE_TO_STRUCTURE_TYPE, the same lookup
+    Spot Session uses - one less thing to enter by hand, and it stays correct
+    if the spot's type is edited later. Picking "Other" instead reveals a
+    second, plain structure-type dropdown for a spot that isn't saved (or
+    isn't a specific spot at all).
+
     Water surface temp and the depth you're marking fish at on your own
-    electronics are both required, direct inputs (Nolin has no live feed
-    for either) - they always drive lure/season selection, depth-to-run
-    guidance, and retrieval notes; there's no "estimate" fallback.
+    electronics are both required, direct inputs (Nolin has no live feed for
+    either) - they always drive lure/season selection, depth-to-run guidance,
+    and retrieval notes; there's no "estimate" fallback.
 
-    Thermocline depth is also a direct input - pre-filled with a seasonal
-    model estimate (Nolin is normally well-mixed outside roughly May-
-    September; KDFWR has confirmed ~15 ft here in mid/late summer), but
-    your own electronics/temp-probe reading always wins if you have one.
-    Used to flag when a marked fish depth is likely below the oxygen-
-    depleted zone.
-
-    Forage: which baitfish/prey are actually available right now. Gizzard
-    shad and bluegill are pre-checked since both are documented forage for
-    Nolin bass; crawfish and shiners/minnows are optional add-ons. Selections
-    nudge lure color/pattern choice and make sure at least one forage-matched
-    lure shows up in the recommendation.
+    Forage: which baitfish/prey are actually available right now, out of
+    Nolin's documented forage base plus a few optional add-ons. Nothing is
+    pre-checked - an empty selection just means "unknown/not specified" to
+    the lure engine, rather than asserting a specific forage base the angler
+    didn't actually confirm. Selections nudge lure color/pattern choice and
+    make sure at least one forage-matched lure shows up in the recommendation.
     """
     with st.sidebar:
         st.header("Lake Setup Options")
 
-        base_stain = st.selectbox(
-            "Water stain color (normal conditions)", BASE_STAIN_OPTIONS,
+        c1, c2 = st.columns(2)
+        base_stain = c1.selectbox(
+            "Water stain", BASE_STAIN_OPTIONS,
             index=BASE_STAIN_OPTIONS.index(DEFAULT_BASE_STAIN), key="lso_base_stain",
+            help="Nolin's normal color under typical conditions.",
         )
-        stirred_up = st.checkbox(
-            "Stirred up / muddy right now (recent wind or rain)", key="lso_stirred_up"
+        stirred_up = c2.checkbox(
+            "Stirred up / muddy", key="lso_stirred_up",
+            help="Recent wind or rain - overrides the stain color to Muddy regardless of what's picked above.",
         )
         clarity = resolve_water_clarity(base_stain, stirred_up)
 
         structure = None
         if include_structure:
-            structure = st.selectbox("Structure type", STRUCTURE_TYPES, index=default_structure_index, key="lso_structure")
+            saved_spots = get_lake_spots()
+            location_options = [s["name"] for s in saved_spots] + [OTHER_LOCATION_LABEL]
+            location_choice = st.selectbox(
+                "Location", location_options, index=len(location_options) - 1, key="lso_location",
+                help="Pick a saved spot to use its own structure type automatically, or Other to set one yourself.",
+            )
+            if location_choice == OTHER_LOCATION_LABEL:
+                structure = st.selectbox(
+                    "Structure type", STRUCTURE_TYPES, index=default_structure_index, key="lso_structure",
+                )
+            else:
+                spot = next((s for s in saved_spots if s["name"] == location_choice), None)
+                structure = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(
+                    (spot or {}).get("location_type"), STRUCTURE_TYPES[default_structure_index]
+                )
+                st.caption(f"Structure: **{structure}** (from this spot's saved type)")
 
-        st.divider()
-        st.caption("Enter your own readings - Nolin has no live feed for either.")
-
-        water_temp_override = st.number_input(
-            "Water surface temp (°F)", min_value=32.0, max_value=100.0,
+        c3, c4 = st.columns(2)
+        water_temp_override = c3.number_input(
+            "Water temp (°F)", min_value=32.0, max_value=100.0,
             value=default_water_temp_f, step=0.5, key="lso_water_temp",
+            help="Nolin has no live temperature feed - enter your own reading.",
+        )
+        fish_depth = c4.number_input(
+            "Fish depth (ft)", min_value=0.0, max_value=100.0,
+            value=default_fish_depth_ft, step=1.0, key="lso_fish_depth",
+            help="Depth fish are showing up on your electronics.",
         )
 
-        fish_depth = st.number_input(
-            "Depth fish are showing up on your electronics (ft)",
-            min_value=0.0, max_value=100.0, value=default_fish_depth_ft, step=1.0, key="lso_fish_depth",
-        )
-
-        modeled_estimate = estimate_thermocline_ft(lake_today())
-        thermocline_ft = st.number_input(
-            "Thermocline depth (ft)",
-            min_value=0.0, max_value=100.0, value=default_thermocline_input_ft(lake_today()),
-            step=1.0, key="lso_thermocline",
-            help="Where warm, oxygenated water gives way to cold, low-oxygen water below - read it off a "
-                 "temp/DO probe if you have one. Pre-filled with a seasonal estimate otherwise.",
-        )
-        st.caption(
-            f"Today's seasonal estimate: ~{modeled_estimate:.0f} ft"
-            if modeled_estimate is not None
-            else "Today's seasonal estimate: no thermocline expected (lake normally well-mixed this time of year)"
-        )
-
-        st.divider()
         forage = st.multiselect(
             "Forage available / being eaten",
-            FORAGE_OPTIONS, default=DEFAULT_FORAGE, key="lso_forage",
+            FORAGE_OPTIONS, default=[], key="lso_forage",
+            help="Gizzard shad and bluegill are Nolin's documented forage base; add others you're actually seeing.",
         )
-
-        st.caption("These carry over to the other pages too.")
 
     return LakeSetupOptions(
         water_clarity=clarity,
@@ -198,6 +206,5 @@ def render_lake_setup_sidebar(
         structure_type=structure,
         water_temp_override_f=water_temp_override,
         fish_depth_ft=fish_depth,
-        thermocline_ft=thermocline_ft,
         forage=forage,
     )
