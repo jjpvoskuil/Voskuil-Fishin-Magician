@@ -630,6 +630,21 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     left in place, just no longer wired into the Lake Map page's UI - re-adding a
     depth/cover layer later (behind an explicit opt-in, not always-on checkboxes) is a
     clean follow-up if wanted, not something this round did.
+28. **Bring back a layer toggle for the two remaining map layers** - immediate
+    follow-up to entry 27: the fish-attractor and saved-spot layers were made
+    un-toggleable (always on) when the old multi-layer checkbox control was removed,
+    but the user asked for the ability to turn each on/off independently, just scoped
+    to these two layers rather than the old five-layer set.
+
+    `core/lake_map.py`'s `build_folium_map()` now wraps each layer in its own
+    `folium.FeatureGroup` (`"Fish attractors (N)"`, `"My saved spots (N)"`, each
+    labeled with a live count) and adds a `folium.LayerControl(collapsed=False)` back -
+    much smaller than the old one since there are only two entries instead of five, and
+    it's expanded by default so the toggles are visible without an extra click. The
+    transient "new spot - not saved yet" crosshair marker (shown when the current click
+    doesn't match a saved spot) is deliberately added directly to the map, outside both
+    feature groups - hiding the "My saved spots" layer while you're mid-way through
+    adding a new one shouldn't also hide the pin you're actively placing.
 
 ## Key design decisions & rationale
 

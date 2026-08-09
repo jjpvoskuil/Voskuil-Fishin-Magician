@@ -14,7 +14,8 @@ st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layo
 st.title("🗺️ Nolin Lake Map")
 st.caption(
     f"Real, GPS-placed fish attractors from Kentucky Fish & Wildlife ({fish_attractor_count():,} shown) "
-    "plus your own saved spots. Click anywhere on the map to drop a pin and record what you know about "
+    "plus your own saved spots - use the layer selector in the map's top-right corner to toggle either "
+    "on or off. Click anywhere on the map to drop a pin and record what you know about "
     "it, or click an existing pin (or jump to it below) to view or edit it."
 )
 
