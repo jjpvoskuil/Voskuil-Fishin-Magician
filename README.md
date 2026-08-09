@@ -15,16 +15,17 @@ key decisions, and known open items.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
   water color/clarity, structure type, and (when you provide it) the depth you're marking
   fish at.
-- **Zoomable lake map** of Nolin Lake showing two things, always on, no layer
-  checkboxes to manage: **346 real fish attractors** (`data/nolin_fish_attractors.csv`)
-  GPS-placed by Kentucky Fish & Wildlife (brush piles, Christmas trees, pallet stacks,
-  plastic structures, rock piles, reef balls) - the most authoritative point data in
-  the app, since it's a state agency's own placement records, not anything derived or
-  modeled - and your own **saved spots** (see below). Earlier versions of this map also
-  drew a modeled pre-dam bottom-cover layer, channel-depth anchor points, historic-topo
-  depth points, and the real shoreline outline, all behind togglable checkboxes and an
-  explanatory dialog about where that data came from; all of that was removed in favor
-  of this simpler map.
+- **Zoomable lake map** of Nolin Lake showing two things, each toggleable on/off from
+  a small layer selector in the map's corner: **346 real fish attractors**
+  (`data/nolin_fish_attractors.csv`) GPS-placed by Kentucky Fish & Wildlife (brush
+  piles, Christmas trees, pallet stacks, plastic structures, rock piles, reef balls) -
+  the most authoritative point data in the app, since it's a state agency's own
+  placement records, not anything derived or modeled - and your own **saved spots**
+  (see below). Earlier versions of this map also drew a modeled pre-dam bottom-cover
+  layer, channel-depth anchor points, historic-topo depth points, and the real
+  shoreline outline, all behind a much busier layer selector and an explanatory
+  dialog about where that data came from; all of that was removed in favor of this
+  simpler map.
 - **Personal spot catalog** - click anywhere on the Lake Map to drop a pin and record
   what you know about that exact spot: a name you choose, the type of location (main-
   lake point, flat, rock face/bluff, dock, creek channel/ledge, and more), what the
