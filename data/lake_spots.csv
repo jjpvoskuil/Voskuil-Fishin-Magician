@@ -1,2 +1,3 @@
 spot_id,added_at,updated_at,name,lat,lon,location_type,bottom_structure,main_depth_ft,transition_depth_ft,transition_grade,notes
 f574f116,2026-08-09T18:05:34.414670,2026-08-09T18:05:34.414680,Strip Island Point,37.32833139429068,-86.1402475833893,Main-lake point,Rocky,3.5,30.0,Medium,Drop of fairly consistent around the point.
+d99b0a4b,2026-08-09T18:13:29.012317,2026-08-09T18:13:29.012329,test,37.31515792998312,-86.13899230957031,Main-lake point,,,,Medium,
