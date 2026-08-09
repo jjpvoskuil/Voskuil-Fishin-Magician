@@ -913,6 +913,59 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     exercise all seven destinations (plus the two inter-page `switch_page` calls)
     programmatically, alongside the full test suite (unaffected - no `core/` logic
     changed).
+34. **Retire `pages/3_Log_a_Trip.py`; rebuild Trip History as a filterable log** -
+    realizes the "ultimate direction" flagged back in entry 29 (retiring the
+    standalone log form once Spot Session could log directly), now that Spot Session
+    has grown a full log-activity section (entry 31 onward) that's strictly richer
+    than the old form ever was.
+
+    `pages/3_Log_a_Trip.py` is deleted outright - no redirect stub, since
+    `st.navigation` already removes it from the sidebar the moment its `st.Page(...)`
+    entry is gone from `app.py`'s list. `home.py`'s intro bullets were updated to
+    match: the "Log a Trip" bullet is gone, and the "Lake Map" bullet now mentions
+    Spot Session's logging role. `core/lake_spots.py`'s module docstring, which
+    referenced the deleted page by name, was reworded.
+
+    `pages/6_Spot_Session.py`'s log form gained two new `conditions` keys,
+    `lure_category`/`trailer_category` (the raw `core.lures.LURE_PROFILES` key, e.g.
+    `"football_jig"` - only set when picked from inventory), specifically so Trip
+    History's new "lure type" filter has a real category to filter on instead of
+    fuzzy-matching the free-text `lure_used` field.
+
+    `pages/4_Trip_History.py` is a full rewrite. Both logging paths already wrote into
+    the same `data/trip_log.csv` via `core.storage.TripEntry` (entry 29), so no
+    storage change was needed - the page now reads all rows, parses each row's
+    `conditions_json` once up front, and derives a `lure_type` label per row (`core.
+    lures.LURE_PROFILES[lure_category]["name"]`, or "Unspecified / manual entry" for
+    rows without a category - covering both manually-typed lures and every pre-entry-
+    34 logged row). Filters: date range, time of day (segment), location (spot name),
+    lure type, water clarity, structure type, "only trips with a catch," and a free-
+    text search across lure/color/notes - all combined with plain pandas boolean
+    masking, no new dependency. The trips table and its three summary metrics (trips
+    shown, total caught, catch rate) recompute over the *filtered* subset; the
+    calibration status section deliberately keeps reading *all* logged rows
+    unfiltered, since calibration is a property of the model as a whole, not of
+    whatever slice the user happens to be looking at.
+
+    The old "Raw conditions snapshots (debug)" JSON dump is replaced with a "Trip
+    details" section - one expander per trip, titled `date · spot · segment`, showing
+    a short always-present summary (lure, technique, catch count, predicted score,
+    notes) plus a curated, human-readable list built from a `FIELD_SPECS` table of
+    `(json_key, label, formatter)` tuples covering essentially every field either
+    logging path can produce (water temp, secchi, wind band, light condition,
+    pressure trend, moon phase, retrieve speed/style, trailer info, the legacy
+    `modeled_thermocline_band_ft`, etc.), skipping whichever keys a given row doesn't
+    have - so legacy Log-a-Trip rows and rich Spot Session rows both render sensibly
+    without special-casing which page produced them, and a small `source` badge
+    ("🎯 Spot Session" vs. "📝 Legacy") makes the origin obvious at a glance.
+
+    Verified with the usual full suite + `AppTest` smoke test across the app entry
+    point and every remaining page, plus a dedicated scratch `AppTest` script (not
+    committed) that appended synthetic legacy- and Spot-Session-shaped trips to a
+    backed-up copy of `data/trip_log.csv`, drove the new lure-type multiselect and
+    catches-only checkbox through `AppTest`, confirmed the filtered count updated
+    correctly, confirmed both trip types' expanders rendered without exceptions, then
+    restored the original (empty, in this dev environment) trip log from the backup.
 
 ## Key design decisions & rationale
 
@@ -1088,6 +1141,15 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   limitation (a mode-switching radio can't hide/show other form fields until the form
   is submitted) for a field that doesn't need live auto-population the way the lure/
   color picker does. Both fields are always visible and both optional.
+- (entry 34) `core/spots.py`/`data/nolin_spots.json` (a small curated list of general
+  reference spots from public sources, distinct from the angler's own
+  `data/lake_spots.csv` pins) is now orphaned - its only real caller was the deleted
+  `pages/3_Log_a_Trip.py`'s spot picker. `pages/1_7_Day_Forecast.py` still imports
+  `get_spots` from `core.appstate` but never actually calls it (a dead import that
+  predates entry 34). Left in place rather than deleted, matching this codebase's
+  existing pattern of leaving unwired modules in place with a documented note (e.g.
+  `core/bathymetry.py`) - either wiring it into a page again or removing it outright
+  would be a deliberate follow-up, not an incidental cleanup.
 
 ## Operating notes
 

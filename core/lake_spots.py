@@ -2,12 +2,13 @@
 User-created fishing spot pins for Nolin River Lake.
 
 Distinct from core/spots.py's curated data/nolin_spots.json (a handful of
-general reference spots anchored to public sources, still used elsewhere
-for trip logging on pages/3_Log_a_Trip.py) - this is the angler's own,
-personal catalog of specific spots they've found on the water and want to
-remember: drop a pin on the Lake Map page and record what kind of spot it
-is, what the bottom is made of, how deep the main area and its drop-off
-are, and how sharp that drop-off is.
+general reference spots anchored to public sources - orphaned now that
+pages/3_Log_a_Trip.py, its last caller, has been removed in favor of
+logging directly from a Spot Session; left in place rather than deleted)
+- this is the angler's own, personal catalog of specific spots they've
+found on the water and want to remember: drop a pin on the Lake Map page
+and record what kind of spot it is, what the bottom is made of, how deep
+the main area and its drop-off are, and how sharp that drop-off is.
 
 Mirrors core/lure_inventory.py's storage pattern: rows live in
 data/lake_spots.csv inside the repo, and when a GITHUB_TOKEN is

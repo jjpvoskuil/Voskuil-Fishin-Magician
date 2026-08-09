@@ -16,9 +16,9 @@ activity forecast for largemouth bass on Nolin River Lake, then recommends
 where to fish and what to throw. Use the sidebar to navigate:
 
 - **7 Day Forecast** - the full week, drill into any day for best times, lures, colors, and technique.
-- **Lake Map** - click any spot on the lake for a location-specific recommendation.
-- **Log a Trip** - record what actually happened so the model can learn from it.
-- **Trip History** - see your logged trips and how the model is calibrating.
+- **Lake Map** - click any spot on the lake, then **Spot Session** to get a live, on-the-water
+  recommendation and log what actually happened so the model can learn from it.
+- **Trip History** - filter and review your logged trips, and see how the model is calibrating.
 """
 )
 
