@@ -579,6 +579,57 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `medium_diving_crankbait` against a "Craw pattern, Brown/orange" suggestion, only
     Chili Craw and Crawfish Orange Belly (both share "craw"/"orange") are shown; the
     other two are dropped rather than shown-but-flagged.
+27. **Rebuild the Lake Map page as a personal spot catalog, drop the forecast/bathymetry
+    UI from it** - user request: keep only the fish attractor markers on the map (no
+    layer-toggle checkboxes, always shown), remove the explanatory dialog about
+    bathymetric/cover data, remove the activity-score + lure-recommendation panel on
+    the right, and replace it with the ability to drop a pin and record structured
+    info about that specific spot - name, type of location, bottom structure, main
+    area depth, transition/drop-off depth, and how sharp that transition is.
+
+    New module `core/lake_spots.py` mirrors `core/lure_inventory.py`'s storage pattern:
+    rows live in `data/lake_spots.csv`, committed back via `core.storage.commit_and_push`
+    when a `GITHUB_TOKEN` is configured. `LakeSpot` dataclass fields: `name`, `lat`,
+    `lon`, `location_type` (new `LOCATION_TYPES` list - deliberately its own vocabulary,
+    separate from `core.lures.STRUCTURE_TYPES`, since this catalog is no longer an input
+    to the recommendation engine), `bottom_structure` (a list, stored pipe-joined in the
+    CSV via `split_bottom_structure()`/manual joining, since a real spot is often more
+    than one texture at once - new `BOTTOM_STRUCTURE_OPTIONS` list), `main_depth_ft`,
+    `transition_depth_ft`, `transition_grade` (new `TRANSITION_GRADE_OPTIONS`: High/
+    Medium/Low), and free-form `notes` - added as a reasonable extra field beyond what
+    was asked for, since a place to jot anything that doesn't fit the structured fields
+    (e.g. "best on a falling lake," "caught two here in May") seemed clearly useful for
+    a personal spot log and the user invited additions. `nearest_spot_within()` matches
+    a click's lat/lon to an existing saved spot within a tight tolerance (~9-11m,
+    calibrated only to absorb float/CSV round-tripping, not to forgive an imprecise
+    click) - since a marker click reports that marker's exact stored coordinates, this
+    is what lets the page tell "clicked an existing pin" apart from "clicked a new
+    blank location."
+
+    `core/lake_map.py` rewritten from scratch: dropped the pre-dam bottom-cover layer,
+    channel-depth-point layer, historic-topo-point layer, real-shoreline outline, and
+    the `folium.LayerControl` that toggled them - now draws only real fish attractors
+    (`core/fish_attractors.py`, unchanged) and the angler's saved spots, both always
+    visible. A saved spot's marker turns red when it's the currently-selected one
+    (matched via `nearest_spot_within`); an orange crosshair marks an unsaved candidate
+    location when the click doesn't match any existing spot. `pages/2_Lake_Map.py`
+    rewritten to match: the bathymetry-explainer `st.info()` dialog is gone, the entire
+    right-column score/lure-recommendation panel (`recommend()`, `render_lure_
+    recommendation()`, the date/segment/structure-type pickers, `render_lake_setup_
+    sidebar()`) is gone, replaced by either a read-only detail view + "Edit this spot"
+    expander (existing spot) or an "Add a new spot here" form (new location) - both
+    read/write through `core.lake_spots`. The "Jump to a named spot" dropdown now jumps
+    among the angler's own saved spots instead of the curated `data/nolin_spots.json`
+    reference list.
+
+    `data/nolin_spots.json`/`core/spots.py`/`get_spots()` were deliberately left alone -
+    they're still used by `pages/3_Log_a_Trip.py` for picking a general area when
+    logging a trip, a separate concern from the new per-pin spot catalog. Likewise,
+    `core/bathymetry.py`, `core/cover.py`, `core/historic_bathymetry.py`,
+    `core/shoreline.py`, and `core/survey_points.py` (and their data files/tests) were
+    left in place, just no longer wired into the Lake Map page's UI - re-adding a
+    depth/cover layer later (behind an explicit opt-in, not always-on checkboxes) is a
+    clean follow-up if wanted, not something this round did.
 
 ## Key design decisions & rationale
 
@@ -702,6 +753,19 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   turns out to be inaccurate often enough to be annoying, the more reliable fix is a
   structured `color` tag on inventory items (same pattern as the
   `category` field, entry 21) rather than tuning the keyword list further.
+- (entry 27) The new saved-spot catalog (`data/lake_spots.csv`) is entirely disconnected
+  from the recommendation engine right now - `location_type`/`bottom_structure` on a
+  saved spot don't feed `core.lures.recommend()`'s `structure_type` input the way the
+  Lake Map page's old structure-type picker used to. Wiring a saved spot's info into a
+  recommendation (e.g. "get lure suggestions for this spot") would be a natural
+  follow-up, not something this round did, since the request was specifically to
+  replace the score/lure panel with spot info, not to also re-connect them.
+- (entry 27) `nearest_spot_within`'s matching tolerance (~9-11m) assumes marker clicks
+  report their exact stored coordinates, which holds for streamlit-folium's normal
+  click behavior - but if two saved spots ever end up closer together than that
+  tolerance, clicking one could resolve to the other. Not expected to come up in
+  practice (real fishing spots are rarely that close together), but worth knowing if a
+  future report describes "wrong spot's details showing up."
 
 ## Operating notes
 

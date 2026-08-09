@@ -7,6 +7,7 @@ from .spots import load_spots
 from .storage import read_all_trips
 from .calibration import calibrate_weights
 from .lure_inventory import read_all_items
+from .lake_spots import read_all_spots
 
 
 @st.cache_data(ttl=60 * 60, show_spinner="Fetching weather forecast...")
@@ -28,6 +29,11 @@ def get_calibrated_weights():
 @st.cache_data(ttl=60)
 def get_inventory():
     return read_all_items()
+
+
+@st.cache_data(ttl=60)
+def get_lake_spots():
+    return read_all_spots()
 
 
 def github_token() -> str:
