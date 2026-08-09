@@ -24,7 +24,9 @@ with Streamlit and hosted on Streamlit Community Cloud, code in
 ## Architecture
 
 ```
-app.py                        Landing page - today at a glance
+app.py                        Entry point - sidebar navigation only (st.navigation/
+                               st.Page), see entry 33
+home.py                        Landing page content - today at a glance
 pages/
   1_7_Day_Forecast.py          Full week, drill into any day, per-segment lure blocks
   2_Lake_Map.py                Click-anywhere map + location-specific recommendation
@@ -874,6 +876,43 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and species-specific forage bonuses (shad vs. bluegill vs. crawfish) - a single
     presence/absence signal keeps the rule explainable, matching this app's
     documented "no black box" scoring philosophy.
+33. **Drop the "≈ N mph" wind caption; give the sidebar nav real titles/icons** - two
+    small, unrelated pieces of feedback landed together.
+
+    The wind band picker on the Spot Session page (entry 31) showed a caption like
+    "≈ 6 mph" under the selectbox to make the underlying proxy value visible - removed
+    per feedback that it wasn't wanted. `wind_mph_for_band()` itself is untouched
+    (still used to drive `avg_wind_mph` for scoring), only the `st.caption()` line
+    displaying it is gone.
+
+    The sidebar page list was still using Streamlit's older file-based `pages/`
+    auto-discovery, which (a) always listed the entry script itself as a page named
+    "app" (derived from the filename `app.py`, which isn't a real page - it's just
+    where the script starts), and (b) had no way to attach a per-page icon, only the
+    filename-derived text label. Fixed by switching to the explicit `st.navigation`/
+    `st.Page` API (Streamlit >=1.36; this app already runs 1.61): `app.py`'s previous
+    landing-page content moved verbatim to a new `home.py` (byte-for-byte identical,
+    including its own `st.set_page_config()` call), and `app.py` itself became a thin
+    entry point that does nothing but build `st.navigation([st.Page(path, title=...,
+    icon=...), ...])` for `home.py` + all six `pages/*.py` files (same relative paths,
+    so the existing `st.switch_page("pages/2_Lake_Map.py")` / `st.switch_page("pages/
+    6_Spot_Session.py")` calls between the Lake Map and Spot Session pages still
+    resolve correctly - verified, not just assumed) and calls `.run()`. Titles now
+    read "Today," "7 Day Forecast," "Lake Map," "Log a Trip," "Trip History," "Lure
+    Inventory," "Spot Session" (same order/wording as before, just no more "app"),
+    each with the same emoji icon that page's `st.set_page_config(page_icon=...)`
+    already used for its browser-tab icon, so the sidebar and the tab now visually
+    match. Every other page file is completely unchanged - each still calls its own
+    `st.set_page_config()` (still safe under `st.navigation`, since `app.py` itself
+    calls no Streamlit commands before handing off via `pg.run()`, so the target
+    page's `set_page_config()` is still effectively "the first Streamlit command" for
+    that run) - confirmed empirically (not just by reasoning about the API) by
+    launching the real app with `streamlit run app.py`, screenshotting the rendered
+    sidebar, and clicking through to the Lake Map page to confirm active-page
+    highlighting and navigation both work; `AppTest.switch_page()` was also used to
+    exercise all seven destinations (plus the two inter-page `switch_page` calls)
+    programmatically, alongside the full test suite (unaffected - no `core/` logic
+    changed).
 
 ## Key design decisions & rationale
 

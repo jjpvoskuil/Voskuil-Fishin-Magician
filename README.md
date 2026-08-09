@@ -345,7 +345,11 @@ streamlit run app.py
 ## Project layout
 
 ```
-app.py                  Landing page - today at a glance
+app.py                  Entry point (streamlit run app.py) - wires up the sidebar
+                         navigation (st.navigation/st.Page) with a title/icon per
+                         page; holds no page content of its own
+home.py                  Landing page content - today at a glance ("Today" in the
+                         sidebar)
 pages/
   1_7_Day_Forecast.py   Full week, drill into any day
   2_Lake_Map.py          Fish attractors + your own saved spots (click to add/edit)

@@ -132,7 +132,6 @@ with st.form(f"conditions_form_{spot['spot_id']}"):
 
     c3, c4 = st.columns(2)
     wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=1, help=_wind_help)
-    c3.caption(f"≈ {wind_mph_for_band(wind_band_choice):.0f} mph")
     light_condition = c4.selectbox(
         "Light conditions", LIGHT_CONDITIONS, index=2,
         help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
