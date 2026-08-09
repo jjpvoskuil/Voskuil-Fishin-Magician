@@ -17,9 +17,19 @@ from core.weather import lake_today
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
 st.title("🎯 Spot Session")
 
-spot_id = st.query_params.get("spot_id")
+# session_state is the reliable channel from the "Fish this spot now" button on the
+# Lake Map page (st.switch_page doesn't consistently carry query params set in that
+# same run over to this page's initial load); query_params is kept as a fallback so a
+# manual page refresh or a bookmarked/shared link with ?spot_id=... still works.
+spot_id = st.session_state.get("spot_session_target_id") or st.query_params.get("spot_id")
 spots = get_lake_spots()
 spot = next((s for s in spots if s["spot_id"] == spot_id), None) if spot_id else None
+
+if spot is not None:
+    # Keep both channels in sync once resolved, so a refresh of this exact page
+    # keeps working from the URL alone, and the URL is shareable/bookmarkable.
+    st.session_state["spot_session_target_id"] = spot_id
+    st.query_params["spot_id"] = spot_id
 
 if spot is None:
     st.info(

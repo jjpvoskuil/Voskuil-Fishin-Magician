@@ -80,6 +80,10 @@ with col_detail:
                 "🎯 Fish this spot now - conditions & lure suggestions", key=f"session_btn_{existing['spot_id']}",
                 width='stretch',
             ):
+                # st.session_state is the reliable channel for handing data to the
+                # next page - st.switch_page doesn't consistently carry query params
+                # set in this same run over to the new page's initial load.
+                st.session_state["spot_session_target_id"] = existing["spot_id"]
                 st.query_params["spot_id"] = existing["spot_id"]
                 st.switch_page("pages/6_Spot_Session.py")
 

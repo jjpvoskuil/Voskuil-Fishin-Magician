@@ -708,6 +708,27 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     to eventually fold trip logging into one report database; this round just makes
     sure both entry points already accumulate into that one place, without touching
     `pages/3_Log_a_Trip.py` or `pages/4_Trip_History.py` themselves.
+30. **Fix: "Fish this spot now" landed on an empty Spot Session page** - the user
+    reported that clicking a saved spot on the Lake Map, then clicking "🎯 Fish this
+    spot now," opened `pages/6_Spot_Session.py` showing "No spot selected" instead of
+    that spot. Root cause: entry 29's handoff relied solely on `st.query_params`, set
+    right before `st.switch_page()` in the same script run - but `st.switch_page`
+    doesn't reliably carry query params set in that same run over to the new page's
+    initial load in real browser navigation (this gap wasn't caught by the earlier
+    `AppTest` verification because that test set `query_params` directly on the target
+    page's own `AppTest` instance, rather than simulating a real button click on one
+    page landing on another).
+
+    Fixed by making `st.session_state["spot_session_target_id"]` the primary handoff
+    channel - `pages/2_Lake_Map.py`'s button now sets both session state and
+    query params before switching; `pages/6_Spot_Session.py` reads session state first,
+    falling back to query params (so a manual refresh or a bookmarked/shared
+    `?spot_id=...` link still resolves), then syncs both back once a spot is found so
+    the page's own URL stays correct for a subsequent refresh. Verified with three
+    `AppTest` scenarios against a throwaway spot: session-state-only (the real button
+    flow), query-params-only (bookmark/refresh), and neither set (still shows the
+    graceful "no spot selected" placeholder rather than crashing) - all three resolve
+    correctly; full suite re-run clean afterward.
 
 ## Key design decisions & rationale
 
