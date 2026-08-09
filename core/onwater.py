@@ -67,6 +67,20 @@ def wind_band(mph: float) -> dict:
     return {"label": WIND_BANDS[-1][2], "detail": WIND_BANDS[-1][3]}
 
 
+# Most anglers can judge "glassy vs. light ripple vs. whitecapping" far more
+# reliably by eye than they can estimate an actual mph figure, so the Spot
+# Session page asks for the band by name rather than a number - this is the
+# reverse lookup, a representative mph within each band, so the rest of the
+# scoring formula (which is expressed in mph, same as a real forecast's
+# windspeed_10m) can still be driven by that pick.
+WIND_BAND_LABELS = [label for _, _, label, _ in WIND_BANDS]
+_WIND_BAND_MPH_PROXY = {label: (lo + min(hi, 25.0)) / 2 for lo, hi, label, _ in WIND_BANDS}
+
+
+def wind_mph_for_band(label: str) -> float:
+    return _WIND_BAND_MPH_PROXY.get(label, 6.5)
+
+
 # --- Water visibility (Secchi depth / sensory mode) -------------------------
 VISIBILITY_BANDS = [
     (4.0, float("inf"), "Clear", "Sight-dominated hunting."),
@@ -92,10 +106,18 @@ def visibility_band(secchi_ft: float) -> dict:
     return {"label": VISIBILITY_BANDS[0][2], "detail": VISIBILITY_BANDS[0][3]}
 
 
-def resolve_water_clarity(secchi_ft: float, stain_color: str = None) -> str:
+def resolve_water_clarity(secchi_ft: float, stain_color: str = None, stirred_up: bool = False) -> str:
     """Turn a Secchi-depth reading (+ a stain color, only needed when the
     reading falls in the ambiguous "Stained" band) into one of
-    core.lures.WATER_CLARITY_OPTIONS for feeding the lure-color engine."""
+    core.lures.WATER_CLARITY_OPTIONS for feeding the lure-color engine.
+
+    `stirred_up` mirrors core.lures.resolve_water_clarity()'s own
+    base-stain-color + stirred-up-checkbox model used elsewhere in the app:
+    a "just got kicked up by wind or rain" flag always wins regardless of
+    the Secchi reading, since a visual/Secchi estimate taken a bit before
+    (or after) conditions changed may not reflect it yet."""
+    if stirred_up:
+        return "Muddy"
     band = visibility_band(secchi_ft)["label"]
     if band in _VISIBILITY_TO_CLARITY:
         return _VISIBILITY_TO_CLARITY[band]

@@ -1,7 +1,8 @@
 from datetime import date, timedelta, datetime
 from core.weather import WeatherBundle
 from core.scoring import (
-    score_week, score_day, manual_segment_score, realtime_context_from_bundle, lake_now_naive,
+    score_week, score_day, manual_segment_score, realtime_context_from_bundle,
+    segment_time_ranges, lake_now_naive, SEGMENTS,
 )
 
 
@@ -143,3 +144,58 @@ def test_realtime_context_from_bundle_degrades_gracefully_outside_coverage():
     bundle = _bundle_with_partial_daily_coverage(daily_days=0)
     ctx = realtime_context_from_bundle(bundle, "Dawn", date.today())
     assert ctx["solunar_overlap"] is None
+
+
+def test_realtime_context_from_bundle_pressure_trend_uses_at_time_not_wall_clock_now():
+    # _fake_bundle()'s pressure falls at a perfectly constant rate per hour, so its
+    # 24h trend is identical no matter which hour you anchor it to - not a useful
+    # bundle for telling "used at_time" apart from "used wall-clock now". Build a
+    # bundle with a kink instead: flat for the first half, then falling - so the
+    # 24h-trend as of a morning anchor (still flat) differs from as of an evening
+    # anchor (now includes the falling stretch) - proving at_time (the angler's
+    # entered session-start time), not lake_now_naive(), drives the lookup.
+    today = date.today()
+    t0 = datetime(today.year, today.month, today.day) - timedelta(days=2)
+    times, pres = [], []
+    for h in range(24 * 4):
+        dt = t0 + timedelta(hours=h)
+        times.append(dt.isoformat())
+        pres.append(1015.0 if h < 24 * 2 else 1015.0 - 0.3 * (h - 24 * 2))
+    hourly = {"time": times, "surface_pressure": pres}
+    bundle = WeatherBundle(hourly=hourly, daily={})
+
+    morning = datetime(today.year, today.month, today.day, 1, 0)
+    evening = datetime(today.year, today.month, today.day, 20, 0)
+    ctx_morning = realtime_context_from_bundle(bundle, "Dawn", today, at_time=morning)
+    ctx_evening = realtime_context_from_bundle(bundle, "Dawn", today, at_time=evening)
+    assert ctx_morning["pressure_trend_24h"] != ctx_evening["pressure_trend_24h"]
+
+
+def test_manual_segment_score_at_time_drives_moon_phase_not_wall_clock_now():
+    # Moon phase is a function of the timestamp passed in - two at_time values far
+    # enough apart (say, ~10 days) land in different phases, proving manual_segment_
+    # score() actually used at_time rather than silently falling back to "now".
+    today = date.today()
+    t1 = datetime(today.year, today.month, today.day, 12, 0)
+    t2 = t1 + timedelta(days=10)
+    r1 = manual_segment_score("Dawn", "summer_peak", 40, 7, at_time=t1)
+    r2 = manual_segment_score("Dawn", "summer_peak", 40, 7, at_time=t2)
+    assert r1.moon.name != r2.moon.name or r1.moon.is_new_or_full_window != r2.moon.is_new_or_full_window
+
+
+def test_segment_time_ranges_returns_none_without_a_bundle():
+    assert segment_time_ranges(None, date.today()) is None
+
+
+def test_segment_time_ranges_covers_every_segment_with_a_real_bundle():
+    bundle = _fake_bundle()
+    ranges = segment_time_ranges(bundle, date.today())
+    assert ranges is not None
+    assert set(ranges) == set(SEGMENTS)
+    for name, (start, end) in ranges.items():
+        assert start < end
+
+
+def test_segment_time_ranges_degrades_gracefully_outside_coverage():
+    bundle = _bundle_with_partial_daily_coverage(daily_days=0)
+    assert segment_time_ranges(bundle, date.today()) is None

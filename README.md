@@ -39,14 +39,21 @@ key decisions, and known open items.
   restarts.
 - **Spot Session page** - from any saved spot's detail panel on the Lake Map, click
   "🎯 Fish this spot now" to open a page dedicated to that pin. Enter what you're
-  actually seeing on the water right now (water temp, visibility/Secchi depth + stain
-  color if it's in the ambiguous mid-range, wind, light condition, precipitation,
-  exact start time, and time-of-day window), and it scores that moment and calls the
-  same lure/color recommendation engine the 7-Day Forecast page uses - just fed by a
-  live reading instead of a forecast. A second form on the same page lets you log what
-  actually happened (lures, catches, notes), writing into the same shared trip log the
-  Log a Trip page uses. See "How the model works" below for the condition bands behind
-  this page's inputs.
+  actually seeing on the water (water temp, visibility/Secchi depth + stain color if
+  it's in the ambiguous mid-range or a "stirred up/muddy" checkbox to override either,
+  wind as a plain-language band like "Light Ripple" rather than an mph guess, light
+  condition, precipitation, a manually-entered session start time, and a time-of-day
+  window shown with today's actual clock range, e.g. "Dawn (5:52 AM-7:52 AM)"), and it
+  scores that moment - using the time you actually entered, not whatever time you
+  happened to be filling out the page - and calls the same lure/color recommendation
+  engine the 7-Day Forecast page uses, just fed by a live reading instead of a
+  forecast. A second section on the same page lets you log what actually happened:
+  pick the lure (and trailer, if that lure type takes one) straight from your tackle
+  inventory - picking one auto-fills the color field - or enter something not in your
+  inventory by hand, plus the time range you fished it, depth(s) fished, how active
+  the fish and forage were, and retrieve speed/style. It writes into the same shared
+  trip log the Log a Trip page uses. See "How the model works" below for the
+  condition bands behind this page's inputs.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -333,6 +340,8 @@ core/
                            Spot Session pages via manual_segment_score())
   onwater.py               On-the-water condition bands (light/wind/visibility/water
                            temp/precipitation) used by the Spot Session page
+  activity_log.py           Log-form vocabulary + inventory lure/trailer picker
+                           helpers used by the Spot Session page's activity log
   lures.py                Lure/color/technique rule engine + tackle-inventory ownership matching
   spots.py                Curated general reference spots (data/nolin_spots.json),
                            used by the Log a Trip page
@@ -364,7 +373,7 @@ data/
   lure_inventory.csv      Tackle inventory (grows over time; category column links
                            each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
-tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater
+tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log
 ```
 
 ## Disclaimers

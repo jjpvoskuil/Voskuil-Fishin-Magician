@@ -321,27 +321,34 @@ def manual_segment_score(
     moon: Optional["astro.MoonPhase"] = None,
     solunar_overlap: Optional[str] = None,
     weights: dict = None,
+    at_time: Optional[datetime] = None,
 ) -> ManualScoreResult:
     """Same 1-10 activity score as score_day()/score_week(), but driven by
     conditions someone reports by hand while standing at the water (the
     spot-specific "fish this spot now" page) instead of an Open-Meteo
     forecast bundle for a whole day.
 
-    Real moon phase needs only the current moment, not a weather API, so
-    it's computed here (via core.astro, UTC "now") unless the caller
-    already has one; everything else the caller must supply - typically
-    approximated from the angler's own observations at the water
-    (core.onwater.py's band helpers turn "Overcast / Diffuse Day" or
-    "Heavy / Turbulent" wind into the same avg_cloud_pct/avg_wind_mph/
-    precip inputs score_day() would have extracted from a real bundle) or
-    a real pressure-trend reading if a weather bundle happens to be
-    available (core.weather.pressure_trend_hpa_per_24h against "now").
+    Real moon phase needs only a point in time, not a weather API, so it's
+    computed here (via core.astro) unless the caller already has one - as
+    of "right now" (lake_now_naive()) by default, or as of `at_time` when
+    the caller supplies one. Pass the angler's own entered session-start
+    time here (not wall-clock "now") when they're filling this out ahead of
+    or after the actual session, so the moon phase reflects the time they
+    were actually on the water rather than whenever they happened to type
+    it in - the entered time should win over a generic "now" default.
+    Everything else the caller must supply - typically approximated from
+    the angler's own observations at the water (core.onwater.py's band
+    helpers turn "Overcast / Diffuse Day" or "Heavy / Turbulent" wind into
+    the same avg_cloud_pct/avg_wind_mph/precip inputs score_day() would
+    have extracted from a real bundle) or a real pressure-trend reading if
+    a weather bundle happens to be available (core.weather.
+    pressure_trend_hpa_per_24h, also against `at_time` when given).
     Solunar major/minor overlap needs today's real sunrise/sunset, which
     also requires a weather bundle - pass None (the default) when one
     isn't available, and this simply skips that bonus rather than
     guessing."""
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
-    moon = moon or astro.moon_phase(lake_now_naive())
+    moon = moon or astro.moon_phase(at_time or lake_now_naive())
 
     score, notes = _segment_score(
         segment_name, pressure_trend_24h, moon, solunar_overlap, avg_cloud_pct, avg_wind_mph,
@@ -355,48 +362,74 @@ def manual_segment_score(
     return ManualScoreResult(score=score, notes=notes, moon=moon, warnings=warnings)
 
 
+def segment_time_ranges(bundle: Optional[WeatherBundle], d: date) -> Optional[dict]:
+    """Real per-segment (Dawn/Morning/.../Night) start/end datetimes for date
+    `d`, derived from the weather bundle's actual sunrise/sunset for that
+    date - e.g. for labeling a "time window" picker with the real clock
+    range each segment covers today ("Dawn (5:52 AM-7:52 AM)"), same as the
+    7-Day Forecast page already shows. Returns None if a bundle isn't
+    available or doesn't cover that date, so callers can degrade
+    gracefully (just show the segment names with no time range) rather
+    than raising."""
+    if bundle is None:
+        return None
+    try:
+        daily = daily_row_for_date(bundle, d)
+        if not daily or not daily.get("sunrise") or not daily.get("sunset"):
+            return None
+        return {name: (start, end) for name, start, end in _segment_windows(daily["sunrise"], daily["sunset"], d)}
+    except Exception:
+        return None
+
+
 def realtime_context_from_bundle(
     bundle: Optional[WeatherBundle], segment_name: str, d: date,
     lat: float = LAKE_LAT, lon: float = LAKE_LON, tz_offset_hours: float = LAKE_TZ_UTC_OFFSET_HOURS,
+    at_time: Optional[datetime] = None,
 ) -> dict:
-    """Best-effort real pressure-trend + solunar-overlap lookup for "right
-    now", for manual_segment_score() callers that happen to have an
-    already-fetched weather bundle handy (e.g. the spot-specific session
-    page also shows the 7-Day Forecast elsewhere in the app, so the bundle
-    is usually already cached) - a nice-to-have enhancement layered on top
-    of otherwise fully hand-entered conditions, not a requirement. Returns
-    {"pressure_trend_24h": float, "solunar_overlap": str|None}, falling back
-    to 0.0/None for anything that can't be resolved (no bundle, today's date
-    outside the bundle's coverage, etc.) rather than raising."""
+    """Best-effort real pressure-trend + solunar-overlap lookup, for
+    manual_segment_score() callers that happen to have an already-fetched
+    weather bundle handy (e.g. the spot-specific session page also shows
+    the 7-Day Forecast elsewhere in the app, so the bundle is usually
+    already cached) - a nice-to-have enhancement layered on top of
+    otherwise fully hand-entered conditions, not a requirement.
+
+    Pressure trend is computed as of `at_time` if given, else "right now"
+    (lake_now_naive()) - pass the angler's own entered session-start time
+    so this reflects that specific moment rather than whenever they
+    happened to be filling out the page, same reasoning as
+    manual_segment_score()'s `at_time`. Solunar overlap is already tied to
+    `segment_name` + `d` rather than a specific instant, so it isn't
+    affected by `at_time`.
+
+    Returns {"pressure_trend_24h": float, "solunar_overlap": str|None},
+    falling back to 0.0/None for anything that can't be resolved (no
+    bundle, today's date outside the bundle's coverage, etc.) rather than
+    raising."""
     result = {"pressure_trend_24h": 0.0, "solunar_overlap": None}
     if bundle is None:
         return result
 
-    now = lake_now_naive()
     try:
-        result["pressure_trend_24h"] = round(pressure_trend_hpa_per_24h(bundle, now), 2)
+        result["pressure_trend_24h"] = round(pressure_trend_hpa_per_24h(bundle, at_time or lake_now_naive()), 2)
     except Exception:
         pass
 
     try:
-        daily = daily_row_for_date(bundle, d)
-        if daily and daily.get("sunrise") and daily.get("sunset"):
-            window = next(
-                ((s, e) for name, s, e in _segment_windows(daily["sunrise"], daily["sunset"], d) if name == segment_name),
-                None,
-            )
-            if window:
-                start, end = window
-                sol = astro.solunar_times(d, lat, lon, tz_offset_hours)
-                overlap = None
-                for ms, me in sol.major_periods:
+        ranges = segment_time_ranges(bundle, d)
+        window = ranges.get(segment_name) if ranges else None
+        if window:
+            start, end = window
+            sol = astro.solunar_times(d, lat, lon, tz_offset_hours)
+            overlap = None
+            for ms, me in sol.major_periods:
+                if _overlaps(start, end, ms, me):
+                    overlap = "major"
+            if overlap is None:
+                for ms, me in sol.minor_periods:
                     if _overlaps(start, end, ms, me):
-                        overlap = "major"
-                if overlap is None:
-                    for ms, me in sol.minor_periods:
-                        if _overlaps(start, end, ms, me):
-                            overlap = "minor"
-                result["solunar_overlap"] = overlap
+                        overlap = "minor"
+            result["solunar_overlap"] = overlap
     except Exception:
         pass
 
