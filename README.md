@@ -38,8 +38,10 @@ key decisions, and known open items.
   back to GitHub when a `GITHUB_TOKEN` is configured so they survive Streamlit Cloud
   restarts.
 - **Spot Session page** - from any saved spot's detail panel on the Lake Map, click
-  "🎯 Fish this spot now" to open a page dedicated to that pin. Enter what you're
-  actually seeing on the water (water temp, visibility/Secchi depth + stain color if
+  "🎯 Fish this spot now" to open a page dedicated to that pin - or open the Spot
+  Session page directly and pick a saved spot from the dropdown there, no trip through
+  the map required. Enter what you're actually seeing on the water (water temp,
+  visibility/Secchi depth + stain color if
   it's in the ambiguous mid-range or a "stirred up/muddy" checkbox to override either,
   wind as a plain-language band like "Light Ripple" rather than an mph guess, light
   condition, precipitation, a manually-entered session start time, and a time-of-day
