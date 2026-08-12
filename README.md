@@ -94,7 +94,12 @@ key decisions, and known open items.
   and detail view keep working exactly as before. It all writes into the same shared
   trip log the **Trip History** page reads from - Spot Session is now the only way to
   log a trip; see "How the model works" below for the condition bands behind this
-  page's inputs.
+  page's inputs. Made a mistake on a past trip, or just want to fix it up? Click
+  "✏️ Edit this trip" on that trip's entry on the Trip History page - it opens Spot
+  Session on that same spot with everything pre-filled from that trip (conditions,
+  lure/trailer, timing, notes, fish caught), and the usual "Log this lure"/"Log this
+  session" pair is replaced with a single **"💾 Save changes"**/"Cancel edit" pair -
+  saving updates that same trip in place rather than adding a duplicate.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -127,8 +132,13 @@ key decisions, and known open items.
   (lures, catches, water conditions, forage seen) so the model can calibrate its
   weights against your own results over time.
 - **Trip History** - every logged trip in one filterable table: filter by date/date
-  range, time of day, location, lure type, water clarity, structure type, catches-only,
-  or free-text search, plus a per-trip details view and the model's calibration status.
+  range, time of day, location, lure type, water clarity, structure type, fish
+  activity, forage activity, wind direction, catches-only, trailer-used-only, or
+  free-text search, plus a per-trip details view and the model's calibration status.
+  Each trip's detail view has an "✏️ Edit this trip" button (jumps back to Spot
+  Session with that trip pre-loaded so you can correct and re-save it - see "Spot
+  Session page" above) and a "🗑️ Delete this trip" button (asks you to confirm, then
+  removes it for good).
 - **Lure inventory** - your tackle box, tracked: brand, full description, a category
   (matching it to one of the forecast engine's lure types), a photo, the last price
   paid, and how many you have on hand. Seeded from a Cabela's order history import; add

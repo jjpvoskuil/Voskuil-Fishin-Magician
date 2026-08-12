@@ -27,8 +27,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from core.appstate import get_lake_spots
-from core.storage import read_all_trips
+from core.appstate import get_lake_spots, github_token, repo_slug
+from core.storage import read_all_trips, delete_trip, TRIP_LOG_PATH, commit_and_push
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES
 
@@ -78,12 +78,20 @@ def _location_label(row: dict) -> str:
 
 # Parse once up front so every row has a usable date, a conditions dict, a
 # derived lure-type label, and a resolved location name available for both
-# filtering and display.
+# filtering and display. fish_activity/forage_activity/wind_direction/
+# trailer_used are all logged inside the conditions dict rather than as
+# their own trip_log.csv columns (see core/storage.py's FIELDNAMES), so they
+# need the same flat-column treatment as _lure_type/_location before they
+# can be used as filter widgets below.
 for row in rows:
     row["_date"] = _parse_date(row.get("trip_date"))
     row["_conditions"] = _parse_conditions(row)
     row["_lure_type"] = _lure_type_label(row["_conditions"])
     row["_location"] = _location_label(row)
+    row["_fish_activity"] = row["_conditions"].get("fish_activity") or ""
+    row["_forage_activity"] = row["_conditions"].get("forage_activity") or ""
+    row["_wind_direction"] = row["_conditions"].get("wind_direction") or ""
+    row["_trailer_used"] = bool(row["_conditions"].get("trailer_used"))
 
 df = pd.DataFrame(rows)
 
@@ -111,9 +119,22 @@ clarities = f5.multiselect("Water clarity", clarity_options, default=[])
 structure_options = sorted(df["structure_type"].dropna().unique().tolist())
 structures = f6.multiselect("Structure type", structure_options, default=[])
 
-f7, f8 = st.columns([1, 3])
+# fish activity / forage activity / wind direction - all newer fields Spot
+# Session's "Add results" section logs per-lure-use (see the "Conditions
+# during this lure use" widgets in pages/6_Spot_Session.py), added here so
+# they're filterable the same as the original condition fields above.
+f9, f10, f11 = st.columns(3)
+fish_activity_options = sorted(v for v in df["_fish_activity"].unique().tolist() if v)
+fish_activities = f9.multiselect("Fish activity", fish_activity_options, default=[])
+forage_activity_options = sorted(v for v in df["_forage_activity"].unique().tolist() if v)
+forage_activities = f10.multiselect("Forage activity", forage_activity_options, default=[])
+wind_direction_options = sorted(v for v in df["_wind_direction"].unique().tolist() if v)
+wind_directions = f11.multiselect("Wind direction", wind_direction_options, default=[])
+
+f7, f8, f12 = st.columns([1, 1, 2])
 catches_only = f7.checkbox("Only trips with a catch", value=False)
-search_text = f8.text_input("Search lure, color, or notes", value="")
+trailer_only = f8.checkbox("Only trips using a trailer", value=False)
+search_text = f12.text_input("Search lure, color, or notes", value="")
 
 filtered = df.copy()
 
@@ -130,8 +151,16 @@ if clarities:
     filtered = filtered[filtered["water_clarity"].isin(clarities)]
 if structures:
     filtered = filtered[filtered["structure_type"].isin(structures)]
+if fish_activities:
+    filtered = filtered[filtered["_fish_activity"].isin(fish_activities)]
+if forage_activities:
+    filtered = filtered[filtered["_forage_activity"].isin(forage_activities)]
+if wind_directions:
+    filtered = filtered[filtered["_wind_direction"].isin(wind_directions)]
 if catches_only:
     filtered = filtered[pd.to_numeric(filtered["fish_caught"], errors="coerce").fillna(0) > 0]
+if trailer_only:
+    filtered = filtered[filtered["_trailer_used"]]
 if search_text.strip():
     needle = search_text.strip().lower()
     haystack = (
@@ -146,10 +175,19 @@ st.caption(f"Showing {len(filtered)} of {len(df)} logged trips.")
 if filtered.empty:
     st.warning("No trips match these filters.")
 else:
+    # technique_used dropped from the grid - Spot Session's "Add results" redesign
+    # replaced free-text technique entry with the visual lure picker, so this
+    # column is always blank for every trip logged since (see TripEntry in
+    # core/storage.py; still present in the CSV/FIELD_SPECS below for any
+    # legacy row that has it). fish_activity/forage_activity take its place as
+    # more useful, always-current at-a-glance columns.
     display_cols = ["trip_date", "segment", "_location", "structure_type", "water_clarity",
-                     "_lure_type", "lure_used", "color_used", "technique_used", "fish_caught",
-                     "biggest_fish_lb", "predicted_score", "notes"]
-    display_df = filtered[display_cols].rename(columns={"_lure_type": "lure_type", "_location": "location"})
+                     "_lure_type", "lure_used", "color_used", "_fish_activity", "_forage_activity",
+                     "fish_caught", "biggest_fish_lb", "predicted_score", "notes"]
+    display_df = filtered[display_cols].rename(columns={
+        "_lure_type": "lure_type", "_location": "location",
+        "_fish_activity": "fish_activity", "_forage_activity": "forage_activity",
+    })
     st.dataframe(display_df.sort_values("trip_date", ascending=False), width='stretch', hide_index=True)
 
     c1, c2, c3 = st.columns(3)
@@ -218,6 +256,7 @@ FIELD_SPECS = [
     ("trailer_used", "Trailer used", lambda v: "Yes" if v else None),
     ("trailer_name", "Trailer", str),
     ("trailer_color", "Trailer color", str),
+    ("trailer_category", "Trailer category", str),
     ("modeled_thermocline_band_ft", "Modeled thermocline band", str),
 ]
 
@@ -230,6 +269,56 @@ else:
         cond = row["_conditions"]
         title = f"{row['trip_date']} · {row['_location']} · {row['segment']}"
         with st.expander(title):
+            # Edit navigates back to Spot Session pre-loaded with this trip's spot
+            # and data, so it can be corrected and saved back in place instead of
+            # appending a duplicate. Lives here (one real st.button per trip,
+            # inside its own expander) rather than as a grid cell above - the
+            # pinned Streamlit version's st.dataframe doesn't support real
+            # per-row interactive buttons, only this manually-looped detail
+            # section does. Only offered for Spot Session rows with a resolvable
+            # current spot - legacy "Log a Trip" rows and rows whose spot_id no
+            # longer matches a saved spot have nowhere in Spot Session to edit
+            # them back into.
+            can_edit = cond.get("source") == "spot_session" and row.get("spot_id") in spot_name_by_id
+            edit_col, delete_col = st.columns([1, 1])
+            if can_edit:
+                if edit_col.button("✏️ Edit this trip", key=f"edit_trip_{row['trip_id']}"):
+                    st.session_state["spot_session_target_id"] = row["spot_id"]
+                    st.session_state["spot_session_edit_trip_id"] = row["trip_id"]
+                    st.query_params["spot_id"] = row["spot_id"]
+                    st.query_params["edit_trip"] = row["trip_id"]
+                    st.switch_page("pages/6_Spot_Session.py")
+
+            # Delete is a two-step confirm (plain button flips a pending flag,
+            # which then swaps in a "Yes, delete it" / "Cancel" pair) rather
+            # than deleting on the first click - this permanently removes the
+            # row from trip_log.csv with no undo, so a single mis-click
+            # shouldn't be able to lose a logged trip.
+            delete_pending_key = f"delete_confirm_{row['trip_id']}"
+            if not st.session_state.get(delete_pending_key):
+                if delete_col.button("🗑️ Delete this trip", key=f"delete_trip_{row['trip_id']}"):
+                    st.session_state[delete_pending_key] = True
+                    st.rerun()
+            else:
+                st.warning("Delete this trip permanently? This can't be undone.")
+                dc1, dc2 = st.columns(2)
+                if dc1.button("Yes, delete it", key=f"confirm_delete_{row['trip_id']}", type="primary", width='stretch'):
+                    ok = delete_trip(row["trip_id"])
+                    if ok:
+                        token = github_token()
+                        if token:
+                            commit_and_push(
+                                [TRIP_LOG_PATH], token, repo_slug(), f"Delete trip {row['trip_id']} from Trip History",
+                            )
+                        st.session_state.pop(delete_pending_key, None)
+                        st.toast("Trip deleted.", icon="✅")
+                    else:
+                        st.session_state.pop(delete_pending_key, None)
+                        st.toast("Couldn't find that trip - it may have already been removed.", icon="⚠️")
+                    st.rerun()
+                if dc2.button("Cancel", key=f"cancel_delete_{row['trip_id']}", width='stretch'):
+                    st.session_state.pop(delete_pending_key, None)
+                    st.rerun()
             # predicted_score is blank for a trip logged via "Add results" without ever
             # filling in "Conditions right now" first - no live reading, no score.
             raw_score = row.get("predicted_score")
