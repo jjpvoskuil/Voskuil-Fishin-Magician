@@ -307,16 +307,23 @@ it shows brand, full product description, a category, a photo, the last price pa
 current quantity on hand. Two ways items get in:
 
 - **Order-history / cart import** - the initial set was seeded from a Cabela's order
-  (order #W283763341), and two further batches were pulled from the items sitting in
-  the Cabela's cart on 2026-08-07 (source: "Cabela's cart (2026-08-07)") - not yet
+  (order #W283763341), two further batches were pulled from the items sitting in the
+  Cabela's cart on 2026-08-07 (source: "Cabela's cart (2026-08-07)") - not yet
   purchased at the time they were added, so treat those rows as a wishlist/on-order
   snapshot rather than confirmed on-hand stock until reconciled against an actual
-  order. All import batches include the vendor's own product photo for each item,
+  order - and on 2026-08-12 a shipped order (#W284504313) plus another cart snapshot
+  were imported (a second order URL from that same day, #W284273868, turned out to be
+  a canceled duplicate of #W284504313 with every line at qty 0, so nothing was pulled
+  from it). All import batches include the vendor's own product photo for each item,
   linked directly from Bass Pro/Cabela's own CDN rather than copied into the repo -
   this app only needs to *display* the vendor's product photography, not keep a stored
   copy of it. Two SKUs (1784868, 3243224) appear in both the original order and the
   first cart batch; they're kept as separate rows rather than merged, consistent with
-  how repeat items within a single order are already handled.
+  how repeat items within a single order are already handled - that was already the
+  case before the 2026-08-12 import. Starting with the 2026-08-12 import, though, a
+  SKU that matches an *existing* inventory row no longer creates a duplicate row at
+  all - its quantity is bumped instead (two items from that batch, SKU 2585737 and
+  3227747, landed this way).
 - **Manual entry** - add a lure any time with brand, description, price, quantity, and
   category, and optionally attach a photo you upload or take right there with your
   camera. These photos are yours, so they're stored under `data/lure_images/` and
@@ -325,11 +332,11 @@ current quantity on hand. Two ways items get in:
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
 Crankbait, Wacky-Rigged Senko, and so on), picked from a dropdown when you add or edit an
-item. The 40 items imported from Cabela's were auto-tagged with a best-guess category
-based on the product name; spot-check them (search/filter by category on this page) and
-correct anything that looks off - a wrong category just means that item won't get
-matched to the right forecast suggestion, not a real error. Items left "Not categorized /
-other" simply don't participate in the ownership matching described below.
+item. Items imported from Cabela's were auto-tagged with a best-guess category based on
+the product name; spot-check them (search/filter by category on this page) and correct
+anything that looks off - a wrong category just means that item won't get matched to the
+right forecast suggestion, not a real error. Items left "Not categorized / other" simply
+don't participate in the ownership matching described below.
 
 Quantity, price, and category can be edited (or the item deleted) from each card. Like
 trip logs, inventory changes are committed and pushed back to GitHub when a
