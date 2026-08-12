@@ -48,3 +48,21 @@ def repo_slug() -> str:
         return st.secrets.get("GITHUB_REPO", "jjpvoskuil/Voskuil-Fishin-Magician")
     except Exception:
         return "jjpvoskuil/Voskuil-Fishin-Magician"
+
+
+def anthropic_api_key() -> str:
+    """API key for the Lure Inventory page's "Scan a lure" photo-identify
+    feature (core.lure_vision). Same graceful-degradation pattern as
+    github_token() above - an empty string just means that feature stays
+    hidden, not an error."""
+    try:
+        return st.secrets.get("ANTHROPIC_API_KEY", "")
+    except Exception:
+        return ""
+
+
+def anthropic_model() -> str:
+    try:
+        return st.secrets.get("ANTHROPIC_MODEL", "") or None
+    except Exception:
+        return None

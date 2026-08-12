@@ -1410,6 +1410,76 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `AppTest` smoke run of `pages/5_Lure_Inventory.py` confirming it still renders
     with no exception.
 
+44. **"Scan a lure" - photo -> Claude vision -> Cabela's product lookup -> confirm ->
+    inventory** - the angler asked whether they could take a picture of a lure in its
+    package and have the app find its real details on Cabela's automatically. Two new
+    core modules plus a new section at the top of `pages/5_Lure_Inventory.py`:
+    - `core/lure_vision.py` (`identify_lure_photo()`) sends the photo to Claude's
+      vision API (Anthropic SDK, tool-use forced to a structured `identify_lure` tool
+      call) and reads back `visible`/`brand`/`product_name`/`search_query`/`notes`.
+      Deliberately scoped to *just* reading the label well enough to build a search
+      query, not to be the source of truth for price/SKU - see the "How the Cabela's
+      lookup works" README section for why. Needs `ANTHROPIC_API_KEY` in secrets;
+      without it the whole "Scan a lure" section shows a setup note and stays out of
+      the way, same graceful-degradation pattern as `GITHUB_TOKEN` elsewhere.
+    - `core/cabelas_lookup.py` (`search_lures()`) turns that query into real Cabela's
+      product data. Cabela's search results are rendered client-side, so there's no
+      HTML to scrape; instead this replicates the exact two JSON calls Cabela's own
+      search box makes (confirmed by reading the site's own network traffic with
+      Claude in Chrome while testing a search there): fetch a short-lived anonymous
+      token from a first-party Cabela's endpoint, then POST it to Coveo's public
+      search REST API (the third-party search platform their site runs on) for a
+      plain-text query. Response `raw` fields (`sku`, `ec_brand`, `ec_name`,
+      `ec_price`/`offerprice`, `fullimage`/`thumbnail`, `ec_category`) map cleanly to
+      what the inventory needs - confirmed against a real query ("strike king thunder
+      cricket swim jig white") that it returns the *exact* SKU (4500087) already
+      imported by hand in entry 43. This is unofficial/reverse-engineered, not a
+      documented API, so `search_lures()`/`_get_token()` fail soft (return `[]`/`None`)
+      on any error rather than raising - a lookup failure just reads as "no matches",
+      falling back to the existing manual "Add a lure" form.
+    - `core/lures.py` gained `guess_category_from_text()` - an ordered keyword-rule
+      heuristic (most-specific phrases checked first, e.g. "square bill" before the
+      generic "crankbait" fallback) that formalizes the same by-hand categorization
+      done in entry 43's Cabela's import, so both that import workflow and this scan
+      feature can reuse one tested function instead of two copies of the same
+      judgment calls. A new test asserts every key it can return is a real
+      `LURE_PROFILES` key, so a typo here can't silently produce an uncategorizable
+      tag.
+    - UI flow: take/upload a photo -> "Identify this lure" -> Claude's read is shown
+      -> Cabela's candidates render as an image-card grid (reusing
+      `core.ui.render_square_thumbnail` directly on the search-result dicts, since
+      they already carry an `image_url` key in the shape that function expects) ->
+      picking one shows an editable confirm form (brand/description/price/quantity/
+      category, category pre-filled from `guess_category_from_text()`) -> "Add to
+      inventory" is the only thing that actually saves anything. If the matched SKU
+      is already in inventory, confirming bumps that row's quantity via
+      `update_item()` instead of creating a duplicate row - the same rule the angler
+      asked for explicitly during entry 43's Cabela's import, now built into the UI
+      instead of being something only I enforce by hand when running an import
+      script.
+    - Added `anthropic_api_key()`/`anthropic_model()` to `core/appstate.py` (same
+      try/except-around-`st.secrets` pattern as `github_token()`), `anthropic>=0.40`
+      to `requirements.txt` (only actually imported inside a try/except in
+      `lure_vision.py`, so a stale/missing version there disables just this one
+      feature, not the app), and documented `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` in
+      `secrets.toml.example`.
+    - Verified with new unit tests (`tests/test_cabelas_lookup.py`,
+      `tests/test_lure_vision.py`, plus three new cases in `tests/test_lures.py` for
+      `guess_category_from_text()`) that mock `requests`/a fake `anthropic` module
+      rather than hitting the real network - 177 tests passing total, up from 161.
+      Also confirmed via a real (interactive, not committed) Coveo query while
+      building this that the token/search endpoints work and return the field names
+      this code expects. **Caveat carried forward into the README**: this hasn't been
+      exercised from a genuine non-browser HTTP client end-to-end (this sandbox's own
+      network egress is allowlisted and blocks cabelas.com directly, so that
+      verification could only be done through the browser) - if Cabela's bot
+      mitigation ends up blocking the deployed app's server-side requests
+      differently than a real browser's, the lookup step could fail even though the
+      token/search endpoints and field mapping are confirmed correct. It fails soft
+      either way, so the angler should just get "no matches found" rather than a
+      broken page if that turns out to be the case - worth confirming with a live
+      scan once this is deployed.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

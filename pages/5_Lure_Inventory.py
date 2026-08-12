@@ -2,15 +2,18 @@ from pathlib import Path
 
 import streamlit as st
 
-from core.appstate import get_inventory, github_token, repo_slug
+from core.appstate import anthropic_api_key, anthropic_model, get_inventory, github_token, repo_slug
+from core.cabelas_lookup import search_lures
 from core.lure_inventory import (
     IMAGES_DIR, INVENTORY_PATH, LureItem, append_item, delete_item, save_image, update_item,
 )
-from core.lures import LURE_CATEGORY_OPTIONS
+from core.lure_vision import identify_lure_photo
+from core.lures import LURE_CATEGORY_OPTIONS, guess_category_from_text
 from core.storage import commit_and_push
 from core.ui import render_square_thumbnail
 
 CARD_THUMBNAIL_PX = 160
+SCAN_THUMBNAIL_PX = 110
 
 st.set_page_config(page_title="Lure Inventory - Nolin Lake", page_icon="🧰", layout="wide")
 st.title("🧰 Lure Inventory")
@@ -35,6 +38,170 @@ def _category_index(category_key: str) -> int:
 
 
 items = get_inventory()
+
+with st.expander("📷 Scan a lure", expanded=False):
+    api_key = anthropic_api_key()
+    if not api_key:
+        st.info(
+            "Photo scanning isn't set up yet - add an `ANTHROPIC_API_KEY` to this app's "
+            "Streamlit secrets to enable it (see `secrets.toml.example` in the repo for the "
+            "exact key name). You can still add lures manually below."
+        )
+    else:
+        st.caption(
+            "Take or upload a photo of the lure's package. Claude reads the brand/product name "
+            "off the label, looks it up on Cabela's for the real product details, and shows you "
+            "candidate matches to confirm before anything is added - nothing saves automatically."
+        )
+        scan_mode = st.radio(
+            "Photo", ["Take a photo", "Upload a photo"], horizontal=True, key="scan_photo_mode",
+        )
+        scan_photo = (
+            st.camera_input("Take a picture of the lure/package", key="scan_camera")
+            if scan_mode == "Take a photo"
+            else st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="scan_upload")
+        )
+
+        if scan_photo is not None and st.button("🔍 Identify this lure", key="scan_identify_btn"):
+            ext = Path(getattr(scan_photo, "name", "photo.jpg")).suffix.lstrip(".") or "jpg"
+            with st.spinner("Reading the label..."):
+                scan_result = identify_lure_photo(
+                    scan_photo.getvalue(), ext, api_key=api_key, model=anthropic_model(),
+                )
+            st.session_state["scan_result"] = scan_result
+            st.session_state["scan_candidates"] = None
+            st.session_state["scan_selected"] = None
+            if not scan_result.get("error") and scan_result.get("visible") and scan_result.get("search_query"):
+                with st.spinner("Searching Cabela's..."):
+                    st.session_state["scan_candidates"] = search_lures(scan_result["search_query"])
+
+        scan_result = st.session_state.get("scan_result")
+        if scan_result:
+            if scan_result.get("error"):
+                st.error(scan_result["error"])
+            elif not scan_result.get("visible"):
+                st.warning(
+                    "Couldn't make out a lure in that photo"
+                    + (f" - {scan_result['notes']}" if scan_result.get("notes") else "")
+                    + ". Try a clearer photo, or add it manually below."
+                )
+            else:
+                read_as = " ".join(p for p in [scan_result.get("brand"), scan_result.get("product_name")] if p)
+                notes_line = f"  \n_{scan_result['notes']}_" if scan_result.get("notes") else ""
+                st.caption(f"📖 Claude read: **{read_as or '(nothing legible)'}**{notes_line}")
+
+                candidates = st.session_state.get("scan_candidates")
+                if not candidates:
+                    st.warning(
+                        "No matches found on Cabela's for that. Try a different search below, "
+                        "or add it manually further down."
+                    )
+                    manual_query = st.text_input(
+                        "Search Cabela's yourself", value=scan_result.get("search_query", ""),
+                        key="scan_manual_query",
+                    )
+                    if st.button("Search", key="scan_manual_search_btn") and manual_query.strip():
+                        with st.spinner("Searching Cabela's..."):
+                            st.session_state["scan_candidates"] = search_lures(manual_query)
+                        st.rerun()
+                else:
+                    st.write(f"Found {len(candidates)} possible match(es) on Cabela's - pick one:")
+                    cols_per_row = 4
+                    for row_start in range(0, len(candidates), cols_per_row):
+                        row_candidates = candidates[row_start:row_start + cols_per_row]
+                        cand_cols = st.columns(cols_per_row)
+                        for col, cand in zip(cand_cols, row_candidates):
+                            with col:
+                                with st.container(border=True):
+                                    if not render_square_thumbnail(cand, size_px=SCAN_THUMBNAIL_PX):
+                                        st.caption("No photo")
+                                    st.caption(f"**{cand['brand']}**  \n{cand['description']}"[:110])
+                                    price_txt = f"${cand['price']:,.2f}" if cand["price"] is not None else "price n/a"
+                                    st.caption(f"SKU {cand['sku']} · {price_txt}")
+                                    if st.button("Use this", key=f"scan_pick_{cand['sku']}", width='stretch'):
+                                        st.session_state["scan_selected"] = cand
+                                        st.rerun()
+
+        selected = st.session_state.get("scan_selected")
+        if selected:
+            st.divider()
+            st.markdown("#### Confirm details")
+            existing_match = next((r for r in items if r.get("sku") and r["sku"] == selected["sku"]), None)
+            if existing_match:
+                st.info(
+                    f"You already have this in inventory (qty {existing_match['quantity']}) - "
+                    "confirming below adds to that quantity instead of creating a duplicate entry."
+                )
+            guessed_category = guess_category_from_text(selected["brand"], selected["description"]) or (
+                existing_match.get("category", "") if existing_match else ""
+            )
+            with st.form("scan_confirm_form"):
+                sc1, sc2 = st.columns(2)
+                confirm_brand = sc1.text_input("Brand", value=selected["brand"])
+                confirm_price = sc2.number_input(
+                    "Price ($)", min_value=0.0, step=0.01, value=float(selected["price"] or 0.0),
+                )
+                confirm_description = st.text_area("Full description", value=selected["description"])
+                sc3, sc4 = st.columns(2)
+                confirm_qty = sc3.number_input("Quantity to add", min_value=1, step=1, value=1)
+                confirm_category_choice = sc4.selectbox(
+                    "Category (matches it to forecast lure suggestions)", CATEGORY_LABELS,
+                    index=_category_index(guessed_category),
+                    key="scan_confirm_category",
+                )
+                confirm_submitted = st.form_submit_button("✅ Add to inventory", width='stretch')
+
+            if confirm_submitted:
+                category_key = CATEGORY_KEYS[CATEGORY_LABELS.index(confirm_category_choice)]
+                if existing_match:
+                    new_qty = int(existing_match["quantity"] or 0) + int(confirm_qty)
+                    update_item(
+                        existing_match["item_id"],
+                        quantity=new_qty,
+                        price=float(confirm_price) if confirm_price else existing_match.get("price"),
+                        category=category_key or existing_match.get("category", ""),
+                    )
+                    saved_desc = (
+                        f"{confirm_brand} - {confirm_description[:50]} "
+                        f"(qty {existing_match['quantity']} -> {new_qty})"
+                    )
+                else:
+                    new_item = LureItem(
+                        brand=confirm_brand.strip(),
+                        description=confirm_description.strip(),
+                        price=float(confirm_price) if confirm_price else None,
+                        quantity=int(confirm_qty),
+                        category=category_key,
+                        sku=selected["sku"],
+                        image_url=selected["image_url"],
+                        source="Scanned photo -> Cabela's lookup",
+                    )
+                    append_item(new_item)
+                    saved_desc = f"{new_item.brand} - {new_item.description[:50]}"
+
+                get_inventory.clear()
+                token = github_token()
+                if token:
+                    ok, msg = commit_and_push(
+                        [INVENTORY_PATH], token, repo_slug(),
+                        f"Add scanned lure to inventory: {saved_desc}",
+                    )
+                    (st.success if ok else st.warning)(msg)
+                else:
+                    st.success("Added locally.")
+                    st.info(
+                        "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
+                        "to GitHub and won't survive an app restart. See README for how to add it."
+                    )
+                for key in ("scan_result", "scan_candidates", "scan_selected"):
+                    st.session_state.pop(key, None)
+                st.rerun()
+
+        if st.session_state.get("scan_result"):
+            if st.button("Start over", key="scan_reset_btn"):
+                for key in ("scan_result", "scan_candidates", "scan_selected"):
+                    st.session_state.pop(key, None)
+                st.rerun()
 
 with st.expander("➕ Add a lure", expanded=len(items) == 0):
     with st.form("add_lure_form", clear_on_submit=True):

@@ -18,3 +18,8 @@ folium>=0.16
 streamlit-folium>=0.22
 scikit-image>=0.22
 scipy>=1.11
+# Lure Inventory's "Scan a lure" photo-identify feature (core/lure_vision.py).
+# Only actually called if ANTHROPIC_API_KEY is configured in Streamlit
+# secrets - the import is wrapped in a try/except there either way, so a
+# missing/outdated version here just disables that one feature, not the app.
+anthropic>=0.40

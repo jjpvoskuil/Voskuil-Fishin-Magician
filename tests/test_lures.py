@@ -1,4 +1,6 @@
-from core.lures import recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES
+from core.lures import (
+    recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES, guess_category_from_text,
+)
 
 
 def test_recommend_returns_valid_blocks():
@@ -297,3 +299,36 @@ def test_only_color_matched_owned_items_are_shown_others_dropped():
     block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
     assert len(block.owned_items) == 1
     assert block.owned_items[0]["description"] == "300 Green Shad"
+
+
+def test_guess_category_from_text_matches_known_product_names():
+    cases = [
+        ("Strike King Rattling Thunder Cricket Swim Jig - White", "chatterbait"),
+        ("Strike King 3XD Series Pro-Model Crankbait - Powder Blue", "medium_diving_crankbait"),
+        ("Strike King Pro-Model XD Crankbait (5XD) - Tennessee Shad", "deep_diving_crankbait"),
+        ("Strike King KVD Elite Double-Willow Spinnerbait", "spinnerbait"),
+        ("Strike King Red Eyed Shad Tungsten 2 Tap Lipless Crankbait", "lipless_crankbait"),
+        ("Strike King Tour Grade Football Jig - Black/Blue", "football_jig"),
+        ("Z-Man Finesse TRD - Green Pumpkin", "finesse_shaky_head"),
+        ("Roboworm FAT Straight Worm - Margarita Mutilator", "wacky_rig_senko"),
+        ("Strike King KVD Rattling Square Bill Crankbait", "squarebill_crankbait"),
+        ("Strike King Rage Tail Craw Soft Bait - Fire Craw", "texas_rig_creature"),
+        ("Booyah Poppin' Pad Crasher Frog", "hollow_body_frog"),
+        ("Some Unbranded Doohickey", ""),
+    ]
+    for text, expected in cases:
+        assert guess_category_from_text(text) == expected, text
+
+
+def test_guess_category_from_text_every_returned_key_is_real():
+    # Every non-blank key this function can ever return must be a real
+    # LURE_PROFILES key, or the Lure Inventory page's category dropdown
+    # (built from LURE_CATEGORY_OPTIONS) wouldn't recognize it.
+    from core.lures import _CATEGORY_KEYWORD_RULES
+    for key, _phrases in _CATEGORY_KEYWORD_RULES:
+        assert key in LURE_PROFILES, key
+
+
+def test_guess_category_from_text_blank_input():
+    assert guess_category_from_text("") == ""
+    assert guess_category_from_text() == ""
