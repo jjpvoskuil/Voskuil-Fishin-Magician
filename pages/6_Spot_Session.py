@@ -384,7 +384,33 @@ if todays_entries:
     summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
     st.caption(f"📋 Already logged for this spot today: {', '.join(summary_bits)}")
 
-results_expander = st.expander("Log a lure/time-window result and any fish caught", expanded=False)
+# Keyed + on_change="rerun" (same fix as the Lure Inventory "Scan a lure" section -
+# see SESSION_NOTES entry 46) so its expanded/collapsed state actually round-trips
+# through st.session_state instead of being purely a client-side toggle. That
+# matters here specifically because the submit handler below explicitly re-opens
+# it after a save (see results_expander_reopen_key there) - without a key, a plain
+# st.expander(expanded=False) always reverts to closed on the st.rerun() that
+# follows a save, since "expanded" is only read as the INITIAL default. Losing
+# all that expanded content collapses the page by hundreds of pixels, which
+# looks exactly like "the page jumped back to the top and nothing happened" -
+# reported after this feature first shipped, even though the save itself was
+# working correctly the whole time.
+#
+# The submit handler can't write st.session_state[results_expander_key] directly
+# to force it back open - Streamlit forbids writing to a keyed widget's state
+# once that widget has already been instantiated in the current run, and the
+# submit button lives inside `with results_expander:`, i.e. after it. So the
+# handler instead sets a separate plain (non-widget) "pending reopen" flag, and
+# it's applied here, right before the widget is created, on the following run.
+results_expander_key = f"results_expander_{spot['spot_id']}"
+results_expander_reopen_key = f"{results_expander_key}_reopen"
+if st.session_state.pop(results_expander_reopen_key, False):
+    st.session_state[results_expander_key] = True
+st.session_state.setdefault(results_expander_key, False)
+results_expander = st.expander(
+    "Log a lure/time-window result and any fish caught",
+    expanded=st.session_state[results_expander_key], key=results_expander_key, on_change="rerun",
+)
 
 # Bumped after each successful "Log this session" save (see the submit handler
 # below) so the lure/trailer/time/notes widgets below all get fresh, blank
@@ -693,10 +719,16 @@ with results_expander:
         # per-fish list, and bump lure_entry_seq_key so every lure/trailer/time/
         # notes widget above gets a fresh blank key next render (the "Conditions
         # during this lure use" fields deliberately keep their values - see the
-        # comment above lure_entry_seq_key). The rerun is what actually makes this
-        # visible immediately, ready to log another lure in the same visit.
+        # comment above lure_entry_seq_key). Setting results_expander_reopen_key
+        # (see the comment where it's read, above) means the "Add results" section
+        # stays open through the rerun below instead of snapping shut - without
+        # this the angler has to scroll back down and re-expand it by hand before
+        # logging the next lure, which reads as "nothing happened." The rerun is
+        # what actually makes all of this visible immediately, ready to log
+        # another lure in the same visit.
         st.session_state[pending_key] = []
         st.session_state[seq_key] = 0
         st.session_state[adding_key] = False
         st.session_state[lure_entry_seq_key] = lure_seq + 1
+        st.session_state[results_expander_reopen_key] = True
         st.rerun()

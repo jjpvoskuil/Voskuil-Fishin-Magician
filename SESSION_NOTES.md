@@ -1613,6 +1613,57 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       needs its own `core.storage` update path (currently only `append_trip()` exists,
       no `update_trip()`) and UI design in `pages/4_Trip_History.py`.
 
+48. **Fix (correction to entry 47): "Add results" collapsed shut after every save,
+    reading as "nothing happened."** Reported immediately after entry 47 shipped -
+    live-browser testing (via `claude-in-chrome`, since the reported symptom couldn't
+    be reasoned out from code alone) confirmed the save itself, the lure-specific
+    reset, and the condition carry-over from entry 47 all worked correctly on the
+    deployed app; the actual problem was that `results_expander =
+    st.expander("Log a lure/time-window result...", expanded=False)` had no `key`.
+    Per the same rule documented in entry 46, an unkeyed expander's `expanded=`
+    argument is only its *initial* default - on the `st.rerun()` that follows a save,
+    it unconditionally re-collapses. Losing that much vertical content (the whole
+    lure picker, conditions, fish list) shrinks the page by hundreds of pixels, and
+    since the browser clamps scroll position to the new (shorter) page height, it
+    *looks* exactly like the page jumped back to the top and the save did nothing -
+    even though "Already logged for this spot today" had, in fact, updated just above
+    the now-collapsed section.
+    - Fix: gave it `key=f"results_expander_{spot_id}"` and `on_change="rerun"` (same
+      pattern as `scan_expander`), and had the submit handler explicitly request it
+      stay open across the save. That second part needed its own workaround:
+      Streamlit forbids writing `st.session_state[key]` for a keyed widget *after*
+      that widget has already been instantiated earlier in the same script run - and
+      the submit button lives inside `with results_expander:`, i.e. structurally
+      after the expander itself. Caught immediately by the `AppTest` verification
+      script (a `StreamlitAPIException` on the direct-write attempt), not by manual
+      testing - a good reminder to keep writing these scripts even for small fixes.
+      Worked around with a deferred "pending reopen" flag: the submit handler sets a
+      separate plain (non-widget) `results_expander_reopen_key`, and it's consumed
+      right before the expander widget is created on the *next* run
+      (`if st.session_state.pop(reopen_key, False): st.session_state[expander_key] =
+      True`), which respects the "must set before instantiation" rule since that
+      check now runs earliest in the fresh run.
+    - This round is also the first time in this project that a reported bug was
+      actually reproduced live (in the deployed Streamlit Community Cloud app via
+      browser automation) rather than diagnosed purely by re-reading the code or
+      through `AppTest`. That mattered here specifically because the underlying save
+      logic was already correct - nothing in the Python state machine was wrong, so
+      no amount of rereading the diff would have surfaced "the page height changes
+      enough that the scroll position reads as snapping to the top." Worth resorting
+      to for any future report where the code looks right but the described symptom
+      doesn't obviously follow from it.
+    - Verified via an extended `AppTest` script (not committed): the expander's
+      tracked `session_state` value is `True` immediately after a save+rerun (was
+      `False`/reset before this fix); condition carry-over and lure-specific reset
+      from entry 47 still hold; two lures logged back-to-back both land in
+      `trip_log.csv` with the same carried-over wind/fish-activity/forage-activity
+      values. Also manually driven end-to-end in the actual deployed app (not just
+      `AppTest`) - opened the section, set distinct condition values, picked a lure,
+      saved, confirmed the section stayed open with the same conditions still shown
+      and the lure picker reset to no selection, then repeated for a second lure in
+      the same visit. Full test suite unaffected (177 passing via `python3 -m
+      pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
