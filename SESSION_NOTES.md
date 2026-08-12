@@ -1377,6 +1377,39 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and real water clarity, unchanged from before this round. Both test-added rows
     were reverted from `data/trip_log.csv` afterward.
 
+43. **Imported new tackle from Cabela's into `data/lure_inventory.csv`** (data-only
+    change, no code touched) - the angler pointed me at their Cabela's cart plus two
+    order-history pages and asked me to add anything new to their inventory, bumping
+    quantity instead of creating a duplicate row for anything already in there. Signed
+    into Cabela's myself was out of the question (entering credentials/passwords is a
+    standing prohibition), so I asked the angler to sign in first, then read each page
+    with Claude in Chrome once they confirmed. Findings: the cart had 6 line items
+    (all qty 1); order `#W284504313` (shipped) had 6 line items (all qty 1); order
+    `#W284273868` turned out to be a **canceled duplicate of the same order** - every
+    line showed qty 0 and the order total was $0.00, so nothing was imported from it.
+    Cross-referencing all 12 real line items against the existing 40-row inventory by
+    SKU found two exact matches - SKU `2585737` (Thunder Cricket Swimjig -
+    Chartreuse/White, already `item_id de225ccd`) and SKU `3227747` (Rapala DT
+    Dives-To Crankbait - Bluegill, already `item_id 027a6e35`) - both bumped from
+    quantity 1 to 2 via `core.lure_inventory.update_item()` rather than appended as
+    new rows. The other 10 items were genuinely new and appended via
+    `core.lure_inventory.append_item()`, each given a `category` matching the closest
+    existing `core.lures.LURE_PROFILES` key by product type (e.g. the two more Thunder
+    Cricket/Rattling Thunder Cricket baits as `chatterbait`, the two more KVD Perfect
+    Plastics Blade Minnow colors as `weightless_soft_plastic`, the two more 3XD Series
+    crankbait colors as `medium_diving_crankbait`, plus one `deep_diving_crankbait`,
+    one `squarebill_crankbait`, one `spinnerbait`, one `football_jig`, one
+    `lipless_crankbait`). Product photo URLs were built the same way entry-under
+    existing rows already do - `https://assets.basspro.com/image/list/...{sku}.json?
+    $BPSSite_orderhistory$` for the order-sourced items and the `$BPSSite_CartTN$`
+    variant for the cart-sourced items - reverse-engineered from the existing CSV
+    rather than scraped from the page DOM, since Chrome's accessibility-tree reader
+    exposes image alt text but not `src` URLs. Verified with the full test suite
+    (unchanged, still 161 passing), a scratch check confirming the inventory read back
+    at 50 rows with no unintended duplicate SKUs among the 12 new/bumped items, and an
+    `AppTest` smoke run of `pages/5_Lure_Inventory.py` confirming it still renders
+    with no exception.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
