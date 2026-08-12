@@ -362,17 +362,13 @@ with results_expander:
 
     st.markdown("#### Lure used")
     selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=f"log_lure_{spot['spot_id']}")
-    if selected_lure_item is None:
-        lure_used = st.text_input(
-            "Lure name", placeholder="e.g. Chartreuse/white spinnerbait", key=f"log_lure_name_{spot['spot_id']}",
-        )
-    else:
-        lure_used = inventory_item_label(selected_lure_item)
-    color_used = st.text_input(
-        "Color used", value=(selected_lure_item.get("description", "") if selected_lure_item else ""),
-        key=f"log_color_used_{spot['spot_id']}_{selected_lure_item.get('item_id') if selected_lure_item else 'manual'}",
-        placeholder="e.g. Chartreuse/white",
-    )
+    # No manual name/color/technique/depth entry here anymore - those were dropped
+    # in favor of just the picker plus the trailer selector below. lure_used/
+    # color_used still get derived from whichever inventory item was picked (blank
+    # if none was), since Trip History and the saved conditions still read them.
+    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else ""
+    color_used = selected_lure_item.get("description", "") if selected_lure_item else ""
+    technique_used = ""
 
     use_trailer = False
     if lure_can_take_trailer(selected_lure_item):
@@ -394,21 +390,6 @@ with results_expander:
             value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
             key=f"log_trailer_color_{spot['spot_id']}_{selected_trailer_item.get('item_id') if selected_trailer_item else 'manual'}",
         )
-
-    technique_used = st.text_input(
-        "Technique/presentation", placeholder="e.g. Slow-rolled along a windblown point",
-        key=f"log_technique_{spot['spot_id']}",
-    )
-
-    dc1, dc2 = st.columns(2)
-    depth_fished_ft = dc1.number_input(
-        "Primary depth fished (ft)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
-        key=f"log_depth_fished_{spot['spot_id']}",
-    )
-    depth_fished_varied_note = dc2.text_input(
-        "Or, several depths tried", placeholder="e.g. worked 2-15 ft, fish suspended over the channel",
-        key=f"log_depth_varied_{spot['spot_id']}",
-    )
 
     st.divider()
     st.markdown("#### Conditions during this lure use")
@@ -583,8 +564,6 @@ with results_expander:
             "lure_end_time": lure_end_time.isoformat() if lure_end_time else None,
             "wind_speed_mph": wind_speed_mph or None,
             "wind_direction": wind_direction,
-            "depth_fished_ft": depth_fished_ft or None,
-            "depth_fished_varied_note": depth_fished_varied_note or None,
             "fish_activity": fish_activity,
             "forage_activity": forage_activity,
             "forage_type_seen": forage_type_seen,
