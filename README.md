@@ -328,6 +328,20 @@ current quantity on hand. Two ways items get in:
   category, and optionally attach a photo you upload or take right there with your
   camera. These photos are yours, so they're stored under `data/lure_images/` and
   committed to the repo like any other user data.
+- **Scan a lure (photo -> Cabela's lookup)** - take or upload a photo of a lure's
+  package in the "📷 Scan a lure" section at the top of the page. Claude's vision
+  (`core/lure_vision.py`) reads the brand/product name off the label, that guess
+  becomes a search query against Cabela's own product catalog (`core/cabelas_lookup.py`),
+  and you're shown the real matching product(s) - photo, brand, description, SKU,
+  price - to pick from. Picking one shows an editable confirm form (category
+  pre-guessed the same way the import batches above are, everything else editable)
+  before anything is saved - nothing is added automatically. If the SKU already
+  matches something in your inventory, confirming bumps that row's quantity instead
+  of creating a duplicate, same rule as the order-history/cart imports above. This
+  needs an `ANTHROPIC_API_KEY` in Streamlit secrets (see `secrets.toml.example`) -
+  without one, this section just explains that and stays otherwise out of the way;
+  manual entry above still works regardless. See "How the Cabela's lookup works"
+  below for how the product search itself works and its limitations.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
@@ -341,6 +355,32 @@ don't participate in the ownership matching described below.
 Quantity, price, and category can be edited (or the item deleted) from each card. Like
 trip logs, inventory changes are committed and pushed back to GitHub when a
 `GITHUB_TOKEN` is configured, so they survive Streamlit Cloud restarts.
+
+### How the Cabela's lookup works (and its limits)
+
+Cabela's search results are rendered client-side by JavaScript, so there's no plain
+HTML page to fetch/parse for product data. Instead, `core/cabelas_lookup.py` calls the
+same two JSON endpoints the site's own search box calls: it fetches a short-lived,
+anonymous, read-only search token from a first-party Cabela's endpoint (no login
+involved - it's the same token any visitor's browser gets), then POSTs that token to
+Coveo's public search REST API (the third-party search platform Cabela's site search
+runs on) with a plain text query, and gets back real product data - brand, name,
+price, SKU, category, photo - as JSON. This was confirmed by inspecting Cabela's own
+site's network traffic while searching, not from any published/documented API, so
+there's no guarantee it keeps working: if Cabela's changes how their search works or
+starts blocking non-browser traffic, these calls will start failing. Every function in
+that module fails soft (returns `[]`, never raises) specifically so a lookup failure
+just falls back to "no matches found" in the UI and the manual "Add a lure" form still
+works - it never breaks the page. If scanning stops finding matches, that module is
+the first place to check.
+
+The photo-identify step (`core/lure_vision.py`) is deliberately kept separate from the
+product lookup - it only reads whatever's legible on the package well enough to build
+a search query (e.g. "Strike King Thunder Cricket Swimjig"), and the Cabela's lookup
+above finds the real product data for that query. A vision model's read of a small,
+possibly glare-y label is a good search query, but isn't trustworthy enough to source
+exact price/SKU from directly - hence showing you the actual matched Cabela's products
+to confirm, rather than saving whatever the photo step guessed.
 
 ### How inventory feeds the forecast
 
@@ -434,6 +474,10 @@ core/
   calibration.py          Weight calibration from logged trips
   lure_inventory.py       Tackle inventory read/write + photo storage (category field
                            links each item to a core.lures lure type)
+  lure_vision.py           Photo -> brand/product-name read via Claude's vision API,
+                           for the Lure Inventory page's "Scan a lure" flow
+  cabelas_lookup.py        Text query -> real Cabela's product data (SKU/price/photo),
+                           via the same JSON endpoints Cabela's own site search calls
   bathymetry.py            Modeled depth grid + historic-topo + real-data blending
                            (not currently rendered on the Lake Map page - see "Data sources")
   historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps

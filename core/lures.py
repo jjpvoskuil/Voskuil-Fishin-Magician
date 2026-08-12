@@ -842,3 +842,59 @@ def recommend(
 # tackle item with the category it matches here, so ownership can be matched
 # up against the forecast's lure suggestions.
 LURE_CATEGORY_OPTIONS = [(key, profile["name"]) for key, profile in LURE_PROFILES.items()]
+
+# Ordered (category key, [keyword phrases]) rules for guess_category_from_text()
+# below - first match wins, so more specific phrases must come before more
+# generic ones (e.g. "square bill" before the bare "crankbait" fallback, or
+# this would tag every squarebill as a medium-diving crankbait instead).
+# This is intentionally just a best-effort heuristic over a product name/
+# description string, the same kind of guess a person skimming the name
+# would make - it's meant to prefill a category the angler can spot-check
+# and correct, not to be authoritative. Used by both the Cabela's
+# order-history/cart import workflow and the Lure Inventory "Scan a lure"
+# feature (core.cabelas_lookup) to auto-tag newly added items.
+_CATEGORY_KEYWORD_RULES = [
+    ("hollow_body_frog", ["hollow body frog", "hollow-body frog", " frog"]),
+    ("buzzbait", ["buzzbait", "buzz bait", "buzz king"]),
+    ("walking_topwater", ["walking topwater", "walk the dog", "spook", "walking bait"]),
+    ("popper", ["popper"]),
+    ("chatterbait", ["chatterbait", "chatter bait", "bladed jig", "thunder cricket"]),
+    ("swim_jig", ["swim jig", "swimjig", "rage swimmer"]),
+    ("football_jig", ["football jig"]),
+    ("finesse_shaky_head", ["shaky head", "ned rig", "finesse trd", "finesse worm"]),
+    ("wacky_rig_senko", ["wacky rig", "senko", "wacky worm", "straight worm"]),
+    ("carolina_rig", ["carolina rig", "c-rig"]),
+    ("texas_rig_creature", ["creature bait", "beaver bait", "rage tail craw", "krackin"]),
+    ("texas_rig_worm", ["texas rig", "ribbon tail worm"]),
+    ("lipless_crankbait", ["lipless"]),
+    ("squarebill_crankbait", ["square bill", "squarebill"]),
+    ("deep_diving_crankbait", [
+        "deep diving", "deep-diving", "5xd", "6xd",
+        "dives to 15", "dives to 16", "dives to 17", "dives to 18",
+        "dives to 19", "dives to 20", "dives to 25",
+    ]),
+    ("medium_diving_crankbait", [
+        "medium diving", "medium-diving", "3xd", "dt10", "dt-10", "dt 10",
+        "dives to 8", "dives to 9", "dives to 10", "dives to 12",
+    ]),
+    ("blade_bait", ["blade bait"]),
+    ("suspending_jerkbait", ["jerkbait", "jerk bait"]),
+    ("spinnerbait", ["spinnerbait", "spinner bait"]),
+    ("weightless_soft_plastic", ["fluke", "soft jerkbait", "swimbait"]),
+    ("medium_diving_crankbait", ["crankbait"]),  # generic fallback - depth unknown, assume mid-range
+]
+
+
+def guess_category_from_text(*texts: str) -> str:
+    """Best-guess one of LURE_CATEGORY_OPTIONS' keys from free-text product
+    name(s)/description(s) - or "" if nothing matches. Pure/offline (no
+    lookups), so it's safe to run on any text, including a vision model's
+    read of a package label before that's even been matched to a real
+    product."""
+    combined = " ".join(t for t in texts if t).lower()
+    if not combined:
+        return ""
+    for category_key, phrases in _CATEGORY_KEYWORD_RULES:
+        if any(phrase in combined for phrase in phrases):
+            return category_key
+    return ""
