@@ -39,7 +39,7 @@ def _category_index(category_key: str) -> int:
 
 items = get_inventory()
 
-with st.expander("📷 Scan a lure", expanded=False, key="scan_expander"):
+with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_change="rerun"):
     api_key = anthropic_api_key()
     if not api_key:
         st.info(

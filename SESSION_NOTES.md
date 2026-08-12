@@ -1526,6 +1526,27 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       trigger a rerun until submit anyway, which is a different (already documented)
       limitation, not this one.
 
+46. **Fix (correction to entry 45): expanding "Scan a lure" showed nothing at all** -
+    reported immediately after entry 45 shipped: the section would visually expand
+    (chevron flips) but render an empty box, not even the "Photo scanning isn't set
+    up yet" message when the key was missing - meaning the code was never reaching
+    *any* branch that produces output. Root cause: giving `st.expander` a `key`
+    alone does **not** make it report its expanded/collapsed state back to Python -
+    per Streamlit's own docs, that also requires `on_change="rerun"` explicitly.
+    Without it, clicking the expander is purely a client-side visual toggle that
+    never triggers a script rerun, so `st.session_state["scan_expander"]` stayed at
+    its initial default (`False`) forever - the code from entry 45 was unconditionally
+    treating the section as collapsed and skipping all output, regardless of what the
+    UI showed. One-line fix: `st.expander("Scan a lure", ..., key="scan_expander",
+    on_change="rerun")`. Verified via `AppTest` that manually driving
+    `st.session_state["scan_expander"]` between `True`/`False` (simulating what a
+    real click + `on_change="rerun"` now produces server-side) correctly toggles
+    between the full "Scan a lure" UI and rendering nothing, with no exception in
+    either state or with/without `ANTHROPIC_API_KEY` configured - full click-and-
+    persist behavior itself isn't independently exercisable through AppTest for this
+    widget type, so the actual browser click path is worth a quick live check once
+    deployed. Full test suite unaffected (177 passing).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
