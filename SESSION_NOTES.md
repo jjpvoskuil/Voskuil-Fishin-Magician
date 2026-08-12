@@ -1880,6 +1880,57 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       synthetic-row regression case described above. Full test suite unaffected
       (177 passing via `python3 -m pytest`).
 
+52. **Trip History: a real 🔍 button on the grid, left of each row, jumping
+    straight to that trip's detail.** Entry 51 put Edit/Delete inside the
+    per-trip "Trip details" expander loop further down the page, since
+    `st.dataframe` can't host real per-row buttons - but the angler wanted the
+    button on the grid itself, not buried in a list they'd have to scroll to
+    and find the right expander in.
+    - `st.dataframe` was replaced with a genuine per-row grid built from
+      `st.columns` (same technique the "Trip details" loop already used) -
+      the only way to get a real, clickable `st.button` on each row in this
+      pinned Streamlit version. Trimmed to six columns (🔍, Date, Location,
+      Lure, Fish caught, Score) rather than all fourteen the old
+      `st.dataframe` grid showed - `st.columns` doesn't get native
+      sort/resize the way `st.dataframe` did, and fourteen manually-sized
+      columns would be unreadably narrow. Every dropped field is still one
+      click away.
+    - Clicking 🔍 sets `trip_history_selected_id` and reruns; right below the
+      grid (not gated on the current filters, and looked up against the
+      *full* unfiltered trip list rather than the filtered one, so it keeps
+      showing even if a filter change afterward would otherwise exclude that
+      trip) a "📌 Selected trip" panel renders that trip's complete detail -
+      literally "takes you to the record detail," with zero scrolling, since
+      the panel appears immediately below the grid rather than requiring a
+      scroll down to find the matching expander in the full list.
+    - The full "Edit this trip"/"Delete this trip"/field-by-field/per-fish
+      rendering logic (previously duplicated nowhere else, but about to be
+      needed in two places - the new panel and the existing full list) was
+      extracted into one shared `_render_trip_detail_body(row, key_prefix)`
+      function. `key_prefix` exists because the SAME trip can now render
+      twice on one script run (once in the "Selected trip" panel, once again
+      in the full "Trip details" list below, since selecting a trip doesn't
+      remove it from that list) - Streamlit raises on a duplicate widget key
+      within one run, so the panel uses `key_prefix="selected"` and the list
+      uses `key_prefix="list"`, giving every button (`Edit`, `Delete`, the
+      delete confirm/cancel pair) a distinct key per call site. The one
+      exception is deliberate: `delete_pending_key` is built from `trip_id`
+      alone (no `key_prefix`), so starting a delete confirm from either
+      rendering of the same trip shows the same pending "are you sure" state
+      in both places, rather than two independent, easily-confusing ones.
+    - Verified via `AppTest`: exactly one 🔍 button per real logged trip;
+      clicking one sets `trip_history_selected_id` and renders the "📌 ..."
+      panel with the right trip's date; both the panel's and the full list's
+      Edit/Delete buttons for that same trip coexist on the same run without
+      a duplicate-key crash (the concrete risk `key_prefix` exists to avoid);
+      "✖ Close" clears the selection. Also caught a real formatting bug
+      during this same verification pass: the new grid's fish-count column
+      used an `:g` format spec on `biggest_fish_lb`, which crashes because
+      that field comes straight off the CSV as a plain string (`read_all_trips`
+      does no numeric coercion) - fixed by dropping the format spec, matching
+      how the detail view already rendered this same field. Full test suite
+      unaffected (177 passing via `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

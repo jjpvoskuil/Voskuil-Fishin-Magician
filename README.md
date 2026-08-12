@@ -131,14 +131,16 @@ key decisions, and known open items.
 - **Trip logging** - the Spot Session page's log section records what actually happened
   (lures, catches, water conditions, forage seen) so the model can calibrate its
   weights against your own results over time.
-- **Trip History** - every logged trip in one filterable table: filter by date/date
+- **Trip History** - every logged trip in one filterable grid: filter by date/date
   range, time of day, location, lure type, water clarity, structure type, fish
   activity, forage activity, wind direction, catches-only, trailer-used-only, or
-  free-text search, plus a per-trip details view and the model's calibration status.
-  Each trip's detail view has an "✏️ Edit this trip" button (jumps back to Spot
-  Session with that trip pre-loaded so you can correct and re-save it - see "Spot
-  Session page" above) and a "🗑️ Delete this trip" button (asks you to confirm, then
-  removes it for good).
+  free-text search. Click the 🔍 on the left of any row to jump straight to that
+  trip's full detail in a "📌 Selected trip" panel right below the grid - no
+  scrolling required. From there (or from the same trip's entry further down in
+  the full "Trip details" list), "✏️ Edit this trip" jumps back to Spot Session
+  with that trip pre-loaded so you can correct and re-save it (see "Spot Session
+  page" above), and "🗑️ Delete this trip" asks you to confirm, then removes it for
+  good. The model's calibration status sits below the grid too.
 - **Lure inventory** - your tackle box, tracked: brand, full description, a category
   (matching it to one of the forecast engine's lure types), a photo, the last price
   paid, and how many you have on hand. Seeded from a Cabela's order history import; add
