@@ -59,11 +59,11 @@ key decisions, and known open items.
   (closed by default), lets you log what actually happened. Picking the lure (and
   trailer, if that lure type takes one) is a searchable, photo card grid instead of a
   plain dropdown - search your tackle box by brand or description, then click the
-  card you want; picking one auto-fills the color field, or enter something not in
-  your inventory by hand instead. Underneath, a "Conditions during this lure use"
-  group holds the time range you fished it, wind speed and direction, fish activity,
-  forage activity, forage type seen, and notes for that window. Fish get logged as
-  you catch them - click "➕ Add fish" each time and fill in species
+  card you want; a "Used a trailer" checkbox reveals the same card-grid picker for
+  the trailer, with its own name/color fields. Underneath, a "Conditions during this
+  lure use" group holds the time range you fished it, wind speed and direction, fish
+  activity, forage activity, forage type seen, and notes for that window. Fish get
+  logged as you catch them - click "➕ Add fish" each time and fill in species
   (Largemouth/Spotted/Striped, or type in your own), weight, length, depth caught,
   presentation/technique, and retrieval speed for that one fish; each save adds it to
   a running list (with a "Remove" if you need to undo one) so you're not committing

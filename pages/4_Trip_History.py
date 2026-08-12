@@ -199,6 +199,10 @@ FIELD_SPECS = [
     ("lure_end_time", "Lure end time", str),
     ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
     ("wind_direction", "Wind direction (logged)", str),
+    # depth_fished_ft/depth_fished_varied_note (an overall "primary depth" for the
+    # whole lure use) were dropped from the "Add results" form - per-fish "depth
+    # caught at" already captures this in more detail. Only trips logged before
+    # that change still set these two.
     ("depth_fished_ft", "Depth fished", lambda v: f"{v} ft"),
     ("depth_fished_varied_note", "Depth variation notes", str),
     ("fish_activity", "Fish activity", str),

@@ -1301,6 +1301,33 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     pending fish list was empty again on the next rerun after submit. The test-added
     row was reverted from `data/trip_log.csv` afterward so no synthetic data was left
     behind.
+41. **Trim the "Lure used" section down to just the picker + trailer selector** -
+    a follow-up to entry 40: the manual "Lure name"/"Color used"/"Technique/
+    presentation"/"Primary depth fished"/"Or, several depths tried" fields
+    underneath the new image card picker were called out as unnecessary and
+    removed, leaving just the card grid plus the "Used a trailer" checkbox (and,
+    when checked, its own card grid/name/color fields - unchanged, explicitly kept).
+    `lure_used`/`color_used` are still populated automatically from whichever
+    inventory item is picked (label and description respectively - the exact same
+    values the removed text fields used to default to, just no longer editable or
+    shown), and are blank strings if nothing's picked, since there's no manual-entry
+    fallback anymore. `technique_used` is now always `""`. `depth_fished_ft`/
+    `depth_fished_varied_note` are no longer collected at all and were dropped from
+    the saved `conditions` dict entirely (not just left `None`) - per-fish "depth
+    caught at" already covers this in more useful, per-catch detail.
+    `pages/4_Trip_History.py`'s `FIELD_SPECS` rows for those two keys got the same
+    "only old trips still set this" comment already added for `retrieve_speed`/
+    `retrieve_style` in entry 40, rather than being removed, so older history still
+    renders correctly.
+
+    Verified with the full test suite (unchanged) plus a scratch `AppTest` script
+    (not committed) confirming the four removed widgets are gone, the trailer
+    selector still works end to end, and a full submit (lure picked from inventory,
+    no fish) produces a `trip_log.csv` row with a populated `lure_used`/`color_used`,
+    an empty `technique_used`, and no `depth_fished_ft`/`depth_fished_varied_note`
+    keys in `conditions_json` at all - plus confirming `pages/4_Trip_History.py`
+    still renders that row without raising. The test-added row was reverted
+    afterward.
 
 ## Key design decisions & rationale
 
