@@ -55,8 +55,13 @@ key decisions, and known open items.
   "How the model works" below for exactly how); hover the small ⓘ next to the score
   to see the full factor-by-factor breakdown of how it was calculated. That score and
   the lure recommendation sit in their own collapsible "Suggestions for right now"
-  section (open by default). Below it, a second collapsible section, "Add results"
-  (closed by default), lets you log what actually happened. Picking the lure (and
+  section (open by default) - it only appears once you've submitted Conditions right
+  now. Below it, a second collapsible section, "Add results" (closed by default),
+  lets you log what actually happened - and this one doesn't need Conditions filled
+  in at all, so you can jump straight to logging a catch without scoring the moment
+  first if that's all you want to do (the trip is saved with a blank predicted score
+  and "Unknown" water clarity in that case, everything else logs normally). Picking
+  the lure (and
   trailer, if that lure type takes one) is a searchable, photo card grid instead of a
   plain dropdown - search your tackle box by brand or description, then click the
   card you want; a "Used a trailer" checkbox reveals the same card-grid picker for

@@ -230,12 +230,16 @@ else:
         cond = row["_conditions"]
         title = f"{row['trip_date']} · {row['_location']} · {row['segment']}"
         with st.expander(title):
+            # predicted_score is blank for a trip logged via "Add results" without ever
+            # filling in "Conditions right now" first - no live reading, no score.
+            raw_score = row.get("predicted_score")
+            has_score = raw_score not in (None, "") and not pd.isna(raw_score)
             top_bits = [
                 f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
                 f"**Technique:** {row['technique_used'] or '-'}",
                 f"**Fish caught:** {row['fish_caught']}"
                 + (f", biggest {row['biggest_fish_lb']} lb" if row.get("biggest_fish_lb") else ""),
-                f"**Predicted score:** {row['predicted_score']}/10",
+                f"**Predicted score:** {raw_score}/10" if has_score else "**Predicted score:** n/a (no live conditions entered)",
             ]
             st.markdown("  \n".join(top_bits))
             if row.get("notes"):
