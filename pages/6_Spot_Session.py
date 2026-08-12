@@ -447,7 +447,23 @@ with results_expander:
 
     # These four fields intentionally keep a stable key (no lure_seq folded in) -
     # see the comment above lure_entry_seq_key for why they carry over between
-    # lures instead of resetting.
+    # lures instead of resetting. "Log this session" (below) is the one action
+    # that clears them back to their own coded defaults, for a genuinely new
+    # session - it can't write st.session_state[key] for these directly, since
+    # by the time that button handler runs they're already instantiated this
+    # run (same restriction, and same deferred-flag fix, as
+    # results_expander_reopen_key above); session_reset_pending_key is applied
+    # here, right before these widgets are created, on the run that follows.
+    session_reset_pending_key = f"session_reset_pending_{spot['spot_id']}"
+    condition_field_keys = (
+        f"log_wind_speed_{spot['spot_id']}", f"log_wind_dir_{spot['spot_id']}",
+        f"log_fish_activity_{spot['spot_id']}", f"log_forage_activity_{spot['spot_id']}",
+        f"log_forage_type_{spot['spot_id']}",
+    )
+    if st.session_state.pop(session_reset_pending_key, False):
+        for condition_key in condition_field_keys:
+            st.session_state.pop(condition_key, None)
+
     wc1, wc2 = st.columns(2)
     wind_speed_mph = wc1.number_input(
         "Wind speed (mph)", min_value=0.0, max_value=60.0, value=0.0, step=1.0,
@@ -617,12 +633,12 @@ with results_expander:
                 st.session_state[adding_key] = False
                 st.rerun()
 
-    st.divider()
-    log_submitted = st.button(
-        "Log this session", key=f"log_submit_{spot['spot_id']}", type="primary", width='stretch',
-    )
-
-    if log_submitted:
+    def _save_current_lure_entry():
+        """Build a TripEntry from the current form state, append it, push to
+        GitHub if configured, and toast a confirmation. Shared by both "Log
+        this lure" (always) and "Log this session" (only when there's an
+        unsaved lure pending - see its handler below) so there's exactly one
+        place that assembles a TripEntry from these fields."""
         fish_weights = [f["weight_lb"] for f in fish_records if f["weight_lb"]]
 
         # Everything in this first block only exists if Conditions right now was
@@ -710,25 +726,66 @@ with results_expander:
             st.toast(msg, icon="✅" if ok else "⚠️")
         else:
             st.toast(
-                "Session logged locally. No GITHUB_TOKEN configured in Streamlit secrets, so this "
+                "Lure logged locally. No GITHUB_TOKEN configured in Streamlit secrets, so this "
                 "entry won't survive an app restart - see README for how to add it.",
                 icon="ℹ️",
             )
 
-        # Full reset for the next lure entry, now that this one's saved: clear the
-        # per-fish list, and bump lure_entry_seq_key so every lure/trailer/time/
-        # notes widget above gets a fresh blank key next render (the "Conditions
-        # during this lure use" fields deliberately keep their values - see the
-        # comment above lure_entry_seq_key). Setting results_expander_reopen_key
-        # (see the comment where it's read, above) means the "Add results" section
-        # stays open through the rerun below instead of snapping shut - without
-        # this the angler has to scroll back down and re-expand it by hand before
-        # logging the next lure, which reads as "nothing happened." The rerun is
-        # what actually makes all of this visible immediately, ready to log
-        # another lure in the same visit.
+    def _reset_for_next_lure():
+        """Clear the per-fish list and bump lure_entry_seq_key so every lure/
+        trailer/time/notes widget above gets a fresh blank key next render -
+        called after EVERY save, whether from "Log this lure" or "Log this
+        session" (see the comment above lure_entry_seq_key for why the
+        "Conditions during this lure use" fields are deliberately NOT touched
+        here - that's "Log this session"'s job, via session_reset_pending_key,
+        since a plain "Log this lure" save should keep carrying them
+        forward). Setting results_expander_reopen_key means the "Add results"
+        section stays open through the rerun below instead of snapping shut -
+        without this the angler has to scroll back down and re-expand it by
+        hand before logging the next lure, which reads as "nothing happened."
+        """
         st.session_state[pending_key] = []
         st.session_state[seq_key] = 0
         st.session_state[adding_key] = False
         st.session_state[lure_entry_seq_key] = lure_seq + 1
         st.session_state[results_expander_reopen_key] = True
+
+    st.divider()
+    lure_col, session_col = st.columns(2)
+    log_lure_submitted = lure_col.button(
+        "Log this lure", key=f"log_submit_{spot['spot_id']}", type="primary", width='stretch',
+        help="Save this lure's results and stay in this session - wind/fish activity/forage "
+             "conditions carry over, ready to pick your next lure.",
+    )
+    log_session_submitted = session_col.button(
+        "Log this session", key=f"log_session_submit_{spot['spot_id']}", width='stretch',
+        help="Done fishing this spot for now: saves this lure too if you haven't yet, then clears "
+             "conditions so the next thing you log starts as a brand-new session.",
+    )
+
+    if log_lure_submitted:
+        _save_current_lure_entry()
+        _reset_for_next_lure()
+        st.rerun()
+
+    if log_session_submitted:
+        # A lure counts as "pending" (worth saving before closing out) if
+        # anything about it was actually filled in - a lure was picked, a
+        # fish was logged, or a note was typed. Guards against writing a
+        # blank/junk trip_log row on the common case where the angler already
+        # clicked "Log this lure" for their last one and the form is sitting
+        # empty when they click "Log this session" right after.
+        has_pending_lure_data = selected_lure_item is not None or bool(fish_records) or bool(log_notes.strip())
+        if has_pending_lure_data:
+            _save_current_lure_entry()
+        else:
+            st.toast("Session closed - conditions cleared for a new session.", icon="✅")
+        _reset_for_next_lure()
+        # Consumed right before the "Conditions during this lure use" widgets
+        # are (re-)created next run (see where this key is read, above) -
+        # that's what actually clears wind/fish activity/forage activity/
+        # forage seen back to their own coded defaults, so the NEXT session
+        # starts from a genuinely blank slate instead of carrying over
+        # whatever this session's conditions happened to be.
+        st.session_state[session_reset_pending_key] = True
         st.rerun()
