@@ -1757,6 +1757,129 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       the new spot's own `spot_picker_<id>` key present in session_state afterward.
       Full test suite unaffected (177 passing via `python3 -m pytest`).
 
+51. **Trip History: field mapping/filters caught up with Spot Session's newer
+    fields, plus per-trip Edit and Delete.** Entries 31-50 added several fields to
+    what Spot Session's "Add results" section logs (wind speed/direction, fish/
+    forage activity, trailer details) and dropped one (`technique_used`, now
+    always blank) - Trip History's grid/filters/detail view hadn't been updated to
+    match. The angler also asked for a way to fix or remove a previously-logged
+    trip without having to edit `trip_log.csv` by hand.
+    - **Field mapping**: the grid's `display_cols` dropped the now-always-empty
+      `technique_used` column and added `fish_activity`/`forage_activity` in its
+      place (derived the same way `_lure_type`/`_location` already were - a flat
+      column added to every row up front, since these live inside the
+      `conditions_json` dict, not as their own `trip_log.csv` columns).
+      `FIELD_SPECS` (the per-trip detail expander's field table) gained
+      `trailer_category`, the one field from the trailer feature (entry 31) that
+      hadn't made it into that list.
+    - **New filters**: Fish activity, Forage activity, and Wind direction
+      multiselects, plus an "Only trips using a trailer" checkbox - all derived
+      via the same flat-column-then-`.isin()`/boolean-mask pattern the existing
+      filters already used.
+    - **Edit**: a real `st.button("✏️ Edit this trip")` per trip, but it lives
+      inside the "Trip details" expander loop rather than as a grid cell - the
+      pinned Streamlit version's `st.dataframe` doesn't support real per-row
+      interactive buttons (only `st.column_config.LinkColumn`, which can only
+      produce a clickable URL, not run navigation logic), while the detail
+      expander loop already renders one real Streamlit container per trip. Only
+      offered when `conditions["source"] == "spot_session"` and the trip's
+      `spot_id` still resolves to a currently-saved spot - legacy "Log a Trip"
+      rows and rows whose spot was since deleted have nowhere in Spot Session to
+      edit them back into. Clicking it sets `spot_session_target_id`/
+      `spot_session_edit_trip_id` (session_state) and `?spot_id=`/`?edit_trip=`
+      (query params, same primary/fallback handoff pattern used everywhere else
+      on this page) and calls `st.switch_page("pages/6_Spot_Session.py")`.
+    - **Delete**: a two-step confirm (a plain button flips a `delete_confirm_<id>`
+      session_state flag, which swaps in a "Yes, delete it"/"Cancel" pair) rather
+      than deleting on the first click, since `core.storage.delete_trip()` is a
+      real, permanent, un-undoable removal from `trip_log.csv`. Confirming pushes
+      to GitHub the same way every other trip-log write does (via
+      `commit_and_push`), so a delete on the deployed app persists past a
+      restart same as a save does.
+    - **`core/storage.py` gained two new functions**: `update_trip(entry)`
+      (replaces the row whose `trip_id` matches `entry.trip_id`, rewriting the
+      whole CSV - the file is small enough that a full rewrite per edit is not a
+      real cost) and `delete_trip(trip_id)` (removes that row entirely, same
+      rewrite approach). Both return `False` as a no-op if the `trip_id` isn't
+      found (e.g. a stale link, or something else already removed it) rather than
+      raising, matching `commit_and_push`'s "never raises, tell the caller so it
+      can show a friendly message" convention.
+    - **Spot Session edit mode** (`pages/6_Spot_Session.py`): landing with
+      `spot_session_edit_trip_id` set switches the page into editing one specific
+      already-logged trip instead of starting a new session.
+      - A one-time prefill block (guarded by an `edit_prefill_done_key` flag, so
+        it only runs once per edit visit and doesn't stomp on further edits the
+        angler makes to the form) seeds every widget-backed `session_state` key
+        the "Conditions right now" form and "Add results" section read - session
+        date, wind speed/direction, fish/forage activity, forage type seen, the
+        lure/trailer pickers (best-effort matched back to an inventory item by
+        display label, since `conditions_json` only ever stored the resolved
+        label/category, not the item's `item_id` itself - a renamed or
+        since-deleted item just falls back to unselected), start/end time, notes,
+        and the per-fish catch list. It bumps `lure_entry_seq_key` first so the
+        lure/trailer/time/notes keys it seeds (which fold that sequence number
+        into their key) are guaranteed unused, even if the same spot already had
+        some unsaved lure entry in progress earlier in the same browser session.
+        Same "must happen before that key's widget is instantiated in this run"
+        rule as every other deferred-flag pattern already on this page.
+      - "Conditions right now"'s own (unkeyed) widgets get their `value=`/
+        `index=` defaults computed from the trip's stored condition snapshot too,
+        so re-submitting that form (optional - conditions have always been
+        optional here) reproduces close to the original score/suggestions rather
+        than the normal blank-form defaults.
+      - The "Log this lure"/"Log this session" pair is replaced by a single
+        "💾 Save changes"/"Cancel edit" pair while editing - there's no "next lure
+        in this session" concept when correcting one specific already-saved row.
+        "Save changes" calls the same shared `_save_current_lure_entry()` helper
+        as the normal flow, but branches to `update_trip()` (same `trip_id`,
+        original `logged_at` preserved) instead of `append_trip()`.
+      - **Caught during verification, not from the original design**: a plain
+        "just fix the notes" edit - where the angler doesn't re-submit
+        "Conditions right now" - was silently blanking `predicted_score` back to
+        `None`, resetting `segment` to a guess based on the *current* wall-clock
+        hour (not whenever the original session happened), and resetting
+        `water_clarity` to `"Unknown"`, because all three are normally derived
+        fresh from `cond`, which stays `None` unless that form is resubmitted.
+        Fixed by falling back to the original trip's stored value for each of
+        the three whenever `cond` is empty and a trip is being edited - a save
+        should only ever change what was actually touched. Confirmed with a
+        dedicated `AppTest` regression case using a synthetic row with
+        distinctive non-default `segment`/`water_clarity`/`predicted_score`
+        values (none of the angler's real logged trips have used "Conditions
+        right now" yet, so this exact bug wouldn't have shown up against real
+        data).
+      - Minor, accepted cosmetic gap: seeding a keyed widget's `session_state`
+        entry *and* passing that widget a separate hardcoded `value=`/`index=`
+        default (as several of the prefilled widgets above still do) trips a
+        one-time, backend-log-only Streamlit warning ("widget was created with a
+        default value but also had its value set via the Session State API") -
+        harmless (session_state always wins; nothing user-facing changes) and,
+        because Streamlit only logs this once per process no matter how many
+        widgets trigger it, fixing every remaining instance for a single log
+        line wasn't judged worth the extra surface area. `session_date` was
+        fixed properly (reads its own current `session_state` value back as its
+        `value=` instead of a separate hardcoded default) since it was trivial.
+    - **Test data cleanup**: `data/trip_log.csv` had carried 7 synthetic rows
+      since entry "Add temporary sample trips to preview the new Trip History
+      page" (commit `619c5c4`, before this session's numbered entries began),
+      each tagged `conditions["_test_data"] = true` and a `[TEST DATA]`-prefixed
+      note - identified via `git show` on that commit and removed by filtering on
+      that tag, leaving all of the angler's real logged trips (`96c5a3d1`,
+      `f964519c`, `bba469f1`, `bf8b6926`, `35d0e656`, `a838b1d5`) untouched.
+    - Verified via `AppTest`: Trip History's new filters/columns/buttons all
+      render without error and match expected values; clicking Edit sets the
+      right `session_state`/query params before `switch_page` (which AppTest
+      itself can't follow cross-page, since it runs each page file in
+      isolation - a harness limitation, not an app bug); the delete confirm/
+      cancel flow leaves the row alone on Cancel and removes exactly the target
+      row (and no others) on confirm; Spot Session's edit mode pre-fills every
+      field checked (conditions, lure/trailer selection matched by label, times,
+      notes, fish list) and "Save changes" updates the same row in place (row
+      count unchanged) rather than appending a duplicate; the
+      segment/water_clarity/predicted_score preservation fix confirmed via the
+      synthetic-row regression case described above. Full test suite unaffected
+      (177 passing via `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

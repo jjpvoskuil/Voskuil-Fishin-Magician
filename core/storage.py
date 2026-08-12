@@ -84,6 +84,45 @@ def append_trip(entry: TripEntry):
         writer.writerow(entry.to_row())
 
 
+def update_trip(entry: TripEntry) -> bool:
+    """Replace the existing row whose trip_id matches entry.trip_id with this
+    entry's data - an in-place edit rather than a new appended row. Used by
+    Spot Session's edit mode (see pages/6_Spot_Session.py) so a previously
+    logged session can be corrected and re-saved without leaving a duplicate
+    behind. Returns False (no-op, file untouched) if no row with that
+    trip_id exists anymore - e.g. it was deleted from trip_log.csv by
+    something else while an edit was in progress."""
+    ensure_log_exists()
+    rows = read_all_trips()
+    for i, row in enumerate(rows):
+        if row.get("trip_id") == entry.trip_id:
+            rows[i] = entry.to_row()
+            break
+    else:
+        return False
+    with open(TRIP_LOG_PATH, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+    return True
+
+
+def delete_trip(trip_id: str) -> bool:
+    """Remove the row with this trip_id entirely. Used by Trip History's
+    per-trip "Delete" action. Returns False (no-op, file untouched) if no
+    row with that trip_id exists."""
+    ensure_log_exists()
+    rows = read_all_trips()
+    remaining = [r for r in rows if r.get("trip_id") != trip_id]
+    if len(remaining) == len(rows):
+        return False
+    with open(TRIP_LOG_PATH, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(remaining)
+    return True
+
+
 def commit_and_push(paths: list, github_token: str, repo_slug: str, commit_message: str, branch: str = "main") -> tuple:
     """
     Commit the given paths (files or directories, repo-relative or absolute)
