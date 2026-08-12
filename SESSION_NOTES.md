@@ -1547,6 +1547,72 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     widget type, so the actual browser click path is worth a quick live check once
     deployed. Full test suite unaffected (177 passing).
 
+47. **Spot Session "Add results": auto-save-and-reload, log multiple lures per visit,
+    and a real fix for a mid-script `st.rerun()` state-loss bug.** The angler asked for
+    two things: (1) saving a result should immediately reset the form and reload, ready
+    to log another entry, without a manual page refresh; (2) a way to log more than one
+    lure during the same time-at-the-spot, since previously each visit only supported
+    one "Add results" submission before you had to leave the page. Asked to clarify
+    what "same session" should mean (one combined multi-lure entry vs. several entries
+    sharing conditions), the answer was explicit: **separate entry per lure** (no
+    `TripEntry`/CSV schema change), **holding the same conditions** - i.e. wind/fish
+    activity/forage activity/forage seen describe the whole time at the spot, not one
+    lure, so they should carry forward to the next lure logged in the same visit rather
+    than resetting.
+    - Implementation: a per-spot `lure_entry_seq_{spot_id}` counter, bumped on every
+      successful save, is folded into the keys of everything that's genuinely
+      lure-specific (lure/trailer picker selections, lure start/end time, notes, the
+      fish-caught list) so each save gives them fresh blank widget identities next
+      render - a full reset. Wind speed/direction, fish activity, forage activity, and
+      forage type seen keep **stable** keys (no seq folded in) so Streamlit's normal
+      "existing session_state wins over a widget's coded default" behavior carries
+      their values forward untouched. `st.rerun()` after a successful save makes the
+      reset/carry-over visible immediately - `st.toast()` is used for the save
+      confirmation instead of `st.success()`/`st.info()` specifically because those
+      would get wiped out by that rerun before being seen. A live "📋 Already logged
+      for this spot today: ..." caption (built fresh from `read_all_trips()` each
+      render, filtered to this spot+date) makes each additional lure read as one
+      cohesive visit even though it's still one row per lure under the hood.
+    - **A real, non-obvious bug found and fixed along the way**, not just an AppTest
+      artifact: the "carry over conditions" behavior worked in isolated testing but
+      silently failed on the actual page - fish/forage activity (and, it turned out,
+      *every* stable-keyed field including wind speed) snapped back to their coded
+      defaults the instant a lure was picked, before "Log this session" was even
+      clicked. Root cause: the lure/trailer picker's "Select" buttons call
+      `st.session_state[...] = ...; st.rerun()` **mid-script**, the moment they're
+      clicked - and Streamlit only preserves a widget's session_state across a rerun
+      if that widget's key was already (re-)declared in the script run that triggers
+      the rerun; a widget whose declaration line hasn't been reached yet when
+      `st.rerun()` fires gets its state dropped, then reappears with its coded default
+      on the next full run. The original layout declared "Conditions during this lure
+      use" (wind/activity/forage-seen) *after* the "Lure used" picker section, so
+      every lure pick wiped them. Fix: reordered the "Add results" section so
+      "Conditions during this lure use" renders **first**, before the lure/trailer
+      pickers - by the time a picker's "Select" click triggers its internal rerun,
+      the condition widgets have already been declared/registered in that same run
+      and survive it. Confirmed with a minimal isolated repro (a button that sets
+      state + `st.rerun()`, placed before vs. after a `number_input`/`select_slider`
+      pair with stable keys) that reproduces the loss when the rerun-triggering
+      widget comes first and confirms the fix when the persisted widgets come first -
+      this is real Streamlit widget-state-GC behavior, not an AppTest-only quirk, so
+      it would have hit the deployed app too. The "Fish caught" sub-flow's own
+      rerun-triggering buttons (Add fish/Remove/Save fish/Cancel) were already
+      positioned after the conditions block, so they were never affected.
+    - Verified via scratch `AppTest` scripts (not committed): conditions
+      (wind/fish activity/forage activity) survive picking a lure and survive a full
+      "Log this session" save+rerun; lure-specific fields (picker selection, notes)
+      correctly reset to blank on the next entry; two lures logged back-to-back in one
+      visit produce two separate `trip_log.csv` rows, each carrying the same
+      wind/fish-activity/forage-activity values that were set once and never
+      re-entered; the "Already logged for this spot today" caption appears and lists
+      both entries. Full test suite unaffected (177 passing via `python3 -m pytest`;
+      `pytest` alone in this environment resolves to a different interpreter missing
+      `requests` - use `python3 -m pytest` here, not bare `pytest`).
+    - Not done this round: an "edit a saved session" capability from the Trip History
+      grid - asked for in the same round but explicitly a separate follow-up, since it
+      needs its own `core.storage` update path (currently only `append_trip()` exists,
+      no `update_trip()`) and UI design in `pages/4_Trip_History.py`.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

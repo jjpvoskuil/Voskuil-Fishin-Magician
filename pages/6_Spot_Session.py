@@ -20,7 +20,7 @@ from core.activity_log import (
 )
 from core.lures import recommend, FORAGE_OPTIONS
 from core.ui import render_lure_recommendation, render_square_thumbnail
-from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push
+from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips
 from core.weather import lake_today
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
@@ -371,53 +371,57 @@ st.caption(
     "Log what actually happened, tagged to this exact spot and these exact conditions - see the "
     "Trip History page to review, filter, and let it calibrate future suggestions."
 )
+
+# Fresh from the CSV every render (cheap - this file is small) rather than a
+# separate in-memory list, so it's correct even across a page refresh: every
+# result already logged for this exact spot+date, so switching lures mid-visit
+# reads as one cohesive "session" even though each lure is still its own row.
+todays_entries = [
+    t for t in read_all_trips()
+    if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date.isoformat()
+]
+if todays_entries:
+    summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
+    st.caption(f"📋 Already logged for this spot today: {', '.join(summary_bits)}")
+
 results_expander = st.expander("Log a lure/time-window result and any fish caught", expanded=False)
+
+# Bumped after each successful "Log this session" save (see the submit handler
+# below) so the lure/trailer/time/notes widgets below all get fresh, blank
+# keys for the next lure - a full reset, ready to log another lure in the same
+# visit right away. The "Conditions during this lure use" fields further down
+# (wind/fish activity/forage activity/forage seen) deliberately do NOT fold
+# this in, so they keep showing whatever was last entered instead of resetting -
+# per the angler's own call: those conditions apply to the whole time at this
+# spot, not just to one lure, so carrying them forward into the next lure entry
+# is the right default (still editable if something actually changed).
+lure_entry_seq_key = f"lure_entry_seq_{spot['spot_id']}"
+st.session_state.setdefault(lure_entry_seq_key, 0)
+lure_seq = st.session_state[lure_entry_seq_key]
 
 with results_expander:
     inventory_items = get_inventory()
 
-    st.markdown("#### Lure used")
-    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=f"log_lure_{spot['spot_id']}")
-    # No manual name/color/technique/depth entry here anymore - those were dropped
-    # in favor of just the picker plus the trailer selector below. lure_used/
-    # color_used still get derived from whichever inventory item was picked (blank
-    # if none was), since Trip History and the saved conditions still read them.
-    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else ""
-    color_used = selected_lure_item.get("description", "") if selected_lure_item else ""
-    technique_used = ""
-
-    use_trailer = False
-    if lure_can_take_trailer(selected_lure_item):
-        use_trailer = st.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}")
-
-    trailer_name, trailer_color = "", ""
-    selected_trailer_item = None
-    if use_trailer:
-        st.markdown("**Trailer**")
-        selected_trailer_item = _visual_lure_picker(inventory_items, key_prefix=f"log_trailer_{spot['spot_id']}")
-        if selected_trailer_item is None:
-            trailer_name = st.text_input(
-                "Trailer name", placeholder="e.g. Green pumpkin craw trailer", key=f"log_trailer_name_{spot['spot_id']}",
-            )
-        else:
-            trailer_name = inventory_item_label(selected_trailer_item)
-        trailer_color = st.text_input(
-            "Trailer color",
-            value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
-            key=f"log_trailer_color_{spot['spot_id']}_{selected_trailer_item.get('item_id') if selected_trailer_item else 'manual'}",
-        )
-
-    st.divider()
+    # "Conditions during this lure use" is rendered FIRST, before the lure/trailer
+    # pickers below - not just for reading order. The pickers' "Select" buttons
+    # call st.rerun() mid-script the instant they're clicked, and Streamlit drops
+    # session_state for any widget whose key hasn't been (re-)declared yet in the
+    # script run that triggers a rerun - it only keeps state for widgets already
+    # "seen" earlier in that same run. Declaring these here means they're always
+    # registered before any picker click can interrupt the run, so their values
+    # (wind/fish activity/forage activity/forage seen) actually survive picking a
+    # lure instead of silently snapping back to their defaults. Confirmed with a
+    # minimal repro during development - this ordering matters, don't move these
+    # below the pickers again without re-testing.
     st.markdown("#### Conditions during this lure use")
-
-    tc3, tc4 = st.columns(2)
-    lure_start_time = tc3.time_input(
-        "Started using this lure at (optional)", value=None, key=f"log_start_time_{spot['spot_id']}",
-    )
-    lure_end_time = tc4.time_input(
-        "Stopped using this lure at (optional)", value=None, key=f"log_end_time_{spot['spot_id']}",
+    st.caption(
+        "These carry over automatically to the next lure you log in this same session - "
+        "update them here if something actually changed."
     )
 
+    # These four fields intentionally keep a stable key (no lure_seq folded in) -
+    # see the comment above lure_entry_seq_key for why they carry over between
+    # lures instead of resetting.
     wc1, wc2 = st.columns(2)
     wind_speed_mph = wc1.number_input(
         "Wind speed (mph)", min_value=0.0, max_value=60.0, value=0.0, step=1.0,
@@ -440,9 +444,51 @@ with results_expander:
         key=f"log_forage_type_{spot['spot_id']}",
     )
 
+    st.divider()
+    st.markdown("#### Lure used")
+    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=f"log_lure_{spot['spot_id']}_{lure_seq}")
+    # No manual name/color/technique/depth entry here anymore - those were dropped
+    # in favor of just the picker plus the trailer selector below. lure_used/
+    # color_used still get derived from whichever inventory item was picked (blank
+    # if none was), since Trip History and the saved conditions still read them.
+    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else ""
+    color_used = selected_lure_item.get("description", "") if selected_lure_item else ""
+    technique_used = ""
+
+    use_trailer = False
+    if lure_can_take_trailer(selected_lure_item):
+        use_trailer = st.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}_{lure_seq}")
+
+    trailer_name, trailer_color = "", ""
+    selected_trailer_item = None
+    if use_trailer:
+        st.markdown("**Trailer**")
+        selected_trailer_item = _visual_lure_picker(inventory_items, key_prefix=f"log_trailer_{spot['spot_id']}_{lure_seq}")
+        if selected_trailer_item is None:
+            trailer_name = st.text_input(
+                "Trailer name", placeholder="e.g. Green pumpkin craw trailer",
+                key=f"log_trailer_name_{spot['spot_id']}_{lure_seq}",
+            )
+        else:
+            trailer_name = inventory_item_label(selected_trailer_item)
+        trailer_color = st.text_input(
+            "Trailer color",
+            value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
+            key=f"log_trailer_color_{spot['spot_id']}_{lure_seq}_"
+                f"{selected_trailer_item.get('item_id') if selected_trailer_item else 'manual'}",
+        )
+
+    tc3, tc4 = st.columns(2)
+    lure_start_time = tc3.time_input(
+        "Started using this lure at (optional)", value=None, key=f"log_start_time_{spot['spot_id']}_{lure_seq}",
+    )
+    lure_end_time = tc4.time_input(
+        "Stopped using this lure at (optional)", value=None, key=f"log_end_time_{spot['spot_id']}_{lure_seq}",
+    )
+
     log_notes = st.text_area(
         "Notes for this time range", placeholder="Anything else worth remembering about this lure/time window",
-        key=f"log_notes_{spot['spot_id']}",
+        key=f"log_notes_{spot['spot_id']}_{lure_seq}",
     )
 
     st.divider()
@@ -631,17 +677,26 @@ with results_expander:
             ok, msg = commit_and_push(
                 [TRIP_LOG_PATH], token, repo_slug(), f"Log trip {entry.trip_id} from spot session ({spot['name']})",
             )
-            (st.success if ok else st.warning)(msg)
+            # st.toast rather than st.success/st.info - this confirmation needs to
+            # survive the st.rerun() below (an inline st.success would get wiped
+            # out by the rerun before the angler has a chance to read it; a toast
+            # keeps showing across it).
+            st.toast(msg, icon="✅" if ok else "⚠️")
         else:
-            st.success("Session logged locally.")
-            st.info(
-                "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed to GitHub "
-                "and won't survive an app restart. See README for how to add it."
+            st.toast(
+                "Session logged locally. No GITHUB_TOKEN configured in Streamlit secrets, so this "
+                "entry won't survive an app restart - see README for how to add it.",
+                icon="ℹ️",
             )
 
-        # Reset the per-fish list for the next result entry, now that this one's saved -
-        # the lure/conditions fields above deliberately stay as they are (handy if
-        # you're about to log another catch on the same lure a bit later).
+        # Full reset for the next lure entry, now that this one's saved: clear the
+        # per-fish list, and bump lure_entry_seq_key so every lure/trailer/time/
+        # notes widget above gets a fresh blank key next render (the "Conditions
+        # during this lure use" fields deliberately keep their values - see the
+        # comment above lure_entry_seq_key). The rerun is what actually makes this
+        # visible immediately, ready to log another lure in the same visit.
         st.session_state[pending_key] = []
         st.session_state[seq_key] = 0
         st.session_state[adding_key] = False
+        st.session_state[lure_entry_seq_key] = lure_seq + 1
+        st.rerun()
