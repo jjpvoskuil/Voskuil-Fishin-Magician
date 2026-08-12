@@ -1480,6 +1480,52 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       broken page if that turns out to be the case - worth confirming with a live
       scan once this is deployed.
 
+45. **Fix: "Scan a lure" was turning the camera on just from opening the Lure
+    Inventory page** - reported immediately after the angler configured
+    `ANTHROPIC_API_KEY` and tried the feature from entry 44. Root cause: Streamlit
+    still runs a collapsed `st.expander`'s `with` block's Python on every rerun (it
+    only hides the rendered result with CSS) - so `st.camera_input(...)`, which
+    requests the webcam the moment its component mounts regardless of visibility,
+    was being created on every page load even though the section looked closed. The
+    old code made this worse by defaulting the "Photo" radio to "Take a photo", so
+    even an *expanded* section would auto-mount the camera without the angler
+    choosing to.
+    - `st.expander("Scan a lure", ..., key="scan_expander")` now carries a `key`
+      (supported since this app's pinned Streamlit >=1.36; confirmed present in the
+      installed 1.61) so its collapsed/expanded boolean is readable from
+      `st.session_state["scan_expander"]`. When it reads `False`, the whole rest of
+      the section - in particular anything that could create `camera_input` - is
+      skipped outright instead of just being visually hidden.
+    - Within the expanded section, the camera is further gated behind an explicit
+      **"📷 Turn on camera"** button (new `scan_camera_active` session-state flag) -
+      switching the "Photo" radio to "Take a photo" alone no longer mounts
+      `camera_input`; only that button click does. The radio's default was also
+      swapped to "Upload a photo" first.
+    - The camera turns itself back off (flag reset, widget stops being created next
+      rerun, browser releases the device) the instant a photo is captured, on an
+      explicit "Turn off camera" click, or whenever the section is collapsed again -
+      re-expanding always starts from "camera off," never resuming a still-live feed.
+    - Since the camera widget can now disappear at any moment, the captured photo's
+      bytes/extension are copied into `st.session_state["scan_photo_bytes"/"scan_photo_ext"]`
+      as soon as they're available (from either the camera or the uploader), and
+      everything downstream (the "Identify this lure" button, the confirm form) reads
+      from there instead of the widget's live return value - the widget disappearing
+      no longer loses the photo. A "Remove photo" button clears it explicitly, and
+      it's included in the same reset lists as `scan_result`/`scan_candidates`/
+      `scan_selected` on both successful save and "Start over."
+    - Verified with a scratch `AppTest` script (not committed) that walks the
+      rendered element tree for anything camera-related in three states: section
+      collapsed (zero camera elements, confirming the original bug is fixed);
+      section expanded with "Take a photo" selected but before clicking "Turn on
+      camera" (still zero); and after clicking it (exactly one `camera_input`
+      appears). Full test suite unaffected (177 passing, no new cases needed since
+      this is UI wiring/state-machine behavior AppTest already exercised directly).
+      The pre-existing "Add a lure" form's own separate camera_input wasn't touched -
+      its radio already defaults to "Upload a photo" first, so it doesn't reproduce
+      this bug, and it's nested inside `st.form(...)` where widget changes don't
+      trigger a rerun until submit anyway, which is a different (already documented)
+      limitation, not this one.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

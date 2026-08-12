@@ -329,9 +329,13 @@ current quantity on hand. Two ways items get in:
   camera. These photos are yours, so they're stored under `data/lure_images/` and
   committed to the repo like any other user data.
 - **Scan a lure (photo -> Cabela's lookup)** - take or upload a photo of a lure's
-  package in the "📷 Scan a lure" section at the top of the page. Claude's vision
-  (`core/lure_vision.py`) reads the brand/product name off the label, that guess
-  becomes a search query against Cabela's own product catalog (`core/cabelas_lookup.py`),
+  package in the "📷 Scan a lure" section at the top of the page. The webcam only
+  turns on when you explicitly click "📷 Turn on camera" after choosing "Take a
+  photo" - it never activates just from opening this page or expanding this
+  section, and it turns itself back off the instant you capture a shot, click
+  "Turn off camera," or collapse the section. Claude's vision (`core/lure_vision.py`)
+  reads the brand/product name off the label, that guess becomes a search query
+  against Cabela's own product catalog (`core/cabelas_lookup.py`),
   and you're shown the real matching product(s) - photo, brand, description, SKU,
   price - to pick from. Picking one shows an editable confirm form (category
   pre-guessed the same way the import batches above are, everything else editable)

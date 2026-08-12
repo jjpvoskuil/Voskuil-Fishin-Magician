@@ -39,7 +39,7 @@ def _category_index(category_key: str) -> int:
 
 items = get_inventory()
 
-with st.expander("📷 Scan a lure", expanded=False):
+with st.expander("📷 Scan a lure", expanded=False, key="scan_expander"):
     api_key = anthropic_api_key()
     if not api_key:
         st.info(
@@ -47,33 +47,80 @@ with st.expander("📷 Scan a lure", expanded=False):
             "Streamlit secrets to enable it (see `secrets.toml.example` in the repo for the "
             "exact key name). You can still add lures manually below."
         )
+    elif not st.session_state.get("scan_expander"):
+        # Collapsed - render nothing below, in particular no camera_input. Streamlit
+        # still runs a collapsed expander's `with` block on every rerun (it only
+        # hides the result with CSS), so a widget with a real hardware side effect -
+        # camera_input requests the webcam the moment it's created, whether or not
+        # it's actually visible - has to be skipped explicitly like this rather than
+        # relying on the collapsed state to do it for us. Also drop the camera-on
+        # flag so re-expanding this section always starts with the camera off,
+        # requiring an explicit "Turn on camera" click again rather than resuming
+        # wherever it was left.
+        st.session_state["scan_camera_active"] = False
     else:
         st.caption(
             "Take or upload a photo of the lure's package. Claude reads the brand/product name "
             "off the label, looks it up on Cabela's for the real product details, and shows you "
             "candidate matches to confirm before anything is added - nothing saves automatically."
         )
-        scan_mode = st.radio(
-            "Photo", ["Take a photo", "Upload a photo"], horizontal=True, key="scan_photo_mode",
-        )
-        scan_photo = (
-            st.camera_input("Take a picture of the lure/package", key="scan_camera")
-            if scan_mode == "Take a photo"
-            else st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="scan_upload")
+        photo_mode = st.radio(
+            "Photo", ["Upload a photo", "Take a photo"], horizontal=True, key="scan_photo_mode",
         )
 
-        if scan_photo is not None and st.button("🔍 Identify this lure", key="scan_identify_btn"):
-            ext = Path(getattr(scan_photo, "name", "photo.jpg")).suffix.lstrip(".") or "jpg"
-            with st.spinner("Reading the label..."):
-                scan_result = identify_lure_photo(
-                    scan_photo.getvalue(), ext, api_key=api_key, model=anthropic_model(),
+        if photo_mode == "Upload a photo":
+            st.session_state["scan_camera_active"] = False
+            uploaded = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="scan_upload")
+            if uploaded is not None:
+                st.session_state["scan_photo_bytes"] = uploaded.getvalue()
+                st.session_state["scan_photo_ext"] = (
+                    Path(getattr(uploaded, "name", "photo.jpg")).suffix.lstrip(".") or "jpg"
                 )
-            st.session_state["scan_result"] = scan_result
-            st.session_state["scan_candidates"] = None
-            st.session_state["scan_selected"] = None
-            if not scan_result.get("error") and scan_result.get("visible") and scan_result.get("search_query"):
-                with st.spinner("Searching Cabela's..."):
-                    st.session_state["scan_candidates"] = search_lures(scan_result["search_query"])
+        elif not st.session_state.get("scan_camera_active"):
+            # Camera stays off until explicitly turned on - this is the actual fix
+            # for the camera activating just from opening this page: it's now
+            # impossible for st.camera_input to even be created without this
+            # button click first, regardless of expander state or widget defaults.
+            st.caption("Camera is off.")
+            if st.button("📷 Turn on camera", key="scan_camera_on_btn"):
+                st.session_state["scan_camera_active"] = True
+                st.rerun()
+        else:
+            cam_photo = st.camera_input("Take a picture of the lure/package", key="scan_camera")
+            if cam_photo is not None:
+                st.session_state["scan_photo_bytes"] = cam_photo.getvalue()
+                st.session_state["scan_photo_ext"] = (
+                    Path(getattr(cam_photo, "name", "photo.jpg")).suffix.lstrip(".") or "jpg"
+                )
+                # Release the camera the instant a shot is captured, rather than
+                # leaving it running while the angler reviews/identifies the photo.
+                st.session_state["scan_camera_active"] = False
+                st.rerun()
+            if st.button("Turn off camera", key="scan_camera_off_btn"):
+                st.session_state["scan_camera_active"] = False
+                st.rerun()
+
+        photo_bytes = st.session_state.get("scan_photo_bytes")
+        if photo_bytes is not None:
+            st.image(photo_bytes, width=220)
+            pc1, pc2 = st.columns(2)
+            identify_clicked = pc1.button("🔍 Identify this lure", key="scan_identify_btn", width='stretch')
+            if pc2.button("Remove photo", key="scan_remove_photo_btn", width='stretch'):
+                st.session_state.pop("scan_photo_bytes", None)
+                st.session_state.pop("scan_photo_ext", None)
+                st.rerun()
+            if identify_clicked:
+                with st.spinner("Reading the label..."):
+                    scan_result = identify_lure_photo(
+                        photo_bytes, st.session_state.get("scan_photo_ext", "jpg"),
+                        api_key=api_key, model=anthropic_model(),
+                    )
+                st.session_state["scan_result"] = scan_result
+                st.session_state["scan_candidates"] = None
+                st.session_state["scan_selected"] = None
+                if not scan_result.get("error") and scan_result.get("visible") and scan_result.get("search_query"):
+                    with st.spinner("Searching Cabela's..."):
+                        st.session_state["scan_candidates"] = search_lures(scan_result["search_query"])
 
         scan_result = st.session_state.get("scan_result")
         if scan_result:
@@ -193,13 +240,13 @@ with st.expander("📷 Scan a lure", expanded=False):
                         "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
                         "to GitHub and won't survive an app restart. See README for how to add it."
                     )
-                for key in ("scan_result", "scan_candidates", "scan_selected"):
+                for key in ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"):
                     st.session_state.pop(key, None)
                 st.rerun()
 
         if st.session_state.get("scan_result"):
             if st.button("Start over", key="scan_reset_btn"):
-                for key in ("scan_result", "scan_candidates", "scan_selected"):
+                for key in ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"):
                     st.session_state.pop(key, None)
                 st.rerun()
 
