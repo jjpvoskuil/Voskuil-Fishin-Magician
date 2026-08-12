@@ -60,21 +60,29 @@ key decisions, and known open items.
   lets you log what actually happened - and this one doesn't need Conditions filled
   in at all, so you can jump straight to logging a catch without scoring the moment
   first if that's all you want to do (the trip is saved with a blank predicted score
-  and "Unknown" water clarity in that case, everything else logs normally). Picking
-  the lure (and
-  trailer, if that lure type takes one) is a searchable, photo card grid instead of a
-  plain dropdown - search your tackle box by brand or description, then click the
-  card you want; a "Used a trailer" checkbox reveals the same card-grid picker for
-  the trailer, with its own name/color fields. Underneath, a "Conditions during this
-  lure use" group holds the time range you fished it, wind speed and direction, fish
-  activity, forage activity, forage type seen, and notes for that window. Fish get
-  logged as you catch them - click "➕ Add fish" each time and fill in species
-  (Largemouth/Spotted/Striped, or type in your own), weight, length, depth caught,
-  presentation/technique, and retrieval speed for that one fish; each save adds it to
-  a running list (with a "Remove" if you need to undo one) so you're not committing
-  to a fish count up front. It all writes into the same shared trip log the **Trip
-  History** page reads from - Spot Session is now the only way to log a trip; see
-  "How the model works" below for the condition bands behind this page's inputs.
+  and "Unknown" water clarity in that case, everything else logs normally). It opens
+  with a "Conditions during this lure use" group - wind speed and direction, fish
+  activity, forage activity, and forage type seen - describing the whole time you're
+  at this spot, not just one lure. Picking the lure (and trailer, if that lure type
+  takes one) comes next, as a searchable, photo card grid instead of a plain dropdown
+  - search your tackle box by brand or description, then click the card you want; a
+  "Used a trailer" checkbox reveals the same card-grid picker for the trailer, with
+  its own name/color fields - followed by the time range you fished this particular
+  lure and notes for that window. Fish get logged as you catch them - click "➕ Add
+  fish" each time and fill in species (Largemouth/Spotted/Striped, or type in your
+  own), weight, length, depth caught, presentation/technique, and retrieval speed for
+  that one fish; each save adds it to a running list (with a "Remove" if you need to
+  undo one) so you're not committing to a fish count up front. Clicking "Log this
+  session" saves that lure as its own entry, shows a confirmation toast, and
+  immediately resets the form for the next lure - the lure/trailer picker, timing, and
+  notes all go blank, but the conditions group above keeps whatever you last entered,
+  ready to log another lure fished in those same conditions right away; a running
+  "📋 Already logged for this spot today" line lists everything saved so far in this
+  visit. Each lure still lands as its own row in the trip log (no combined/bundled
+  entry), so Trip History's per-trip filtering and detail view keep working exactly as
+  before. It all writes into the same shared trip log the **Trip History** page reads
+  from - Spot Session is now the only way to log a trip; see "How the model works"
+  below for the condition bands behind this page's inputs.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
