@@ -72,3 +72,10 @@ RETRIEVE_STYLE_OPTIONS = [
     "Straight retrieve (no action)", "Twitch", "Jerk", "Stop-and-go", "Slow-roll",
     "Burn (fast retrieve)", "Hop / drag (bottom contact)", "Deadstick (no movement)",
 ]
+
+# Per-fish species picker for individual catch records - the angler's own
+# on-the-water categorization, not a strict biological survey list (Nolin's
+# real KDFWR-regulated species are largemouth/smallmouth/white bass, but this
+# vocabulary matches what was specifically asked for, and "Other" makes it
+# free-text-extensible for anything not listed).
+FISH_SPECIES_OPTIONS = ["Largemouth Bass", "Spotted Bass", "Striped Bass", "Other (type in species)"]
