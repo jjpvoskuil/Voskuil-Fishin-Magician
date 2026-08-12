@@ -1664,6 +1664,54 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       the same visit. Full test suite unaffected (177 passing via `python3 -m
       pytest`).
 
+49. **Spot Session "Add results": split the single submit button into "Log this
+    lure" and "Log this session."** After using entries 47/48's single-button flow,
+    the angler asked for a clearer split matching how a real trip actually goes:
+    several lure changes within one time at a spot, each of which should just log
+    that lure and let you keep going, versus an explicit "I'm done here" action that
+    also resets things for a genuinely new session later. The single "Log this
+    session" button conflated both - clicking it always carried conditions forward,
+    with no way to say "actually, close this one out."
+    - **"Log this lure"** (the primary-styled button, left column) is exactly the
+      old single-button behavior, renamed: saves the current lure/fish/notes as its
+      own `trip_log.csv` row, resets the lure-specific fields (picker, trailer,
+      timing, notes, fish list) via the existing `lure_entry_seq_key` bump, and
+      keeps the "Conditions during this lure use" group (wind/fish activity/forage
+      activity/forage seen) exactly as last entered - unchanged from entries 47/48.
+    - **"Log this session"** (right column) is new. If a lure is currently picked,
+      or a fish was logged, or notes were typed - i.e. there's real unsaved data -
+      it saves that as its own row first (reusing the exact same save logic, now
+      factored into a shared `_save_current_lure_entry()` closure so there's only
+      one place that assembles a `TripEntry`), so clicking straight to "Log this
+      session" after your last lure never silently drops it. If nothing's actually
+      filled in, it skips the save entirely (a plain toast instead) rather than
+      writing a blank/junk row - guarded by `has_pending_lure_data = selected_lure_
+      item is not None or bool(fish_records) or bool(log_notes.strip())`. Either
+      way, it then clears the conditions group back to its own coded defaults (0 mph
+      wind, "Variable" direction, "Moderate"/"Moderate" activity, no forage seen)
+      and leaves the section open and blank, ready for a genuinely new session -
+      the whole point being that today's leftover wind reading shouldn't silently
+      carry into a session you fish three hours later.
+    - The conditions-reset hit the *exact* same Streamlit restriction entries 47/48
+      already worked around for the expander's open state: you cannot write (or, it
+      turns out, delete) `st.session_state[key]` for a keyed widget after that
+      widget's already been instantiated earlier in the same script run, and the
+      "Log this session" button lives well after the condition widgets are declared.
+      Same fix shape: a `session_reset_pending_key` flag, set in the button handler,
+      consumed (and only then are the five condition keys popped from
+      `session_state`) right before those widgets are created on the *next* run -
+      not by the handler that clicked the button.
+    - Verified via `AppTest`: "Log this lure" still carries conditions forward
+      across a save (wind 9.0/"Active" survived); "Log this session" with a lure
+      picked but not yet individually saved correctly appends that lure's row
+      *with the pre-reset conditions still attached to it* (both saved rows show
+      wind 9.0, not the post-reset 0.0 - the reset only affects what the *next*
+      entry starts from, not what was just written), then resets wind/fish activity
+      back to their coded defaults for the next widget render; a second "Log this
+      session" click with nothing pending appended zero new rows (`trip_log.csv`
+      row count unchanged) instead of writing an empty entry. Full test suite
+      unaffected (177 passing via `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
