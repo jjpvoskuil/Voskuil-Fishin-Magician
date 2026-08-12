@@ -1328,6 +1328,54 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     keys in `conditions_json` at all - plus confirming `pages/4_Trip_History.py`
     still renders that row without raising. The test-added row was reverted
     afterward.
+42. **"Add results" no longer requires filling in Conditions first** - previously
+    the whole rest of the page (Suggestions *and* Add results) sat behind
+    `if not cond: st.stop()`, so logging a catch meant filling out the entire
+    Conditions right now form and clicking "Get lure suggestions" even if the
+    angler didn't care about the score/recommendation that trip - they just wanted
+    to log what happened. That `st.stop()` is gone; `cond` can now be `None` for
+    the rest of the script, and everything downstream was updated to tolerate it:
+    - `structure_type` moved up to right after the spot header, since it only ever
+      depended on the spot's own saved `location_type` (`LOCATION_TYPE_TO_STRUCTURE_TYPE`),
+      never on `cond` - it just hadn't been computed that early before.
+    - `water_clarity`/`season`/`avg_cloud_pct`/`avg_wind_mph`/`at_time`/`rt`/
+      `score_result` are now all initialized to `None` and only computed inside
+      `if cond:`. The "Suggestions for right now" expander only renders when `cond`
+      is truthy; otherwise a caption points back at the Conditions form and
+      explicitly says logging results doesn't need it.
+    - "Add results" (header, caption, and the expander itself) moved out from
+      under the old gate entirely and always renders now.
+    - The "Log this session" submit handler builds `conditions` in two passes: the
+      block of cond-derived keys (`pressure_trend_24h`, `moon_phase`, `wind_band`,
+      `water_temp_f`, etc.) only gets added `if cond`, then the lure/trailer/wind/
+      fish-activity/fish-list keys (which never depended on `cond`) always get
+      added - so a result logged without conditions just has a smaller
+      `conditions_json`, read exactly the same way Trip History's `FIELD_SPECS`
+      loop already treats any other missing/empty key (skipped, not an error).
+      `TripEntry.segment` falls back to the same `_guess_segment(hour)` heuristic
+      the Conditions form's own Time window default already uses. `water_clarity`
+      falls back to the literal string `"Unknown"` (distinct from all four real
+      `core.lures.WATER_CLARITY_OPTIONS` values, so it can't be confused with a
+      real reading). `predicted_score` is `None` - **`core.storage.TripEntry.predicted_score`
+      changed from `float` to `Optional[float]`** to allow this (no reordering
+      needed, since it had no default value before either).
+    - `pages/4_Trip_History.py`'s per-trip detail expander now checks
+      `predicted_score` for `None`/empty/NaN before formatting it, showing
+      "Predicted score: n/a (no live conditions entered)" instead of a bare
+      `/10` for these rows; the raw dataframe/CSV export just shows a blank cell,
+      same as any other missing numeric field.
+
+    Verified with the full test suite (unchanged) plus two scratch `AppTest`
+    scripts (not committed): one confirming that landing on Spot Session and
+    going straight to "Add results" - without touching Conditions right now at
+    all - shows the expander (and no "Suggestions" expander), logs successfully,
+    and produces a `trip_log.csv` row with a blank `predicted_score`,
+    `water_clarity` of `"Unknown"`, no cond-derived keys in `conditions_json`, and
+    that `pages/4_Trip_History.py` renders that row's "n/a" score line without
+    raising; a second re-confirming the original full flow (fill Conditions,
+    submit, get suggestions, then log results) still produces a populated score
+    and real water clarity, unchanged from before this round. Both test-added rows
+    were reverted from `data/trip_log.csv` afterward.
 
 ## Key design decisions & rationale
 

@@ -49,7 +49,10 @@ class TripEntry:
     technique_used: str
     fish_caught: int
     biggest_fish_lb: Optional[float]
-    predicted_score: float
+    # None when a session was logged via "Add results" without ever filling in
+    # "Conditions right now" first (no live reading means no score to compute) -
+    # see pages/6_Spot_Session.py.
+    predicted_score: Optional[float]
     conditions: dict
     notes: str = ""
     trip_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])

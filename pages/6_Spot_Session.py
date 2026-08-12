@@ -103,6 +103,10 @@ st.caption(" · ".join(meta_bits) if meta_bits else "No saved details for this s
 if st.button("← Back to Lake Map"):
     st.switch_page("pages/2_Lake_Map.py")
 
+# Computed from the spot alone (not from the Conditions form below), so it's always
+# available - "Add results" needs it even if the angler never fills in conditions.
+structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), "Main-lake point")
+
 session_date = st.date_input(
     "Session date", value=lake_today(), max_value=lake_today(),
     help="Defaults to today - pick an earlier date to log a past session at this spot. Pressure trend and "
@@ -205,30 +209,36 @@ if submitted:
 
 cond = st.session_state.get("spot_session_conditions", {}).get(spot["spot_id"])
 
-if not cond:
-    st.info("Fill in the conditions above and click **Get lure suggestions** to continue.")
-    st.stop()
+# Everything below (score, recommendation, and the values folded into a logged
+# entry's conditions) only exists once the angler has filled in Conditions above
+# and clicked "Get lure suggestions" - but "Add results" further down must NOT be
+# gated on that, so nothing here calls st.stop(). water_clarity/season/at_time/rt/
+# score_result all stay None when cond is empty, and every place downstream that
+# reads them (the Suggestions expander, the "Log this session" submit handler)
+# checks for that instead of assuming they exist.
+water_clarity = season = avg_cloud_pct = avg_wind_mph = at_time = rt = score_result = None
 
-water_clarity = resolve_water_clarity(cond["secchi_ft"], cond.get("stain_color"), cond.get("stirred_up", False))
-structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), "Main-lake point")
-season = season_stage(session_date.timetuple().tm_yday, cond["water_temp_f"])
-avg_cloud_pct = cloud_proxy_for_light_condition(cond["light_condition"])
-avg_wind_mph = wind_mph_for_band(cond["wind_band"])
-total_precip_in, max_precip_prob_pct = precipitation_proxy(cond["precipitation"])
+if cond:
+    water_clarity = resolve_water_clarity(cond["secchi_ft"], cond.get("stain_color"), cond.get("stirred_up", False))
+    season = season_stage(session_date.timetuple().tm_yday, cond["water_temp_f"])
+    avg_cloud_pct = cloud_proxy_for_light_condition(cond["light_condition"])
+    avg_wind_mph = wind_mph_for_band(cond["wind_band"])
+    total_precip_in, max_precip_prob_pct = precipitation_proxy(cond["precipitation"])
 
-# The angler's own entered session-start time - not "right now" - is what "for that
-# exact time of day" should mean here, so it overrides the generic wall-clock-now
-# default that pressure-trend/moon-phase lookups would otherwise fall back to.
-at_time = datetime.combine(session_date, dtime.fromisoformat(cond["start_time"]))
+    # The angler's own entered session-start time - not "right now" - is what "for
+    # that exact time of day" should mean here, so it overrides the generic
+    # wall-clock-now default that pressure-trend/moon-phase lookups would
+    # otherwise fall back to.
+    at_time = datetime.combine(session_date, dtime.fromisoformat(cond["start_time"]))
 
-rt = realtime_context_from_bundle(bundle, cond["segment_name"], session_date, at_time=at_time)
+    rt = realtime_context_from_bundle(bundle, cond["segment_name"], session_date, at_time=at_time)
 
-score_result = manual_segment_score(
-    cond["segment_name"], season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
-    pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
-    water_temp_f=cond["water_temp_f"], water_clarity=water_clarity,
-    forage_present=bool(cond.get("forage_seen")),
-)
+    score_result = manual_segment_score(
+        cond["segment_name"], season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
+        pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
+        water_temp_f=cond["water_temp_f"], water_clarity=water_clarity,
+        forage_present=bool(cond.get("forage_seen")),
+    )
 
 
 def _score_breakdown_help(breakdown: list, final_score: float) -> str:
@@ -245,35 +255,41 @@ def _score_breakdown_help(breakdown: list, final_score: float) -> str:
 
 
 st.divider()
-with st.expander("Suggestions for right now", expanded=True):
-    m1, m2 = st.columns([1, 2])
-    m1.metric(
-        f"{cond['segment_name']} activity score", f"{score_result.score}/10",
-        help=_score_breakdown_help(score_result.breakdown, score_result.score),
-    )
-    m2.write(
-        f"**Season:** {season.replace('_', ' ').title()}  \n"
-        f"**Structure:** {structure_type} (from this spot's saved type)  \n"
-        f"**Water clarity:** {water_clarity}"
-    )
-    st.caption(f"Scored for about {at_time.strftime('%-I:%M %p')} - your entered session start time.")
-    if score_result.notes:
-        st.caption(" · ".join(score_result.notes))
-    for warn in score_result.warnings:
-        st.warning(warn)
-    if bundle is None:
-        st.caption(
-            "Pressure trend and solunar timing aren't factored into the score above - no weather forecast "
-            "data was available just now."
+if cond:
+    with st.expander("Suggestions for right now", expanded=True):
+        m1, m2 = st.columns([1, 2])
+        m1.metric(
+            f"{cond['segment_name']} activity score", f"{score_result.score}/10",
+            help=_score_breakdown_help(score_result.breakdown, score_result.score),
         )
+        m2.write(
+            f"**Season:** {season.replace('_', ' ').title()}  \n"
+            f"**Structure:** {structure_type} (from this spot's saved type)  \n"
+            f"**Water clarity:** {water_clarity}"
+        )
+        st.caption(f"Scored for about {at_time.strftime('%-I:%M %p')} - your entered session start time.")
+        if score_result.notes:
+            st.caption(" · ".join(score_result.notes))
+        for warn in score_result.warnings:
+            st.warning(warn)
+        if bundle is None:
+            st.caption(
+                "Pressure trend and solunar timing aren't factored into the score above - no weather forecast "
+                "data was available just now."
+            )
 
-    rec = recommend(
-        season, cond["water_temp_f"], cond["segment_name"], rt["pressure_trend_24h"],
-        structure_type=structure_type, water_clarity=water_clarity,
-        fish_depth_ft=cond.get("fish_depth_ft"), forage=cond.get("forage_seen"),
-        inventory=get_inventory(),
+        rec = recommend(
+            season, cond["water_temp_f"], cond["segment_name"], rt["pressure_trend_24h"],
+            structure_type=structure_type, water_clarity=water_clarity,
+            fish_depth_ft=cond.get("fish_depth_ft"), forage=cond.get("forage_seen"),
+            inventory=get_inventory(),
+        )
+        render_lure_recommendation(rec)
+else:
+    st.caption(
+        "Fill in **Conditions right now** above and click **Get lure suggestions** to see a live activity "
+        "score and lure recommendation here. You don't need to do that to log results below, though."
     )
-    render_lure_recommendation(rec)
 
 LURE_PICKER_COLS = 4
 LURE_PICKER_THUMBNAIL_PX = 90
@@ -420,7 +436,7 @@ with results_expander:
     )
 
     forage_type_seen = st.multiselect(
-        "Forage type/species seen", FORAGE_OPTIONS, default=cond.get("forage_seen", []),
+        "Forage type/species seen", FORAGE_OPTIONS, default=(cond.get("forage_seen", []) if cond else []),
         key=f"log_forage_type_{spot['spot_id']}",
     )
 
@@ -536,21 +552,32 @@ with results_expander:
 
     if log_submitted:
         fish_weights = [f["weight_lb"] for f in fish_records if f["weight_lb"]]
-        conditions = {
-            "pressure_trend_24h": rt["pressure_trend_24h"],
-            "moon_near_new_full": score_result.moon.is_new_or_full_window,
-            "moon_phase": score_result.moon.name,
-            "avg_cloud_pct": avg_cloud_pct,
-            "avg_wind_mph": avg_wind_mph,
-            "wind_band": cond["wind_band"],
-            "water_temp_f": cond["water_temp_f"],
-            "secchi_ft": cond["secchi_ft"],
-            "stirred_up": cond.get("stirred_up", False),
-            "light_condition": cond["light_condition"],
-            "precipitation": cond["precipitation"],
-            "start_time": cond["start_time"],
-            "forage_seen": cond.get("forage_seen"),
-            "fish_depth_ft": cond.get("fish_depth_ft"),
+
+        # Everything in this first block only exists if Conditions right now was
+        # filled in and scored (cond/rt/score_result/avg_cloud_pct/avg_wind_mph are
+        # all None otherwise, per the "cond may be empty" note above) - logging
+        # results doesn't require that, so these keys are simply left out of
+        # conditions_json when there's no live reading behind them, same treatment
+        # Trip History's FIELD_SPECS loop already gives any other missing key.
+        conditions = {}
+        if cond:
+            conditions.update({
+                "pressure_trend_24h": rt["pressure_trend_24h"],
+                "moon_near_new_full": score_result.moon.is_new_or_full_window,
+                "moon_phase": score_result.moon.name,
+                "avg_cloud_pct": avg_cloud_pct,
+                "avg_wind_mph": avg_wind_mph,
+                "wind_band": cond["wind_band"],
+                "water_temp_f": cond["water_temp_f"],
+                "secchi_ft": cond["secchi_ft"],
+                "stirred_up": cond.get("stirred_up", False),
+                "light_condition": cond["light_condition"],
+                "precipitation": cond["precipitation"],
+                "start_time": cond["start_time"],
+                "forage_seen": cond.get("forage_seen"),
+                "fish_depth_ft": cond.get("fish_depth_ft"),
+            })
+        conditions.update({
             # lure_category is the raw core.lures.LURE_PROFILES key (e.g. "football_jig"),
             # not the display name - only set when the lure was picked from inventory, so
             # Trip History can offer a real "lure type" filter without guessing a
@@ -576,20 +603,24 @@ with results_expander:
             # working unchanged.
             "fish": fish_records,
             "source": "spot_session",
-        }
+        })
         entry = TripEntry(
             trip_date=session_date.isoformat(),
-            segment=cond["segment_name"],
+            # cond["segment_name"] reflects the time window picked in Conditions
+            # right now; without that, fall back to the same hour-of-day guess that
+            # field defaults to, so a result logged without conditions still lands
+            # in a sensible time-of-day bucket for Trip History's filters.
+            segment=cond["segment_name"] if cond else _guess_segment(lake_now_naive().hour),
             spot_id=spot["spot_id"],
             spot_name=spot["name"],
             structure_type=structure_type,
-            water_clarity=water_clarity,
+            water_clarity=water_clarity or "Unknown",
             lure_used=lure_used,
             color_used=color_used,
             technique_used=technique_used,
             fish_caught=len(fish_records),
             biggest_fish_lb=max(fish_weights) if fish_weights else None,
-            predicted_score=score_result.score,
+            predicted_score=score_result.score if score_result else None,
             conditions=conditions,
             notes=log_notes,
         )
