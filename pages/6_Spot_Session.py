@@ -40,33 +40,60 @@ if spot is not None:
     st.session_state["spot_session_target_id"] = spot_id
     st.query_params["spot_id"] = spot_id
 
-if spot is None:
+if not spots:
     st.info(
         "No spot selected yet. Pick one of your saved spots below to start a session here directly, "
         "or go to the Lake Map page to click (or jump to) one instead."
     )
+    st.caption("You don't have any saved spots yet - drop a pin on the Lake Map page first.")
+    if st.button("Go to Lake Map"):
+        st.switch_page("pages/2_Lake_Map.py")
+    st.stop()
 
-    if spots:
-        CHOOSE_PROMPT = "— choose a saved spot —"
-        sorted_spots = sorted(spots, key=lambda s: s["name"])
-        picked_idx = st.selectbox(
-            "Start a session at",
-            options=range(len(sorted_spots) + 1),
-            format_func=lambda i: CHOOSE_PROMPT if i == 0 else sorted_spots[i - 1]["name"],
-        )
-        if picked_idx != 0:
-            picked_spot = sorted_spots[picked_idx - 1]
-            # Same session_state-primary/query_params-fallback handoff the Lake Map
-            # page's "Fish this spot now" button uses (see comment above) - setting
-            # it here means the rest of this page (which reads spot_id from those
-            # same two places) picks it up identically on the rerun below, no
-            # separate code path needed for "arrived via this dropdown" vs. "arrived
-            # via the map".
-            st.session_state["spot_session_target_id"] = picked_spot["spot_id"]
-            st.query_params["spot_id"] = picked_spot["spot_id"]
-            st.rerun()
-    else:
-        st.caption("You don't have any saved spots yet - drop a pin on the Lake Map page first.")
+sorted_spots = sorted(spots, key=lambda s: s["name"])
+
+# Location picker - always visible at the top, so a spot can be switched
+# directly from this page instead of always having to go back to the Lake
+# Map first. Keyed on the CURRENTLY loaded spot_id (rather than one fixed
+# key) so that however a spot got selected - clicking "Fish this spot now"
+# on the Lake Map, a bookmarked/shared ?spot_id= link, or picking a
+# different spot from this exact dropdown a moment ago - it always shows
+# the right thing already selected: a fresh key means Streamlit applies the
+# `index=` default fresh every time spot_id changes, instead of clinging to
+# a stale selection tied to the previous spot's widget instance.
+if spot is not None:
+    current_spot_idx = next(i for i, s in enumerate(sorted_spots) if s["spot_id"] == spot["spot_id"])
+    picked_idx = st.selectbox(
+        "📍 Location", options=range(len(sorted_spots)), format_func=lambda i: sorted_spots[i]["name"],
+        index=current_spot_idx, key=f"spot_picker_{spot['spot_id']}",
+    )
+    picked_spot = sorted_spots[picked_idx]
+    if picked_spot["spot_id"] != spot["spot_id"]:
+        # Same session_state-primary/query_params-fallback handoff the Lake Map
+        # page's "Fish this spot now" button uses (see comment above) - setting
+        # it here means the rest of this page (which reads spot_id from those
+        # same two places) picks it up identically on the rerun below, no
+        # separate code path needed for "arrived via this dropdown" vs. "arrived
+        # via the map".
+        st.session_state["spot_session_target_id"] = picked_spot["spot_id"]
+        st.query_params["spot_id"] = picked_spot["spot_id"]
+        st.rerun()
+else:
+    st.info(
+        "No spot selected yet. Pick one of your saved spots below to start a session here directly, "
+        "or go to the Lake Map page to click (or jump to) one instead."
+    )
+    NO_SPOT_PROMPT = "— choose a saved spot —"
+    picked_idx = st.selectbox(
+        "📍 Location", options=range(len(sorted_spots) + 1),
+        format_func=lambda i: NO_SPOT_PROMPT if i == 0 else sorted_spots[i - 1]["name"],
+        key="spot_picker_none",
+    )
+    if picked_idx != 0:
+        picked_spot = sorted_spots[picked_idx - 1]
+        st.session_state["spot_session_target_id"] = picked_spot["spot_id"]
+        st.query_params["spot_id"] = picked_spot["spot_id"]
+        st.rerun()
 
     if st.button("Go to Lake Map"):
         st.switch_page("pages/2_Lake_Map.py")
