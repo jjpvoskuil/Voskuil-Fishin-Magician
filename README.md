@@ -74,11 +74,12 @@ key decisions, and known open items.
   that one fish; each save adds it to a running list (with a "Remove" if you need to
   undo one) so you're not committing to a fish count up front. Clicking "Log this
   session" saves that lure as its own entry, shows a confirmation toast, and
-  immediately resets the form for the next lure - the lure/trailer picker, timing, and
-  notes all go blank, but the conditions group above keeps whatever you last entered,
-  ready to log another lure fished in those same conditions right away; a running
-  "📋 Already logged for this spot today" line lists everything saved so far in this
-  visit. Each lure still lands as its own row in the trip log (no combined/bundled
+  immediately resets the form for the next lure - the section stays open (it doesn't
+  collapse back shut), the lure/trailer picker, timing, and notes all go blank, but the
+  conditions group above keeps whatever you last entered, ready to log another lure
+  fished in those same conditions right away; a running "📋 Already logged for this
+  spot today" line lists everything saved so far in this visit. Each lure still lands
+  as its own row in the trip log (no combined/bundled
   entry), so Trip History's per-trip filtering and detail view keep working exactly as
   before. It all writes into the same shared trip log the **Trip History** page reads
   from - Spot Session is now the only way to log a trip; see "How the model works"
