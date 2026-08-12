@@ -204,6 +204,11 @@ FIELD_SPECS = [
     ("fish_activity", "Fish activity", str),
     ("forage_activity", "Forage activity", str),
     ("forage_type_seen", "Forage type seen (while fishing)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
+    # retrieve_speed/retrieve_style used to be logged once per lure-use entry; Spot
+    # Session's "Add results" redesign moved presentation to a per-fish record
+    # instead (see the "fish" renderer below), so these two only ever populate for
+    # trips logged before that change - kept here so that older history still
+    # renders, not because new entries write them.
     ("retrieve_speed", "Retrieve speed", str),
     ("retrieve_style", "Retrieve style", str),
     ("trailer_used", "Trailer used", lambda v: "Yes" if v else None),
