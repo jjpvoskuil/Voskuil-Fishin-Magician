@@ -1217,6 +1217,90 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `pages/4_Trip_History.py` renders that row (including the new per-fish lines)
     without raising - the test-added row was reverted from `data/trip_log.csv`
     afterward so no synthetic data was left behind.
+40. **"Add results" reflow: image lure picker, grouped conditions, add-fish-as-you-go**
+    - a follow-up to entry 39's per-fish redesign, changing HOW the same information
+    gets entered rather than what's captured:
+    - **Image lure/trailer picker.** A plain `st.selectbox` can't show a photo inside
+      its own option list - no browser `<select>` element supports that - so "Lure
+      used" (and, when "Used a trailer" is checked, "Trailer") is now a searchable
+      card grid instead: a text search box over brand/description, then a 4-per-row
+      grid of bordered cards (`core.ui.render_square_thumbnail` - the exact same
+      thumbnail helper `pages/5_Lure_Inventory.py`'s browse grid already uses, so no
+      new image-rendering code was written) each with a "Select" button. Picking one
+      writes the item's `item_id` to `st.session_state`; a "Selected: ..." caption +
+      "Clear" button underneath shows/undoes the current pick. This whole picker
+      (`_visual_lure_picker()`, a new module-level helper in
+      `pages/6_Spot_Session.py`) lives outside any `st.form` for the same reason the
+      old plain selectbox did: a card click needs an immediate rerun so downstream
+      fields (default color, trailer eligibility) update in the same pass, and a form
+      only reruns on submit. It returns the selected inventory row or `None`, and
+      every existing "is a lure selected or not" downstream check
+      (`lure_can_take_trailer(selected_lure_item)`, the manual-entry fallback text
+      inputs, `lure_category` in the saved conditions) keeps working completely
+      unchanged - only the *picking* mechanism changed, not what gets stored.
+    - **Grouped conditions.** Everything about the lure itself (the new picker, color,
+      trailer, technique, depth fished) now renders together first under "Lure used,"
+      followed by a "Conditions during this lure use" group holding exactly the six
+      fields asked for, in that order: time range, wind speed/direction, fish
+      activity, forage activity, forage type seen, notes. A "Fish caught" section
+      comes last.
+    - **No more st.form for this section at all.** Entry 39's design still wrapped
+      most of "Add results" in `st.form(...)`, with only the lure/trailer/species
+      pickers living outside it (forms can't contain plain `st.button`s, only a
+      submit button, so anything needing a click-triggered rerun has to be outside).
+      This round's new image-card picker and the new "Add fish" flow (below) both
+      need that same click-and-rerun behavior throughout, so rather than split the
+      section across a form/non-form boundary in two different places, the whole
+      section dropped `st.form` and became one plain `st.button("Log this session")`
+      that reads the current value of every widget already computed earlier in the
+      same script run - the same pattern the lure picker already used. The trade-off
+      (every widget change reruns the script, not just on submit) is the same one the
+      lure/trailer/species pickers already accepted before this round; nothing here
+      is newly expensive enough to need form-batching.
+    - **Add fish, one at a time.** Replaces entry 39's "set a fish count, N sections
+      appear" approach with an explicit "➕ Add fish" button that opens one blank
+      entry (fish type - reusing `FISH_SPECIES_OPTIONS`, with "Other" free-text same
+      as before; weight; length; depth caught at; presentation/technique via
+      `RETRIEVE_STYLE_OPTIONS`; retrieval speed via `RETRIEVE_SPEED_OPTIONS`) with its
+      own "Save fish"/"Cancel" buttons. Saving appends to a running list in
+      `st.session_state[f"pending_fish_{spot_id}"]`, shown above the button as a
+      compact "🐟 Fish #N: ..." line with its own "Remove" button, and increments a
+      `st.session_state[f"fish_entry_seq_{spot_id}"]` counter that's folded into the
+      new entry's widget keys - the standard Streamlit trick for getting genuinely
+      blank widgets on the next "Add fish" open, since changing a widget's `key`
+      makes Streamlit treat it as a brand-new widget rather than one that needs
+      clearing. The per-fish `notes` field entry 39 had is dropped in this round -
+      not asked for in the new field list, easy to re-add later if wanted. The
+      pending list resets to empty (and the sequence counter to 0) right after "Log
+      this session" successfully saves, but the lure/conditions fields above are
+      deliberately left as they are, in case the next thing logged is another catch
+      on the same lure a few minutes later.
+    - `core.activity_log.lure_picker_options()`/`OTHER_LABEL` (the index-offset
+      "Other" sentinel helper the old plain selectbox used) are now unreferenced by
+      any page - left in place rather than deleted, same as this codebase's existing
+      pattern for orphaned-but-still-tested modules (`core/spots.py`, entry 34;
+      `core/thermocline.py`, entry 36); `tests/test_activity_log.py` still covers it
+      directly. `pages/4_Trip_History.py`'s `retrieve_speed`/`retrieve_style`
+      `FIELD_SPECS` rows are similarly now write-only-by-old-data - a trip logged
+      before this round still has those top-level conditions keys and still renders
+      them, a trip logged after this round doesn't set them at all (presentation is
+      per-fish now), so the rows were commented rather than removed.
+
+    Verified with the full test suite (unchanged) plus three scratch `AppTest`
+    scripts (not committed): one exercising the image lure picker end-to-end
+    (searching narrows the card grid, clicking "Select" persists the pick across a
+    rerun, "Color used" auto-fills from the newly-picked item, same as before); one
+    confirming the trailer picker (a second, independent instance of the same
+    `_visual_lure_picker()` helper) behaves identically; and one driving the full
+    "Add results" flow - search+select a lure, set wind speed/direction, add two
+    fish one at a time (one plain species, one "Other" with free-text, checking the
+    free-text field appears reactively), submit, and confirm the persisted
+    `trip_log.csv` row's `conditions_json` (`fish` list, `wind_speed_mph`,
+    `wind_direction`), that `fish_caught`/`biggest_fish_lb` were correctly derived,
+    that `pages/4_Trip_History.py` renders the new row without raising, and that the
+    pending fish list was empty again on the next rerun after submit. The test-added
+    row was reverted from `data/trip_log.csv` afterward so no synthetic data was left
+    behind.
 
 ## Key design decisions & rationale
 

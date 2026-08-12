@@ -56,17 +56,20 @@ key decisions, and known open items.
   to see the full factor-by-factor breakdown of how it was calculated. That score and
   the lure recommendation sit in their own collapsible "Suggestions for right now"
   section (open by default). Below it, a second collapsible section, "Add results"
-  (closed by default), lets you log what actually happened: pick the lure (and
-  trailer, if that lure type takes one) straight from your tackle inventory - picking
-  one auto-fills the color field - or enter something not in your inventory by hand,
-  plus the time range you fished it, wind speed and direction during that window,
-  depth(s) fished, and how active the fish and forage were. Set how many fish you
-  caught on that lure in that window and a matching number of catch-detail sections
-  open up, one per fish - species (Largemouth/Spotted/Striped, or type in your own),
-  weight, length, depth caught, retrieve speed/style for that specific fish, and
-  notes. It all writes into the same shared trip log the **Trip History** page reads
-  from - Spot Session is now the only way to log a trip; see "How the model works"
-  below for the condition bands behind this page's inputs.
+  (closed by default), lets you log what actually happened. Picking the lure (and
+  trailer, if that lure type takes one) is a searchable, photo card grid instead of a
+  plain dropdown - search your tackle box by brand or description, then click the
+  card you want; picking one auto-fills the color field, or enter something not in
+  your inventory by hand instead. Underneath, a "Conditions during this lure use"
+  group holds the time range you fished it, wind speed and direction, fish activity,
+  forage activity, forage type seen, and notes for that window. Fish get logged as
+  you catch them - click "➕ Add fish" each time and fill in species
+  (Largemouth/Spotted/Striped, or type in your own), weight, length, depth caught,
+  presentation/technique, and retrieval speed for that one fish; each save adds it to
+  a running list (with a "Remove" if you need to undo one) so you're not committing
+  to a fish count up front. It all writes into the same shared trip log the **Trip
+  History** page reads from - Spot Session is now the only way to log a trip; see
+  "How the model works" below for the condition bands behind this page's inputs.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a

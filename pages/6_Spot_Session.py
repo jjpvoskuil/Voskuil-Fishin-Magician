@@ -14,12 +14,12 @@ from core.scoring import (
     segment_time_ranges, lake_now_naive,
 )
 from core.activity_log import (
-    lure_picker_options, inventory_item_label, lure_can_take_trailer,
+    inventory_item_label, lure_can_take_trailer,
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
     FISH_SPECIES_OPTIONS,
 )
 from core.lures import recommend, FORAGE_OPTIONS
-from core.ui import render_lure_recommendation
+from core.ui import render_lure_recommendation, render_square_thumbnail
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push
 from core.weather import lake_today
 
@@ -275,6 +275,80 @@ with st.expander("Suggestions for right now", expanded=True):
     )
     render_lure_recommendation(rec)
 
+LURE_PICKER_COLS = 4
+LURE_PICKER_THUMBNAIL_PX = 90
+
+
+def _visual_lure_picker(inventory_items: list, key_prefix: str):
+    """Searchable, image-card picker over the tackle inventory. A plain
+    st.selectbox can't show a photo inside its own option list - no browser
+    <select> element supports that - so this renders a compact card grid
+    instead (reusing core.ui.render_square_thumbnail, the same thumbnail
+    helper the Lure Inventory page's browse grid already uses), with a
+    search box to narrow a bigger tackle box down first. It lives entirely
+    outside any st.form: clicking a card needs an immediate rerun so
+    downstream fields (default color, trailer eligibility) update in the
+    same pass, and a form only reruns on submit.
+
+    Returns the selected inventory row, or None if nothing's picked (the
+    caller then falls back to a plain text entry, same as the old "Other /
+    not in inventory" selectbox option did).
+    """
+    selected_key = f"{key_prefix}_selected_id"
+    if not inventory_items:
+        st.caption(
+            "No lures in your tackle box yet - add some on the Lure Inventory page, "
+            "or just type this one in below."
+        )
+        return None
+
+    search = st.text_input(
+        "Search", key=f"{key_prefix}_search",
+        placeholder="Search your tackle box by brand or description...",
+        label_visibility="collapsed",
+    )
+    filtered = inventory_items
+    if search:
+        s = search.lower()
+        filtered = [
+            it for it in filtered
+            if s in (it.get("description") or "").lower() or s in (it.get("brand") or "").lower()
+        ]
+
+    current_id = st.session_state.get(selected_key)
+
+    if not filtered:
+        st.caption("No matches for that search.")
+    else:
+        for row_start in range(0, len(filtered), LURE_PICKER_COLS):
+            row_items = filtered[row_start:row_start + LURE_PICKER_COLS]
+            cols = st.columns(LURE_PICKER_COLS)
+            for col, item in zip(cols, row_items):
+                with col:
+                    with st.container(border=True):
+                        if not render_square_thumbnail(item, size_px=LURE_PICKER_THUMBNAIL_PX):
+                            st.caption("No photo")
+                        st.caption(f"**{item.get('brand', '')}**  \n{item.get('description', '')}"[:90])
+                        is_selected = item.get("item_id") == current_id
+                        if st.button(
+                            "✅ Selected" if is_selected else "Select",
+                            key=f"{key_prefix}_pick_{item['item_id']}",
+                            disabled=is_selected, width='stretch',
+                        ):
+                            st.session_state[selected_key] = item["item_id"]
+                            st.rerun()
+
+    current_id = st.session_state.get(selected_key)
+    selected_item = next((it for it in inventory_items if it.get("item_id") == current_id), None)
+    if selected_item is not None:
+        cc1, cc2 = st.columns([5, 1])
+        cc1.caption(f"Selected: **{inventory_item_label(selected_item)}**")
+        if cc2.button("Clear", key=f"{key_prefix}_clear"):
+            st.session_state[selected_key] = None
+            st.rerun()
+    return selected_item
+
+
 st.divider()
 st.subheader("Add results")
 st.caption(
@@ -285,164 +359,199 @@ results_expander = st.expander("Log a lure/time-window result and any fish caugh
 
 with results_expander:
     inventory_items = get_inventory()
-    lure_labels, lure_items = lure_picker_options(inventory_items)
 
-    pc1, pc2 = st.columns(2)
-    lure_idx = pc1.selectbox(
-        "Lure used", options=list(range(len(lure_labels))), format_func=lambda i: lure_labels[i],
-        key=f"log_lure_idx_{spot['spot_id']}",
+    st.markdown("#### Lure used")
+    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=f"log_lure_{spot['spot_id']}")
+    if selected_lure_item is None:
+        lure_used = st.text_input(
+            "Lure name", placeholder="e.g. Chartreuse/white spinnerbait", key=f"log_lure_name_{spot['spot_id']}",
+        )
+    else:
+        lure_used = inventory_item_label(selected_lure_item)
+    color_used = st.text_input(
+        "Color used", value=(selected_lure_item.get("description", "") if selected_lure_item else ""),
+        key=f"log_color_used_{spot['spot_id']}_{selected_lure_item.get('item_id') if selected_lure_item else 'manual'}",
+        placeholder="e.g. Chartreuse/white",
     )
-    selected_lure_item = lure_items[lure_idx]
 
     use_trailer = False
     if lure_can_take_trailer(selected_lure_item):
-        use_trailer = pc2.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}")
+        use_trailer = st.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}")
 
-    trailer_idx = 0
+    trailer_name, trailer_color = "", ""
     selected_trailer_item = None
     if use_trailer:
-        trailer_idx = st.selectbox(
-            "Trailer", options=list(range(len(lure_labels))), format_func=lambda i: lure_labels[i],
-            key=f"log_trailer_idx_{spot['spot_id']}",
-        )
-        selected_trailer_item = lure_items[trailer_idx]
-
-    num_fish = st.number_input(
-        "Fish caught on this lure in this time window", min_value=0, max_value=25, step=1, value=0,
-        key=f"log_num_fish_{spot['spot_id']}",
-        help="Set this first - a matching number of catch-detail sections open below, inside the form, "
-             "one per fish.",
-    )
-    num_fish = int(num_fish)
-
-    # Species lives outside the form (like the lure/trailer pickers above) so picking
-    # "Other" immediately reveals the free-text species field inside the form on the
-    # same rerun - widgets inside a form only trigger a rerun on submit.
-    fish_species_idx = []
-    if num_fish:
-        st.caption("Species for each fish caught (details for each are filled in further down, inside the form):")
-        sp_cols = st.columns(min(num_fish, 4))
-        for i in range(num_fish):
-            idx = sp_cols[i % len(sp_cols)].selectbox(
-                f"Fish #{i + 1} species", options=list(range(len(FISH_SPECIES_OPTIONS))),
-                format_func=lambda j: FISH_SPECIES_OPTIONS[j],
-                key=f"log_fish_species_idx_{spot['spot_id']}_{i}",
+        st.markdown("**Trailer**")
+        selected_trailer_item = _visual_lure_picker(inventory_items, key_prefix=f"log_trailer_{spot['spot_id']}")
+        if selected_trailer_item is None:
+            trailer_name = st.text_input(
+                "Trailer name", placeholder="e.g. Green pumpkin craw trailer", key=f"log_trailer_name_{spot['spot_id']}",
             )
-            fish_species_idx.append(idx)
-
-    with st.form(f"log_activity_form_{spot['spot_id']}"):
-        if selected_lure_item is None:
-            lure_used = st.text_input("Lure name", placeholder="e.g. Chartreuse/white spinnerbait")
         else:
-            lure_used = inventory_item_label(selected_lure_item)
-            st.caption(f"Lure: **{lure_used}**")
-        color_used = st.text_input(
-            "Color used", value=(selected_lure_item.get("description", "") if selected_lure_item else ""),
-            key=f"log_color_used_{spot['spot_id']}_{lure_idx}", placeholder="e.g. Chartreuse/white",
+            trailer_name = inventory_item_label(selected_trailer_item)
+        trailer_color = st.text_input(
+            "Trailer color",
+            value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
+            key=f"log_trailer_color_{spot['spot_id']}_{selected_trailer_item.get('item_id') if selected_trailer_item else 'manual'}",
         )
 
-        trailer_name, trailer_color = "", ""
-        if use_trailer:
-            tc1, tc2 = st.columns(2)
-            if selected_trailer_item is None:
-                trailer_name = tc1.text_input("Trailer name", placeholder="e.g. Green pumpkin craw trailer")
-            else:
-                trailer_name = inventory_item_label(selected_trailer_item)
-                tc1.caption(f"Trailer: **{trailer_name}**")
-            trailer_color = tc2.text_input(
-                "Trailer color",
-                value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
-                key=f"log_trailer_color_{spot['spot_id']}_{trailer_idx}",
+    technique_used = st.text_input(
+        "Technique/presentation", placeholder="e.g. Slow-rolled along a windblown point",
+        key=f"log_technique_{spot['spot_id']}",
+    )
+
+    dc1, dc2 = st.columns(2)
+    depth_fished_ft = dc1.number_input(
+        "Primary depth fished (ft)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+        key=f"log_depth_fished_{spot['spot_id']}",
+    )
+    depth_fished_varied_note = dc2.text_input(
+        "Or, several depths tried", placeholder="e.g. worked 2-15 ft, fish suspended over the channel",
+        key=f"log_depth_varied_{spot['spot_id']}",
+    )
+
+    st.divider()
+    st.markdown("#### Conditions during this lure use")
+
+    tc3, tc4 = st.columns(2)
+    lure_start_time = tc3.time_input(
+        "Started using this lure at (optional)", value=None, key=f"log_start_time_{spot['spot_id']}",
+    )
+    lure_end_time = tc4.time_input(
+        "Stopped using this lure at (optional)", value=None, key=f"log_end_time_{spot['spot_id']}",
+    )
+
+    wc1, wc2 = st.columns(2)
+    wind_speed_mph = wc1.number_input(
+        "Wind speed (mph)", min_value=0.0, max_value=60.0, value=0.0, step=1.0,
+        key=f"log_wind_speed_{spot['spot_id']}",
+    )
+    wind_direction = wc2.selectbox(
+        "Wind direction", WIND_DIRECTIONS, index=8, key=f"log_wind_dir_{spot['spot_id']}",
+    )
+
+    ac1, ac2 = st.columns(2)
+    fish_activity = ac1.select_slider(
+        "Fish activity", options=FISH_ACTIVITY_OPTIONS, value="Moderate", key=f"log_fish_activity_{spot['spot_id']}",
+    )
+    forage_activity = ac2.select_slider(
+        "Forage activity", options=FORAGE_ACTIVITY_OPTIONS, value="Moderate", key=f"log_forage_activity_{spot['spot_id']}",
+    )
+
+    forage_type_seen = st.multiselect(
+        "Forage type/species seen", FORAGE_OPTIONS, default=cond.get("forage_seen", []),
+        key=f"log_forage_type_{spot['spot_id']}",
+    )
+
+    log_notes = st.text_area(
+        "Notes for this time range", placeholder="Anything else worth remembering about this lure/time window",
+        key=f"log_notes_{spot['spot_id']}",
+    )
+
+    st.divider()
+    st.markdown("#### Fish caught")
+
+    pending_key = f"pending_fish_{spot['spot_id']}"
+    seq_key = f"fish_entry_seq_{spot['spot_id']}"
+    adding_key = f"adding_fish_{spot['spot_id']}"
+    st.session_state.setdefault(pending_key, [])
+    st.session_state.setdefault(seq_key, 0)
+    st.session_state.setdefault(adding_key, False)
+    fish_records = st.session_state[pending_key]
+
+    if fish_records:
+        for i, fish in enumerate(fish_records):
+            frow1, frow2 = st.columns([5, 1])
+            bits = [fish["species"]]
+            if fish.get("weight_lb"):
+                bits.append(f"{fish['weight_lb']:g} lb")
+            if fish.get("length_in"):
+                bits.append(f"{fish['length_in']:g} in")
+            if fish.get("depth_ft"):
+                bits.append(f"{fish['depth_ft']:g} ft deep")
+            presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
+            if presentation:
+                bits.append(presentation)
+            frow1.write(f"🐟 Fish #{i + 1}: {', '.join(bits)}")
+            if frow2.button("Remove", key=f"remove_fish_{spot['spot_id']}_{i}"):
+                fish_records.pop(i)
+                st.session_state[pending_key] = fish_records
+                st.rerun()
+    else:
+        st.caption("No fish logged yet for this lure/time window.")
+
+    if not st.session_state[adding_key]:
+        if st.button("➕ Add fish", key=f"open_add_fish_{spot['spot_id']}"):
+            st.session_state[adding_key] = True
+            st.rerun()
+    else:
+        seq = st.session_state[seq_key]
+        with st.container(border=True):
+            st.markdown("**New fish**")
+            species_idx = st.selectbox(
+                "Fish type", options=list(range(len(FISH_SPECIES_OPTIONS))),
+                format_func=lambda j: FISH_SPECIES_OPTIONS[j],
+                key=f"log_new_fish_species_{spot['spot_id']}_{seq}",
             )
-
-        technique_used = st.text_input("Technique/presentation", placeholder="e.g. Slow-rolled along a windblown point")
-
-        st.markdown("**Time range this lure was used**")
-        tc3, tc4 = st.columns(2)
-        lure_start_time = tc3.time_input("Started using this lure at (optional)", value=None)
-        lure_end_time = tc4.time_input("Stopped using this lure at (optional)", value=None)
-
-        st.markdown("**Wind during this time range**")
-        wc1, wc2 = st.columns(2)
-        wind_speed_mph = wc1.number_input(
-            "Wind speed (mph)", min_value=0.0, max_value=60.0, value=0.0, step=1.0,
-        )
-        wind_direction = wc2.selectbox("Wind direction", WIND_DIRECTIONS, index=8)
-
-        dc1, dc2 = st.columns(2)
-        depth_fished_ft = dc1.number_input(
-            "Primary depth fished (ft)", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
-        )
-        depth_fished_varied_note = dc2.text_input(
-            "Or, several depths tried", placeholder="e.g. worked 2-15 ft, fish suspended over the channel",
-        )
-
-        ac1, ac2 = st.columns(2)
-        fish_activity = ac1.select_slider("Fish activity for this time window", options=FISH_ACTIVITY_OPTIONS, value="Moderate")
-        retrieve_speed = ac2.selectbox("Overall retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1)
-
-        rc1, rc2 = st.columns(2)
-        retrieve_style = rc1.selectbox("Overall retrieve style", RETRIEVE_STYLE_OPTIONS)
-        forage_activity = rc2.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, value="Moderate")
-
-        forage_type_seen = st.multiselect("Forage type/species seen", FORAGE_OPTIONS, default=cond.get("forage_seen", []))
-
-        log_notes = st.text_area(
-            "Notes for this time range", placeholder="Anything else worth remembering about this lure/time window",
-        )
-
-        fish_records = []
-        if num_fish:
-            st.divider()
-            st.markdown(f"**Fish caught this time window ({num_fish})**")
-        for i in range(num_fish):
-            st.markdown(f"—  Fish #{i + 1}")
-            species_idx = fish_species_idx[i]
             species_label = FISH_SPECIES_OPTIONS[species_idx]
             species_other = ""
             if species_label == "Other (type in species)":
                 species_other = st.text_input(
-                    f"Fish #{i + 1} species (type it in)", key=f"log_fish_species_other_{spot['spot_id']}_{i}",
+                    "Species (type it in)", key=f"log_new_fish_species_other_{spot['spot_id']}_{seq}",
                 )
 
             fc1, fc2, fc3 = st.columns(3)
-            fish_weight_lb = fc1.number_input(
-                f"Fish #{i + 1} weight (lb)", min_value=0.0, step=0.1, value=0.0,
-                key=f"log_fish_weight_{spot['spot_id']}_{i}",
+            new_weight_lb = fc1.number_input(
+                "Weight (lb)", min_value=0.0, step=0.1, value=0.0,
+                key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
             )
-            fish_length_in = fc2.number_input(
-                f"Fish #{i + 1} length (in)", min_value=0.0, step=0.25, value=0.0,
-                key=f"log_fish_length_{spot['spot_id']}_{i}",
+            new_length_in = fc2.number_input(
+                "Length (in)", min_value=0.0, step=0.25, value=0.0,
+                key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
             )
-            fish_depth_caught_ft = fc3.number_input(
-                f"Fish #{i + 1} depth caught (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
-                key=f"log_fish_depth_{spot['spot_id']}_{i}",
+            new_depth_ft = fc3.number_input(
+                "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
+                key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
             )
 
             fc4, fc5 = st.columns(2)
-            fish_retrieve_speed = fc4.selectbox(
-                f"Fish #{i + 1} retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1,
-                key=f"log_fish_speed_{spot['spot_id']}_{i}",
+            new_retrieve_style = fc4.selectbox(
+                "Presentation/technique", RETRIEVE_STYLE_OPTIONS, key=f"log_new_fish_style_{spot['spot_id']}_{seq}",
             )
-            fish_retrieve_style = fc5.selectbox(
-                f"Fish #{i + 1} retrieve style / action", RETRIEVE_STYLE_OPTIONS,
-                key=f"log_fish_style_{spot['spot_id']}_{i}",
+            new_retrieve_speed = fc5.selectbox(
+                "Retrieval speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"log_new_fish_speed_{spot['spot_id']}_{seq}",
             )
 
-            fish_notes = st.text_input(f"Fish #{i + 1} notes", key=f"log_fish_notes_{spot['spot_id']}_{i}")
+            sc1, sc2 = st.columns(2)
+            if sc1.button(
+                "Save fish", key=f"log_new_fish_save_{spot['spot_id']}_{seq}", type="primary", width='stretch',
+            ):
+                species_final = (
+                    species_other.strip()
+                    if (species_label == "Other (type in species)" and species_other.strip())
+                    else species_label
+                )
+                fish_records.append({
+                    "species": species_final,
+                    "species_other": species_other or None,
+                    "weight_lb": new_weight_lb or None,
+                    "length_in": new_length_in or None,
+                    "depth_ft": new_depth_ft or None,
+                    "retrieve_speed": new_retrieve_speed,
+                    "retrieve_style": new_retrieve_style,
+                })
+                st.session_state[pending_key] = fish_records
+                st.session_state[seq_key] = seq + 1
+                st.session_state[adding_key] = False
+                st.rerun()
+            if sc2.button("Cancel", key=f"log_new_fish_cancel_{spot['spot_id']}_{seq}", width='stretch'):
+                st.session_state[adding_key] = False
+                st.rerun()
 
-            fish_records.append({
-                "species": species_other.strip() if (species_label == "Other (type in species)" and species_other.strip()) else species_label,
-                "species_other": species_other or None,
-                "weight_lb": fish_weight_lb or None,
-                "length_in": fish_length_in or None,
-                "depth_ft": fish_depth_caught_ft or None,
-                "retrieve_speed": fish_retrieve_speed,
-                "retrieve_style": fish_retrieve_style,
-                "notes": fish_notes or None,
-            })
-
-        log_submitted = st.form_submit_button("Log this session", width='stretch')
+    st.divider()
+    log_submitted = st.button(
+        "Log this session", key=f"log_submit_{spot['spot_id']}", type="primary", width='stretch',
+    )
 
     if log_submitted:
         fish_weights = [f["weight_lb"] for f in fish_records if f["weight_lb"]]
@@ -479,14 +588,13 @@ with results_expander:
             "fish_activity": fish_activity,
             "forage_activity": forage_activity,
             "forage_type_seen": forage_type_seen,
-            "retrieve_speed": retrieve_speed,
-            "retrieve_style": retrieve_style,
             # Per-fish catch records - a separate entry for each fish caught on this
             # lure during this time window, each with its own species/size/depth/
-            # presentation/notes. fish_caught/biggest_fish_lb below are derived from
-            # this list so existing Trip History metrics and core.calibration's
-            # factor-flag logic (both keyed on those two top-level TripEntry fields)
-            # keep working unchanged.
+            # presentation, added one at a time via the "Add fish" button above.
+            # fish_caught/biggest_fish_lb below are derived from this list so
+            # existing Trip History metrics and core.calibration's factor-flag
+            # logic (both keyed on those two top-level TripEntry fields) keep
+            # working unchanged.
             "fish": fish_records,
             "source": "spot_session",
         }
@@ -520,3 +628,10 @@ with results_expander:
                 "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed to GitHub "
                 "and won't survive an app restart. See README for how to add it."
             )
+
+        # Reset the per-fish list for the next result entry, now that this one's saved -
+        # the lure/conditions fields above deliberately stay as they are (handy if
+        # you're about to log another catch on the same lure a bit later).
+        st.session_state[pending_key] = []
+        st.session_state[seq_key] = 0
+        st.session_state[adding_key] = False
