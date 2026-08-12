@@ -1139,6 +1139,84 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     of `data/lake_spots.csv`) renders the caption instead of a dropdown with no
     exception - plus the usual AppTest smoke test across all pages that can run in
     this sandbox.
+39. **Spot Session: session date field, collapsible sections, and per-fish catch
+    records** - a bigger redesign of the "after the conditions form" half of
+    `pages/6_Spot_Session.py`, driven by the angler wanting a real per-fish catch log
+    instead of a single "bass caught" count + "biggest fish" pair:
+    - Added a `st.date_input("Session date", ...)` right under the spot name/back
+      button, defaulting to today and capped at today (`max_value=lake_today()`) so
+      the angler can log a past session at this spot but never a future one. The
+      `today` variable that used to feed `segment_time_ranges()`/`season_stage()`/
+      `realtime_context_from_bundle()`/the trip's `trip_date` was renamed to
+      `session_date` and now comes from this widget everywhere. No new error
+      handling was needed for past dates - `core/scoring.py`'s
+      `segment_time_ranges()`/`realtime_context_from_bundle()` already degrade
+      gracefully (try/except, falling back to `None`/neutral defaults) for a date
+      outside the current weather bundle's coverage window, the same fallback path
+      that already fires whenever `bundle` itself is `None`.
+    - "Suggestions for right now" and the old "Log actual activity" section (renamed
+      "Add results") are each now their own `st.expander` - the suggestions one
+      defaults open (`expanded=True`, since it's the main reason to visit this page),
+      the new results one defaults closed (`expanded=False`, since it's an
+      after-the-fact log entry, not something to stare at while fishing). Both can be
+      independently opened/collapsed, per the ask.
+    - Inside "Add results," the lure/trailer picker keeps the existing outside-form
+      pattern (must live outside `st.form` so picking a different lure/trailer
+      reruns immediately and the form's defaults/captions update in the same pass -
+      form-internal widgets only trigger a rerun on submit). New alongside it: a
+      "Fish caught on this lure in this time window" `st.number_input` (also outside
+      the form, since it drives how many per-fish sections appear) and, for each
+      fish, a species `st.selectbox` (`core/activity_log.py`'s new
+      `FISH_SPECIES_OPTIONS = ["Largemouth Bass", "Spotted Bass", "Striped Bass",
+      "Other (type in species)"]` - the angler's own requested vocabulary, not a
+      strict biological list; free-text-extensible via "Other" so any imprecision
+      versus Nolin's real regulated species costs nothing). Species selectboxes stay
+      outside the form too, for the same reactivity reason: picking "Other" needs to
+      reveal a free-text species field inside the form on the same rerun.
+    - Inside the form: the existing lure/color/trailer/technique/depth/forage fields
+      are unchanged; new fields are wind speed (`st.number_input`, mph) and wind
+      direction (`st.selectbox`, `core/onwater.py`'s new `WIND_DIRECTIONS` - 8-point
+      compass plus "Variable"/"Calm", distinct from the plain-language `WIND_BANDS`
+      picker in the Conditions form above, which drives the live score rather than
+      being a logged fact); "Notes" is now explicitly framed as notes for this
+      lure/time-window rather than the whole session. The old flat "Bass caught"/
+      "Biggest fish (lb)" number inputs are gone, replaced by one expander section
+      per fish (index-matched to the outside-form species pickers) capturing weight,
+      length, depth caught, retrieve speed (reusing `RETRIEVE_SPEED_OPTIONS`),
+      retrieve style/action (reusing `RETRIEVE_STYLE_OPTIONS` - already covers the
+      angler's "steady"/"stop-start"/"intermittent jerks" wording via "Straight
+      retrieve (no action)"/"Stop-and-go"/"Twitch"/"Jerk", so no second vocabulary
+      was invented), and per-fish notes.
+    - On submit, `conditions["fish"]` stores the full list of per-fish dicts
+      (`species`, `species_other`, `weight_lb`, `length_in`, `depth_ft`,
+      `retrieve_speed`, `retrieve_style`, `notes`), plus new `wind_speed_mph`/
+      `wind_direction` keys - all inside the existing flexible `conditions` JSON
+      blob, no CSV schema change. `TripEntry`'s top-level `fish_caught`/
+      `biggest_fish_lb` fields (read by Trip History's metrics and
+      `core/calibration.py`'s factor-flag logic) are now *derived* from that list
+      (`len(fish_records)` / `max(weights)` or `None`) rather than asked for
+      separately, so nothing downstream needed to change and there's no
+      double-entry to keep in sync.
+    - `pages/4_Trip_History.py`'s per-trip detail expander got two new simple
+      `FIELD_SPECS` rows (`wind_speed_mph`, `wind_direction`) and a dedicated
+      renderer for the new `fish` list (one "Fish #N: species, weight, length,
+      depth, presentation" line per catch, with notes as a caption underneath) -
+      the existing generic `", ".join(v) if isinstance(v, list) ...` formatter
+      would otherwise have shown a raw Python list-of-dicts string for any trip
+      logged through the redesigned form.
+
+    Verified with the full test suite (unchanged - no existing test logic touched)
+    plus two scratch `AppTest` scripts (not committed): one confirming the date
+    field, both expanders, and the reactive per-fish species picker (setting fish
+    count to 2, picking "Other" for one, and seeing its free-text field appear on
+    the same rerun without submitting); a second driving a full submission (2 fish,
+    one plain species, one "Other" with free text, wind speed/direction filled in)
+    through to `data/trip_log.csv`, confirming the persisted row's `conditions_json`
+    has the expected `fish` list and `wind_speed_mph`/`wind_direction`, that
+    `fish_caught`/`biggest_fish_lb` were correctly derived, and that
+    `pages/4_Trip_History.py` renders that row (including the new per-fish lines)
+    without raising - the test-added row was reverted from `data/trip_log.csv`
+    afterward so no synthetic data was left behind.
 
 ## Key design decisions & rationale
 

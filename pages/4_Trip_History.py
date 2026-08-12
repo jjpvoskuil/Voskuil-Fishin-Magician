@@ -197,6 +197,8 @@ FIELD_SPECS = [
     ("forage_seen", "Forage seen (pre-trip)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
     ("lure_start_time", "Lure start time", str),
     ("lure_end_time", "Lure end time", str),
+    ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
+    ("wind_direction", "Wind direction (logged)", str),
     ("depth_fished_ft", "Depth fished", lambda v: f"{v} ft"),
     ("depth_fished_varied_note", "Depth variation notes", str),
     ("fish_activity", "Fish activity", str),
@@ -248,3 +250,27 @@ else:
                 st.markdown("\n".join(detail_lines))
             else:
                 st.caption("No additional condition details recorded for this trip.")
+
+            # Per-fish catch records (Spot Session's "Add results" section) - a list of
+            # dicts, one per fish, so it gets its own renderer rather than the generic
+            # single-line FIELD_SPECS formatter above (which would otherwise show an
+            # unreadable raw Python list-of-dicts string).
+            fish_list = cond.get("fish")
+            if isinstance(fish_list, list) and fish_list:
+                st.markdown(f"**Fish caught ({len(fish_list)}):**")
+                for i, fish in enumerate(fish_list, start=1):
+                    if not isinstance(fish, dict):
+                        continue
+                    bits = [fish.get("species") or "Unknown species"]
+                    if fish.get("weight_lb"):
+                        bits.append(f"{fish['weight_lb']:g} lb")
+                    if fish.get("length_in"):
+                        bits.append(f"{fish['length_in']:g} in")
+                    if fish.get("depth_ft"):
+                        bits.append(f"{fish['depth_ft']:g} ft deep")
+                    presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
+                    if presentation:
+                        bits.append(presentation)
+                    st.markdown(f"- Fish #{i}: {', '.join(str(b) for b in bits)}")
+                    if fish.get("notes"):
+                        st.caption(f"　{fish['notes']}")

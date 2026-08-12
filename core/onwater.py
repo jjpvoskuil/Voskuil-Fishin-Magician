@@ -81,6 +81,13 @@ def wind_mph_for_band(label: str) -> float:
     return _WIND_BAND_MPH_PROXY.get(label, 6.5)
 
 
+# 8-point compass, plus the two common "no clean direction" cases an angler
+# actually needs to log after the fact - used only for the per-lure result
+# entry on the Spot Session page (distinct from the plain-language WIND_BANDS
+# picker above, which drives the live score instead of being a logged fact).
+WIND_DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable", "Calm"]
+
+
 # --- Water visibility (Secchi depth / sensory mode) -------------------------
 VISIBILITY_BANDS = [
     (4.0, float("inf"), "Clear", "Sight-dominated hunting."),
