@@ -95,6 +95,177 @@ for row in rows:
 
 df = pd.DataFrame(rows)
 
+# (json_key, label, formatter). Every key is optional - legacy Log a Trip
+# rows and Spot Session rows each only populate a subset, so a row simply
+# shows whichever of these it has data for. Defined up here (rather than
+# down by "Trip details") so _render_trip_detail_body below can use it -
+# both the grid's "Selected trip" quick-jump panel and the full "Trip
+# details" list further down call that same function.
+FIELD_SPECS = [
+    ("source", "Logged from", lambda v: "🎯 Spot Session" if v == "spot_session" else "📝 Legacy (Log a Trip)"),
+    ("start_time", "Session start time", str),
+    ("water_temp_f", "Water temp", lambda v: f"{v}°F"),
+    ("secchi_ft", "Water clarity (secchi)", lambda v: f"{v} ft"),
+    ("stirred_up", "Muddy / stirred up", lambda v: "Yes" if v else None),
+    ("wind_band", "Wind", str),
+    ("avg_wind_mph", "Avg wind", lambda v: f"{v:.0f} mph" if isinstance(v, (int, float)) else str(v)),
+    ("light_condition", "Light condition", str),
+    ("precipitation", "Precipitation", str),
+    ("avg_cloud_pct", "Cloud cover", lambda v: f"{v:.0f}%" if isinstance(v, (int, float)) else str(v)),
+    ("pressure_trend_24h", "Pressure trend (24h)", lambda v: f"{v:+.1f} hPa" if isinstance(v, (int, float)) else str(v)),
+    ("moon_phase", "Moon phase", str),
+    ("fish_depth_ft", "Fish holding depth", lambda v: f"{v} ft"),
+    ("forage_seen", "Forage seen (pre-trip)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
+    ("lure_start_time", "Lure start time", str),
+    ("lure_end_time", "Lure end time", str),
+    ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
+    ("wind_direction", "Wind direction (logged)", str),
+    # depth_fished_ft/depth_fished_varied_note (an overall "primary depth" for the
+    # whole lure use) were dropped from the "Add results" form - per-fish "depth
+    # caught at" already captures this in more detail. Only trips logged before
+    # that change still set these two.
+    ("depth_fished_ft", "Depth fished", lambda v: f"{v} ft"),
+    ("depth_fished_varied_note", "Depth variation notes", str),
+    ("fish_activity", "Fish activity", str),
+    ("forage_activity", "Forage activity", str),
+    ("forage_type_seen", "Forage type seen (while fishing)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
+    # retrieve_speed/retrieve_style used to be logged once per lure-use entry; Spot
+    # Session's "Add results" redesign moved presentation to a per-fish record
+    # instead (see the "fish" renderer below), so these two only ever populate for
+    # trips logged before that change - kept here so that older history still
+    # renders, not because new entries write them.
+    ("retrieve_speed", "Retrieve speed", str),
+    ("retrieve_style", "Retrieve style", str),
+    ("trailer_used", "Trailer used", lambda v: "Yes" if v else None),
+    ("trailer_name", "Trailer", str),
+    ("trailer_color", "Trailer color", str),
+    ("trailer_category", "Trailer category", str),
+    ("modeled_thermocline_band_ft", "Modeled thermocline band", str),
+]
+
+
+def _render_trip_detail_body(row, key_prefix):
+    """Renders one trip's full detail: Edit/Delete buttons, headline facts,
+    notes, every populated FIELD_SPECS entry, and per-fish catch records.
+    Shared by the grid's "Selected trip" quick-jump panel and the full "Trip
+    details" list further down, so there's exactly one place that knows how
+    to render a trip. key_prefix keeps widget keys distinct between the two
+    call sites - the same trip can be rendered in both places on the same
+    run (selected AND still present in the full filtered list), and
+    Streamlit errors on a duplicate widget key within one run."""
+    cond = row["_conditions"]
+    trip_id = row["trip_id"]
+
+    # Edit navigates back to Spot Session pre-loaded with this trip's spot
+    # and data, so it can be corrected and saved back in place instead of
+    # appending a duplicate. Only offered for Spot Session rows with a
+    # resolvable current spot - legacy "Log a Trip" rows and rows whose spot
+    # was since deleted have nowhere in Spot Session to edit them back into.
+    can_edit = cond.get("source") == "spot_session" and row.get("spot_id") in spot_name_by_id
+    edit_col, delete_col = st.columns([1, 1])
+    if can_edit:
+        if edit_col.button("✏️ Edit this trip", key=f"{key_prefix}_edit_{trip_id}"):
+            st.session_state["spot_session_target_id"] = row["spot_id"]
+            st.session_state["spot_session_edit_trip_id"] = trip_id
+            st.query_params["spot_id"] = row["spot_id"]
+            st.query_params["edit_trip"] = trip_id
+            st.switch_page("pages/6_Spot_Session.py")
+
+    # Delete is a two-step confirm (plain button flips a pending flag, which
+    # then swaps in a "Yes, delete it" / "Cancel" pair) rather than deleting
+    # on the first click - this permanently removes the row from
+    # trip_log.csv with no undo, so a single mis-click shouldn't be able to
+    # lose a logged trip. Keyed on trip_id alone (not key_prefix) so the
+    # pending state is shared no matter which rendering of this same trip
+    # started the confirm - clicking Delete in the "Selected trip" panel and
+    # then finding the row in the full list below shows the same pending
+    # confirm there too, instead of two independent, confusing ones.
+    delete_pending_key = f"delete_confirm_{trip_id}"
+    if not st.session_state.get(delete_pending_key):
+        if delete_col.button("🗑️ Delete this trip", key=f"{key_prefix}_delete_{trip_id}"):
+            st.session_state[delete_pending_key] = True
+            st.rerun()
+    else:
+        st.warning("Delete this trip permanently? This can't be undone.")
+        dc1, dc2 = st.columns(2)
+        if dc1.button("Yes, delete it", key=f"{key_prefix}_confirm_delete_{trip_id}", type="primary", width='stretch'):
+            ok = delete_trip(trip_id)
+            if ok:
+                token = github_token()
+                if token:
+                    commit_and_push(
+                        [TRIP_LOG_PATH], token, repo_slug(), f"Delete trip {trip_id} from Trip History",
+                    )
+                st.session_state.pop(delete_pending_key, None)
+                st.session_state.pop("trip_history_selected_id", None)
+                st.toast("Trip deleted.", icon="✅")
+            else:
+                st.session_state.pop(delete_pending_key, None)
+                st.toast("Couldn't find that trip - it may have already been removed.", icon="⚠️")
+            st.rerun()
+        if dc2.button("Cancel", key=f"{key_prefix}_cancel_delete_{trip_id}", width='stretch'):
+            st.session_state.pop(delete_pending_key, None)
+            st.rerun()
+
+    # predicted_score is blank for a trip logged via "Add results" without ever
+    # filling in "Conditions right now" first - no live reading, no score.
+    raw_score = row.get("predicted_score")
+    has_score = raw_score not in (None, "") and not pd.isna(raw_score)
+    top_bits = [
+        f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
+        f"**Technique:** {row['technique_used'] or '-'}",
+        f"**Fish caught:** {row['fish_caught']}"
+        + (f", biggest {row['biggest_fish_lb']} lb" if row.get("biggest_fish_lb") else ""),
+        f"**Predicted score:** {raw_score}/10" if has_score else "**Predicted score:** n/a (no live conditions entered)",
+    ]
+    st.markdown("  \n".join(top_bits))
+    if row.get("notes"):
+        st.caption(f"Notes: {row['notes']}")
+
+    detail_lines = []
+    for key, label, fmt in FIELD_SPECS:
+        value = cond.get(key)
+        if value in (None, "", [], False) and key not in ("stirred_up", "trailer_used"):
+            continue
+        if key in ("stirred_up", "trailer_used") and not value:
+            continue
+        try:
+            formatted = fmt(value)
+        except (TypeError, ValueError):
+            formatted = str(value)
+        if formatted is None:
+            continue
+        detail_lines.append(f"- **{label}:** {formatted}")
+    if detail_lines:
+        st.markdown("\n".join(detail_lines))
+    else:
+        st.caption("No additional condition details recorded for this trip.")
+
+    # Per-fish catch records (Spot Session's "Add results" section) - a list of
+    # dicts, one per fish, so it gets its own renderer rather than the generic
+    # single-line FIELD_SPECS formatter above (which would otherwise show an
+    # unreadable raw Python list-of-dicts string).
+    fish_list = cond.get("fish")
+    if isinstance(fish_list, list) and fish_list:
+        st.markdown(f"**Fish caught ({len(fish_list)}):**")
+        for i, fish in enumerate(fish_list, start=1):
+            if not isinstance(fish, dict):
+                continue
+            bits = [fish.get("species") or "Unknown species"]
+            if fish.get("weight_lb"):
+                bits.append(f"{fish['weight_lb']:g} lb")
+            if fish.get("length_in"):
+                bits.append(f"{fish['length_in']:g} in")
+            if fish.get("depth_ft"):
+                bits.append(f"{fish['depth_ft']:g} ft deep")
+            presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
+            if presentation:
+                bits.append(presentation)
+            st.markdown(f"- Fish #{i}: {', '.join(str(b) for b in bits)}")
+            if fish.get("notes"):
+                st.caption(f"　{fish['notes']}")
+
+
 # --- Filters -----------------------------------------------------------------
 st.subheader("Filters")
 
@@ -175,20 +346,41 @@ st.caption(f"Showing {len(filtered)} of {len(df)} logged trips.")
 if filtered.empty:
     st.warning("No trips match these filters.")
 else:
-    # technique_used dropped from the grid - Spot Session's "Add results" redesign
-    # replaced free-text technique entry with the visual lure picker, so this
-    # column is always blank for every trip logged since (see TripEntry in
-    # core/storage.py; still present in the CSV/FIELD_SPECS below for any
-    # legacy row that has it). fish_activity/forage_activity take its place as
-    # more useful, always-current at-a-glance columns.
-    display_cols = ["trip_date", "segment", "_location", "structure_type", "water_clarity",
-                     "_lure_type", "lure_used", "color_used", "_fish_activity", "_forage_activity",
-                     "fish_caught", "biggest_fish_lb", "predicted_score", "notes"]
-    display_df = filtered[display_cols].rename(columns={
-        "_lure_type": "lure_type", "_location": "location",
-        "_fish_activity": "fish_activity", "_forage_activity": "forage_activity",
-    })
-    st.dataframe(display_df.sort_values("trip_date", ascending=False), width='stretch', hide_index=True)
+    # A real per-row grid (st.columns per trip) rather than st.dataframe - the
+    # pinned Streamlit version's st.dataframe doesn't support real per-row
+    # interactive buttons (only st.column_config.LinkColumn, which can only
+    # produce a clickable URL, not run the "select this trip" logic below), so
+    # a manual grid is the only way to put a real button on each row. Trimmed
+    # to the essentials that matter for scanning (date/location/lure/fish/
+    # score) - every other field (structure, water clarity, conditions,
+    # notes, etc.) is one click away in the "Selected trip" panel or the full
+    # "Trip details" list below, both of which show everything.
+    GRID_COL_WIDTHS = [0.5, 1.1, 1.6, 2.4, 1.1, 0.8]
+    header_cols = st.columns(GRID_COL_WIDTHS)
+    for header_col, label in zip(header_cols, ["", "Date", "Location", "Lure", "Fish caught", "Score"]):
+        if label:
+            header_col.markdown(f"**{label}**")
+    st.divider()
+
+    grid_sorted = filtered.sort_values("trip_date", ascending=False)
+    for _, grid_row in grid_sorted.iterrows():
+        row_cols = st.columns(GRID_COL_WIDTHS)
+        if row_cols[0].button("🔍", key=f"grid_view_{grid_row['trip_id']}", help="View this trip's full detail"):
+            st.session_state["trip_history_selected_id"] = grid_row["trip_id"]
+            st.rerun()
+        row_cols[1].write(grid_row["trip_date"])
+        row_cols[2].write(grid_row["_location"])
+        row_cols[3].write(grid_row["lure_used"] or grid_row["_lure_type"] or "-")
+        fish_bit = str(grid_row["fish_caught"] or 0)
+        if grid_row.get("biggest_fish_lb"):
+            # biggest_fish_lb comes straight from the CSV as a plain string
+            # (read_all_trips does no numeric coercion) - no :g format spec,
+            # same as the detail view's rendering of this same field.
+            fish_bit += f" ({grid_row['biggest_fish_lb']} lb)"
+        row_cols[4].write(fish_bit)
+        grid_score = grid_row.get("predicted_score")
+        has_grid_score = grid_score not in (None, "") and not pd.isna(grid_score)
+        row_cols[5].write(f"{grid_score}/10" if has_grid_score else "-")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Trips shown", len(filtered))
@@ -196,6 +388,30 @@ else:
     c2.metric("Total bass caught", int(total_caught))
     success_rate = (pd.to_numeric(filtered["fish_caught"], errors="coerce").fillna(0) > 0).mean() * 100
     c3.metric("Trips with a catch", f"{success_rate:.0f}%")
+
+# Quick-jump panel for whichever trip's 🔍 button was last clicked in the grid
+# above - looked up against the FULL (unfiltered) df rather than filtered, so
+# it keeps showing even if the angler changes a filter afterward that would
+# otherwise exclude this trip. Sits right below the grid (not gated on
+# filtered being non-empty) so clicking 🔍 always "takes you to the record
+# detail" immediately, no scrolling required.
+selected_trip_id = st.session_state.get("trip_history_selected_id")
+if selected_trip_id:
+    selected_matches = df[df["trip_id"] == selected_trip_id]
+    if selected_matches.empty:
+        st.session_state.pop("trip_history_selected_id", None)
+    else:
+        selected_row = selected_matches.iloc[0]
+        st.divider()
+        sel_header_col, sel_close_col = st.columns([5, 1])
+        sel_header_col.subheader(
+            f"📌 {selected_row['trip_date']} · {selected_row['_location']} · {selected_row['segment']}"
+        )
+        if sel_close_col.button("✖ Close", key="close_selected_trip"):
+            st.session_state.pop("trip_history_selected_id", None)
+            st.rerun()
+        with st.container(border=True):
+            _render_trip_detail_body(selected_row, key_prefix="selected")
 
 # --- Calibration status (always over ALL logged trips, not just the filtered
 # view - it's a property of the model, not of whatever the user is looking at
@@ -214,165 +430,13 @@ for factor, counts in summary["detail"].items():
     st.write(f"**{label}** - {status}  \n"
              f"_{counts['on_total']} trips with factor present, {counts['off_total']} without_")
 
-# --- Trip details --------------------------------------------------------
-# (json_key, label, formatter). Every key is optional - legacy Log a Trip
-# rows and Spot Session rows each only populate a subset, so a row simply
-# shows whichever of these it has data for.
-FIELD_SPECS = [
-    ("source", "Logged from", lambda v: "🎯 Spot Session" if v == "spot_session" else "📝 Legacy (Log a Trip)"),
-    ("start_time", "Session start time", str),
-    ("water_temp_f", "Water temp", lambda v: f"{v}°F"),
-    ("secchi_ft", "Water clarity (secchi)", lambda v: f"{v} ft"),
-    ("stirred_up", "Muddy / stirred up", lambda v: "Yes" if v else None),
-    ("wind_band", "Wind", str),
-    ("avg_wind_mph", "Avg wind", lambda v: f"{v:.0f} mph" if isinstance(v, (int, float)) else str(v)),
-    ("light_condition", "Light condition", str),
-    ("precipitation", "Precipitation", str),
-    ("avg_cloud_pct", "Cloud cover", lambda v: f"{v:.0f}%" if isinstance(v, (int, float)) else str(v)),
-    ("pressure_trend_24h", "Pressure trend (24h)", lambda v: f"{v:+.1f} hPa" if isinstance(v, (int, float)) else str(v)),
-    ("moon_phase", "Moon phase", str),
-    ("fish_depth_ft", "Fish holding depth", lambda v: f"{v} ft"),
-    ("forage_seen", "Forage seen (pre-trip)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
-    ("lure_start_time", "Lure start time", str),
-    ("lure_end_time", "Lure end time", str),
-    ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
-    ("wind_direction", "Wind direction (logged)", str),
-    # depth_fished_ft/depth_fished_varied_note (an overall "primary depth" for the
-    # whole lure use) were dropped from the "Add results" form - per-fish "depth
-    # caught at" already captures this in more detail. Only trips logged before
-    # that change still set these two.
-    ("depth_fished_ft", "Depth fished", lambda v: f"{v} ft"),
-    ("depth_fished_varied_note", "Depth variation notes", str),
-    ("fish_activity", "Fish activity", str),
-    ("forage_activity", "Forage activity", str),
-    ("forage_type_seen", "Forage type seen (while fishing)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
-    # retrieve_speed/retrieve_style used to be logged once per lure-use entry; Spot
-    # Session's "Add results" redesign moved presentation to a per-fish record
-    # instead (see the "fish" renderer below), so these two only ever populate for
-    # trips logged before that change - kept here so that older history still
-    # renders, not because new entries write them.
-    ("retrieve_speed", "Retrieve speed", str),
-    ("retrieve_style", "Retrieve style", str),
-    ("trailer_used", "Trailer used", lambda v: "Yes" if v else None),
-    ("trailer_name", "Trailer", str),
-    ("trailer_color", "Trailer color", str),
-    ("trailer_category", "Trailer category", str),
-    ("modeled_thermocline_band_ft", "Modeled thermocline band", str),
-]
-
+# --- Trip details ---------------------------------------------------------
 st.divider()
 st.subheader("Trip details")
 if filtered.empty:
     st.caption("No trips to show for the current filters.")
 else:
     for _, row in filtered.sort_values("trip_date", ascending=False).iterrows():
-        cond = row["_conditions"]
         title = f"{row['trip_date']} · {row['_location']} · {row['segment']}"
         with st.expander(title):
-            # Edit navigates back to Spot Session pre-loaded with this trip's spot
-            # and data, so it can be corrected and saved back in place instead of
-            # appending a duplicate. Lives here (one real st.button per trip,
-            # inside its own expander) rather than as a grid cell above - the
-            # pinned Streamlit version's st.dataframe doesn't support real
-            # per-row interactive buttons, only this manually-looped detail
-            # section does. Only offered for Spot Session rows with a resolvable
-            # current spot - legacy "Log a Trip" rows and rows whose spot_id no
-            # longer matches a saved spot have nowhere in Spot Session to edit
-            # them back into.
-            can_edit = cond.get("source") == "spot_session" and row.get("spot_id") in spot_name_by_id
-            edit_col, delete_col = st.columns([1, 1])
-            if can_edit:
-                if edit_col.button("✏️ Edit this trip", key=f"edit_trip_{row['trip_id']}"):
-                    st.session_state["spot_session_target_id"] = row["spot_id"]
-                    st.session_state["spot_session_edit_trip_id"] = row["trip_id"]
-                    st.query_params["spot_id"] = row["spot_id"]
-                    st.query_params["edit_trip"] = row["trip_id"]
-                    st.switch_page("pages/6_Spot_Session.py")
-
-            # Delete is a two-step confirm (plain button flips a pending flag,
-            # which then swaps in a "Yes, delete it" / "Cancel" pair) rather
-            # than deleting on the first click - this permanently removes the
-            # row from trip_log.csv with no undo, so a single mis-click
-            # shouldn't be able to lose a logged trip.
-            delete_pending_key = f"delete_confirm_{row['trip_id']}"
-            if not st.session_state.get(delete_pending_key):
-                if delete_col.button("🗑️ Delete this trip", key=f"delete_trip_{row['trip_id']}"):
-                    st.session_state[delete_pending_key] = True
-                    st.rerun()
-            else:
-                st.warning("Delete this trip permanently? This can't be undone.")
-                dc1, dc2 = st.columns(2)
-                if dc1.button("Yes, delete it", key=f"confirm_delete_{row['trip_id']}", type="primary", width='stretch'):
-                    ok = delete_trip(row["trip_id"])
-                    if ok:
-                        token = github_token()
-                        if token:
-                            commit_and_push(
-                                [TRIP_LOG_PATH], token, repo_slug(), f"Delete trip {row['trip_id']} from Trip History",
-                            )
-                        st.session_state.pop(delete_pending_key, None)
-                        st.toast("Trip deleted.", icon="✅")
-                    else:
-                        st.session_state.pop(delete_pending_key, None)
-                        st.toast("Couldn't find that trip - it may have already been removed.", icon="⚠️")
-                    st.rerun()
-                if dc2.button("Cancel", key=f"cancel_delete_{row['trip_id']}", width='stretch'):
-                    st.session_state.pop(delete_pending_key, None)
-                    st.rerun()
-            # predicted_score is blank for a trip logged via "Add results" without ever
-            # filling in "Conditions right now" first - no live reading, no score.
-            raw_score = row.get("predicted_score")
-            has_score = raw_score not in (None, "") and not pd.isna(raw_score)
-            top_bits = [
-                f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
-                f"**Technique:** {row['technique_used'] or '-'}",
-                f"**Fish caught:** {row['fish_caught']}"
-                + (f", biggest {row['biggest_fish_lb']} lb" if row.get("biggest_fish_lb") else ""),
-                f"**Predicted score:** {raw_score}/10" if has_score else "**Predicted score:** n/a (no live conditions entered)",
-            ]
-            st.markdown("  \n".join(top_bits))
-            if row.get("notes"):
-                st.caption(f"Notes: {row['notes']}")
-
-            detail_lines = []
-            for key, label, fmt in FIELD_SPECS:
-                value = cond.get(key)
-                if value in (None, "", [], False) and key not in ("stirred_up", "trailer_used"):
-                    continue
-                if key in ("stirred_up", "trailer_used") and not value:
-                    continue
-                try:
-                    formatted = fmt(value)
-                except (TypeError, ValueError):
-                    formatted = str(value)
-                if formatted is None:
-                    continue
-                detail_lines.append(f"- **{label}:** {formatted}")
-            if detail_lines:
-                st.markdown("\n".join(detail_lines))
-            else:
-                st.caption("No additional condition details recorded for this trip.")
-
-            # Per-fish catch records (Spot Session's "Add results" section) - a list of
-            # dicts, one per fish, so it gets its own renderer rather than the generic
-            # single-line FIELD_SPECS formatter above (which would otherwise show an
-            # unreadable raw Python list-of-dicts string).
-            fish_list = cond.get("fish")
-            if isinstance(fish_list, list) and fish_list:
-                st.markdown(f"**Fish caught ({len(fish_list)}):**")
-                for i, fish in enumerate(fish_list, start=1):
-                    if not isinstance(fish, dict):
-                        continue
-                    bits = [fish.get("species") or "Unknown species"]
-                    if fish.get("weight_lb"):
-                        bits.append(f"{fish['weight_lb']:g} lb")
-                    if fish.get("length_in"):
-                        bits.append(f"{fish['length_in']:g} in")
-                    if fish.get("depth_ft"):
-                        bits.append(f"{fish['depth_ft']:g} ft deep")
-                    presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
-                    if presentation:
-                        bits.append(presentation)
-                    st.markdown(f"- Fish #{i}: {', '.join(str(b) for b in bits)}")
-                    if fish.get("notes"):
-                        st.caption(f"　{fish['notes']}")
+            _render_trip_detail_body(row, key_prefix="list")
