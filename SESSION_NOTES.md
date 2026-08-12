@@ -1110,6 +1110,35 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     intentionally-neutral Summer Stratified band still doesn't fire - plus two new
     tests confirming moon phase and cloud cover are each genuinely two-sided now) and
     the AppTest smoke test across all pages that can run in this sandbox.
+38. **Start a Spot Session directly, without going through the Lake Map first** -
+    previously the only way to reach `pages/6_Spot_Session.py` with a spot loaded was
+    the Lake Map page's "🎯 Fish this spot now" button; landing on Spot Session with no
+    spot selected was a dead end (an info message + a button back to the map). Added a
+    `st.selectbox` of the angler's own saved spots (alphabetized, `get_lake_spots()` -
+    the same `data/lake_spots.csv` catalog the Lake Map page and the 7-Day Forecast's
+    Location picker, entry 36, both already read from) right on that dead-end screen,
+    with a `"— choose a saved spot —"` placeholder as index 0 (same index-offset
+    pattern `core/activity_log.py`'s `lure_picker_options()`/`OTHER_LABEL` already
+    uses, for the same reason: robust against two spots ever sharing a name, since the
+    real value is the list index, not the display string). Picking one sets
+    `st.session_state["spot_session_target_id"]`/`st.query_params["spot_id"]` - the
+    exact same two-channel handoff the Lake Map button already writes to, per the
+    comment already on that code from entry 30's fix for the original "clicked a
+    saved spot, got 'No spot selected'" bug - then calls `st.rerun()`, so the rest of
+    the page (which only ever reads spot_id from those same two places) treats
+    "arrived via this dropdown" identically to "arrived via
+    the map," no separate code path needed. If the angler has no saved spots yet, the
+    dropdown is skipped in favor of a caption pointing them at the Lake Map page to
+    drop a pin first, rather than showing an empty/single-option selectbox.
+
+    Verified with the full test suite (untouched - no `core/` logic changed, this is
+    entirely inside `pages/6_Spot_Session.py`) plus two scratch `AppTest` scripts (not
+    committed): one confirming picking a saved spot from the new dropdown lands on
+    that exact spot's session screen with both handoff channels correctly set, one
+    confirming the no-saved-spots-yet fallback (temporarily emptying a backed-up copy
+    of `data/lake_spots.csv`) renders the caption instead of a dropdown with no
+    exception - plus the usual AppTest smoke test across all pages that can run in
+    this sandbox.
 
 ## Key design decisions & rationale
 

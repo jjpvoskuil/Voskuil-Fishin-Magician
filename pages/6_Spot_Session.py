@@ -41,9 +41,32 @@ if spot is not None:
 
 if spot is None:
     st.info(
-        "No spot selected. Go to the Lake Map page, click (or jump to) a saved spot, and use "
-        "\"🎯 Fish this spot now\" to get here with that spot's info pre-loaded."
+        "No spot selected yet. Pick one of your saved spots below to start a session here directly, "
+        "or go to the Lake Map page to click (or jump to) one instead."
     )
+
+    if spots:
+        CHOOSE_PROMPT = "— choose a saved spot —"
+        sorted_spots = sorted(spots, key=lambda s: s["name"])
+        picked_idx = st.selectbox(
+            "Start a session at",
+            options=range(len(sorted_spots) + 1),
+            format_func=lambda i: CHOOSE_PROMPT if i == 0 else sorted_spots[i - 1]["name"],
+        )
+        if picked_idx != 0:
+            picked_spot = sorted_spots[picked_idx - 1]
+            # Same session_state-primary/query_params-fallback handoff the Lake Map
+            # page's "Fish this spot now" button uses (see comment above) - setting
+            # it here means the rest of this page (which reads spot_id from those
+            # same two places) picks it up identically on the rerun below, no
+            # separate code path needed for "arrived via this dropdown" vs. "arrived
+            # via the map".
+            st.session_state["spot_session_target_id"] = picked_spot["spot_id"]
+            st.query_params["spot_id"] = picked_spot["spot_id"]
+            st.rerun()
+    else:
+        st.caption("You don't have any saved spots yet - drop a pin on the Lake Map page first.")
+
     if st.button("Go to Lake Map"):
         st.switch_page("pages/2_Lake_Map.py")
     st.stop()
