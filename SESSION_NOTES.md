@@ -1712,6 +1712,51 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       row count unchanged) instead of writing an empty entry. Full test suite
       unaffected (177 passing via `python3 -m pytest`).
 
+50. **Spot Session: a persistent "📍 Location" picker at the top of the page.**
+    Previously the only way to see/change which spot you were logging against was
+    the one-time "Start a session at" dropdown shown *only* when no spot was
+    selected yet - once a spot loaded (via the Lake Map's "🎯 Fish this spot now"
+    button, or a `?spot_id=` link), the only way to switch spots was clicking
+    "← Back to Lake Map" and starting over from there. The angler asked for a
+    saved-spot picker that's always visible at the top, and for it to already show
+    the right spot selected when arriving via the map click - no extra step.
+    - The old "no spot yet" dropdown and the new "spot already loaded" dropdown are
+      now the same `st.selectbox("📍 Location", ...)` element, just with slightly
+      different option lists: the no-spot-yet branch keeps its `"— choose a saved
+      spot —"` placeholder at index 0 (unchanged from before), while the
+      already-loaded branch drops the placeholder entirely and its `index=` is
+      computed to match whatever spot is actually current - so it always opens
+      already pointed at the right one, never needing to be touched.
+    - Getting "always pre-selected correctly regardless of how you got here" right
+      needed the same pattern already used for `lure_entry_seq_key`-folded widget
+      keys elsewhere on this page: the picker's `key` is
+      `f"spot_picker_{spot['spot_id']}"` - i.e. it changes every time the loaded
+      spot changes, for ANY reason (map click, a shared link, or picking a
+      different spot from this same dropdown a moment ago). A fresh key means
+      Streamlit treats it as a brand-new widget and applies the `index=` default
+      fresh; a single fixed key would have kept whatever the angler last picked
+      from the dropdown itself, ignoring a spot that arrived some other way (e.g.
+      clicking a different pin's "Fish this spot now" button after already having
+      one spot open) - Streamlit doesn't re-apply `index=` for an already-seen key
+      no matter what code passes it on a later run.
+    - When the dropdown's own selection differs from the spot actually loaded (the
+      angler picked something new), it writes to `spot_session_target_id`/
+      `?spot_id=` and calls `st.rerun()` - the exact same session_state-primary/
+      query_params-fallback handoff the Lake Map's own button already used, so
+      there's still only one navigation mechanism for "how do I load a different
+      spot session" no matter which UI element triggers it.
+    - Verified via `AppTest`: picking a spot from the placeholder dropdown
+      navigates to the right spot (confirmed via the resulting `st.subheader`
+      text, not just session_state, so the actual render is checked, not just the
+      routing variable); that spot's own picker instance is then correctly
+      pre-selected to itself (no placeholder, no extra click); landing directly
+      with `spot_session_target_id` pre-set (simulating the Lake Map's button)
+      shows the right spot's name in both the header and the picker with zero
+      interaction needed; switching to a second spot via the dropdown while one is
+      already loaded correctly navigates and re-renders around the new spot, with
+      the new spot's own `spot_picker_<id>` key present in session_state afterward.
+      Full test suite unaffected (177 passing via `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
