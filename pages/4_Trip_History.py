@@ -28,9 +28,12 @@ import pandas as pd
 import streamlit as st
 
 from core.appstate import get_lake_spots, github_token, repo_slug
-from core.storage import read_all_trips, delete_trip, TRIP_LOG_PATH, commit_and_push
+from core.storage import (
+    read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push,
+)
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
-from core.lures import LURE_PROFILES
+from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
+from core.scoring import SEGMENTS
 
 st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", layout="wide")
 st.title("📊 Trip History & Model Calibration")
@@ -266,6 +269,81 @@ def _render_trip_detail_body(row, key_prefix):
                 st.caption(f"　{fish['notes']}")
 
 
+# --- Grid inline-edit helpers -------------------------------------------------
+# Pure/pandas-only (no Streamlit calls) so the diffing logic can be unit
+# tested without spinning up a script run - st.data_editor itself isn't
+# reachable from AppTest in the pinned Streamlit/testing version, so this is
+# the part that actually gets test coverage; see _scratch_grid_edit_test.py.
+def _norm_date_str(v):
+    if pd.isna(v):
+        return ""
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return v.date().isoformat()
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return str(v)
+
+
+def _norm_text(v):
+    if pd.isna(v):
+        return ""
+    return str(v).strip()
+
+
+def _norm_int(v):
+    return int(v) if pd.notna(v) else 0
+
+
+def _norm_float_or_none(v):
+    return float(v) if pd.notna(v) else None
+
+
+# Only columns a straightforward flat trip_log.csv field maps to are
+# editable here - segment/structure_type/water_clarity/lure_used/color_used/
+# fish_caught/biggest_fish_lb/notes/trip_date. Location (needs spot_id
+# resolution) and anything pulled from conditions_json (lure type, fish/
+# forage activity, predicted score) stay read-only in the grid; those still
+# go through "Edit this trip" -> Spot Session, which already round-trips
+# conditions_json correctly (see the edit-mode prefill fix a few sessions
+# back).
+COLUMN_NORMALIZERS = {
+    "trip_date": _norm_date_str,
+    "segment": _norm_text,
+    "structure_type": _norm_text,
+    "water_clarity": _norm_text,
+    "lure_used": _norm_text,
+    "color_used": _norm_text,
+    "notes": _norm_text,
+    "fish_caught": _norm_int,
+    "biggest_fish_lb": _norm_float_or_none,
+}
+
+
+def _normalize_grid_row(df, trip_id, columns):
+    return {col: COLUMN_NORMALIZERS[col](df.loc[trip_id, col]) for col in columns}
+
+
+def _grid_edit_diff(original_df, edited_df, editable_columns):
+    """Compare original_df and edited_df (both indexed by trip_id, same
+    columns) and return {trip_id: {every editable column: normalized new
+    value}} for each row where at least one editable column's normalized
+    value actually changed. Every editable column is included for a changed
+    row (not just the ones that differ) so the caller has a complete set of
+    values to build a replacement TripEntry from."""
+    changes = {}
+    for trip_id in original_df.index:
+        if trip_id not in edited_df.index:
+            continue
+        old = _normalize_grid_row(original_df, trip_id, editable_columns)
+        new = _normalize_grid_row(edited_df, trip_id, editable_columns)
+        if old != new:
+            changes[trip_id] = new
+    return changes
+
+
+GRID_EDITABLE_COLUMNS = list(COLUMN_NORMALIZERS.keys())
+
+
 # --- Filters -----------------------------------------------------------------
 st.subheader("Filters")
 
@@ -346,41 +424,151 @@ st.caption(f"Showing {len(filtered)} of {len(df)} logged trips.")
 if filtered.empty:
     st.warning("No trips match these filters.")
 else:
-    # A real per-row grid (st.columns per trip) rather than st.dataframe - the
-    # pinned Streamlit version's st.dataframe doesn't support real per-row
-    # interactive buttons (only st.column_config.LinkColumn, which can only
-    # produce a clickable URL, not run the "select this trip" logic below), so
-    # a manual grid is the only way to put a real button on each row. Trimmed
-    # to the essentials that matter for scanning (date/location/lure/fish/
-    # score) - every other field (structure, water clarity, conditions,
-    # notes, etc.) is one click away in the "Selected trip" panel or the full
-    # "Trip details" list below, both of which show everything.
-    GRID_COL_WIDTHS = [0.5, 1.1, 1.6, 2.4, 1.1, 0.8]
-    header_cols = st.columns(GRID_COL_WIDTHS)
-    for header_col, label in zip(header_cols, ["", "Date", "Location", "Lure", "Fish caught", "Score"]):
-        if label:
-            header_col.markdown(f"**{label}**")
-    st.divider()
+    # A wide, scrollable, inline-editable grid via st.data_editor - restores
+    # the original 14-field view (this used to be a plain st.dataframe before
+    # a manual st.columns-per-row grid replaced it just to get a real 🔍
+    # button on each row, since st.dataframe/st.data_editor can't host a real
+    # per-row button in this pinned Streamlit version - only
+    # st.column_config.LinkColumn, a clickable URL). Trade-off: no more
+    # click-a-row-to-jump; use the "Jump to a trip's detail" picker below the
+    # grid instead, which drives the same "Selected trip" panel the 🔍 button
+    # used to.
+    #
+    # Only the columns that map straight onto a flat trip_log.csv field are
+    # editable (see COLUMN_NORMALIZERS above) - location, lure type, fish/
+    # forage activity, and predicted score stay read-only here since editing
+    # those safely means touching spot_id or conditions_json, which "Edit
+    # this trip" (Spot Session) already knows how to do correctly.
+    st.caption(
+        "Scroll right for every field. Date, time of day, structure, water "
+        "clarity, lure, color, fish caught, biggest fish, and notes are "
+        "editable here - changes save automatically. Location, lure type, "
+        "fish/forage activity, and score are shown for reference only; use "
+        "\"✏️ Edit this trip\" (via the detail picker below) to change those."
+    )
 
     grid_sorted = filtered.sort_values("trip_date", ascending=False)
-    for _, grid_row in grid_sorted.iterrows():
-        row_cols = st.columns(GRID_COL_WIDTHS)
-        if row_cols[0].button("🔍", key=f"grid_view_{grid_row['trip_id']}", help="View this trip's full detail"):
-            st.session_state["trip_history_selected_id"] = grid_row["trip_id"]
-            st.rerun()
-        row_cols[1].write(grid_row["trip_date"])
-        row_cols[2].write(grid_row["_location"])
-        row_cols[3].write(grid_row["lure_used"] or grid_row["_lure_type"] or "-")
-        fish_bit = str(grid_row["fish_caught"] or 0)
-        if grid_row.get("biggest_fish_lb"):
-            # biggest_fish_lb comes straight from the CSV as a plain string
-            # (read_all_trips does no numeric coercion) - no :g format spec,
-            # same as the detail view's rendering of this same field.
-            fish_bit += f" ({grid_row['biggest_fish_lb']} lb)"
-        row_cols[4].write(fish_bit)
-        grid_score = grid_row.get("predicted_score")
-        has_grid_score = grid_score not in (None, "") and not pd.isna(grid_score)
-        row_cols[5].write(f"{grid_score}/10" if has_grid_score else "-")
+    grid_display = grid_sorted.set_index("trip_id")[[
+        "trip_date", "segment", "_location", "structure_type", "water_clarity",
+        "_lure_type", "lure_used", "color_used", "_fish_activity", "_forage_activity",
+        "fish_caught", "biggest_fish_lb", "predicted_score", "notes",
+    ]].copy()
+    grid_display["trip_date"] = pd.to_datetime(grid_display["trip_date"], errors="coerce")
+    grid_display["fish_caught"] = pd.to_numeric(grid_display["fish_caught"], errors="coerce").fillna(0).astype(int)
+    grid_display["biggest_fish_lb"] = pd.to_numeric(grid_display["biggest_fish_lb"], errors="coerce")
+    grid_display["predicted_score"] = pd.to_numeric(grid_display["predicted_score"], errors="coerce")
+
+    # SelectboxColumn requires every value already present in the column to
+    # be one of its options, or Streamlit errors rendering that cell - so the
+    # option lists are the canonical set plus whatever's actually in this
+    # data (legacy/blank values included) rather than just the canonical set
+    # on its own.
+    def _select_options(canonical, series):
+        observed = set(v for v in series.dropna().unique().tolist() if v)
+        return [""] + sorted(set(canonical) | observed)
+
+    edited_grid = st.data_editor(
+        grid_display,
+        key="trip_history_grid_editor",
+        width="stretch",
+        hide_index=True,
+        num_rows="fixed",
+        disabled=["_location", "_lure_type", "_fish_activity", "_forage_activity", "predicted_score"],
+        column_config={
+            "trip_date": st.column_config.DateColumn("Date"),
+            "segment": st.column_config.SelectboxColumn(
+                "Time of day", options=_select_options(SEGMENTS, grid_display["segment"]),
+            ),
+            "_location": st.column_config.TextColumn("Location"),
+            "structure_type": st.column_config.SelectboxColumn(
+                "Structure", options=_select_options(STRUCTURE_TYPES, grid_display["structure_type"]),
+            ),
+            "water_clarity": st.column_config.SelectboxColumn(
+                "Water clarity", options=_select_options(WATER_CLARITY_OPTIONS, grid_display["water_clarity"]),
+            ),
+            "_lure_type": st.column_config.TextColumn("Lure type"),
+            "lure_used": st.column_config.TextColumn("Lure"),
+            "color_used": st.column_config.TextColumn("Color"),
+            "_fish_activity": st.column_config.TextColumn("Fish activity"),
+            "_forage_activity": st.column_config.TextColumn("Forage activity"),
+            "fish_caught": st.column_config.NumberColumn("Fish caught", min_value=0, step=1),
+            "biggest_fish_lb": st.column_config.NumberColumn("Biggest fish (lb)", min_value=0.0, step=0.25, format="%.2f"),
+            "predicted_score": st.column_config.NumberColumn("Score", format="%.1f"),
+            "notes": st.column_config.TextColumn("Notes"),
+        },
+    )
+
+    # Auto-save: st.data_editor commits (and reruns the script) as soon as a
+    # cell edit is confirmed, so simply diffing the just-rendered edited copy
+    # against grid_display on every run - no separate "Save" button - is
+    # enough to make an edit "just update," matching what was asked for.
+    grid_changes = _grid_edit_diff(grid_display, edited_grid, GRID_EDITABLE_COLUMNS)
+    if grid_changes:
+        rows_by_id = {r["trip_id"]: r for r in rows}
+        saved_ids, missing_ids = [], []
+        for trip_id, new_vals in grid_changes.items():
+            original_row = rows_by_id.get(trip_id)
+            if not original_row:
+                missing_ids.append(trip_id)
+                continue
+            raw_score = original_row.get("predicted_score")
+            entry = TripEntry(
+                trip_date=new_vals["trip_date"],
+                segment=new_vals["segment"],
+                spot_id=original_row["spot_id"],
+                spot_name=original_row["spot_name"],
+                structure_type=new_vals["structure_type"],
+                water_clarity=new_vals["water_clarity"],
+                lure_used=new_vals["lure_used"],
+                color_used=new_vals["color_used"],
+                technique_used=original_row.get("technique_used", ""),
+                fish_caught=new_vals["fish_caught"],
+                biggest_fish_lb=new_vals["biggest_fish_lb"],
+                predicted_score=float(raw_score) if raw_score not in (None, "") else None,
+                conditions=original_row["_conditions"],
+                notes=new_vals["notes"],
+                trip_id=trip_id,
+                logged_at=original_row.get("logged_at") or "",
+            )
+            if update_trip(entry):
+                saved_ids.append(trip_id)
+            else:
+                missing_ids.append(trip_id)
+        if saved_ids:
+            token = github_token()
+            if token:
+                plural = "s" if len(saved_ids) != 1 else ""
+                commit_and_push(
+                    [TRIP_LOG_PATH], token, repo_slug(),
+                    f"Update trip{plural} {', '.join(saved_ids)} via Trip History grid edit",
+                )
+            st.toast(f"Saved {len(saved_ids)} trip{'s' if len(saved_ids) != 1 else ''}.", icon="✅")
+        if missing_ids:
+            st.toast("Couldn't save some edits - that trip may have been deleted elsewhere.", icon="⚠️")
+        st.rerun()
+
+    # Jump to a trip's full detail - replaces the old per-row 🔍 button, which
+    # st.data_editor can't host (no real per-row buttons in this Streamlit
+    # version). Drives the same "Selected trip" panel below.
+    # Suffixed with a short trip_id fragment so two trips with otherwise
+    # identical date/location/segment/catch labels don't collide into one
+    # dict key (which would silently drop one of them from the picker).
+    jump_options = {
+        (
+            f"{r['trip_date']} · {r['_location']} · {r['segment']}"
+            + (f" · {r['fish_caught']} caught" if str(r.get('fish_caught') or '0') != '0' else "")
+            + f" ({r['trip_id'][:6]})"
+        ): r["trip_id"]
+        for _, r in grid_sorted.iterrows()
+    }
+    jc1, jc2 = st.columns([4, 1])
+    jump_label = jc1.selectbox(
+        "Jump to a trip's full detail", options=list(jump_options.keys()),
+        index=None, placeholder="Pick a trip...", key="trip_history_jump_picker",
+    )
+    if jc2.button("🔍 View", key="trip_history_jump_button", disabled=jump_label is None):
+        st.session_state["trip_history_selected_id"] = jump_options[jump_label]
+        st.rerun()
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Trips shown", len(filtered))

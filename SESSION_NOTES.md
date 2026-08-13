@@ -1977,6 +1977,73 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       unchanged. Full test suite unaffected (177 passing via
       `python3 -m pytest`).
 
+54. **Trip History grid: wide/scrollable again, plus inline editing that
+    auto-saves.** Requested directly: "We used to be able to scroll over and
+    see more fields. That would be ideal to have back. Also, it would be
+    great if we can edit directly in the filter grid and have that update
+    once edited." Entry 52's manual `st.columns`-per-row grid (built just to
+    get a real 🔍 button on each row, since `st.dataframe`/`st.data_editor`
+    can't host a real per-row button in this pinned Streamlit version - only
+    `st.column_config.LinkColumn`, a clickable URL) had trimmed the grid down
+    to 6 columns to make room for that button, losing the original 14-field
+    `st.dataframe` view from before entry 52.
+    - Replaced the manual grid with `st.data_editor` over the same 14 fields
+      as the original pre-entry-52 `st.dataframe` (trip_date, segment,
+      location, structure_type, water_clarity, lure type, lure_used,
+      color_used, fish_activity, forage_activity, fish_caught,
+      biggest_fish_lb, predicted_score, notes) - wide and scrollable again,
+      `width="stretch"` plus the page's existing `layout="wide"`.
+    - Only the columns that map onto a flat `trip_log.csv` field are
+      editable: trip_date, segment, structure_type, water_clarity,
+      lure_used, color_used, fish_caught, biggest_fish_lb, notes (via
+      `st.column_config.DateColumn`/`SelectboxColumn`/`TextColumn`/
+      `NumberColumn`). Location, lure type, fish/forage activity, and
+      predicted score stay read-only (`disabled=[...]`) in the grid -
+      location needs spot_id resolution and the other three live inside
+      `conditions_json`, and both already have a correct, tested path
+      through "✏️ Edit this trip" → Spot Session (entry 51/53) that a quick
+      grid-cell edit would risk half-updating (e.g. changing `_lure_type`
+      inline wouldn't touch the actual `lure_category` inside
+      `conditions_json`, so the two would silently disagree).
+    - Auto-save, no separate "Save" button: `st.data_editor` already commits
+      an edit and reruns the script as soon as a cell is confirmed, so the
+      page just diffs the freshly-edited DataFrame against the pre-edit one
+      on every run (indexed by `trip_id`) and calls `update_trip()` for any
+      row where a normalized value actually changed, then one
+      `commit_and_push()` covering every changed trip in that run. The
+      diff/normalize logic (`_grid_edit_diff`, `_normalize_grid_row`,
+      `COLUMN_NORMALIZERS`) is deliberately pure pandas/stdlib with no
+      Streamlit calls, specifically so it has real unit-test coverage -
+      `st.data_editor` cells aren't reachable/editable through `AppTest` in
+      this Streamlit/testing version (only read-only `st.dataframe` is), so
+      this is the one part of the feature that *can* be exercised outside a
+      live browser. Verified (scratch, not committed): unedited rows produce
+      no diff even when `st.data_editor` hands back a different-but-equal
+      representation (e.g. `datetime.date` vs the `pd.Timestamp` the grid was
+      built with); two NaN `biggest_fish_lb` values on both sides don't
+      false-positive as "changed" (`NaN != NaN` needs an explicit guard);
+      clearing a numeric field normalizes to `None`/`0` correctly; a real
+      edit is captured with the rest of that row's editable columns included
+      alongside it (needed to rebuild a complete `TripEntry`, not just the
+      touched cell).
+    - Losing the per-row 🔍 button (no per-row buttons possible in
+      `st.data_editor`, same constraint as `st.dataframe`) is offset with a
+      "Jump to a trip's full detail" picker (a labeled `st.selectbox` +
+      "🔍 View" button) right below the grid, which sets the same
+      `trip_history_selected_id` session state the old button did and opens
+      the same "📌 Selected trip" panel - so the wider Edit/Delete/per-fish
+      detail flow is unchanged, just reached by picking from a dropdown
+      instead of clicking a row.
+    - Verified via `AppTest`: the page renders with no exceptions after the
+      change; the jump picker lists exactly one option per real logged trip
+      (5); selecting a trip and clicking "🔍 View" sets
+      `trip_history_selected_id` and renders the matching "📌 ..." panel
+      subheader, with `data/trip_log.csv` left byte-identical afterward
+      (confirming the read-only AppTest pass makes no writes). Full test
+      suite unaffected (177 passing via `python3 -m pytest`). The inline-edit
+      auto-save path itself (the part `AppTest` can't reach) should get a
+      live-browser check before calling this fully done.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
