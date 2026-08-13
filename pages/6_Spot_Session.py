@@ -124,7 +124,18 @@ if edit_trip_id:
     else:
         st.session_state["spot_session_edit_trip_id"] = edit_trip_id
         st.query_params["edit_trip"] = edit_trip_id
-        edit_prefill_done_key = f"edit_prefill_done_{edit_trip_id}"
+        # Keyed by BOTH edit_trip_id and the currently-loaded spot_id, not
+        # just edit_trip_id alone - every widget the prefill block below
+        # seeds is scoped to spot_id (e.g. f"log_wind_speed_{spot_id}"), so
+        # switching the "📍 Location" picker to a different spot WHILE
+        # editing (the angler correcting which spot a trip actually
+        # happened at) lands on a brand-new set of spot-scoped widget keys
+        # that have never been seeded. A key that only tracked edit_trip_id
+        # would already read as "done" from the original spot and skip
+        # re-seeding these - which is exactly what happened when reported:
+        # switching location mid-edit made the lure/conditions/notes/fish
+        # fields all revert to blank, as if starting a brand new session.
+        edit_prefill_done_key = f"edit_prefill_done_{edit_trip_id}_{spot['spot_id']}"
         try:
             editing_cond = json.loads(editing_trip.get("conditions_json") or "{}")
         except json.JSONDecodeError:
@@ -134,9 +145,16 @@ if edit_trip_id:
 def _exit_edit_mode():
     """Drop every bit of edit-mode state for whichever trip was being
     edited, so the next run lands back in normal "log a new session" mode
-    for this same spot."""
-    if edit_trip_id and edit_prefill_done_key:
-        st.session_state.pop(edit_prefill_done_key, None)
+    for this same spot. Sweeps every edit_prefill_done_<trip_id>_<spot_id>
+    flag for this trip, not just the current spot's - switching location
+    mid-edit (see above) can leave one behind per spot visited, and a stale
+    leftover from a spot no longer being edited would silently skip
+    prefill if this same trip is ever edited again in this browser
+    session."""
+    if edit_trip_id:
+        prefix = f"edit_prefill_done_{edit_trip_id}_"
+        for stale_key in [k for k in st.session_state.keys() if k.startswith(prefix)]:
+            st.session_state.pop(stale_key, None)
     st.session_state.pop("spot_session_edit_trip_id", None)
     st.query_params.pop("edit_trip", None)
 

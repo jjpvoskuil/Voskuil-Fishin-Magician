@@ -99,7 +99,10 @@ key decisions, and known open items.
   Session on that same spot with everything pre-filled from that trip (conditions,
   lure/trailer, timing, notes, fish caught), and the usual "Log this lure"/"Log this
   session" pair is replaced with a single **"💾 Save changes"**/"Cancel edit" pair -
-  saving updates that same trip in place rather than adding a duplicate.
+  saving updates that same trip in place rather than adding a duplicate. Logged it
+  against the wrong spot? While editing, just pick the right one from the "📍
+  Location" dropdown at the top before saving - everything else you'd already
+  filled in carries over to the new spot instead of clearing out.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a

@@ -1931,6 +1931,52 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       how the detail view already rendered this same field. Full test suite
       unaffected (177 passing via `python3 -m pytest`).
 
+53. **Fixed: editing a trip's location mid-edit blanked out everything else.**
+    Reported directly: "I edited the location from Stripe Point to Midnight
+    Point and everything after that then changed as if it was a new record."
+    Reproduced and root-caused via `AppTest` (not live browser this time -
+    entry 51's edit-mode prefill logic was already proven correct in a live
+    session for the *no-location-change* case, so the bug had to be
+    specifically about changing spots mid-edit).
+    - Root cause: `edit_prefill_done_key` (the one-time-seed guard from entry
+      51) was keyed by `edit_trip_id` alone - `f"edit_prefill_done_{trip_id}"`.
+      It gets set `True` the first time the prefill block runs, for whichever
+      spot the angler landed on. But every widget that block seeds is itself
+      keyed by spot_id (`f"log_wind_speed_{spot_id}"`,
+      `f"log_notes_{spot_id}_{lure_seq}"`, etc. - see entry 51). Switching the
+      "📍 Location" picker to a different spot while editing lands on a
+      **different set of spot-scoped widget keys that have never been
+      seeded** - but since `edit_prefill_done_key` was already `True` from
+      the original spot, the prefill block's guard skipped re-running
+      entirely, so those new-spot widgets just showed their normal blank
+      defaults. Exactly the "changed as if it was a new record" symptom.
+    - Fix: `edit_prefill_done_key` is now `f"edit_prefill_done_{trip_id}_{spot_id}"` -
+      composite on both, so switching spots mid-edit is treated as "not yet
+      prefilled for this (trip, spot) pair" and the seed block runs again,
+      carrying the trip's lure/conditions/notes/fish data forward into the
+      new spot's widget keys. `_exit_edit_mode()` now sweeps *every*
+      `edit_prefill_done_<trip_id>_*` key (not just the current spot's) on
+      Save/Cancel, so a stale `True` from a spot no longer being edited can't
+      silently skip prefill if this same trip is ever edited again later in
+      the same browser session.
+    - This isn't just a prefill-cosmetics fix - `_save_current_lure_entry()`
+      already built `spot_id`/`spot_name` from whichever spot is *currently*
+      loaded (not the trip's original one), so "Save changes" after
+      switching location now does exactly what was asked: moves the trip to
+      the new spot (same `trip_id`, via `update_trip`) while keeping
+      everything else that was filled in.
+    - Verified via a dedicated `AppTest` regression case: edit a real trip at
+      Stripe Island Point (confirming the original prefill first), switch
+      the location picker to Midnight Point, confirm the edit banner is
+      still showing and every previously-prefilled field (wind speed/
+      direction, notes, lure selection, fish record) still shows the same
+      values under the new spot's keys, then save and confirm the row
+      updated in place (still 6 rows) with `spot_id`/`spot_name` now set to
+      Midnight Point. A second check confirmed the ordinary no-location-
+      change edit path (entry 51's original scenario) still works
+      unchanged. Full test suite unaffected (177 passing via
+      `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
