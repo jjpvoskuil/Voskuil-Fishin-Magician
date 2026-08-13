@@ -6,6 +6,28 @@ Picking this project back up in a new Claude chat? Use [`NEW_SESSION_PROMPT.md`]
 to kick things off, and see [`SESSION_NOTES.md`](SESSION_NOTES.md) for the full development history,
 key decisions, and known open items.
 
+## Using it on a phone
+
+The app is usable from a phone browser, not just desktop. Two things that used to make it
+rough on a phone are fixed: the sidebar's collapse/expand toggle is now a real, high-contrast
+button (Streamlit's default is a tiny low-contrast arrow easy to miss on a touchscreen), and
+wide multi-column rows (the 7-Day Forecast's day-by-day score row, its time-of-day breakdown,
+and "Today at a glance") reflow into a readable stacked layout below a phone-width breakpoint
+instead of squishing into unreadable slivers - see `core.ui.inject_mobile_css()`, called near
+the top of every page. Trip History's grid stays a single wide `st.data_editor` on a phone
+(swipe left within the grid itself, not the page, to see the rest of its columns) rather than
+being redesigned into a stacked-card view - a deliberate scope choice to avoid losing inline
+editing on the one page that already has it.
+
+Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
+this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
+iframe under its own wrapper page, and that wrapper page - not this repo - owns the `<head>`
+Safari actually reads when you bookmark it, including its `apple-touch-icon`/`manifest.json`
+(confirmed by inspecting the live app: both already point at Streamlit's own generic
+`favicon_*.png`/`manifest.json`, not anything this repo could serve). So the home-screen icon
+will carry Streamlit's default branding rather than a custom one - there's no code change in
+this repo that can override it on this hosting.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,

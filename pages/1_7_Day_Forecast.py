@@ -3,12 +3,13 @@ import streamlit as st
 from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory, github_token, repo_slug
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
-from core.ui import render_lure_recommendation, render_lake_setup_sidebar
+from core.ui import render_lure_recommendation, render_lake_setup_sidebar, inject_mobile_css
 from core.weather import lake_today
 from core.storage import commit_and_push
 from core.forecast_freeze import apply_freeze, FREEZE_PATH
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
+inject_mobile_css()
 st.title("📅 7-Day Largemouth Bass Forecast")
 
 today = lake_today()

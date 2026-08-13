@@ -20,11 +20,12 @@ from core.activity_log import (
     FISH_SPECIES_OPTIONS,
 )
 from core.lures import recommend, FORAGE_OPTIONS
-from core.ui import render_lure_recommendation, render_square_thumbnail
+from core.ui import render_lure_recommendation, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip
 from core.weather import lake_today
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
+inject_mobile_css()
 st.title("🎯 Spot Session")
 
 # session_state is the reliable channel from the "Fish this spot now" button on the

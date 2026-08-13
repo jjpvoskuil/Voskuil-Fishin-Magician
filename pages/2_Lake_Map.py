@@ -9,8 +9,10 @@ from core.lake_spots import (
 )
 from core.fish_attractors import fish_attractor_count
 from core.storage import commit_and_push
+from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
+inject_mobile_css()
 st.title("🗺️ Nolin Lake Map")
 st.caption(
     f"Real, GPS-placed fish attractors from Kentucky Fish & Wildlife ({fish_attractor_count():,} shown) "

@@ -3,8 +3,10 @@ import streamlit as st
 from core.appstate import get_weather_bundle, get_calibrated_weights
 from core.scoring import score_day
 from core.weather import lake_today
+from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
+inject_mobile_css()
 
 st.title("🎣 Voskuil Fishin' Magician")
 st.caption("Largemouth bass fishing forecasts for Nolin River Lake, KY")
