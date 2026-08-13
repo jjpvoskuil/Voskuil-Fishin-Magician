@@ -607,6 +607,28 @@ st.caption(
     "Trip History page to review, filter, and let it calibrate future suggestions."
 )
 
+# One-shot, non-toast confirmation that "Log this session" actually did
+# something - reported directly: after logging several lures with "Log
+# this lure" (which worked), clicking "Log this session" left the angler
+# unsure whether it saved and whether the form had actually reset for a
+# new session. Root cause, confirmed with a scratch AppTest repro against
+# real data (reverted afterward, no data lost): "Log this session" DOES
+# correctly skip writing a duplicate row when nothing new was picked (by
+# design - see has_pending_lure_data below) and DOES correctly reset
+# "Conditions during this lure use" back to defaults - but the only
+# confirmation was st.toast(), which is easy to miss on a phone, and if
+# those condition fields already happened to be sitting at their defaults
+# (very plausible - wind speed/fish activity aren't touched every visit),
+# there was no VISIBLE difference on screen before vs. after clicking, so
+# it read as "nothing happened" even though everything worked correctly.
+# Popped (shown once) rather than a standing banner, so it doesn't linger
+# on an unrelated later visit to this page.
+if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
+    st.success(
+        "✅ Session closed - conditions cleared for a new session. Pick a lure below whenever "
+        "you're ready to start logging again."
+    )
+
 # Fresh from the CSV every render (cheap - this file is small) rather than a
 # separate in-memory list, so it's correct even across a page refresh: every
 # result already logged for this exact spot+date, so switching lures mid-visit
@@ -1117,4 +1139,10 @@ with results_expander:
             # starts from a genuinely blank slate instead of carrying over
             # whatever this session's conditions happened to be.
             st.session_state[session_reset_pending_key] = True
+            # Shown once, right at the top of "Add results" (see above) -
+            # backstops the st.toast() calls above/inside
+            # _save_current_lure_entry() with a confirmation that survives
+            # long enough to actually be seen and doesn't depend on the
+            # conditions fields having visibly changed.
+            st.session_state[f"session_closed_banner_{spot['spot_id']}"] = True
             st.rerun()
