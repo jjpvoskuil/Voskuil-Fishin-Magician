@@ -117,7 +117,10 @@ this repo that can override it on this hosting.
   remember to click "Log this lure" one last time before wrapping up; it's a no-op if
   nothing's actually filled in), then clears the conditions group back to blank
   defaults and leaves the section open and empty, ready for a genuinely new session -
-  next time you fish this spot, its conditions won't carry over from today's. A
+  next time you fish this spot, its conditions won't carry over from today's. A green
+  "✅ Session closed" banner confirms this happened even when nothing on screen visibly
+  changed (e.g. wind speed/fish activity were already at their defaults) - it's not
+  just a toast, so it's still there to read a moment later. A
   running "📋 Already logged for this spot today" line lists everything saved so far
   today, across however many lures and sessions. Each lure still lands as its own row
   in the trip log (no combined/bundled entry), so Trip History's per-trip filtering

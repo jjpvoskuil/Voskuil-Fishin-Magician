@@ -2278,6 +2278,58 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     no exception after adding the `inject_mobile_css()` call. Also verified
     via a fresh `git clone` into a new temp directory before pushing.
 
+58. **Bug report: "Log this session" left the angler unsure whether it
+    saved and the form didn't look like it reset.** Reported after a real
+    on-the-water use: several lures logged fine with "Log this lure," but
+    clicking "Log this session" afterward gave no clear signal anything
+    happened. Investigated by reading the actual code path (entries 47-49)
+    plus a scratch `AppTest` repro run against a copy of the real spot/lure
+    data (`data/trip_log.csv` backed up and restored after, confirmed
+    byte-identical before/after - no real data touched) - **found the
+    underlying save/reset logic is correct, not broken**: with nothing new
+    picked since the last "Log this lure" (the reported scenario), the row
+    count correctly stayed unchanged (no duplicate/junk row - entry 49's
+    `has_pending_lure_data` guard working as designed), and the "Conditions
+    during this lure use" fields correctly reset to their coded defaults
+    (confirmed by setting wind speed to a non-default 12.0 mph before the
+    click and reading it back as 0.0 after). Also confirmed directly against
+    the angler's own live app history: three separate `git log` commits
+    ("Log trip ... from spot session") exist for the reported session, one
+    per lure - all three really did save.
+
+    So the data was never at risk - the actual gap is UX: the only
+    confirmation was `st.toast()`, which is easy to miss on a phone, and if
+    the "Conditions during this lure use" fields already happened to be
+    sitting at their defaults for that whole visit (plausible - wind speed/
+    fish activity aren't touched every time), there was **no visible change
+    on screen at all** before vs. after clicking "Log this session," so it
+    read as "nothing happened" even though everything worked. (Side note:
+    confirmed via a minimal isolated repro that `AppTest`'s own `at.toast`
+    collection doesn't capture a toast fired immediately before `st.rerun()`
+    within the same script run - an `AppTest` harness limitation, not
+    evidence the toast itself fails in the real deployed app; entries 47/48
+    already established live in-browser that this same toast-before-rerun
+    pattern does survive on the real Streamlit Cloud app.)
+
+    Fix: a one-shot, non-toast confirmation banner. `log_session_submitted`'s
+    handler now also sets `session_state[f"session_closed_banner_{spot_id}"]
+    = True` alongside the existing `session_reset_pending_key`; a check at
+    the top of "Add results" (`st.session_state.pop(...)`, so it renders
+    exactly once and never lingers on a later, unrelated visit) shows
+    `st.success("✅ Session closed - conditions cleared for a new session...")`
+    - a persistent inline element rather than an ephemeral toast, so it's
+    there to read regardless of whether anything else on the page visibly
+    changed, and regardless of whether "Log this session" also had to save
+    one last pending lure along the way (both branches set the flag).
+
+    Verified via two scratch `AppTest` scenarios (not committed, same
+    backed-up/restored `trip_log.csv` protocol): nothing pending (matches
+    the report) - row count unchanged, banner renders, and is gone on a
+    later unrelated rerun; something pending (a lure picked but never
+    individually logged) - row count +1 *and* the banner renders in the same
+    run. Full test suite unaffected (183 passing) plus the usual `AppTest`
+    smoke test across every page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
