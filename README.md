@@ -11,7 +11,12 @@ key decisions, and known open items.
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
-  best window(s) to fish each day.
+  best window(s) to fish each day. Today's scores update live as the weather forecast
+  refreshes throughout the day - except a window whose end time has already passed, which
+  locks in at whatever score it had the moment it closed instead of continuing to drift
+  as later weather data comes in (a forecast for a time that's already over isn't a
+  forecast anymore). That locked-in score, and the day's overall score recomputed to
+  match, survive app restarts - see `core/forecast_freeze.py`.
 - **Lure, color, and technique recommendations** for each time segment, tailored to season,
   water color/clarity, structure type, and (when you provide it) the depth you're marking
   fish at.
@@ -507,6 +512,9 @@ core/
   weather.py              Open-Meteo integration + water-temp estimate
   scoring.py              1-10 activity scoring engine (shared by the forecast and
                            Spot Session pages via manual_segment_score())
+  forecast_freeze.py       Locks in a 7-Day Forecast time segment's score once its
+                           window has passed + git commit-back, so it stops drifting
+                           with later weather refreshes (data/segment_score_freeze.csv)
   onwater.py               On-the-water condition bands (light/wind/visibility/water
                            temp/precipitation) used by the Spot Session page
   activity_log.py           Log-form vocabulary + inventory lure/trailer picker
