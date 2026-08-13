@@ -15,6 +15,76 @@ from .appstate import get_lake_spots
 MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
 OWNED_THUMBNAIL_PX = 64   # small on purpose - these are ownership flags, not the card's focus
 
+# Below this viewport width, wide multi-column rows (4+ columns) reflow
+# instead of squishing - see inject_mobile_css() below for why this needed
+# real measurement against the live app rather than just reasoning about
+# Streamlit's CSS from the outside.
+MOBILE_BREAKPOINT_PX = 700
+MOBILE_COLUMN_MIN_WIDTH_PX = 120
+
+
+def inject_mobile_css():
+    """Site-wide phone-usability CSS - call once near the top of every page,
+    right after st.set_page_config(). Two independent fixes:
+
+    1. **Bigger, higher-contrast collapsed-sidebar toggle.** Streamlit's own
+       collapsed-sidebar expand arrow (`stExpandSidebarButton`, the
+       "keyboard_double_arrow_right" icon button that appears top-left once
+       the sidebar is collapsed) is a small, low-contrast 28x28px hit target
+       by default - a widely-reported Streamlit usability complaint, worse on
+       a phone where it's also the only way back to Lake Setup Options/nav
+       and has to survive a thumb tap instead of a precise mouse click.
+       Enlarged and given a solid background so it reads as a button, not a
+       stray mark in the corner. Applied unconditionally (not just under the
+       mobile media query below) since a clearer toggle only helps on desktop
+       too.
+    2. **Reflow wide column rows below a phone-width breakpoint**, instead of
+       letting them squish unreadably. Verified directly against the live
+       deployed app (not just reasoned about): Streamlit's own
+       `stHorizontalBlock` already sets `flex-wrap: wrap`, but `st.metric`'s
+       label/value text has its own `white-space: nowrap` + ellipsis CSS, so
+       a column's min-content width collapses to almost nothing and the row
+       never actually triggers a wrap - each column just truncates in place
+       (e.g. the 7-Day Forecast's day-by-day score row and its 6-column
+       time-of-day breakdown becoming a strip of "Thu ...", "6..." slivers).
+       Giving each column a real minimum width forces the existing wrap to
+       actually fire once a row can't fit at that minimum. Scoped to rows of
+       3+ columns via `:has(> ... :nth-child(3))` so intentional 2-column
+       master/detail layouts (e.g. the Lake Map's map + detail panel, or a
+       page's own info + best-window pair) keep their original proportions
+       instead of being forced to an even split - only the wide metric/card
+       rows this was actually reported about are affected.
+    """
+    st.markdown(
+        f"""
+        <style>
+        button[data-testid="stExpandSidebarButton"] {{
+            width: 44px !important;
+            height: 44px !important;
+            background-color: #0e4f66 !important;
+            border-radius: 8px !important;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35) !important;
+        }}
+        button[data-testid="stExpandSidebarButton"] span[data-testid="stIconMaterial"] {{
+            color: #ffffff !important;
+            font-size: 26px !important;
+        }}
+
+        @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
+            [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)) {{
+                flex-wrap: wrap !important;
+            }}
+            [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3))
+                > div[data-testid="stColumn"] {{
+                min-width: {MOBILE_COLUMN_MIN_WIDTH_PX}px !important;
+                flex: 1 1 {MOBILE_COLUMN_MIN_WIDTH_PX}px !important;
+            }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
     """Render one inventory item's photo (if it has one) as a fixed-size,

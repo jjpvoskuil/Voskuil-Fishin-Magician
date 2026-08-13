@@ -34,8 +34,10 @@ from core.storage import (
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
 from core.scoring import SEGMENTS
+from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", layout="wide")
+inject_mobile_css()
 st.title("📊 Trip History & Model Calibration")
 
 rows = read_all_trips()
@@ -440,7 +442,8 @@ else:
     # those safely means touching spot_id or conditions_json, which "Edit
     # this trip" (Spot Session) already knows how to do correctly.
     st.caption(
-        "Scroll right for every field. Date, time of day, structure, water "
+        "Scroll right for every field (on a phone: swipe left within the grid itself, "
+        "not the page). Date, time of day, structure, water "
         "clarity, lure, color, fish caught, biggest fish, and notes are "
         "editable here - changes save automatically. Location, lure type, "
         "fish/forage activity, and score are shown for reference only; use "

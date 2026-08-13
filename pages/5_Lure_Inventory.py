@@ -10,12 +10,13 @@ from core.lure_inventory import (
 from core.lure_vision import identify_lure_photo
 from core.lures import LURE_CATEGORY_OPTIONS, guess_category_from_text
 from core.storage import commit_and_push
-from core.ui import render_square_thumbnail
+from core.ui import render_square_thumbnail, inject_mobile_css
 
 CARD_THUMBNAIL_PX = 160
 SCAN_THUMBNAIL_PX = 110
 
 st.set_page_config(page_title="Lure Inventory - Nolin Lake", page_icon="🧰", layout="wide")
+inject_mobile_css()
 st.title("🧰 Lure Inventory")
 st.caption(
     "Your tackle box, tracked: brand, full description, a photo, the last price you paid, and "

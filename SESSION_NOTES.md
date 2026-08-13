@@ -2169,6 +2169,115 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       suite unaffected (183 passing via `python3 -m pytest`, 177 existing +
       6 new).
 
+57. **Phone-friendliness pass: bigger sidebar toggle, reflowing multi-column
+    rows, Trip History left as-is (light touch).** The angler wants to
+    actually use this app standing at the lake on an iPhone. A prior session
+    had already ruled out website-wrapper "conversion" tools (MobiLoud/
+    Median/GoNative - they only add native packaging, they don't touch the
+    underlying page layout) and identified three known problems: the
+    collapsed sidebar's tiny toggle arrow, the 7-Day Forecast's wide
+    multi-column rows squishing on a phone, and Trip History's `st.data_editor`
+    grid (rebuilt in a prior session, entry 54) needing a fresh mobile check.
+    Confirmed priorities with the angler before a big layout pass (per the
+    session's own instructions): follow the suggested order (Spot Session/
+    Today first in spirit, then sidebar toggle + 7-Day Forecast reflow, then
+    Trip History), and for Trip History specifically, "light touch - keep the
+    grid, improve scrolling" over a bigger stacked-card redesign.
+
+    **Root-caused both known problems against the live deployed app**, not
+    just by reasoning about Streamlit's CSS - `resize_window` (the Chrome
+    tool) turned out not to actually shrink the rendered viewport in this
+    sandbox (`window.innerWidth` stayed at desktop width - 1512px - no matter
+    what size was requested; confirmed via `window.innerWidth`/`outerWidth`
+    reads after resizing, not just assumed), so real mobile-viewport
+    screenshots weren't obtainable here. Worked around it by discovering the
+    real DOM testids (`stExpandSidebarButton`, `stHorizontalBlock`,
+    `stColumn`, etc. - Streamlit Community Cloud actually serves the app
+    inside an iframe under its own wrapper page, at `.../~/+/`, not at the
+    top-level URL a user sees; had to navigate directly to that iframe URL to
+    read testids at all, since the top-level document has none of the app's
+    own content) and, since a `stHorizontalBlock`'s children lay out as
+    percentages of *its own* width rather than the viewport, forcing that
+    one element's width to 390px via injected inline styles - a valid way to
+    simulate a phone-width container regardless of the surrounding window
+    size, since flexbox wrapping is driven by the container's width, not
+    `window.innerWidth` itself.
+    - **Sidebar toggle**: confirmed live that `button[data-testid=
+      "stExpandSidebarButton"]` (the "keyboard_double_arrow_right" icon
+      button that appears once the sidebar is collapsed) is a 28x28px,
+      low-contrast (rgba(38,39,48,0.6)) hit target - exactly the "small,
+      easy-to-miss arrow" the angler described.
+    - **Column squish**: confirmed live that `stHorizontalBlock` already has
+      `flex-wrap: wrap` in this pinned Streamlit version - the actual root
+      cause is that `st.metric`'s label/value elements have their own
+      `white-space: nowrap` + ellipsis CSS, so a column's min-content width
+      collapses to almost nothing and the row never needs to wrap; each
+      column just truncates in place ("Thu ...", "6..."). Confirmed the fix
+      (a real per-column `min-width`) by injecting it live and re-measuring:
+      the 7-day score row went from one unreadable truncated row to a clean
+      2-per-row grid at a simulated 390px width, and the 6-segment breakdown
+      reflowed the same way.
+
+    **Implementation** (`core/ui.py`'s new `inject_mobile_css()`, called once
+    near the top of every page - home.py and all six `pages/*.py` files -
+    right after each page's own `st.set_page_config()`, the same "first
+    Streamlit call per page" pattern `st.navigation` already relies on):
+    - The collapsed-sidebar button is enlarged (44x44px) and given a solid
+      dark background + white icon, unconditionally (not gated to mobile
+      only) - a clearer toggle helps on desktop too, and it only ever shows
+      when the sidebar is already collapsed.
+    - Below a 700px viewport-width media query, any `stHorizontalBlock` with
+      3+ columns gets `flex-wrap: wrap` (redundant with Streamlit's own
+      default, kept for clarity/robustness) and each of its columns gets a
+      real `min-width`/`flex-basis` (120px) - **scoped via
+      `:has(> [data-testid="stColumn"]:nth-child(3))`** so intentional
+      2-column master/detail layouts (the Lake Map's map + detail panel, the
+      7-Day Forecast's info + best-window pair, button pairs elsewhere) keep
+      their original proportions instead of being forced to an even split.
+      Modern `:has()` support (Safari 16.4+, 2023) was judged safe for an
+      iPhone-focused fix in 2026. This one shared rule also reflows Trip
+      History's three `st.columns(3)` filter rows and its 3-column summary
+      metrics row, and Home's 4-column "Today at a glance" metrics, and
+      Spot Session's various 3+/4-column groups - not just the two rows
+      explicitly reported, since it's a single general-purpose fix rather
+      than a per-page patch.
+    - Trip History's own grid widget was deliberately left alone per the
+      angler's "light touch" choice - only its caption above the grid was
+      reworded to explicitly say "on a phone: swipe left within the grid
+      itself, not the page" (the existing "Scroll right" wording read as a
+      desktop mouse instruction). Verified the grid's own internal resize
+      logic (glide-data-grid, a canvas-based widget) computes its pixel
+      width via `ResizeObserver` at actual layout time, not from any CSS
+      that could be overridden the same way the metric-column fix was - so
+      unlike the two fixes above, its real touch/swipe behavior on a phone
+      genuinely couldn't be verified from this sandbox (the same
+      `resize_window` limitation that blocked true mobile screenshots), and
+      is called out below as something to confirm live on a phone rather
+      than something already checked.
+    - **Investigated and deliberately did not implement** a custom
+      `manifest.json`/`apple-touch-icon` for a polished Safari "Add to Home
+      Screen" icon (the third, lower-priority step in the angler's suggested
+      plan) - confirmed, by inspecting the live app's actual top-level
+      document (not the iframe), that Streamlit Community Cloud's own
+      wrapper page already ships its own `apple-touch-icon` and
+      `manifest.json` (both pointing at generic `favicon_*.png`/Streamlit-
+      branded assets under `.../-/build/`) - and that wrapper page, not
+      anything in this repo, is what Safari actually reads when a user
+      bookmarks the app, since the real app only ever renders inside an
+      iframe. There's no hook in this repo's code that can override the
+      *top-level* document's `<head>` on this hosting setup, so this item is
+      not achievable here without a different hosting model - documented in
+      the README rather than attempted.
+
+    Verified with the full test suite (unchanged - `inject_mobile_css()` is
+    pure CSS injection via `st.markdown(unsafe_allow_html=True)`, no logic
+    touched; 183 passing) plus a scratch `AppTest` smoke script (not
+    committed) confirming every page - home.py and all six `pages/*.py`,
+    including 7-Day Forecast against a mocked weather bundle, same fixture
+    shape as `tests/test_scoring.py`'s `_fake_bundle()` - still renders with
+    no exception after adding the `inject_mobile_css()` call. Also verified
+    via a fresh `git clone` into a new temp directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -2362,6 +2471,27 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   sourced domain modeling that a future page could wire back in without any changes to
   `recommend()` itself - just something to know if a report ever says "the thermocline
   caveat never shows up."
+
+- (entry 57) Trip History's `st.data_editor` grid's actual touch/swipe
+  behavior on a real phone hasn't been verified - this sandbox's Chrome
+  automation `resize_window` tool doesn't actually shrink the rendered
+  viewport (`window.innerWidth` stays at desktop width no matter what size
+  is requested), and glide-data-grid (the canvas widget behind
+  `st.data_editor`) computes its own pixel width via `ResizeObserver` at
+  real layout time, which can't be forced the same way the metric-column
+  reflow fix was verified (by constraining one element's own width via
+  injected CSS). Worth a real-phone check; if horizontal swipe turns out to
+  be unreliable, the "redesign as stacked cards on narrow screens" option
+  (declined this round in favor of a lighter touch) is the fallback.
+- (entry 57) A custom `manifest.json`/`apple-touch-icon` for Safari's "Add to
+  Home Screen" isn't achievable through this repo's code on Streamlit
+  Community Cloud - the real app only ever renders inside an iframe under
+  Streamlit Cloud's own wrapper page, and that wrapper page (already shipping
+  its own generic Streamlit-branded `apple-touch-icon`/`manifest.json`, not
+  anything from this repo) is what Safari actually reads when bookmarking,
+  since it's the top-level document. Would need a different hosting model
+  (self-hosted, or a host that serves the app directly with no wrapper
+  iframe) to customize.
 
 ## Operating notes
 
