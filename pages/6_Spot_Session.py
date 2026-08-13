@@ -356,95 +356,99 @@ st.header("Conditions right now")
 st.caption(
     "Enter what you're actually seeing at the water - unlike the 7-Day Forecast page (which relies on "
     "a weather API), everything here is your own on-the-spot reading, so it drives suggestions "
-    "specific to this exact moment at this exact spot."
+    "specific to this exact moment at this exact spot. As soon as a session start time is set below, "
+    "these values are saved and scored automatically - no extra button to click, and no need to open "
+    "the suggestions panel below for that to happen."
 )
 
-with st.form(f"conditions_form_{spot['spot_id']}"):
-    c1, c2 = st.columns(2)
-    water_temp_f = c1.number_input(
-        "Water temperature (°F)", min_value=32.0, max_value=100.0, value=_cond_water_temp_f, step=0.5,
-    )
-    secchi_ft = c2.number_input(
-        "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, value=_cond_secchi_ft, step=0.5,
-        help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
-    )
-    temp_band = water_temp_band(water_temp_f)
-    st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
-    vis_band = visibility_band(secchi_ft)
-    st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
+# No st.form here (there used to be one, gated behind a "Get lure suggestions"
+# submit button) - these fields update cond/score_result live on every
+# rerun, same as any other widget outside a form. That's the point: an
+# activity score gets computed and attached to a logged trip as soon as
+# these fields are filled in, whether or not the angler ever opens "Add
+# results" below to see it. The only genuinely required field is session
+# start time (deliberately blank by default, per its help text below) -
+# every other field already has a sane default, so cond starts existing the
+# moment a start time is entered.
+c1, c2 = st.columns(2)
+water_temp_f = c1.number_input(
+    "Water temperature (°F)", min_value=32.0, max_value=100.0, value=_cond_water_temp_f, step=0.5,
+)
+secchi_ft = c2.number_input(
+    "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, value=_cond_secchi_ft, step=0.5,
+    help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
+)
+temp_band = water_temp_band(water_temp_f)
+st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
+vis_band = visibility_band(secchi_ft)
+st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
 
-    stain_color = None
-    if vis_band["label"] == "Stained":
-        stain_color = st.selectbox(
-            "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
-            index=_cond_stain_idx,
-        )
-    stirred_up = st.checkbox(
-        "Stirred up / muddy right now (recent wind or rain)", value=_cond_stirred_up,
-        help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color - a "
-             "fresh disturbance can outrun what you can see or measure yet.",
+stain_color = None
+if vis_band["label"] == "Stained":
+    stain_color = st.selectbox(
+        "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
+        index=_cond_stain_idx,
     )
+stirred_up = st.checkbox(
+    "Stirred up / muddy right now (recent wind or rain)", value=_cond_stirred_up,
+    help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color - a "
+         "fresh disturbance can outrun what you can see or measure yet.",
+)
 
-    c3, c4 = st.columns(2)
-    wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=_cond_wind_band_idx, help=_wind_help)
-    light_condition = c4.selectbox(
-        "Light conditions", LIGHT_CONDITIONS, index=_cond_light_idx,
-        help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
-    )
+c3, c4 = st.columns(2)
+wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=_cond_wind_band_idx, help=_wind_help)
+light_condition = c4.selectbox(
+    "Light conditions", LIGHT_CONDITIONS, index=_cond_light_idx,
+    help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
+)
 
-    c5, c6 = st.columns(2)
-    precipitation = c5.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=_cond_precip_idx)
-    start_time = c6.time_input(
-        "Session start time (enter manually)", value=_cond_start_time, step=300,
-        help="When you actually started fishing this spot - enter it yourself rather than relying on "
-             "whatever time it happens to be while you're filling this out, since you might do that "
-             "before heading out or after you're done. Used to line up the score/suggestions below with "
-             "that exact moment.",
-    )
+c5, c6 = st.columns(2)
+precipitation = c5.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=_cond_precip_idx)
+start_time = c6.time_input(
+    "Session start time (enter manually)", value=_cond_start_time, step=300,
+    help="When you actually started fishing this spot - enter it yourself rather than relying on "
+         "whatever time it happens to be while you're filling this out, since you might do that "
+         "before heading out or after you're done. Used to line up the score/suggestions below with "
+         "that exact moment, and is what triggers a live score to be saved with this trip once you "
+         "log results below.",
+)
 
-    segment_display_options = [_segment_option_label(s) for s in SEGMENTS]
-    segment_display_choice = st.selectbox(
-        "Time window", segment_display_options,
-        index=SEGMENTS.index(_cond_segment_name),
-    )
-    segment_name = SEGMENTS[segment_display_options.index(segment_display_choice)]
+segment_display_options = [_segment_option_label(s) for s in SEGMENTS]
+segment_display_choice = st.selectbox(
+    "Time window", segment_display_options,
+    index=SEGMENTS.index(_cond_segment_name),
+)
+segment_name = SEGMENTS[segment_display_options.index(segment_display_choice)]
 
-    c7, c8 = st.columns(2)
-    forage_seen = c7.multiselect("Forage seen (optional)", FORAGE_OPTIONS, default=_cond_forage_seen)
-    fish_depth_ft = c8.number_input(
-        "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0,
-        value=_cond_fish_depth_ft, step=1.0,
-    )
+c7, c8 = st.columns(2)
+forage_seen = c7.multiselect("Forage seen (optional)", FORAGE_OPTIONS, default=_cond_forage_seen)
+fish_depth_ft = c8.number_input(
+    "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0,
+    value=_cond_fish_depth_ft, step=1.0,
+)
 
-    submitted = st.form_submit_button(
-        "Get lure suggestions", width='stretch',
-        help=(
-            "Recomputes the activity score/suggestions from these values - only needed if you want to "
-            "double check or change the live conditions for this trip too. The actual save happens with "
-            "the Save changes button further down." if editing_trip is not None else None
-        ),
-    )
-
-if submitted:
-    if start_time is None:
-        st.warning("Session start time is required - enter the time you actually started fishing this spot.")
-    else:
-        st.session_state.setdefault("spot_session_conditions", {})[spot["spot_id"]] = {
-            "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,
-            "stirred_up": stirred_up, "wind_band": wind_band_choice, "light_condition": light_condition,
-            "precipitation": precipitation, "start_time": start_time.isoformat(), "segment_name": segment_name,
-            "forage_seen": forage_seen, "fish_depth_ft": fish_depth_ft or None,
-        }
+if start_time is not None:
+    st.session_state.setdefault("spot_session_conditions", {})[spot["spot_id"]] = {
+        "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,
+        "stirred_up": stirred_up, "wind_band": wind_band_choice, "light_condition": light_condition,
+        "precipitation": precipitation, "start_time": start_time.isoformat(), "segment_name": segment_name,
+        "forage_seen": forage_seen, "fish_depth_ft": fish_depth_ft or None,
+    }
+else:
+    # Nothing typed into "Session start time" yet - clear out any stale
+    # snapshot for this spot rather than leaving a previous visit's cond
+    # (and score) hanging around after the one required field got blanked.
+    st.session_state.setdefault("spot_session_conditions", {}).pop(spot["spot_id"], None)
 
 cond = st.session_state.get("spot_session_conditions", {}).get(spot["spot_id"])
 
 # Everything below (score, recommendation, and the values folded into a logged
-# entry's conditions) only exists once the angler has filled in Conditions above
-# and clicked "Get lure suggestions" - but "Add results" further down must NOT be
-# gated on that, so nothing here calls st.stop(). water_clarity/season/at_time/rt/
-# score_result all stay None when cond is empty, and every place downstream that
-# reads them (the Suggestions expander, the "Log this session" submit handler)
-# checks for that instead of assuming they exist.
+# entry's conditions) only exists once a session start time has been entered
+# above - but "Add results" further down must NOT be gated on that, so nothing
+# here calls st.stop(). water_clarity/season/at_time/rt/score_result all stay
+# None when cond is empty, and every place downstream that reads them (the
+# Suggestions expander, "Log this session"/"Save changes") checks for that
+# instead of assuming they exist.
 water_clarity = season = avg_cloud_pct = avg_wind_mph = at_time = rt = score_result = None
 
 if cond:
@@ -516,8 +520,9 @@ if cond:
         render_lure_recommendation(rec)
 else:
     st.caption(
-        "Fill in **Conditions right now** above and click **Get lure suggestions** to see a live activity "
-        "score and lure recommendation here. You don't need to do that to log results below, though."
+        "Enter a **session start time** in Conditions right now above to compute a live activity score "
+        "and lure recommendation here - it'll save automatically with this trip too. You don't need to "
+        "fill any of this in to log results below, though."
     )
 
 LURE_PICKER_COLS = 4
@@ -864,7 +869,7 @@ with results_expander:
 
     # Every key _save_current_lure_entry's cond-derived block below writes,
     # used to carry the original snapshot forward when editing a trip and
-    # the angler didn't re-submit "Conditions right now" this visit (see
+    # the angler didn't re-fill in "Conditions right now" this visit (see
     # that function for why - otherwise a plain notes/fish-count correction
     # would silently blow away the whole condition reading it was scored
     # against).
@@ -890,10 +895,11 @@ with results_expander:
         # conditions_json when there's no live reading behind them, same treatment
         # Trip History's FIELD_SPECS loop already gives any other missing key.
         #
-        # When editing a trip and the angler didn't re-submit "Conditions right
-        # now" this visit, fall back to whatever condition snapshot the
-        # original entry already had instead of dropping it - a save should
-        # only ever change what was actually touched.
+        # When editing a trip and the angler didn't re-fill in "Conditions right
+        # now" this visit (e.g. left session start time blank), fall back to
+        # whatever condition snapshot the original entry already had instead
+        # of dropping it - a save should only ever change what was actually
+        # touched.
         conditions = {}
         if cond:
             conditions.update({
@@ -942,9 +948,10 @@ with results_expander:
             "source": "spot_session",
         })
         # Same fallback logic as the conditions block above: a fresh score
-        # only exists if "Conditions right now" was (re-)submitted this
-        # visit; otherwise, when editing, keep the original trip's score
-        # rather than blanking it out just because that form wasn't touched.
+        # only exists if "Conditions right now" has a session start time
+        # filled in this visit; otherwise, when editing, keep the original
+        # trip's score rather than blanking it out just because that section
+        # wasn't touched.
         if score_result:
             predicted_score = score_result.score
         elif editing_trip is not None and editing_trip.get("predicted_score") not in (None, ""):
@@ -957,7 +964,7 @@ with results_expander:
 
         # cond["segment_name"] reflects the time window picked in Conditions
         # right now this visit. Without that: when editing and conditions
-        # weren't re-submitted, keep the original trip's segment rather than
+        # weren't re-filled in, keep the original trip's segment rather than
         # guessing from the CURRENT wall-clock hour (which is almost
         # certainly not when the original session happened); otherwise (a
         # brand new result with no conditions filled in) fall back to that
@@ -971,9 +978,9 @@ with results_expander:
             entry_segment = _guess_segment(lake_now_naive().hour)
 
         # Same story as segment above: water_clarity is derived from cond
-        # too, so without a resubmitted "Conditions right now" this visit,
+        # too, so without "Conditions right now" refilled in this visit,
         # an edit should keep the original trip's stored water_clarity
-        # rather than resetting it to "Unknown" just because that form
+        # rather than resetting it to "Unknown" just because that section
         # wasn't touched this time.
         if water_clarity:
             entry_water_clarity = water_clarity

@@ -2044,6 +2044,58 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       auto-save path itself (the part `AppTest` can't reach) should get a
       live-browser check before calling this fully done.
 
+55. **Spot Session: a live activity score now computes and saves automatically
+    once "Conditions right now" is filled in - no button click needed.**
+    Prompted by the user noticing `predicted_score` was blank on every real
+    logged trip and asking whether it auto-calculates. Root cause: "Conditions
+    right now" was an `st.form` gated behind a "Get lure suggestions" submit
+    button - filling in the fields did nothing until that specific button was
+    clicked, and since it read as being about *lure suggestions* (which an
+    angler who already knows what they're throwing has no reason to care
+    about), it was easy to skip straight to "Add results" and never trigger a
+    score at all. Follow-up ask: "get a score once current conditions are
+    filled in, even if I don't look at the lure suggestions."
+    - Removed the `st.form`/`st.form_submit_button` around "Conditions right
+      now" entirely - every field in that section (water temp, secchi/stain,
+      wind, light, precipitation, session start time, time window, forage
+      seen, fish depth) is now a bare widget outside any form, so each one
+      reruns the script and updates `cond`/`score_result` live, the same way
+      every other widget on this page already works.
+    - Session start time is the only field with no default (deliberately
+      blank - see its help text, "enter it yourself rather than relying on
+      whatever time it happens to be"), so it's the natural gate: `cond` now
+      gets built (and cleared, if start time is ever emptied back out) on
+      every rerun based on whether start time has a value, instead of on
+      whether a button was ever clicked. Every other field already had a
+      sane default, so a score exists the moment a start time is entered,
+      whether or not the "Suggestions for right now" expander (open by
+      default, unchanged) is ever actually looked at - and `_save_current_
+      lure_entry()` already read `cond`/`score_result` directly rather than
+      caring how they got populated, so no changes were needed there or to
+      any of its editing-mode fallback logic (still correctly keeps an
+      already-scored trip's original score/segment/water_clarity when
+      editing it without touching Conditions this visit - verified that
+      specifically still holds).
+    - Updated the stale "click Get lure suggestions" comments/captions
+      throughout the file to match (the caption shown before a score exists,
+      the header caption, and several inline comments describing the
+      editing-mode fallback logic) - none of those were logic changes, just
+      wording that referenced a button that no longer exists.
+    - Verified via `AppTest` (with `data/trip_log.csv` backed up/restored
+      around anything that wrote to it): no score metric renders and the
+      "Enter a session start time..." caption shows before any time is
+      entered; setting only the start time produces a score on that same
+      rerun with no button anywhere in the flow (confirmed the old "Get lure
+      suggestions" button no longer exists at all); changing another
+      condition field (water temp) after that recomputes the score live too;
+      a full "Log this lure" round-trip (start time filled in, Suggestions
+      panel never touched) saved a row with a real numeric `predicted_score`;
+      and editing one of the 5 real trips that was never live-scored (no
+      `start_time` in its stored `conditions_json`) correctly shows no score
+      and the "fill in a start time" prompt rather than conjuring one out of
+      nowhere just because it's now in edit mode. Full test suite unaffected
+      (177 passing via `python3 -m pytest`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
