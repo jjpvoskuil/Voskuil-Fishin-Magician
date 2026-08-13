@@ -1,10 +1,12 @@
 import streamlit as st
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory
+from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory, github_token, repo_slug
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar
 from core.weather import lake_today
+from core.storage import commit_and_push
+from core.forecast_freeze import apply_freeze, FREEZE_PATH
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 st.title("📅 7-Day Largemouth Bass Forecast")
@@ -14,6 +16,29 @@ weights, n_trips = get_calibrated_weights()
 bundle = get_weather_bundle(7)
 week = score_week(bundle, today, 7, weights=weights)
 inventory = get_inventory()
+
+# Once a time-of-day window's end time has passed, its score/notes/solunar
+# overlap are locked in at whatever they were the moment it was first
+# observed as past, rather than continuing to drift every time the hourly
+# weather refresh (get_weather_bundle above) changes what score_day()
+# would otherwise compute for it - a forecast score that keeps changing
+# after its window has already closed isn't a forecast anymore. Only
+# today's entry in `week` can ever have a mix of past/future segments
+# (every later day is still entirely in the future), but this is called
+# for every day rather than special-casing that, since it's a no-op for a
+# day with nothing past yet. Only pushes to GitHub when a segment is newly
+# frozen this run (the common case is nothing new, especially since the
+# weather bundle itself only refreshes hourly) - see core/forecast_freeze.py.
+newly_frozen = []
+for day in week:
+    newly_frozen += apply_freeze(day, path=FREEZE_PATH)
+if newly_frozen:
+    token = github_token()
+    if token:
+        commit_and_push(
+            [FREEZE_PATH], token, repo_slug(),
+            f"Freeze forecast score(s) for {', '.join(newly_frozen)}",
+        )
 
 if not week:
     st.error(

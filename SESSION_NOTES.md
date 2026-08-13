@@ -2096,6 +2096,79 @@ trip-log entries back to the repo (see `secrets.toml.example`).
       nowhere just because it's now in edit mode. Full test suite unaffected
       (177 passing via `python3 -m pytest`).
 
+56. **7-Day Forecast: past time segments no longer keep changing score.**
+    Reported directly: the angler noticed scores update live as the weather
+    forecast/conditions change (intended, and liked) but wanted a segment
+    whose window has already closed to stop moving - "the score should stay
+    fixed as the last score recorded prior to that time range passing."
+    Root cause: `pages/1_7_Day_Forecast.py` calls `core.scoring.score_week()`
+    fresh on every page load, which recomputes every segment (including
+    ones fully in the past) from whatever `get_weather_bundle()` currently
+    holds - and that bundle refreshes hourly (`st.cache_data(ttl=3600)`), so
+    a segment like this morning's Dawn window kept silently reflecting
+    later weather refreshes/actuals hours after it closed.
+    - Added `core/forecast_freeze.py`, a small new git-backed store
+      (`data/segment_score_freeze.csv`, same commit-back pattern as
+      `core/storage.py`/`core/lure_inventory.py`/`core/lake_spots.py` - a
+      Streamlit Cloud sleep/wake restart would otherwise silently lose an
+      in-memory-only freeze, which would defeat the whole point).
+      `apply_freeze(day_forecast, now=..., path=...)` mutates a
+      `DayForecast`'s segments in place: any segment whose `end <= now` gets
+      either its already-frozen score/notes/solunar_overlap/breakdown
+      reapplied (overriding whatever `score_day()` just recomputed), or - if
+      this is the first time it's been observed as past - a new permanent
+      row is written capturing its current score, which becomes that
+      segment's value forever after. Segments still in progress or upcoming
+      are left completely untouched, so the live-updating behavior for
+      anything not yet past is unchanged. Wired into
+      `pages/1_7_Day_Forecast.py` right after `score_week()`, called for
+      every day in the week (a no-op for the 6 days that are always
+      entirely future, since `score_week()` always starts at today - see
+      that function) - only pushes to GitHub when something was actually
+      newly frozen this run (the common case is nothing new).
+    - Only today's date can ever have a mix of past/future segments, so the
+      freeze file only ever needs to track one date at a time - rows for any
+      other date are pruned automatically whenever a new segment gets
+      frozen (not proactively on every load, to avoid a git commit on every
+      single page view).
+    - A day's `overall_score` (the plain average of its 6 segment scores,
+      per `score_day()`) is recomputed from the corrected segment list
+      whenever a frozen value overrides a freshly-computed one, so the
+      day-level number a reader sees never disagrees with the segment cards
+      underneath it - not just individual segment scores were flagged as an
+      issue, so this was worth getting right even though it wasn't asked
+      for explicitly.
+    - `core/forecast_freeze.py`'s functions all take an optional `path`
+      parameter defaulting to the real `FREEZE_PATH` constant (matching
+      `core/lure_inventory.py`'s existing pattern) specifically so tests can
+      inject a `tmp_path` instead of touching the real repo file - and
+      `pages/1_7_Day_Forecast.py` passes `path=FREEZE_PATH` explicitly to
+      `apply_freeze()` rather than relying on that default, since a Python
+      default-argument value is bound once at function-definition time, not
+      at call time - relying on it would have made the default silently
+      immune to being swapped later (learned this the hard way debugging a
+      scratch AppTest smoke test that kept writing to the real file no
+      matter what it patched, before switching to passing `path=` explicitly).
+    - Verified via a new `tests/test_forecast_freeze.py` (6 cases, using
+      `tmp_path` and hand-built `SegmentForecast`/fake-day objects, no
+      network needed): a still-in-progress segment is left untouched and
+      nothing gets written; a segment observed past for the first time gets
+      frozen but its OWN score isn't touched on that same call; a second
+      call with a deliberately different fresh score for that same segment
+      reapplies the original frozen value instead; `overall_score` is
+      correctly recomputed only when a frozen override actually changes a
+      segment's value; freezing a new date's segment prunes stale rows from
+      a previous date; and notes/breakdown/solunar_overlap all round-trip
+      correctly through the CSV's JSON-encoded columns. Also end-to-end
+      smoke-tested the full page via `AppTest` with a fake weather bundle
+      (this sandbox has no real network access to Open-Meteo) and a real
+      `apply_freeze()` call: a mid-morning page load froze Dawn's score,
+      and a second simulated page load - with a deliberately different fake
+      weather bundle - confirmed Dawn's score held exactly steady instead of
+      drifting to whatever the new data would have produced. Full test
+      suite unaffected (183 passing via `python3 -m pytest`, 177 existing +
+      6 new).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
