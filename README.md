@@ -506,14 +506,19 @@ The **Development** page is a running list of things to adjust or fix in the app
 itself - not a fishing feature, a place to jot down anything you notice while using
 the app so it's not forgotten by the next session. Add an item with a description and
 the page it's mainly about; each one gets a small auto-assigned number (`#1`, `#2`,
-...) that never changes or gets reused, so you can reference it later just by number
-("let's do #7 next") instead of re-describing it, and so a future Claude session can
-read this list and ask which number to work on. Check "Done" off in the grid when
-something's finished - saves automatically, same inline-edit behavior as Trip
-History's grid. There's no delete button by design (see `core/dev_tasks.py`) - a
-finished item stays referenceable by its number rather than disappearing; toggle
-"Show completed items" to see them. Stored in `data/dev_tasks.csv` and committed back
-to GitHub like every other data file when a `GITHUB_TOKEN` is configured.
+...) that's never reused, even if that item is later edited or deleted, so you can
+reference it later just by number ("let's do #7 next") instead of re-describing it,
+and so a future Claude session can read this list and ask which number to work on.
+Check the "Done" box next to an item to mark it finished (or uncheck to reopen it) -
+saves immediately, no extra button. Each item also has its own "✏️ Edit or delete"
+section: edit its description/page and save, or delete it outright (a two-step
+confirm, since it's permanent - same pattern as deleting a trip in Trip History).
+Deleting an item never reuses its number for anything added later - see
+`core/dev_tasks.py`'s module docstring for how the numbering is kept stable. Toggle
+"Show completed items" to see finished ones again. Stored in `data/dev_tasks.csv`
+(plus a small `data/dev_tasks_counter.txt` sidecar tracking the next number to hand
+out) and committed back to GitHub like every other data file when a `GITHUB_TOKEN`
+is configured.
 
 ## Running locally
 
@@ -583,8 +588,9 @@ core/
   shoreline.py              Real digitized lake shoreline + point-in-polygon clip mask
   cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
   fish_attractors.py        Loads real KY Fish & Wildlife fish attractor GPS data
-  dev_tasks.py              Development punch-list read/write (auto-numbered, append-
-                           only) + git commit-back, for the Development page
+  dev_tasks.py              Development punch-list read/write/edit/delete (auto-
+                           numbered, numbers never reused) + git commit-back, for
+                           the Development page
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)
@@ -598,6 +604,7 @@ data/
                            each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
   dev_tasks.csv            Development punch-list items (grows over time; auto-numbered)
+  dev_tasks_counter.txt    Next punch-list number to hand out (survives item deletes)
 tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log/dev_tasks
 ```
 
