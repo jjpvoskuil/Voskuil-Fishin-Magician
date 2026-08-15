@@ -500,6 +500,21 @@ Because it's keyword-based against free text rather than a structured color fiel
 it can occasionally miss a real match (different wording) or flag a coincidental
 one - it's meant as a helpful signal, not a guarantee.
 
+## Development punch list
+
+The **Development** page is a running list of things to adjust or fix in the app
+itself - not a fishing feature, a place to jot down anything you notice while using
+the app so it's not forgotten by the next session. Add an item with a description and
+the page it's mainly about; each one gets a small auto-assigned number (`#1`, `#2`,
+...) that never changes or gets reused, so you can reference it later just by number
+("let's do #7 next") instead of re-describing it, and so a future Claude session can
+read this list and ask which number to work on. Check "Done" off in the grid when
+something's finished - saves automatically, same inline-edit behavior as Trip
+History's grid. There's no delete button by design (see `core/dev_tasks.py`) - a
+finished item stays referenceable by its number rather than disappearing; toggle
+"Show completed items" to see them. Stored in `data/dev_tasks.csv` and committed back
+to GitHub like every other data file when a `GITHUB_TOKEN` is configured.
+
 ## Running locally
 
 ```bash
@@ -532,6 +547,7 @@ pages/
                          way to log one) + per-trip details + calibration status
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
   6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
+  7_Development.py        Punch list of app adjustments/fixes to track between sessions
 core/
   astro.py               Moon phase + solunar rise/transit/set
   weather.py              Open-Meteo integration + water-temp estimate
@@ -567,6 +583,8 @@ core/
   shoreline.py              Real digitized lake shoreline + point-in-polygon clip mask
   cover.py                  Pre-dam bottom-cover classification (wooded/cleared/channel)
   fish_attractors.py        Loads real KY Fish & Wildlife fish attractor GPS data
+  dev_tasks.py              Development punch-list read/write (auto-numbered, append-
+                           only) + git commit-back, for the Development page
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)
@@ -579,7 +597,8 @@ data/
   lure_inventory.csv      Tackle inventory (grows over time; category column links
                            each item to a core.lures lure type)
   lure_images/            User-uploaded/captured lure photos
-tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log
+  dev_tasks.csv            Development punch-list items (grows over time; auto-numbered)
+tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log/dev_tasks
 ```
 
 ## Disclaimers

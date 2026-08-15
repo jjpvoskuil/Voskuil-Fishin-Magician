@@ -19,15 +19,20 @@ presentation recommendations checked against your tackle inventory, a
 click-anywhere fish-attractor/saved-spot map, an on-the-water "Spot
 Session" page for live conditions plus logging (the only way to log a trip
 now), a filterable/inline-editable Trip History page with per-trip edit/
-delete, and a tackle inventory with a photo-to-Cabela's-lookup "Scan a
-lure" flow. The app is phone-friendly (bigger sidebar toggle, wide column
-rows reflow on narrow screens) and works well added to an iPhone home
-screen via Safari's Add to Home Screen.
+delete, a tackle inventory with a photo-to-Cabela's-lookup "Scan a
+lure" flow, and a Development page punch list for tracking app fixes/
+adjustments between sessions (each item has a stable number, e.g. "#7").
+The app is phone-friendly (bigger sidebar toggle, wide column rows reflow
+on narrow screens) and works well added to an iPhone home screen via
+Safari's Add to Home Screen.
 
 Please clone the repo, then read SESSION_NOTES.md and README.md in full
 before making any changes - SESSION_NOTES.md has the development history,
 key design decisions, and known open items; README.md has the current
-feature list and data-source documentation.
+feature list and data-source documentation. Also check the Development
+page's punch list (`data/dev_tasks.csv`) for open items - if I haven't
+already told you which number(s) to work on this session, ask me before
+starting.
 
 Workflow to follow (established over many prior sessions - see
 SESSION_NOTES.md "Operating notes"):

@@ -8,6 +8,7 @@ from .storage import read_all_trips
 from .calibration import calibrate_weights
 from .lure_inventory import read_all_items
 from .lake_spots import read_all_spots
+from .dev_tasks import read_all_tasks as read_all_dev_tasks
 
 
 @st.cache_data(ttl=60 * 60, show_spinner="Fetching weather forecast...")
@@ -34,6 +35,11 @@ def get_inventory():
 @st.cache_data(ttl=60)
 def get_lake_spots():
     return read_all_spots()
+
+
+@st.cache_data(ttl=60)
+def get_dev_tasks():
+    return read_all_dev_tasks()
 
 
 def github_token() -> str:
