@@ -2330,6 +2330,52 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     run. Full test suite unaffected (183 passing) plus the usual `AppTest`
     smoke test across every page.
 
+59. **New Development page: an in-app punch list, replacing "just tell Claude at
+    the start of a session."** The angler wanted a place to jot down app fixes/
+    adjustments as they notice them, referenceable by a stable number across
+    sessions ("let's do #7 next"), rather than re-describing an issue from memory
+    or relying on SESSION_NOTES.md's "Known limitations" section (written by
+    Claude, after the fact, not meant as an angler-facing intake list). Scoped to
+    exactly what was asked: an auto-assigned item number, a description, and a
+    "mainly associated with" page dropdown, checked off (not deleted) when done.
+
+    New `core/dev_tasks.py` mirrors `core/lure_inventory.py`'s storage pattern
+    (dataclass + `data/dev_tasks.csv` + git commit-back via
+    `core.storage.commit_and_push`) with one deliberate difference: `task_no` is
+    a small human-friendly int, not a uuid - the whole point is a number the
+    angler can say out loud. `_next_task_no()` assigns existing-max + 1, and
+    there's **no `delete_task`** - a "Done" item stays in the list (and keeps its
+    number) rather than disappearing, so a past reference to "#12" still resolves
+    to something even after it's finished; a "Show completed items" checkbox on
+    the page hides them by default instead. New `pages/7_Development.py` (added
+    last in `app.py`'s `st.navigation` list) has an "Add an item" form up top and
+    an inline-editable `st.data_editor` grid below (Done checkbox, description,
+    page - same auto-save-on-edit pattern as Trip History's grid, diffed
+    directly against the pre-edit `DataFrame` each rerun rather than as an
+    extracted pure function - Trip History's `_grid_edit_diff` precedent exists
+    but its own diff logic still only ever got scratch, not committed, test
+    coverage either, since real `st.data_editor` cell edits aren't reachable
+    through `AppTest` regardless of how the diff code is structured).
+
+    Verified with a new `tests/test_dev_tasks.py` (12 cases: empty-file read,
+    task_no assignment/increment, whitespace stripping, update by int or str
+    task_no, mark_done/reopen_task, a documented caveat test showing a hand-edit
+    that removes the highest-numbered row *can* cause number reuse since nothing
+    else tracks a persistent counter, the real page-title list staying in sync
+    with `PAGE_OPTIONS`, and the dataclass's `to_row()` keys matching
+    `FIELDNAMES`) - full suite 195 passing (183 + 12 new). Also an `AppTest`
+    smoke pass across all seven pages (home + six `pages/*.py`, 7-Day Forecast
+    against a mocked weather bundle) confirming no exception, plus a dedicated
+    scratch `AppTest` script (not committed) that actually filled in and
+    submitted the "Add an item" form end-to-end - typed a description, picked a
+    page, clicked submit, then re-read `data/dev_tasks.csv` directly (`st.data_
+    editor` grid edits themselves aren't reachable through `AppTest`, so the
+    grid's diff/save logic was instead traced by hand against a throwaway CSV
+    outside the Streamlit runtime) - confirmed task #1 was assigned, persisted
+    with the right description/page/status, and immediately reflected in the
+    grid's "N open" caption on the very next render. `data/dev_tasks.csv` starts
+    committed as an empty (header-only) file, ready for the angler's first entry.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
