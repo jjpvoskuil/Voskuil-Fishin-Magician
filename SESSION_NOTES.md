@@ -2376,6 +2376,54 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     grid's "N open" caption on the very next render. `data/dev_tasks.csv` starts
     committed as an empty (header-only) file, ready for the angler's first entry.
 
+60. **Development page: added explicit per-item Edit/Delete buttons, and reworked
+    the list from an `st.data_editor` grid to plain widgets.** Requested right
+    after entry 59 shipped - the angler wanted an explicit button to edit a
+    previously-entered item or delete it outright (delete was deliberately left
+    out of entry 59). Used the request as a reason to reconsider the grid choice
+    too: this page is exactly the kind of thing the angler would use standing at
+    the lake to jot something down, and Trip History's `st.data_editor` grid
+    (glide-data-grid under the hood) still has unverified real-phone touch/swipe
+    behavior (entry 57's open item) - so the punch-list's own item rows were
+    rebuilt as plain `st.checkbox`/`st.text_area`/`st.selectbox`/`st.button`
+    cards instead, the same widget family already proven mobile-friendly
+    elsewhere (Spot Session's live-conditions inputs). Each item is now a
+    bordered container: a "Done" checkbox that saves the instant it's toggled
+    (no separate save step, matching the original ask), and an "✏️ Edit or
+    delete" expander with an editable description/page + "Save changes" button,
+    plus a "🗑️ Delete" button behind the same two-step confirm pattern Trip
+    History uses for deleting a trip (permanent, no undo).
+
+    Deleting an item raised the numbering question the angler's original request
+    didn't need answered: with `task_no` derived from "current max in the file"
+    (entry 59's original scheme), deleting the *highest*-numbered item would let
+    the next new item silently reuse that same number for something unrelated -
+    fine for a uuid, actively confusing for an id specifically meant to be
+    memorized and said out loud. Fixed by backing `task_no` assignment with a
+    small persisted counter file (`data/dev_tasks_counter.txt`, next to
+    `data/dev_tasks.csv`) that only ever increases - `delete_task()` never
+    touches it, so a deleted number is never reissued regardless of which item
+    (highest-numbered or not) gets removed. Bootstraps itself from the existing
+    CSV's highest `task_no` the first time it's needed if the counter file
+    doesn't exist yet (covers the real `data/dev_tasks.csv`, which already had
+    one live item - #1, added by the angler through the deployed app between
+    these two sessions - committed before this counter file existed).
+
+    Verified with 4 new/replaced `tests/test_dev_tasks.py` cases (`delete_task`
+    removing a row, deleting a missing task_no returning `False`, and two
+    number-reuse regression cases - deleting the highest-numbered item and
+    deleting a middle item, confirming neither's number is reissued - plus a
+    bootstrap test simulating the real pre-counter-file `dev_tasks.csv`) - full
+    suite 199 passing (195 + 4 net new). Also the usual `AppTest` smoke pass
+    across all seven pages, plus a dedicated scratch `AppTest` script (not
+    committed, run against a temporary second item added alongside the real
+    #1 - restored `data/dev_tasks.csv` to its exact pre-test state afterward)
+    that drove the new buttons directly: edited an item's description via its
+    Edit panel and confirmed the save persisted, then deleted that same item
+    through the two-step confirm flow and confirmed both the row's removal
+    *and* that the next `append_task()` call skipped straight past the deleted
+    number rather than reusing it.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
