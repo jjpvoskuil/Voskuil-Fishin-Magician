@@ -32,6 +32,16 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
+- **3-day trend charts** on the Home page ("📈 3-day trends", below "Today at a glance") -
+  activity score, estimated water temp, and 24h pressure trend for the last 3 days
+  (recomputed from the same weather data already fetched for today, no extra live calls),
+  plus a real USGS lake-level trend covering the same window. A separate "🌡️ USACE surface
+  reading history" section charts the periodic USACE water-temp/dissolved-oxygen survey
+  (see below) - since that live report only ever has the CURRENT reading, this app records
+  its own local archive (`data/water_quality_log.csv`, git-committed like the trip log)
+  every time it fetches a fresh survey, so this one genuinely starts sparse and fills in
+  gradually as USACE republishes (roughly every 1-2 weeks) rather than showing a fixed
+  3-day window that would barely move.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day. Every window's real clock range tracks that day's
   actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,
@@ -656,6 +666,10 @@ core/
                            (not an estimate, unlike everything else weather-derived)
   lake_water_quality.py     USACE periodic water-quality survey - real (but not live)
                            surface temp + dissolved oxygen % saturation
+  water_quality_log.py      Local git-committed archive of USACE readings (data/
+                           water_quality_log.csv) - the live report has no history
+                           of its own, so this app records one going forward, for
+                           the Home page's "🌡️ USACE surface reading history" chart
   scoring.py              1-10 activity scoring engine (shared by the forecast and
                            Spot Session pages via manual_segment_score())
   forecast_freeze.py       Locks in a 7-Day Forecast time segment's score once its
@@ -705,6 +719,8 @@ data/
   lure_images/            User-uploaded/captured lure photos
   dev_tasks.csv            Development punch-list items (grows over time; auto-numbered)
   dev_tasks_counter.txt    Next punch-list number to hand out (survives item deletes)
+  water_quality_log.csv    Locally-recorded USACE survey history (grows ~every 1-2
+                           weeks; starts empty, see core/water_quality_log.py)
 tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log/dev_tasks
 ```
 

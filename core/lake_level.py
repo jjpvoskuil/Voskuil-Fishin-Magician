@@ -69,3 +69,45 @@ def fetch_lake_level(site_id: str = USGS_SITE_ID) -> LakeLevel:
         observed_at=datetime.fromisoformat(latest["dateTime"]),
         site_name=site_name,
     )
+
+
+def fetch_lake_level_history(site_id: str = USGS_SITE_ID, days: int = 3) -> list:
+    """Punch-list #13: same USGS instantaneous-values feed as
+    fetch_lake_level(), but requesting `days` of history (instead of the
+    default 1) and returning every reading in that window as a list of
+    LakeLevel, oldest first - not just the latest one. This is real USGS
+    telemetry (readings roughly every 15-60 min), not a synthesized trend,
+    so a 3-day request typically comes back with somewhere around 100-300
+    points - fine for a line chart, no downsampling done here.
+
+    Same "raise on failure, let the caller degrade gracefully" convention
+    as fetch_lake_level() - deliberately not implemented by just calling
+    fetch_lake_level() in a loop (that would be `days` separate requests
+    against a free public API for no benefit); one request with a wider
+    `period` returns the whole window at once, same as the live API
+    already supports for fetch_forecast()'s past_days."""
+    resp = requests.get(
+        USGS_IV_URL,
+        params={
+            "sites": site_id,
+            "format": "json",
+            "period": f"P{max(int(days), 1)}D",
+            "parameterCd": USGS_LAKE_ELEVATION_PARAM_CD,
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    series = payload["value"]["timeSeries"][0]
+    site_name = series["sourceInfo"]["siteName"]
+    values = series["values"][0]["value"]
+    if not values:
+        raise ValueError(f"USGS site {site_id} returned no lake elevation readings.")
+    return [
+        LakeLevel(
+            elevation_ft=round(float(v["value"]), 2),
+            observed_at=datetime.fromisoformat(v["dateTime"]),
+            site_name=site_name,
+        )
+        for v in values
+    ]

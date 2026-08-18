@@ -3,8 +3,9 @@ from __future__ import annotations
 import streamlit as st
 
 from .weather import fetch_forecast
-from .lake_level import fetch_lake_level
+from .lake_level import fetch_lake_level, fetch_lake_level_history
 from .lake_water_quality import fetch_surface_water_quality
+from .water_quality_log import parsed_log as read_water_quality_log
 from .cabelas_lookup import search_lures
 from .spots import load_spots
 from .storage import read_all_trips
@@ -24,12 +25,32 @@ def get_lake_level():
     return fetch_lake_level()
 
 
+# Punch-list #13: same site/TTL as get_lake_level() above (same live USGS
+# source, just a wider window - one real request covers both use cases'
+# freshness needs) - a separate cache entry (different function name means
+# a different cache key) since the two callers want different shapes back
+# (single latest reading vs. the whole trailing series for a chart).
+@st.cache_data(ttl=60 * 15, show_spinner="Fetching lake level history...")
+def get_lake_level_history(days: int = 3):
+    return fetch_lake_level_history(days=days)
+
+
 # Much longer TTL than the other live sources - USACE only republishes this
 # survey roughly every 1-2 weeks, so there's no benefit to re-fetching more
 # than a few times a day, and it saves hammering a non-API legacy page.
 @st.cache_data(ttl=60 * 60 * 6, show_spinner="Fetching USACE water-quality survey...")
 def get_surface_water_quality():
     return fetch_surface_water_quality()
+
+
+# Punch-list #13: the locally-recorded historical archive of the reading
+# above (see core/water_quality_log.py for why - the live USACE page itself
+# has no history to fetch). Short TTL: this is a cheap local CSV read, not
+# a network fetch, so there's no real cost to keeping it fresh within a
+# session - the TTL just avoids re-reading the file on every single rerun.
+@st.cache_data(ttl=60)
+def get_water_quality_log():
+    return read_water_quality_log()
 
 
 @st.cache_data(ttl=60 * 5)

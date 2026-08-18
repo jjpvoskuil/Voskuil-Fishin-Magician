@@ -3623,6 +3623,134 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     reachable in this sandbox (same set as entry 73) - all rendered with no
     exception. Marked Development punch-list item #12 "Done."
 
+75. **Punch-list #13: 3-day historical trend charts for the Home page's
+    "Today at a glance" data, with a longer trend for the USACE data since
+    it updates less often.** Ask (page: Today/Home): "Can you add a set of
+    3 day historical trend charts for the data listed on the Today page?
+    For the data from the corp of engineers, lets do a longer trend since
+    that is update[d] less frequently."
+
+    Asked two clarifying questions before building, since both had real
+    architectural implications: (1) which of the 5 "Today at a glance"
+    metrics should get a chart - proposed skipping Moon phase (a
+    deterministic cycle, not monitored data, so a 3-day chart of it
+    wouldn't show anything meaningful) and charting the other 4; angler
+    picked that. (2) How to handle the USACE trend specifically - the live
+    USACE report (`core/lake_water_quality.py`) only ever has the CURRENT
+    reading, confirmed by re-reading punch-list #69's own exhaustive
+    source search (no external API publishes a real historical time series
+    for this lake's water temp/DO) - so charting a real trend at all meant
+    starting a local archive from today forward rather than fabricating
+    history. Proposed exactly that, angler agreed ("Yes, start logging
+    from today").
+
+    Investigated what data was actually already on hand before writing any
+    fetch code: `core.weather.fetch_forecast()` already requests
+    `WATER_TEMP_TREND_PAST_DAYS` (5) days of real past weather alongside
+    the forecast (added for punch-list #7's water-temp estimate), and
+    `score_day(bundle, d, weights)` already computes and returns
+    `overall_score`, `water_temp_f`, AND `pressure_trend_24h` together for
+    any date `d` the bundle covers - so 3 of the 4 charted metrics needed
+    zero new fetches, just calling the same already-imported `score_day()`
+    for `today-2`, `today-1`, `today` instead of just `today`. Lake level
+    needed one real change: `core.lake_level.fetch_lake_level()` only ever
+    requested `period: "P1D"` and returned the single latest reading -
+    added `fetch_lake_level_history(site_id, days=3)` as a separate
+    function (not a refactor of the existing, already-tested
+    `fetch_lake_level()`, to avoid any regression risk to a working, real-
+    money-path live source) requesting a wider `period` and returning
+    every reading in the window (typically ~100-300 points at USGS's
+    15-60 min telemetry cadence) instead of just the last one.
+
+    New `core/water_quality_log.py`: a small local CSV
+    (`data/water_quality_log.csv`) recording every USACE reading this app
+    has ever fetched, keyed by `observed_at` so re-fetching the same still-
+    current survey (which happens on most reruns, since USACE only
+    republishes every 1-2 weeks) is a cheap no-op via `append_if_new()`
+    rather than a duplicate row. Same git-committed-CSV persistence
+    pattern `data/trip_log.csv` (`core/storage.py`) and `data/
+    lure_inventory.csv` (`core/lure_inventory.py`) already established -
+    reused `core.storage.commit_and_push()` directly rather than writing
+    new git plumbing, exactly as that function's own docstring invites.
+    `home.py` calls `append_if_new()` right after its existing
+    `get_surface_water_quality()` fetch, and only reaches the git commit
+    when a row was actually newly added (i.e. essentially never, except
+    the rare rerun where USACE has genuinely republished) - wrapped in the
+    same "nice to have, don't block the page" `try/except Exception: pass`
+    treatment already used for lake level and water quality on this page,
+    so a write failure or git conflict here degrades silently rather than
+    surfacing as an error to the angler for a background archival side
+    effect they didn't directly trigger. `core/appstate.py` gained two
+    thin cached wrappers matching this page's existing convention:
+    `get_lake_level_history()` (same 15-min TTL as `get_lake_level()`,
+    same live source, just a wider request) and `get_water_quality_log()`
+    (a short 60s TTL, since it's a cheap local file read, not a network
+    fetch - just enough to avoid re-reading the file on every single
+    rerun).
+
+    Chart layout: a "📈 3-day trends" expander (`expanded=True`, directly
+    below "Today at a glance") with a 2x2 grid - Activity score, Est. water
+    temp, Pressure trend (24h), and Lake level - shown only if there's
+    genuinely at least 2 days of forecast trend data or a lake-level
+    history to show (so a fully-failed weather+USGS fetch just skips the
+    whole expander rather than rendering four empty charts). A separate
+    "🌡️ USACE surface reading history" expander (`expanded=False`, since
+    it's the least immediately actionable of the two - a slow-moving
+    secondary reading, not a decision-driving trend) only appears once
+    at least one reading has ever been logged, and shows a plain
+    informational caption (not a pointless single-point chart) when
+    exactly one reading exists so far - explicitly telling the angler this
+    will fill in over the next several weeks rather than looking like a
+    broken/empty chart. Both sections use `st.line_chart` (no new
+    dependency - `pandas`, already used by `pages/4_Trip_History.py`, is
+    the only import needed; this is this app's first use of a chart
+    widget anywhere).
+
+    New tests: `tests/test_lake_level.py` gained 4 cases for
+    `fetch_lake_level_history()` (requests the wider `period`, returns
+    every reading oldest-first - not just the last one, raises on zero
+    readings, raises on a network failure - same conventions as the
+    existing `fetch_lake_level()` tests it sits next to). New
+    `tests/test_water_quality_log.py` (7 cases): creates the log file with
+    just a header if missing; a genuinely new reading gets appended and
+    returns `True`; the exact same reading again is a no-op and returns
+    `False`; a second, genuinely different survey date does get added;
+    `parsed_log()` returns real `datetime`/`float` types, not raw CSV
+    strings; a corrupted/malformed row is skipped rather than raised on
+    (so one bad row can't take down the whole chart); the CSV column order
+    matches the `FIELDNAMES` constant. `python3 -m pytest tests/ -q`
+    passes at 254 (243 + 11 new).
+
+    Verified end to end with a scratch `AppTest` script (not committed)
+    against `home.py`, patching `core.appstate`'s cached accessors directly
+    (confirmed this works even though `home.py` does `from core.appstate
+    import get_weather_bundle, ...` - AppTest re-execs the whole script
+    fresh on every `at.run()`, so that import statement re-resolves
+    against whatever's patched on the `core.appstate` module at that
+    moment, same as a live rerun would): (1) full success path (a real
+    multi-day fake bundle shaped like `tests/test_scoring.py`'s own
+    `_fake_bundle()`, fake lake-level history, and a 2-row fake USACE log)
+    - both expanders render, no exception; (2) weather fetch failing but
+    lake level + USACE still available - "📈 3-day trends" still renders
+    (lake level chart only) and doesn't block the rest of the page; (3) an
+    empty USACE log - that expander doesn't render at all; (4) exactly one
+    USACE log row - shows the "only one survey logged so far" caption, not
+    a chart; (5) `append_if_new()` against a real temp file genuinely adds
+    a new reading and no-ops on an exact repeat. Ran the standard `AppTest`
+    smoke pass across the app entry point and every page reachable in this
+    sandbox (same set as entries 73/74, `home.py` itself included with its
+    real - unmocked, so all-sources-failing - fetch path) - all rendered
+    with no exception, confirming the existing graceful-degradation
+    behavior still holds with the new code in place. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv` confirmed byte-identical (`md5sum`)
+    before and after every run; `data/water_quality_log.csv` (newly
+    created this entry, header row only - this sandbox has no outbound
+    network access to actually fetch a real USACE reading to seed it, so
+    the deployed app will record its own first real row organically)
+    likewise confirmed unchanged by any test run, since every test used
+    either a temp path or a mocked `append_if_new`. Marked Development
+    punch-list item #13 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
