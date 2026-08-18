@@ -432,7 +432,14 @@ stirred_up = st.checkbox(
 c3, c4 = st.columns(2)
 wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=_cond_wind_band_idx, help=_wind_help)
 light_condition = c4.selectbox(
-    "Light conditions", LIGHT_CONDITIONS, index=_cond_light_idx,
+    # Renamed from "Light conditions" (punch-list #10) - describes the sky
+    # itself (cloud cover) now, not a lux-based light-penetration guess; see
+    # core.onwater.LIGHT_CONDITIONS for the NWS-sourced band definitions.
+    # Internal variable/key names (light_condition, LIGHT_CONDITIONS, the
+    # conditions_json "light_condition" field) are left as-is - only the
+    # on-screen label and options changed, so past logged trips' saved
+    # values still read back correctly.
+    "Sky conditions", LIGHT_CONDITIONS, index=_cond_light_idx,
     help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
 )
 
