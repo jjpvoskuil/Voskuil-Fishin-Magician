@@ -2569,6 +2569,71 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     segment_score_freeze.csv` again - reverted before committing, same as
     last time. Marked Development punch-list items #2 and #3 "Done."
 
+63. **Punch-list #4: the "Used a trailer" picker only shows real trailer-style
+    baits now, not the whole tackle box.** Previously `_visual_lure_picker()`
+    was called with the same full `inventory_items` list for both "Lure
+    used" and "Trailer," so worms, senkos, and finesse baits (e.g. Z-Man's
+    TRD line - explicitly named in the ask) showed up as trailer candidates
+    even though they're standalone rigged baits, not something added onto
+    another bait's hook.
+
+    New `core.lures.TRAILER_ELIGIBLE_CATEGORIES = {"texas_rig_creature",
+    "weightless_soft_plastic"}` - deliberately narrow, matching the two
+    trailer TYPES this app's own `LURE_PROFILES` already documents ("Craw
+    trailer," "Paddle-tail swimbait trailer"; `weightless_soft_plastic` is
+    also where `guess_category_from_text()` already tags a standalone
+    "swimbait," so this reuses that existing convention rather than
+    inventing a new category). `is_trailer_eligible(item)` checks category
+    first, then a keyword safety net (`TRAILER_EXCLUDE_KEYWORDS = ("worm",
+    "senko", "trd", "stick bait", "stickbait")`) on the item's own brand/
+    description text, so a TRD is excluded even if it were ever mis-
+    categorized - same "no black box" keyword-matching philosophy as
+    `_color_tokens()` elsewhere in this module. Checked against the
+    angler's real inventory before committing to this design: every one of
+    the 6 trailers actually logged so far is a Strike King Rage Tail Craw
+    (`texas_rig_creature`) or a KVD Blade Minnow (`weightless_soft_plastic`)
+    - the filter doesn't regress any real historical usage - and the
+    angler's `finesse_shaky_head`-tagged Z-Man "Finesse TRD" rows confirm
+    the keyword safety net's specific TRD callout wasn't hypothetical.
+
+    `pages/6_Spot_Session.py`'s trailer call site now pre-filters
+    `inventory_items` through `is_trailer_eligible()` before passing it to
+    `_visual_lure_picker()` - the "Lure used" picker above it is completely
+    unaffected, still shows the whole tackle box. `_visual_lure_picker()`
+    gained an optional `empty_message` parameter so the trailer picker's
+    empty state reads correctly ("No trailer-style baits... found") instead
+    of the generic "No lures in your tackle box yet" when the *filter*, not
+    an actually-empty inventory, is why nothing's showing.
+
+    One edge case *not* specifically handled, documented here rather than
+    engineered around since it doesn't affect any real data today: editing
+    a trip whose logged trailer somehow falls outside
+    `TRAILER_ELIGIBLE_CATEGORIES` (e.g. re-categorized after the fact) would
+    prefill `selected_id` but the picker's own lookup (against the filtered
+    list) wouldn't find it, silently showing "no trailer selected" rather
+    than resolving it - the manual trailer-name text fallback still works
+    in that case, so it's not a dead end, just not perfectly seamless.
+
+    Verified with new `tests/test_lures.py` cases (7): every
+    `TRAILER_ELIGIBLE_CATEGORIES` key is a real `LURE_PROFILES` entry;
+    craw/swimbait categories pass, every worm-style category
+    (`texas_rig_worm`, `wacky_rig_senko`, `finesse_shaky_head`,
+    `carolina_rig`) and every host-bait category
+    (`football_jig`/`chatterbait`/`spinnerbait`/`swim_jig`/`buzzbait`) fail;
+    the TRD keyword safety net fires even against a category that would
+    otherwise pass; and the two real historical trailer products both pass.
+    `python3 -m pytest tests/ -q` passes at 217 (211 + 6 new). Also a
+    scratch `AppTest` script (not committed, `data/trip_log.csv` backed
+    up/restored): picked a real
+    chatterbait as the lure, checked "Used a trailer," and confirmed the
+    rendered trailer card grid's "Select" buttons only ever correspond to
+    `texas_rig_creature`/`weightless_soft_plastic` inventory rows - no
+    worm-style item's button ever appears - while the main "Lure used"
+    picker's buttons still include worm-style items, confirming the filter
+    is trailer-only. Full page smoke pass unaffected; `data/
+    segment_score_freeze.csv` reverted afterward per the now-standard note
+    from entries 61/62. Marked Development punch-list item #4 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

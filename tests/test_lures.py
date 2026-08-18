@@ -1,5 +1,6 @@
 from core.lures import (
     recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES, guess_category_from_text,
+    is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES,
 )
 
 
@@ -332,3 +333,57 @@ def test_guess_category_from_text_every_returned_key_is_real():
 def test_guess_category_from_text_blank_input():
     assert guess_category_from_text("") == ""
     assert guess_category_from_text() == ""
+
+
+# --- is_trailer_eligible / TRAILER_ELIGIBLE_CATEGORIES -----------------------
+
+def _inv_item(**kwargs):
+    base = {"item_id": "abc123", "brand": "Strike King", "description": "Test Lure", "category": ""}
+    base.update(kwargs)
+    return base
+
+
+def test_trailer_eligible_categories_are_all_real_lure_profiles():
+    for key in TRAILER_ELIGIBLE_CATEGORIES:
+        assert key in LURE_PROFILES, key
+
+
+def test_is_trailer_eligible_true_for_craw_and_swimbait_style_categories():
+    assert is_trailer_eligible(_inv_item(category="texas_rig_creature")) is True
+    assert is_trailer_eligible(_inv_item(category="weightless_soft_plastic")) is True
+
+
+def test_is_trailer_eligible_false_for_worm_style_categories():
+    # These are the exact categories the angler asked to exclude ("not for
+    # worms or TRD's") - Texas-rigged worms, wacky senkos, finesse worms,
+    # and Carolina-rigged worms aren't trailers, they're standalone rigs.
+    for category in ("texas_rig_worm", "wacky_rig_senko", "finesse_shaky_head", "carolina_rig"):
+        assert is_trailer_eligible(_inv_item(category=category)) is False, category
+
+
+def test_is_trailer_eligible_false_for_host_bait_categories():
+    # A jig/chatterbait/spinnerbait/swim_jig/buzzbait is what a trailer gets
+    # ADDED to - it isn't itself a trailer.
+    for category in ("football_jig", "chatterbait", "spinnerbait", "swim_jig", "buzzbait"):
+        assert is_trailer_eligible(_inv_item(category=category)) is False, category
+
+
+def test_is_trailer_eligible_keyword_safety_net_excludes_trd_even_if_miscategorized():
+    # Z-Man's TRD line is a finesse worm - explicitly called out by the
+    # angler. Even if it were (incorrectly) tagged as a trailer-eligible
+    # category, the brand/description keyword check should still exclude it.
+    item = _inv_item(category="texas_rig_creature", brand="Z-Man", description="Finesse TRD - Green Pumpkin")
+    assert is_trailer_eligible(item) is False
+
+
+def test_is_trailer_eligible_matches_real_logged_trailer_uses():
+    # Every trailer the angler has actually logged so far is a Strike King
+    # Rage Tail Craw (texas_rig_creature) or a KVD Blade Minnow
+    # (weightless_soft_plastic) - confirms the filter doesn't regress real
+    # historical usage.
+    craw = _inv_item(category="texas_rig_creature", brand="Strike King",
+                      description='Rage Tail Craw Soft Bait - Fire Craw, 4", 7-pack')
+    blade_minnow = _inv_item(category="weightless_soft_plastic", brand="Strike King",
+                              description='KVD Perfect Plastics Blade Minnow - Key Lime Pie, 4-1/2", 8-pack')
+    assert is_trailer_eligible(craw) is True
+    assert is_trailer_eligible(blade_minnow) is True

@@ -19,7 +19,7 @@ from core.activity_log import (
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
     FISH_SPECIES_OPTIONS, format_weight_lb_oz, parse_weight_lb_oz,
 )
-from core.lures import recommend, FORAGE_OPTIONS
+from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
 from core.ui import render_lure_recommendation, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip
 from core.weather import lake_today
@@ -530,7 +530,7 @@ LURE_PICKER_COLS = 4
 LURE_PICKER_THUMBNAIL_PX = 90
 
 
-def _visual_lure_picker(inventory_items: list, key_prefix: str):
+def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: str = None):
     """Searchable, image-card picker over the tackle inventory. A plain
     st.selectbox can't show a photo inside its own option list - no browser
     <select> element supports that - so this renders a compact card grid
@@ -541,6 +541,15 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str):
     downstream fields (default color, trailer eligibility) update in the
     same pass, and a form only reruns on submit.
 
+    `inventory_items` is whatever the caller wants shown as options - the
+    full tackle box for the main "Lure used" picker, or a pre-filtered
+    subset (see core.lures.is_trailer_eligible) for the "Trailer" picker, so
+    this function itself has no opinion on what belongs in either list.
+    `empty_message` overrides the default "no lures" caption for a
+    filtered/empty list, e.g. "no trailer-eligible items" rather than the
+    generic message when the filter (not an empty tackle box) is why
+    nothing's showing.
+
     Returns the selected inventory row, or None if nothing's picked (the
     caller then falls back to a plain text entry, same as the old "Other /
     not in inventory" selectbox option did).
@@ -548,6 +557,7 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str):
     selected_key = f"{key_prefix}_selected_id"
     if not inventory_items:
         st.caption(
+            empty_message or
             "No lures in your tackle box yet - add some on the Lure Inventory page, "
             "or just type this one in below."
         )
@@ -762,7 +772,19 @@ with results_expander:
     selected_trailer_item = None
     if use_trailer:
         st.markdown("**Trailer**")
-        selected_trailer_item = _visual_lure_picker(inventory_items, key_prefix=f"log_trailer_{spot['spot_id']}_{lure_seq}")
+        # Only real trailer-style baits (craw/creature, paddle-tail
+        # swimbait-style) - not the whole tackle box, and specifically not
+        # worms/senkos/TRDs, which aren't trailers even though they're soft
+        # plastics too. See core.lures.is_trailer_eligible/
+        # TRAILER_ELIGIBLE_CATEGORIES for exactly what qualifies and why.
+        trailer_items = [it for it in inventory_items if is_trailer_eligible(it)]
+        selected_trailer_item = _visual_lure_picker(
+            trailer_items, key_prefix=f"log_trailer_{spot['spot_id']}_{lure_seq}",
+            empty_message=(
+                "No trailer-style baits (craw/creature or paddle-tail swimbait) found in your "
+                "tackle box - add one on the Lure Inventory page, or just type this one in below."
+            ),
+        )
         if selected_trailer_item is None:
             trailer_name = st.text_input(
                 "Trailer name", placeholder="e.g. Green pumpkin craw trailer",
