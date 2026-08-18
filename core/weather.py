@@ -8,7 +8,7 @@ Lake's approximate center point.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import requests
 
@@ -36,6 +36,16 @@ DAILY_VARS = [
     "temperature_2m_max",
     "temperature_2m_min",
 ]
+
+# How many real (not forecasted) past days of air-temp history to request
+# alongside the forecast, so estimate_water_temp_f()'s "trailing average"
+# has actual data to average even when scoring TODAY - without this,
+# Open-Meteo's response starts exactly at today's local midnight with
+# nothing earlier, so a request for "the last 5 days" would only ever
+# have today's own not-yet-elapsed hours (or literally a single instant,
+# for the very first hour of the day) to work with. See
+# estimate_water_temp_f() below.
+WATER_TEMP_TREND_PAST_DAYS = 5
 
 
 @dataclass
@@ -67,6 +77,7 @@ def fetch_forecast(days: int = 7, lat: float = LAKE_LAT, lon: float = LAKE_LON) 
         "daily": ",".join(DAILY_VARS),
         "timezone": LAKE_TZ,
         "forecast_days": min(max(days, 1), 16),
+        "past_days": WATER_TEMP_TREND_PAST_DAYS,
         "temperature_unit": "fahrenheit",
         "windspeed_unit": "mph",
         "precipitation_unit": "inch",
@@ -119,7 +130,7 @@ def pressure_trend_hpa_per_24h(bundle: WeatherBundle, at_time: datetime) -> floa
         return min(range(len(times)), key=lambda i: abs((times[i] - target).total_seconds()))
 
     i_now = nearest_idx(at_time)
-    i_prev = nearest_idx(at_time.replace(hour=at_time.hour) - __import__("datetime").timedelta(hours=24))
+    i_prev = nearest_idx(at_time.replace(hour=at_time.hour) - timedelta(hours=24))
     p_now = pressures[i_now] if i_now < len(pressures) else None
     p_prev = pressures[i_prev] if i_prev < len(pressures) else None
     if p_now is None or p_prev is None:
@@ -129,26 +140,55 @@ def pressure_trend_hpa_per_24h(bundle: WeatherBundle, at_time: datetime) -> floa
 
 def estimate_water_temp_f(bundle: WeatherBundle, d: date, day_of_year: int) -> float:
     """
-    Rough water-temperature estimate since Nolin Lake has no live buoy feed.
-    Blends a 5-day trailing average of air temps (lagged, since water warms/cools
-    slower than air) with a seasonal baseline curve for a KY reservoir.
-    This is clearly surfaced in the UI as an ESTIMATE, not a measurement.
+    Rough SURFACE water-temperature estimate since Nolin Lake has no live
+    buoy/sensor feed to read a real number from - see core/lake_level.py
+    for the one metric on this page that *is* a genuine live measurement
+    (pool elevation, not temperature). Blends a trailing average of recent
+    daily HIGH air temps (lagged/offset a couple degrees, since the surface
+    layer tracks the day's peak heating more than its overnight low) with a
+    seasonal baseline curve for a KY reservoir. Clearly surfaced in the UI
+    as an ESTIMATE, not a measurement.
+
+    Two fixes worth calling out, both found (and their impact confirmed)
+    against the angler's own real, hand-logged surface-temp readings from
+    Spot Session (which run 83-89°F in mid-August 2026 - see SESSION_NOTES.md's
+    punch-list #7 entry for the full before/after numbers):
+
+    1. Uses `bundle.daily["temperature_2m_max"]` (each day's actual high),
+       not a raw average of every hourly reading. Averaging in overnight
+       lows dragged the number down several degrees - a lake's surface
+       layer responds to net daily heating, not the pre-dawn low, and
+       fetch_forecast() requesting WATER_TEMP_TREND_PAST_DAYS of real past
+       days (not just forecast) means there's now genuine multi-day history
+       to average even when estimating TODAY's temperature, not just days
+       several days out into the forecast window.
+    2. The seasonal curve's peak/amplitude were retuned against those real
+       readings - the old curve topped out at 84°F on its best day, already
+       below several real August readings, and peaked around day 196
+       (mid-July) rather than reflecting a reservoir's actual thermal lag
+       into early August. Still just a best-effort model outside the window
+       this one summer's data actually covers (no real cold-season ground
+       truth exists yet to check the curve elsewhere) - a good future
+       improvement once trips get logged across more of the year.
     """
-    times = [datetime.fromisoformat(t) for t in bundle.hourly.get("time", [])]
-    temps = bundle.hourly.get("temperature_2m", [])
-    if times:
-        window_start = datetime.combine(d, datetime.min.time()) - __import__("datetime").timedelta(days=5)
-        window_vals = [temps[i] for i, t in enumerate(times) if window_start <= t <= datetime.combine(d, datetime.min.time())]
-        air_avg = sum(window_vals) / len(window_vals) if window_vals else None
-    else:
-        air_avg = None
+    daily_times = [datetime.fromisoformat(t).date() for t in bundle.daily.get("time", [])]
+    daily_highs = bundle.daily.get("temperature_2m_max", [])
+    window_start = d - timedelta(days=WATER_TEMP_TREND_PAST_DAYS)
+    window_vals = [
+        daily_highs[i] for i, dd in enumerate(daily_times)
+        if window_start <= dd < d and i < len(daily_highs) and daily_highs[i] is not None
+    ]
+    high_avg = sum(window_vals) / len(window_vals) if window_vals else None
 
-    # Seasonal baseline (rough, KY reservoir climatology), keyed by day-of-year
+    # Seasonal baseline (rough, KY reservoir climatology), keyed by day-of-year -
+    # peak ~87°F around day 215 (early August), trough ~33°F around day 32
+    # (early February).
     import math
-    seasonal = 60 + 24 * math.sin(2 * math.pi * (day_of_year - 105) / 365.0)
+    seasonal = 60 + 27 * math.sin(2 * math.pi * (day_of_year - 124) / 365.0)
 
-    if air_avg is None:
+    if high_avg is None:
         return round(seasonal, 1)
-    # Water lags/damps air temp - blend 45% recent air trend (offset cooler than air), 55% seasonal norm
-    blended = 0.45 * (air_avg - 4) + 0.55 * seasonal
+    # Water lags/damps air's daily peak - blend 45% recent daily-high trend
+    # (offset a few degrees cooler than the air's own peak), 55% seasonal norm.
+    blended = 0.45 * (high_avg - 3) + 0.55 * seasonal
     return round(blended, 1)

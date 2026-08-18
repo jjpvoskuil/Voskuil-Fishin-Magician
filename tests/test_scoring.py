@@ -1,5 +1,5 @@
 from datetime import date, timedelta, datetime
-from core.weather import WeatherBundle
+from core.weather import WeatherBundle, WATER_TEMP_TREND_PAST_DAYS
 from core.scoring import (
     score_week, score_day, manual_segment_score, realtime_context_from_bundle,
     segment_time_ranges, lake_now_naive, SEGMENTS, _segment_windows,
@@ -12,7 +12,14 @@ def _fake_bundle_with_air_temp(air_temp_f: float, d: date, days=9):
     """Same shape as _fake_bundle(), but every hourly reading is a fixed air
     temp and the window is anchored around `d` - used to force
     estimate_water_temp_f() toward a specific, deterministic metabolic band
-    regardless of what day the test suite happens to run on."""
+    regardless of what day the test suite happens to run on. `daily` starts
+    WATER_TEMP_TREND_PAST_DAYS before `d`, not at `d` itself - matching a
+    real Open-Meteo response now that fetch_forecast() requests
+    `past_days`, and needed so estimate_water_temp_f()'s trailing daily-high
+    average actually has real days to average for `d` (a bundle whose daily
+    array only started at `d` itself, like this fixture used to build,
+    would leave that average permanently empty and silently fall through to
+    the seasonal-only branch - not what these tests are meant to exercise)."""
     times, temps, pres, cloud, wind, wdir, pprob, precip = [], [], [], [], [], [], [], []
     t0 = datetime(d.year, d.month, d.day) - timedelta(days=6)
     for h in range(24 * days):
@@ -28,12 +35,20 @@ def _fake_bundle_with_air_temp(air_temp_f: float, d: date, days=9):
     hourly = {"time": times, "temperature_2m": temps, "surface_pressure": pres, "cloudcover": cloud,
               "windspeed_10m": wind, "winddirection_10m": wdir, "precipitation_probability": pprob,
               "precipitation": precip}
+    daily_start = d - timedelta(days=WATER_TEMP_TREND_PAST_DAYS)
+    daily_days = WATER_TEMP_TREND_PAST_DAYS + 7
     daily = {
-        "time": [(d + timedelta(days=i)).isoformat() for i in range(7)],
-        "sunrise": [(datetime(d.year, d.month, d.day) + timedelta(days=i, hours=6, minutes=20)).isoformat() for i in range(7)],
-        "sunset": [(datetime(d.year, d.month, d.day) + timedelta(days=i, hours=20, minutes=15)).isoformat() for i in range(7)],
-        "temperature_2m_max": [air_temp_f + 10] * 7,
-        "temperature_2m_min": [air_temp_f - 10] * 7,
+        "time": [(daily_start + timedelta(days=i)).isoformat() for i in range(daily_days)],
+        "sunrise": [
+            (datetime(d.year, d.month, d.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=6, minutes=20)).isoformat()
+            for i in range(daily_days)
+        ],
+        "sunset": [
+            (datetime(d.year, d.month, d.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=20, minutes=15)).isoformat()
+            for i in range(daily_days)
+        ],
+        "temperature_2m_max": [air_temp_f + 10] * daily_days,
+        "temperature_2m_min": [air_temp_f - 10] * daily_days,
     }
     return WeatherBundle(hourly=hourly, daily=daily)
 
@@ -55,12 +70,22 @@ def _fake_bundle(days=9):
     hourly = {"time": times, "temperature_2m": temps, "surface_pressure": pres, "cloudcover": cloud,
               "windspeed_10m": wind, "winddirection_10m": wdir, "precipitation_probability": pprob,
               "precipitation": precip}
+    # daily starts WATER_TEMP_TREND_PAST_DAYS before today, not at today itself -
+    # see _fake_bundle_with_air_temp()'s docstring for why this matters now.
+    daily_start = today - timedelta(days=WATER_TEMP_TREND_PAST_DAYS)
+    daily_days = WATER_TEMP_TREND_PAST_DAYS + 7
     daily = {
-        "time": [(today + timedelta(days=i)).isoformat() for i in range(7)],
-        "sunrise": [(datetime(today.year, today.month, today.day) + timedelta(days=i, hours=6, minutes=20)).isoformat() for i in range(7)],
-        "sunset": [(datetime(today.year, today.month, today.day) + timedelta(days=i, hours=20, minutes=15)).isoformat() for i in range(7)],
-        "temperature_2m_max": [90] * 7,
-        "temperature_2m_min": [72] * 7,
+        "time": [(daily_start + timedelta(days=i)).isoformat() for i in range(daily_days)],
+        "sunrise": [
+            (datetime(today.year, today.month, today.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=6, minutes=20)).isoformat()
+            for i in range(daily_days)
+        ],
+        "sunset": [
+            (datetime(today.year, today.month, today.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=20, minutes=15)).isoformat()
+            for i in range(daily_days)
+        ],
+        "temperature_2m_max": [90] * daily_days,
+        "temperature_2m_min": [72] * daily_days,
     }
     return WeatherBundle(hourly=hourly, daily=daily)
 
@@ -142,10 +167,15 @@ def test_manual_segment_score_flags_storm_warning_for_heavy_precip():
 
 
 def test_manual_segment_score_matches_score_day_for_equivalent_inputs():
-    # If the same underlying pressure/moon/cloud/wind/season/precip values are
-    # fed to both the bundle-driven score_day() and the hand-entered
+    # If the same underlying pressure/moon/cloud/wind/season/precip/water-temp
+    # values are fed to both the bundle-driven score_day() and the hand-entered
     # manual_segment_score(), they should agree - they share the same
-    # _segment_score() formula, just different sources for the inputs.
+    # _segment_score() formula, just different sources for the inputs. Passing
+    # day.water_temp_f explicitly here matters now that estimate_water_temp_f()
+    # produces realistic (not artificially neutral-banded) estimates - without
+    # it, this would be comparing score_day()'s water-temp-aware score against
+    # manual_segment_score()'s water-temp-blind default, which aren't actually
+    # "equivalent inputs" at all.
     bundle = _fake_bundle()
     day = score_day(bundle, date.today())
     dawn = next(s for s in day.segments if s.name == "Dawn")
@@ -154,7 +184,7 @@ def test_manual_segment_score_matches_score_day_for_equivalent_inputs():
         "Dawn", day.season, avg_cloud_pct=40, avg_wind_mph=7,
         total_precip_in=0.0, max_precip_prob_pct=10,
         pressure_trend_24h=day.pressure_trend_24h, solunar_overlap=dawn.solunar_overlap,
-        moon=day.moon,
+        moon=day.moon, water_temp_f=day.water_temp_f,
     )
     assert result.score == dawn.score
 
@@ -406,9 +436,13 @@ def test_score_day_now_applies_water_temp_band_scoring():
 def test_score_day_water_temp_summer_stratified_band_stays_neutral():
     # 77-84F intentionally has no dedicated weight (already partially covered
     # by season_summer_midday_penalty) - confirm score_day() respects that too,
-    # not just manual_segment_score().
+    # not just manual_segment_score(). 66.0 (not a hotter value) is deliberate:
+    # estimate_water_temp_f() now weights each day's actual HIGH
+    # (_fake_bundle_with_air_temp sets temperature_2m_max to air_temp_f + 10),
+    # not a flat all-hours average, so a cooler input air temp is what lands
+    # the resulting estimate in the 77-84F Summer Stratified band now.
     d = date(2026, 7, 15)
-    bundle = _fake_bundle_with_air_temp(84.0, d)
+    bundle = _fake_bundle_with_air_temp(66.0, d)
     day = score_day(bundle, d)
     assert onwater.water_temp_band(day.water_temp_f)["label"] == "Summer Stratified"
     for seg in day.segments:

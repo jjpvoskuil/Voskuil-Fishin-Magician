@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from .weather import fetch_forecast
+from .lake_level import fetch_lake_level
 from .spots import load_spots
 from .storage import read_all_trips
 from .calibration import calibrate_weights
@@ -14,6 +15,11 @@ from .dev_tasks import read_all_tasks as read_all_dev_tasks
 @st.cache_data(ttl=60 * 60, show_spinner="Fetching weather forecast...")
 def get_weather_bundle(days: int = 7):
     return fetch_forecast(days=days)
+
+
+@st.cache_data(ttl=60 * 15, show_spinner="Fetching lake level...")
+def get_lake_level():
+    return fetch_lake_level()
 
 
 @st.cache_data(ttl=60 * 5)

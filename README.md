@@ -299,8 +299,13 @@ plausible day/segment combinations, with the tails far more balanced).
   low-precision lunar-position algorithm (`core/astro.py`) - no external service or
   ephemeris download needed.
 - Water temperature: **estimated**, not measured (Nolin Lake has no live buoy feed) -
-  blended from recent air temperature and a seasonal baseline curve. Always shown as an
-  estimate in the UI.
+  blended from a trailing average of recent daily HIGH air temps and a seasonal baseline
+  curve tuned against real logged Nolin readings. Always shown as an estimate in the UI.
+- Lake level (pool elevation): a genuine live measurement, not an estimate - [USGS Water
+  Services](https://waterservices.usgs.gov/) gauge 03310900 ("Nolin Lake near Kyrock, KY"),
+  the one on the lake pool itself rather than the separate downstream river gauges. Shown
+  on the Home page alongside how far above/below USACE's normal summer pool (515 ft) the
+  lake currently sits.
 - Lake spot coordinates (`data/nolin_spots.json`): a handful of general reference spots
   anchored to verified public sources (USACE gauge location, Kentucky State Parks/GNIS
   coordinate, U.S. Census TIGER address geocoding). **These are planning
@@ -588,6 +593,8 @@ pages/
 core/
   astro.py               Moon phase + solunar rise/transit/set
   weather.py              Open-Meteo integration + water-temp estimate
+  lake_level.py            USGS Water Services integration - real, live pool elevation
+                           (not an estimate, unlike everything else weather-derived)
   scoring.py              1-10 activity scoring engine (shared by the forecast and
                            Spot Session pages via manual_segment_score())
   forecast_freeze.py       Locks in a 7-Day Forecast time segment's score once its
