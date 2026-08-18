@@ -248,13 +248,23 @@ lure_entry_seq_key = f"lure_entry_seq_{spot['spot_id']}"
 st.session_state.setdefault(lure_entry_seq_key, 0)
 lure_seq = st.session_state[lure_entry_seq_key]
 
-if editing_trip is not None and not st.session_state.get(edit_prefill_done_key):
-    # One-time seed of every widget-backed session_state key the "Add
-    # results" section (and the Session date field) reads, so the form
-    # opens already showing this trip's data instead of blank defaults.
-    # Guarded by edit_prefill_done_key so it only runs once per edit visit -
-    # otherwise every rerun (e.g. typing in a text field) would stomp
-    # whatever the angler had just changed back to the original values.
+# Captured as a plain variable (not re-derived later) because the prefill
+# block below immediately marks edit_prefill_done_key True once it runs -
+# the "Time window" guard further down (punch-list #9's start-time-follow
+# logic vs. punch-list #11's persisted-widget-key logic) needs to know
+# specifically "did prefill seeding JUST happen this run", which re-reading
+# edit_prefill_done_key at that point could no longer distinguish from
+# "seeding already happened on some earlier run."
+_just_entered_edit_mode = editing_trip is not None and not st.session_state.get(edit_prefill_done_key)
+
+if _just_entered_edit_mode:
+    # One-time seed of every widget-backed session_state key the "Conditions
+    # right now" section, "Add results" section, and the Session date field
+    # read, so the form opens already showing this trip's data instead of
+    # blank defaults. Guarded by edit_prefill_done_key so it only runs once
+    # per edit visit - otherwise every rerun (e.g. typing in a text field)
+    # would stomp whatever the angler had just changed back to the original
+    # values.
     #
     # Bump lure_entry_seq_key first so the lure/trailer/time/notes keys we
     # seed below (which fold lure_seq into their key) are guaranteed unused,
@@ -288,6 +298,35 @@ if editing_trip is not None and not st.session_state.get(edit_prefill_done_key):
 
     st.session_state[f"session_date_{spot['spot_id']}"] = _parse_iso_date(editing_trip.get("trip_date")) or lake_today()
 
+    # Punch-list #11: "Conditions right now" fields, same one-time-seed-on-
+    # edit-entry treatment as everything else in this block, now that those
+    # widgets are keyed (persisted) below instead of just reading a locally
+    # computed default every run. "Time window" is deliberately NOT seeded
+    # here - it depends on start_time (seeded below) and seg_ranges (not
+    # computed until after this block runs), so it's handled separately,
+    # right at its own widget, guarded by this same _just_entered_edit_mode.
+    st.session_state[f"cond_water_temp_{spot['spot_id']}"] = editing_cond.get("water_temp_f", 85.0)
+    st.session_state[f"cond_secchi_{spot['spot_id']}"] = editing_cond.get("secchi_ft", 2.5)
+    st.session_state[f"cond_stain_color_{spot['spot_id']}"] = (
+        editing_cond["stain_color"] if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS
+        else STAIN_COLOR_OPTIONS[0]
+    )
+    st.session_state[f"cond_stirred_up_{spot['spot_id']}"] = bool(editing_cond.get("stirred_up", False))
+    st.session_state[f"cond_wind_band_{spot['spot_id']}"] = (
+        editing_cond["wind_band"] if editing_cond.get("wind_band") in WIND_BAND_LABELS else WIND_BAND_LABELS[1]
+    )
+    st.session_state[f"cond_light_condition_{spot['spot_id']}"] = (
+        editing_cond["light_condition"] if editing_cond.get("light_condition") in LIGHT_CONDITIONS
+        else LIGHT_CONDITIONS[2]
+    )
+    st.session_state[f"cond_precipitation_{spot['spot_id']}"] = (
+        editing_cond["precipitation"] if editing_cond.get("precipitation") in PRECIPITATION_OPTIONS
+        else PRECIPITATION_OPTIONS[0]
+    )
+    st.session_state[f"cond_start_time_{spot['spot_id']}"] = _parse_iso_time(editing_cond.get("start_time"))
+    st.session_state[f"cond_forage_seen_{spot['spot_id']}"] = editing_cond.get("forage_seen") or []
+    st.session_state[f"cond_fish_depth_{spot['spot_id']}"] = editing_cond.get("fish_depth_ft") or 8.0
+
     st.session_state[f"log_wind_speed_{spot['spot_id']}"] = editing_cond.get("wind_speed_mph") or 0.0
     st.session_state[f"log_wind_dir_{spot['spot_id']}"] = editing_cond.get("wind_direction") or WIND_DIRECTIONS[8]
     st.session_state[f"log_fish_activity_{spot['spot_id']}"] = editing_cond.get("fish_activity") or "Moderate"
@@ -318,16 +357,18 @@ if editing_trip is not None and not st.session_state.get(edit_prefill_done_key):
     st.session_state[f"results_expander_{spot['spot_id']}"] = True
     st.session_state[edit_prefill_done_key] = True
 
+# Punch-list #11 cleanup: this predates #11 (it's always been keyed, since
+# it needs to survive the "Get suggestions" reruns below), but it used to
+# pass `value=st.session_state.get(key, lake_today())` alongside `key=` -
+# which still trips Streamlit's "widget was created with a default value
+# but also had its value set via the Session State API" warning on any run
+# where the edit-prefill block above just explicitly assigned this same key
+# (confirmed empirically while building #11). Switched to the same
+# `setdefault` + bare-`key=` pattern used by every "Conditions right now"
+# widget below, which was verified warning-free for exactly this scenario.
+st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
 session_date = st.date_input(
     "Session date",
-    # Reads back whatever the edit-mode prefill block above just seeded into
-    # session_state (falling back to today, same as always, outside edit
-    # mode) rather than passing today as a separate literal default -
-    # passing a differing hardcoded default alongside a pre-set
-    # session_state value for the same key trips Streamlit's "widget was
-    # created with a default value but also had its value set via the
-    # Session State API" warning.
-    value=st.session_state.get(f"session_date_{spot['spot_id']}", lake_today()),
     max_value=lake_today(),
     help="Defaults to today - pick an earlier date to log a past session at this spot. Pressure trend and "
          "solunar timing may fall back to their no-data defaults for dates outside the current forecast window.",
@@ -353,36 +394,16 @@ _wind_help = "\n".join(
     for lo, hi, label, detail in WIND_BANDS
 )
 
-# Defaults for the (unkeyed) "Conditions right now" form below - editing_cond
-# is {} outside edit mode, so every .get() here just falls through to the
-# same hardcoded default the form always used, with no extra branching
-# needed for the non-edit case.
-_cond_water_temp_f = editing_cond.get("water_temp_f", 85.0)
-_cond_secchi_ft = editing_cond.get("secchi_ft", 2.5)
-_cond_stain_idx = (
-    STAIN_COLOR_OPTIONS.index(editing_cond["stain_color"])
-    if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS else 0
-)
-_cond_stirred_up = bool(editing_cond.get("stirred_up", False))
-_cond_wind_band_idx = (
-    WIND_BAND_LABELS.index(editing_cond["wind_band"]) if editing_cond.get("wind_band") in WIND_BAND_LABELS else 1
-)
-_cond_light_idx = (
-    LIGHT_CONDITIONS.index(editing_cond["light_condition"])
-    if editing_cond.get("light_condition") in LIGHT_CONDITIONS else 2
-)
-_cond_precip_idx = (
-    PRECIPITATION_OPTIONS.index(editing_cond["precipitation"])
-    if editing_cond.get("precipitation") in PRECIPITATION_OPTIONS else 0
-)
-_cond_start_time = None
-if editing_cond.get("start_time"):
-    try:
-        _cond_start_time = dtime.fromisoformat(editing_cond["start_time"])
-    except ValueError:
-        _cond_start_time = None
-_cond_forage_seen = editing_cond.get("forage_seen") or []
-_cond_fish_depth_ft = editing_cond.get("fish_depth_ft") or 8.0
+# Punch-list #11: "Conditions right now" widgets below are now all keyed
+# (session_state-backed via f"cond_<field>_{spot_id}"), so whatever's typed
+# in survives navigating to another page and back, exactly like the "Add
+# results" section's log_* fields already do - each widget's `st.session_
+# state.setdefault(key, ...)` immediately above it only ever applies the
+# very first time its key is created for this spot (a brand-new, never-
+# before-visited session); every other case (a returning visit, or
+# entering edit mode - handled by the prefill block above seeding these
+# same keys) is served straight from session_state instead, since the
+# widget itself is never given a competing `value=`/`index=`.
 _editing_segment = (editing_trip or {}).get("segment")
 
 st.divider()
@@ -404,13 +425,29 @@ st.caption(
 # start time (deliberately blank by default, per its help text below) -
 # every other field already has a sane default, so cond starts existing the
 # moment a start time is entered.
+# Every widget below is seeded via `st.session_state.setdefault(key, ...)`
+# immediately before it's created, then constructed with `key=` alone - no
+# `value=`/`index=` argument at all. Passing a literal `value=`/`index=`
+# alongside `key=` (even one computed by reading back from session_state)
+# still trips Streamlit's "widget was created with a default value but also
+# had its value set via the Session State API" warning on any run where the
+# edit-prefill block above just explicitly assigned that same key
+# (confirmed empirically before writing this). `setdefault` sidesteps it
+# entirely: it only writes when the key doesn't exist yet (a first-ever
+# visit for this spot), so it never collides with the prefill block's
+# assignment, and the widget itself has exactly one source of truth -
+# session_state - from then on.
 c1, c2 = st.columns(2)
+st.session_state.setdefault(f"cond_water_temp_{spot['spot_id']}", 85.0)
 water_temp_f = c1.number_input(
-    "Water temperature (°F)", min_value=32.0, max_value=100.0, value=_cond_water_temp_f, step=0.5,
+    "Water temperature (°F)", min_value=32.0, max_value=100.0, step=0.5,
+    key=f"cond_water_temp_{spot['spot_id']}",
 )
+st.session_state.setdefault(f"cond_secchi_{spot['spot_id']}", 2.5)
 secchi_ft = c2.number_input(
-    "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, value=_cond_secchi_ft, step=0.5,
+    "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
     help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
+    key=f"cond_secchi_{spot['spot_id']}",
 )
 temp_band = water_temp_band(water_temp_f)
 st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
@@ -419,18 +456,29 @@ st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
 
 stain_color = None
 if vis_band["label"] == "Stained":
+    _stain_key = f"cond_stain_color_{spot['spot_id']}"
+    st.session_state.setdefault(_stain_key, STAIN_COLOR_OPTIONS[0])
     stain_color = st.selectbox(
         "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
-        index=_cond_stain_idx,
+        key=_stain_key,
     )
+st.session_state.setdefault(f"cond_stirred_up_{spot['spot_id']}", False)
 stirred_up = st.checkbox(
-    "Stirred up / muddy right now (recent wind or rain)", value=_cond_stirred_up,
+    "Stirred up / muddy right now (recent wind or rain)",
     help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color - a "
          "fresh disturbance can outrun what you can see or measure yet.",
+    key=f"cond_stirred_up_{spot['spot_id']}",
 )
 
 c3, c4 = st.columns(2)
-wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, index=_cond_wind_band_idx, help=_wind_help)
+_wind_band_key = f"cond_wind_band_{spot['spot_id']}"
+st.session_state.setdefault(_wind_band_key, WIND_BAND_LABELS[1])
+wind_band_choice = c3.selectbox(
+    "Wind", WIND_BAND_LABELS,
+    help=_wind_help, key=_wind_band_key,
+)
+_light_key = f"cond_light_condition_{spot['spot_id']}"
+st.session_state.setdefault(_light_key, LIGHT_CONDITIONS[2])
 light_condition = c4.selectbox(
     # Renamed from "Light conditions" (punch-list #10) - describes the sky
     # itself (cloud cover) now, not a lux-based light-penetration guess; see
@@ -439,55 +487,79 @@ light_condition = c4.selectbox(
     # conditions_json "light_condition" field) are left as-is - only the
     # on-screen label and options changed, so past logged trips' saved
     # values still read back correctly.
-    "Sky conditions", LIGHT_CONDITIONS, index=_cond_light_idx,
+    "Sky conditions", LIGHT_CONDITIONS,
     help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
+    key=_light_key,
 )
 
 c5, c6 = st.columns(2)
-precipitation = c5.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=_cond_precip_idx)
+_precip_key = f"cond_precipitation_{spot['spot_id']}"
+st.session_state.setdefault(_precip_key, PRECIPITATION_OPTIONS[0])
+precipitation = c5.selectbox(
+    "Precipitation", PRECIPITATION_OPTIONS,
+    key=_precip_key,
+)
+st.session_state.setdefault(f"cond_start_time_{spot['spot_id']}", None)
 start_time = c6.time_input(
-    "Session start time (enter manually)", value=_cond_start_time, step=300,
+    "Session start time (enter manually)",
+    step=300,
     help="When you actually started fishing this spot - enter it yourself rather than relying on "
          "whatever time it happens to be while you're filling this out, since you might do that "
          "before heading out or after you're done. Used to line up the score/suggestions below with "
          "that exact moment, and is what triggers a live score to be saved with this trip once you "
          "log results below.",
+    key=f"cond_start_time_{spot['spot_id']}",
 )
 
-# Punch-list #9: "automatically fill in the period of the day based on the
-# start time I input" - guess off the entered `start_time` (combined with
-# `session_date`, so it lines up with the same seg_ranges windows the
-# dropdown's own labels use) instead of the real current clock time,
-# whenever a start time has actually been entered. Falls back to "now"
-# (the previous behavior) before start_time is filled in, since that's
-# still a reasonable live default for an angler filling this out in the
-# moment. Recomputed on every rerun from whatever start_time currently
-# holds - since this selectbox has no explicit `key`, Streamlit re-applies
-# `index=` on every run where the computed value changes, so the dropdown
-# actually follows start_time edits live, not just on first render. A
-# manual pick in the dropdown itself still sticks across unrelated field
-# edits (any rerun where the computed guess doesn't change) - only
-# changing start_time re-drives it, matching "never authoritative, always
-# overridable."
-_guess_dt = datetime.combine(session_date, start_time) if start_time is not None else lake_now_naive()
-_cond_segment_name = (
-    _editing_segment if _editing_segment in SEGMENTS else _guess_segment(_guess_dt.hour, _guess_dt)
-)
+# Punch-list #9 ("automatically fill in the period of the day based on the
+# start time I input") and punch-list #11 (persist whatever's entered
+# across a page visit and back) pull in slightly different directions for
+# this one widget: #9 wants the guess to actively follow start_time edits,
+# while #11 wants a manual pick to survive reruns this widget isn't
+# involved in (including navigating away and back). A plain keyless
+# selectbox (the original #9 implementation) satisfies the first but not
+# the second - without a `key`, nothing here would be in session_state to
+# read back after navigating away. A plain keyed selectbox satisfies the
+# second but not the first - once keyed, Streamlit ignores `index=` after
+# the very first render, so a later start_time edit would never re-drive
+# it. Reconciled by keying the widget AND explicitly re-seeding its
+# session_state value on exactly the runs where that's warranted: entering
+# edit mode for the first time (prefers the trip's own saved segment, same
+# as every other edit-prefill field above), or start_time changing to a
+# value we haven't already reacted to (tracked via a small "last seen"
+# sentinel key) - any other rerun leaves the session-state value, and thus
+# the widget, untouched. Uses `format_func` to show the real clock range
+# (e.g. "Dawn (5:52 AM-7:52 AM)") without baking that formatted, session-
+# date-dependent string into the persisted value itself - SEGMENTS (the
+# actual options) never changes, so there's no risk of a stale formatted
+# label no longer matching a current option after a session-date edit.
+_segment_key = f"cond_segment_{spot['spot_id']}"
+_start_time_seen_key = f"cond_segment_last_start_time_seen_{spot['spot_id']}"
+if _just_entered_edit_mode and _editing_segment in SEGMENTS:
+    st.session_state[_segment_key] = _editing_segment
+    st.session_state[_start_time_seen_key] = start_time
+elif st.session_state.get(_start_time_seen_key, "__unset__") != start_time:
+    st.session_state[_start_time_seen_key] = start_time
+    _guess_dt = datetime.combine(session_date, start_time) if start_time is not None else lake_now_naive()
+    st.session_state[_segment_key] = _guess_segment(_guess_dt.hour, _guess_dt)
 
-segment_display_options = [_segment_option_label(s) for s in SEGMENTS]
-segment_display_choice = st.selectbox(
-    "Time window", segment_display_options,
-    index=SEGMENTS.index(_cond_segment_name),
+segment_name = st.selectbox(
+    "Time window", SEGMENTS, format_func=_segment_option_label, key=_segment_key,
     help="Auto-filled from the session start time above once it's set (falls back to the current time "
-         "before that) - pick a different window here any time to override it.",
+         "before that) - pick a different window here any time to override it. Sticks around if you "
+         "leave this page and come back, same as everything else above.",
 )
-segment_name = SEGMENTS[segment_display_options.index(segment_display_choice)]
 
 c7, c8 = st.columns(2)
-forage_seen = c7.multiselect("Forage seen (optional)", FORAGE_OPTIONS, default=_cond_forage_seen)
+st.session_state.setdefault(f"cond_forage_seen_{spot['spot_id']}", [])
+forage_seen = c7.multiselect(
+    "Forage seen (optional)", FORAGE_OPTIONS,
+    key=f"cond_forage_seen_{spot['spot_id']}",
+)
+st.session_state.setdefault(f"cond_fish_depth_{spot['spot_id']}", 8.0)
 fish_depth_ft = c8.number_input(
-    "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0,
-    value=_cond_fish_depth_ft, step=1.0,
+    "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, step=1.0,
+    key=f"cond_fish_depth_{spot['spot_id']}",
 )
 
 if start_time is not None:

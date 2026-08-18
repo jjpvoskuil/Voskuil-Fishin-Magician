@@ -84,7 +84,10 @@ this repo that can override it on this hosting.
   matching typical summer conditions on Nolin rather than generic placeholders,
   wind as a plain-language band like "Light Ripple" rather than an mph guess, light
   condition, precipitation, a manually-entered session start time, and a time-of-day
-  window shown with today's actual clock range, e.g. "Dawn (5:52 AM-7:52 AM)"). The
+  window shown with today's actual clock range, e.g. "Dawn (5:52 AM-7:52 AM)").
+  Whatever you've entered here sticks around if you navigate to another page and
+  come back, or reload the browser tab, so a half-filled-out session never gets
+  lost. The
   time-of-day window auto-fills to match whatever start time you enter (falling back
   to the real current time before a start time is set) - pick a different window
   yourself any time to override it, which sticks until you change the start time
