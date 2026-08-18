@@ -181,8 +181,9 @@ class LakeSetupOptions:
 def render_lake_setup_sidebar(
     include_structure: bool = True,
     default_structure_index: int = 0,
-    default_water_temp_f: float = 75.0,
-    default_fish_depth_ft: float = 10.0,
+    default_water_temp_f: float = 85.0,
+    default_fish_depth_ft: float = 8.0,
+    default_base_stain: str = DEFAULT_BASE_STAIN,
 ) -> LakeSetupOptions:
     """
     Shared "Lake Setup Options" sidebar (currently only used by the 7-Day
@@ -223,7 +224,12 @@ def render_lake_setup_sidebar(
         c1, c2 = st.columns(2)
         base_stain = c1.selectbox(
             "Water stain", BASE_STAIN_OPTIONS,
-            index=BASE_STAIN_OPTIONS.index(DEFAULT_BASE_STAIN), key="lso_base_stain",
+            index=(
+                BASE_STAIN_OPTIONS.index(default_base_stain)
+                if default_base_stain in BASE_STAIN_OPTIONS
+                else BASE_STAIN_OPTIONS.index(DEFAULT_BASE_STAIN)
+            ),
+            key="lso_base_stain",
             help="Nolin's normal color under typical conditions.",
         )
         stirred_up = c2.checkbox(
