@@ -3440,6 +3440,107 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     byte-identical (`md5sum`) before and after both runs. Marked
     Development punch-list item #10 "Done."
 
+73. **Punch-list #11: persist in-progress form entries across a page
+    navigation.** Ask (page: "General / whole app"): "If I begin to enter
+    data on a page and then leave a page, save the information entered
+    that far so if I go back it is already populated with what I entered."
+    Audited every page's forms for the actual gap: Spot Session's "Add
+    results" section (`log_*` keys) and every other page's forms were
+    already keyed and therefore already persisted correctly - the one real
+    gap was Spot Session's "Conditions right now" section (water temp,
+    Secchi depth, stain color, stirred-up, wind, sky conditions,
+    precipitation, start time, forage seen, fish depth), whose widgets had
+    never been given an explicit `key=` at all, so a page navigation (or
+    even certain reruns) would silently drop whatever had been typed in.
+
+    Keying these widgets collided with punch-list #9's "Time window"
+    auto-follow-start_time behavior, which specifically relied on that
+    dropdown staying keyless so a plain `index=` recompute could re-drive
+    it on every start-time edit. Reconciled by keeping "Time window" keyed
+    (so a manual pick survives navigation, matching every other field) but
+    only explicitly reseeding its session_state value on the two runs that
+    should actually redrive it - entering edit mode for the first time
+    (prefers the trip's own saved segment), or start_time changing to a
+    value not already reacted to (tracked via a small "last start time
+    seen" sentinel key) - leaving every other rerun (including an
+    unrelated field edit) untouched. Along the way, switched "Time window"
+    from baked, session-date-formatted option strings (e.g. "Dawn (5:52
+    AM-7:52 AM)") to raw `SEGMENTS` names plus a `format_func` that
+    computes the display string at render time - the raw name is what's
+    actually persisted now, so a later session-date edit can never leave a
+    stale formatted label that no longer matches any current option (a
+    real crash risk the old baked-string design would have had once
+    keyed).
+
+    Also root-caused, via careful empirical scratch testing rather than
+    guessing (4 throwaway `AppTest` scripts, each isolating one
+    hypothesis), a genuine Streamlit gotcha that the first two attempts at
+    keying these widgets both ran into: passing a `value=`/`index=`
+    argument to a widget *at all* - even one computed by reading back from
+    `st.session_state.get(key, default)`, the same pattern this codebase's
+    pre-existing `session_date` widget already used - still trips
+    Streamlit's "widget was created with a default value but also had its
+    value set via the Session State API" warning, specifically on any run
+    where the edit-prefill block earlier in the script had just explicitly
+    assigned that same key. The clean fix: call
+    `st.session_state.setdefault(key, hardcoded_default)` immediately
+    before the widget (only ever writes on a key's first-ever creation, so
+    it never collides with the prefill block's explicit assignment), then
+    construct the widget with `key=` alone - no `value=`/`index=` argument
+    at all. Verified warning-free across `number_input`, `selectbox`,
+    `checkbox`, and `time_input`, then applied it to all ten "Conditions
+    right now" widgets and, opportunistically (same root cause, one-line
+    fix, directly adjacent to this entry's own new prefill-block writes),
+    to the pre-existing `session_date` widget too - `session_date` predates
+    this entry, but as a keyed widget fed by the same prefill block it had
+    the identical wart. Left the same class of warning on the "Add
+    results" section's `log_*` widgets (e.g. `log_wind_speed_*`)
+    deliberately unfixed: those widgets already persist correctly
+    (functionally) and predate this entry entirely, the warning is a
+    server-console log line only - never shown in the app's own UI - and
+    fixing every remaining instance of it project-wide is a separate
+    cosmetic cleanup, not part of what this ask requested.
+
+    Scope: kept to Spot Session's "Conditions right now" section (the one
+    confirmed real persistence gap) plus the one adjacent `session_date`
+    fix above. Other pages' add/edit forms (Lake Map's spot form, Lure
+    Inventory's add-lure form, Development's add/edit task form) were
+    checked and already persist correctly via existing keyed widgets, so
+    nothing there needed changing despite the "General / whole app" scope
+    tag on this ask.
+
+    No new pure-logic unit tests - the change is Streamlit
+    widget/session_state wiring inside a page script, not testable
+    business logic (same reasoning as entry 71's "Time window" work).
+    `python3 -m pytest tests/ -q` still passes at 243 (unchanged).
+
+    Verified end to end with a scratch `AppTest` script (not committed)
+    against the real `data/lake_spots.csv`/`data/trip_log.csv`: (1) filled
+    in water temp, Secchi depth, stirred-up, wind, sky conditions,
+    precipitation, and fish depth on a fresh (non-edit) session, then
+    constructed a brand-new `AppTest` instance seeded with the same
+    `session_state` dict (simulating a real navigate-away-and-back) and
+    confirmed every field, and the widgets themselves, still showed the
+    entered values; (2) opened a real logged trip in edit mode and
+    confirmed its saved conditions still prefill correctly with no
+    exception; (3) re-confirmed "Time window" still auto-follows a start-
+    time edit (6:30 AM -> Dawn, 1:00 PM -> Midday); (4) re-confirmed a
+    manual "Time window" override ("Night") survives an unrelated field
+    edit (water temp) afterward. Also confirmed, via the same harness, that
+    no Streamlit session-state warning fires on any of the above runs for
+    the widgets this entry touched (only the pre-existing, out-of-scope
+    `log_wind_speed_*`-class warning remains, on an edit-mode run, for
+    fields this entry didn't touch). Ran the standard `AppTest` smoke pass
+    across the app entry point and every page reachable in this sandbox
+    (`app.py`, `home.py`, Lake Map, Trip History, Lure Inventory, Spot
+    Session, Development - the 7-Day Forecast page is unreachable here
+    since it calls the live Open-Meteo API with no fallback and this
+    sandbox's proxy blocks that host, a pre-existing environment
+    limitation unrelated to this entry) - all rendered with no exception.
+    `data/trip_log.csv`/`data/segment_score_freeze.csv` confirmed byte-
+    identical (`md5sum`) before and after every run. Marked Development
+    punch-list item #11 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
