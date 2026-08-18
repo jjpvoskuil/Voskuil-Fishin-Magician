@@ -115,6 +115,22 @@ def test_parse_weight_lb_oz_plain_decimal_fallback():
     assert parse_weight_lb_oz("2") == 2.0
 
 
+def test_parse_weight_lb_oz_dash_separated_format():
+    # The Spot Session "Add fish" form's own manual weight field (punch-list
+    # item #2) uses this "lb - oz" shorthand, dash pre-filled as "0 - 0".
+    assert parse_weight_lb_oz("3 - 8") == 3.5
+    assert parse_weight_lb_oz("3-8") == 3.5
+    assert parse_weight_lb_oz("0 - 0") == 0.0
+    assert parse_weight_lb_oz("3 8") == 3.5  # space-separated, no dash, same idea
+
+
+def test_parse_weight_lb_oz_dash_format_rejects_invalid_ounces():
+    # 20 isn't a valid oz value (>= 16) - falls through to the plain-decimal
+    # fallback, which can't parse "3 - 20" either, so this is None rather
+    # than silently misinterpreting it.
+    assert parse_weight_lb_oz("3 - 20") is None
+
+
 def test_parse_weight_lb_oz_blank_or_unparseable_returns_none():
     assert parse_weight_lb_oz(None) is None
     assert parse_weight_lb_oz("") is None

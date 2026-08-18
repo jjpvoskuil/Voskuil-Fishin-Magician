@@ -101,15 +101,17 @@ this repo that can override it on this hosting.
   - search your tackle box by brand or description, then click the card you want; a
   "Used a trailer" checkbox reveals the same card-grid picker for the trailer, with
   its own name/color fields - followed by the time range you fished this particular
-  lure and notes for that window. Fish get logged as you catch them - click "➕ Add
-  fish" each time and fill in species (Largemouth/Spotted/Striped, or type in your
-  own), weight, length, depth caught, presentation/technique, and retrieval speed for
-  that one fish; each save adds it to a running list (with a "Remove" if you need to
-  undo one) so you're not committing to a fish count up front. For a bunch of small
-  fish not worth an entry each, check "Log as a group of small fish (all under 1 lb)"
-  instead - it swaps the weight/length fields for a fish count and an optional approx
-  weight each, and counts as that many fish (not one) toward the trip's total catch
-  count and Trip History's totals. Two buttons at the
+  lure and notes for that window. Fish get logged as you catch them, split into two
+  entry paths: click "➕ Add fish (1 lb+)" for a scoreable fish worth its own full
+  entry - species (Largemouth/Spotted/Striped, or type in your own), weight (as a
+  manual "lb - oz" field, e.g. "3 - 8" for 3 lb 8 oz - the dash comes pre-filled so
+  you just type over it), length, depth caught, presentation/technique, and retrieval
+  speed. For fish too small to bother scoring (under 1 lb), click "➕ Log small fish
+  (under 1 lb)" instead - a much shorter entry with just the species and a running
+  count, no weight/length/depth/presentation fields at all; it still counts as that
+  many fish (not one) toward the trip's total catch count and Trip History's totals.
+  Either way, each save adds it to a running list (with a "Remove" if you need to undo
+  one) so you're not committing to a fish count up front. Two buttons at the
   bottom cover the two things you actually do out on the water: **"Log this lure"**
   saves that lure as its own entry, shows a confirmation toast, and immediately resets
   the form for the next lure - the section stays open (it doesn't collapse back shut),

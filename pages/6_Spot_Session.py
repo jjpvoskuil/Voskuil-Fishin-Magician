@@ -17,7 +17,7 @@ from core.scoring import (
 from core.activity_log import (
     inventory_item_label, lure_can_take_trailer,
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
-    FISH_SPECIES_OPTIONS,
+    FISH_SPECIES_OPTIONS, format_weight_lb_oz, parse_weight_lb_oz,
 )
 from core.lures import recommend, FORAGE_OPTIONS
 from core.ui import render_lure_recommendation, render_square_thumbnail, inject_mobile_css
@@ -279,7 +279,7 @@ if editing_trip is not None and not st.session_state.get(edit_prefill_done_key):
 
     edit_fish_list = editing_cond.get("fish")
     st.session_state[f"pending_fish_{spot['spot_id']}"] = list(edit_fish_list) if isinstance(edit_fish_list, list) else []
-    st.session_state[f"adding_fish_{spot['spot_id']}"] = False
+    st.session_state[f"adding_fish_mode_{spot['spot_id']}"] = None
 
     st.session_state[f"results_expander_{spot['spot_id']}"] = True
     st.session_state[edit_prefill_done_key] = True
@@ -795,10 +795,16 @@ with results_expander:
 
     pending_key = f"pending_fish_{spot['spot_id']}"
     seq_key = f"fish_entry_seq_{spot['spot_id']}"
-    adding_key = f"adding_fish_{spot['spot_id']}"
+    # None / "scoreable" / "small" - which of the two "Add fish" flows below
+    # (if either) is currently open. Per punch-list item #3: a scoreable fish
+    # (1 lb+) gets its own full entry (weight/length/depth/presentation/
+    # speed), while a non-scoreable one (<1 lb) is meant to be quick to log -
+    # just species and a running count, no other fields - via a separate
+    # button rather than a checkbox buried inside the full form.
+    adding_key = f"adding_fish_mode_{spot['spot_id']}"
     st.session_state.setdefault(pending_key, [])
     st.session_state.setdefault(seq_key, 0)
-    st.session_state.setdefault(adding_key, False)
+    st.session_state.setdefault(adding_key, None)
     fish_records = st.session_state[pending_key]
 
     if fish_records:
@@ -807,7 +813,8 @@ with results_expander:
             count = fish.get("count") or 1
             bits = [f"{count} x {fish['species']}" if count > 1 else fish["species"]]
             if fish.get("weight_lb"):
-                bits.append(f"~{fish['weight_lb']:g} lb each" if count > 1 else f"{fish['weight_lb']:g} lb")
+                weight_str = format_weight_lb_oz(fish["weight_lb"])
+                bits.append(f"~{weight_str} each" if count > 1 else weight_str)
             if fish.get("length_in"):
                 bits.append(f"{fish['length_in']:g} in")
             if fish.get("depth_ft"):
@@ -823,14 +830,73 @@ with results_expander:
     else:
         st.caption("No fish logged yet for this lure/time window.")
 
-    if not st.session_state[adding_key]:
-        if st.button("➕ Add fish", key=f"open_add_fish_{spot['spot_id']}"):
-            st.session_state[adding_key] = True
+    adding_mode = st.session_state[adding_key]
+    seq = st.session_state[seq_key]
+
+    if adding_mode is None:
+        ac1, ac2 = st.columns(2)
+        if ac1.button("➕ Add fish (1 lb+)", key=f"open_add_fish_{spot['spot_id']}", width='stretch'):
+            st.session_state[adding_key] = "scoreable"
             st.rerun()
-    else:
-        seq = st.session_state[seq_key]
+        if ac2.button(
+            "➕ Log small fish (under 1 lb)", key=f"open_add_small_fish_{spot['spot_id']}", width='stretch',
+            help='Quick entry for fish too small to bother scoring - just the species and a count.',
+        ):
+            st.session_state[adding_key] = "small"
+            st.rerun()
+
+    elif adding_mode == "small":
+        # Non-scoreable (<1 lb) fish: species + a running count, nothing else -
+        # no weight, length, depth, or presentation fields at all, per the
+        # punch-list ask.
         with st.container(border=True):
-            st.markdown("**New fish**")
+            st.markdown("**Small fish (under 1 lb) - count only**")
+            species_idx = st.selectbox(
+                "Fish type", options=list(range(len(FISH_SPECIES_OPTIONS))),
+                format_func=lambda j: FISH_SPECIES_OPTIONS[j],
+                key=f"log_new_small_fish_species_{spot['spot_id']}_{seq}",
+            )
+            species_label = FISH_SPECIES_OPTIONS[species_idx]
+            species_other = ""
+            if species_label == "Other (type in species)":
+                species_other = st.text_input(
+                    "Species (type it in)", key=f"log_new_small_fish_species_other_{spot['spot_id']}_{seq}",
+                )
+            new_count = st.number_input(
+                "Total number of this type caught", min_value=1, step=1, value=1,
+                key=f"log_new_small_fish_count_{spot['spot_id']}_{seq}",
+            )
+
+            sc1, sc2 = st.columns(2)
+            if sc1.button(
+                "Save", key=f"log_new_small_fish_save_{spot['spot_id']}_{seq}", type="primary", width='stretch',
+            ):
+                species_final = (
+                    species_other.strip()
+                    if (species_label == "Other (type in species)" and species_other.strip())
+                    else species_label
+                )
+                fish_records.append({
+                    "species": species_final,
+                    "species_other": species_other or None,
+                    "count": int(new_count),
+                    "weight_lb": None,
+                    "length_in": None,
+                    "depth_ft": None,
+                    "retrieve_speed": None,
+                    "retrieve_style": None,
+                })
+                st.session_state[pending_key] = fish_records
+                st.session_state[seq_key] = seq + 1
+                st.session_state[adding_key] = None
+                st.rerun()
+            if sc2.button("Cancel", key=f"log_new_small_fish_cancel_{spot['spot_id']}_{seq}", width='stretch'):
+                st.session_state[adding_key] = None
+                st.rerun()
+
+    else:  # adding_mode == "scoreable"
+        with st.container(border=True):
+            st.markdown("**New fish (1 lb+)**")
             species_idx = st.selectbox(
                 "Fish type", options=list(range(len(FISH_SPECIES_OPTIONS))),
                 format_func=lambda j: FISH_SPECIES_OPTIONS[j],
@@ -843,44 +909,28 @@ with results_expander:
                     "Species (type it in)", key=f"log_new_fish_species_other_{spot['spot_id']}_{seq}",
                 )
 
-            is_group = st.checkbox(
-                "Log as a group of small fish (all under 1 lb)",
-                key=f"log_new_fish_is_group_{spot['spot_id']}_{seq}",
-                help="For a bunch of small dinks caught on the same lure/window that aren't worth a "
-                     "separate entry each - enter how many instead of adding them one at a time.",
+            fc1, fc2, fc3 = st.columns(3)
+            # Plain text field, not a number_input - punch-list item #2 asked
+            # for a manual "xx - xx" (lb - oz) field with no +/- steppers and
+            # the dash pre-filled; parse_weight_lb_oz() reads this same "3 - 8"
+            # shorthand back into decimal pounds on save (see core.activity_log).
+            # Streamlit has no built-in way to make typing into a sub-field
+            # overwrite it without selecting/backspacing first (that needs a
+            # real custom JS component) - this gets the single-field "3 - 8"
+            # format right without that extra machinery.
+            new_weight_text = fc1.text_input(
+                "Weight (lb - oz)", value="0 - 0",
+                key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
+                help='Type over the pre-filled "0 - 0", e.g. "3 - 8" for 3 lb 8 oz.',
             )
-
-            if is_group:
-                gc1, gc2, gc3 = st.columns(3)
-                new_count = gc1.number_input(
-                    "How many fish", min_value=2, step=1, value=2,
-                    key=f"log_new_fish_count_{spot['spot_id']}_{seq}",
-                )
-                new_weight_lb = gc2.number_input(
-                    "Approx weight each (lb, optional)", min_value=0.0, max_value=1.0, step=0.1, value=0.0,
-                    key=f"log_new_fish_group_weight_{spot['spot_id']}_{seq}",
-                    help="Leave at 0 if you didn't weigh them - a group entry is for fish under 1 lb each.",
-                )
-                new_depth_ft = gc3.number_input(
-                    "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
-                    key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
-                )
-                new_length_in = 0.0
-            else:
-                fc1, fc2, fc3 = st.columns(3)
-                new_weight_lb = fc1.number_input(
-                    "Weight (lb)", min_value=0.0, step=0.1, value=0.0,
-                    key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
-                )
-                new_length_in = fc2.number_input(
-                    "Length (in)", min_value=0.0, step=0.25, value=0.0,
-                    key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
-                )
-                new_depth_ft = fc3.number_input(
-                    "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
-                    key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
-                )
-                new_count = 1
+            new_length_in = fc2.number_input(
+                "Length (in)", min_value=0.0, step=0.25, value=0.0,
+                key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
+            )
+            new_depth_ft = fc3.number_input(
+                "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
+                key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
+            )
 
             fc4, fc5 = st.columns(2)
             new_retrieve_style = fc4.selectbox(
@@ -902,8 +952,8 @@ with results_expander:
                 fish_records.append({
                     "species": species_final,
                     "species_other": species_other or None,
-                    "count": int(new_count) if is_group else 1,
-                    "weight_lb": new_weight_lb or None,
+                    "count": 1,
+                    "weight_lb": parse_weight_lb_oz(new_weight_text) or None,
                     "length_in": new_length_in or None,
                     "depth_ft": new_depth_ft or None,
                     "retrieve_speed": new_retrieve_speed,
@@ -911,10 +961,10 @@ with results_expander:
                 })
                 st.session_state[pending_key] = fish_records
                 st.session_state[seq_key] = seq + 1
-                st.session_state[adding_key] = False
+                st.session_state[adding_key] = None
                 st.rerun()
             if sc2.button("Cancel", key=f"log_new_fish_cancel_{spot['spot_id']}_{seq}", width='stretch'):
-                st.session_state[adding_key] = False
+                st.session_state[adding_key] = None
                 st.rerun()
 
     # Every key _save_current_lure_entry's cond-derived block below writes,
@@ -1102,7 +1152,7 @@ with results_expander:
         """
         st.session_state[pending_key] = []
         st.session_state[seq_key] = 0
-        st.session_state[adding_key] = False
+        st.session_state[adding_key] = None
         st.session_state[lure_entry_seq_key] = lure_seq + 1
         st.session_state[results_expander_reopen_key] = True
 
