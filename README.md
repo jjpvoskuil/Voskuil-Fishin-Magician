@@ -221,14 +221,14 @@ this repo that can override it on this hosting.
   paid, and how many you have on hand. Seeded from a Cabela's order history import; add
   more any time by typing them in or by uploading/taking a photo. See "Lure inventory"
   below for details.
-- **Inventory-aware lure suggestions** - the 7-Day Forecast page checks
-  every recommended lure against your tackle inventory: lures you already own are
-  flagged (✅ "In your tackle box", with the specific brand/description/quantity **and
-  a photo thumbnail** of the owned item(s), up to 4 per lure block) and sorted to the
-  top of each choice tier, while ones you don't have yet stay in the list underneath as
-  pick-up suggestions (🛒). Nothing is added or hidden based on ownership - the
-  season/structure/pressure/forage logic still decides what's recommended; ownership
-  only decides what's flagged and what floats to the top.
+- **Inventory-aware lure suggestions** - every page that recommends lures (7-Day
+  Forecast, Spot Session) checks each recommended lure against your tackle inventory:
+  lures you already own are flagged (✅ "In your tackle box", with the specific
+  brand/description/quantity **and a photo thumbnail** of the owned item(s)) and
+  sorted to the top of each choice tier, while ones you don't have yet stay in the
+  list underneath as pick-up suggestions (🛒). Nothing is added or hidden based on
+  ownership - the season/structure/pressure/forage logic still decides what's
+  recommended; ownership only decides what's flagged and what floats to the top.
 - **Color-match filtering on owned lures** - within a lure block, owned items are
   further checked against that block's suggested color for today's water clarity, and
   only the ones whose description shares color/pattern words with the suggestion
@@ -237,6 +237,19 @@ this repo that can override it on this hosting.
   green-pumpkin crankbait next to a chartreuse suggestion) isn't shown for that
   block at all - if none of your on-hand items match today's suggested color, the
   block falls back to the normal 🛒 pick-up-suggestion treatment.
+- **Top-2-per-category capping, and real Cabela's buy suggestions when you own
+  nothing that matches** - within a lure block, at most the top 2 color-matched
+  owned items are shown (ranked #1/#2 by quantity on hand), not every match, so a
+  category with a dozen color-matched items on hand doesn't dominate the card. When
+  a lure block has *nothing* color-matched on hand, up to 2 real products from
+  Cabela's (brand, name, price, photo, and a link to search for it on Cabela's own
+  site) are suggested instead of the plain "not in your inventory" note, using the
+  same `core/cabelas_lookup.py` integration the Lure Inventory page's "Scan a lure"
+  flow already uses (see "How the Cabela's lookup works" below) - cached for a day
+  per lure name so the 7-Day Forecast page's ~28 recommendation calls (one per
+  segment per day) don't each trigger a live lookup for the same handful of repeating
+  lure names. Falls back to the plain pick-up note if Cabela's has no match or can't
+  be reached, same fail-soft behavior as everywhere else this integration is used.
 
 ## How the model works (and its limits)
 
@@ -515,21 +528,32 @@ possibly glare-y label is a good search query, but isn't trustworthy enough to s
 exact price/SKU from directly - hence showing you the actual matched Cabela's products
 to confirm, rather than saving whatever the photo step guessed.
 
+The same `search_lures()` function also powers the lure-block "worth considering from
+Cabela's" suggestions described above (queried by lure name, e.g. "Squarebill
+Crankbait", via `core.appstate.get_cabelas_suggestions()`, which adds a 24h cache on
+top so the 7-Day Forecast page's many recommendation calls don't each trigger a live
+lookup). The mapped product data doesn't include a stable per-product page URL (Coveo's
+`raw` fields don't have one that's been found), so each suggestion links to Cabela's own
+live site search for that product's brand + name instead of a direct product page
+(`core.cabelas_lookup.search_page_url()`).
+
 ### How inventory feeds the forecast
 
 `core.lures.recommend()` takes an optional `inventory` argument (the same rows this page
 reads/writes) and, for each lure it would otherwise recommend, checks whether any
-in-hand item (quantity > 0) shares that lure's category. If so, the block is flagged
-✅ **"In your tackle box"** with the specific brand/description/quantity - plus a photo
-thumbnail per owned item (up to 4; extras are just counted) using `core.lure_inventory.
-resolve_image_source()`, the same local-photo-wins-over-vendor-link rule the Lure
-Inventory page itself uses - and that block is stable-sorted to the front of its choice
-tier (first choice or second choice) - so the
-best options you actually own surface first. Lures you don't have are left in place
-tagged 🛒 as still-worth-trying suggestions. This only reorders and annotates; it never
-adds, removes, or changes *which* lures a given day/segment/structure/forage combination
-recommends - that's still entirely the season/structure/pressure/forage logic described
-above.
+in-hand item (quantity > 0) shares that lure's category and matches today's suggested
+color. If so, the block is flagged ✅ **"In your tackle box"** with the top 2
+color-matched items (ranked #1/#2 by quantity on hand, not every match) - specific
+brand/description/quantity, plus a photo thumbnail per owned item, using
+`core.lure_inventory.resolve_image_source()`, the same local-photo-wins-over-vendor-link
+rule the Lure Inventory page itself uses - and that block is stable-sorted to the front
+of its choice tier (first choice or second choice) - so the best options you actually
+own surface first. Lures you don't have anything color-matched for instead show up to 2
+real Cabela's product suggestions worth buying (see "Top-2-per-category capping..."
+above and "How the Cabela's lookup works" below). This only reorders and annotates; it
+never adds, removes, or changes *which* lures a given day/segment/structure/forage
+combination recommends - that's still entirely the season/structure/pressure/forage
+logic described above.
 
 One addition specifically for this: a **Medium-Diving Crankbait** lure type (6-12 ft,
 e.g. Strike King 3XD, Rapala DT-8) was added to `core/lures.py` alongside the existing

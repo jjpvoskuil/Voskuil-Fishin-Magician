@@ -10,9 +10,17 @@ from .lures import (
 )
 from .lure_inventory import resolve_image_source, image_data_uri_or_url
 from .lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE
-from .appstate import get_lake_spots
+from .appstate import get_lake_spots, get_cabelas_suggestions
+from .cabelas_lookup import search_page_url
 
-MAX_OWNED_THUMBNAILS = 4  # cap per lure block so a big category doesn't dominate the card
+# Punch-list #8: cap how many real Cabela's products get suggested per lure
+# block when nothing color-matched is in the tackle-box inventory - "only
+# show a max of 2 best options from cabelas."
+MAX_CABELAS_SUGGESTIONS = 2
+
+# A lure block's owned-item thumbnails are naturally capped at 2 now (see
+# core.lures.MAX_OWNED_ITEMS_PER_BLOCK), so no separate thumbnail cap is
+# needed here anymore - only the shared display size remains.
 OWNED_THUMBNAIL_PX = 64   # small on purpose - these are ownership flags, not the card's focus
 
 # Below this viewport width, wide multi-column rows (4+ columns) reflow
@@ -120,26 +128,42 @@ def render_lure_block(block: LureBlock):
         if block.owned_items:
             # block.owned_items only ever contains items that both match this lure's
             # category AND match today's suggested color (core.lures._color_matched_
-            # owned_items) - an owned item in the wrong color for today's water
-            # clarity isn't shown here at all, so what's shown is always ready to go.
-            owned_desc = "; ".join(
-                f"{it['brand']} – {it['description']} (qty {it['quantity']})"
-                for it in block.owned_items
-            )
-            st.success(f"✅ Color match in your tackle box: {owned_desc}")
+            # owned_items), already capped to the top MAX_OWNED_ITEMS_PER_BLOCK (#1/#2)
+            # by quantity on hand - so what's shown here is always ready to go, and
+            # never more than 2 items (punch-list #8).
+            st.success("✅ In your tackle box:")
+            for i, it in enumerate(block.owned_items, start=1):
+                st.write(f"**#{i}** {it['brand']} – {it['description']} (qty {it['quantity']})")
 
             photos = [it for it in block.owned_items if resolve_image_source(it)]
             if photos:
-                shown, extra = photos[:MAX_OWNED_THUMBNAILS], photos[MAX_OWNED_THUMBNAILS:]
-                cols = st.columns(len(shown))
-                for col, it in zip(cols, shown):
+                cols = st.columns(len(photos))
+                for col, it in zip(cols, photos):
                     with col:
                         render_square_thumbnail(it, size_px=OWNED_THUMBNAIL_PX)
-                        st.caption(f"{it['brand']} – {it['description']}"[:60])
-                if extra:
-                    st.caption(f"+ {len(extra)} more color-matched item(s) in this category (see Lure Inventory for photos).")
         else:
-            st.caption("🛒 Not in your inventory yet - worth picking one up for this presentation.")
+            # Nothing color-matched on hand - suggest up to MAX_CABELAS_SUGGESTIONS
+            # real products worth buying instead (punch-list #8). Cached (see
+            # core.appstate.get_cabelas_suggestions) so repeated blocks for the same
+            # lure name across a page (e.g. the same crankbait recommended for
+            # several days/segments at once) don't each trigger a live lookup.
+            # search_lures() fails soft (returns []) on any lookup problem, so this
+            # falls back to the plain "not in your inventory" caption exactly like
+            # before whenever Cabela's can't be reached or has no match.
+            suggestions = get_cabelas_suggestions(block.name, num_results=MAX_CABELAS_SUGGESTIONS)
+            if suggestions:
+                st.caption("🛒 Not in your inventory yet - worth considering from Cabela's:")
+                cols = st.columns(len(suggestions))
+                for i, (col, item) in enumerate(zip(cols, suggestions), start=1):
+                    with col:
+                        if resolve_image_source(item):
+                            render_square_thumbnail(item, size_px=OWNED_THUMBNAIL_PX)
+                        price_txt = f" – ${item['price']:.2f}" if item.get("price") else ""
+                        st.caption(f"**#{i}** {item['brand']} – {item['description']}{price_txt}"[:100])
+                        product_query = f"{item['brand']} {item['description']}"
+                        st.markdown(f"[Search Cabela's]({search_page_url(product_query)})")
+            else:
+                st.caption("🛒 Not in your inventory yet - worth picking one up for this presentation.")
         st.write(f"Colors: {', '.join(block.colors)}")
         if block.trailer:
             st.write(f"Trailer: {block.trailer.type} - {', '.join(block.trailer.colors)}")

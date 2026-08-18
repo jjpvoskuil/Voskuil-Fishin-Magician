@@ -1,7 +1,11 @@
 """
-Looks up real product data on Cabela's, by text query, for the Lure
-Inventory page's "Scan a lure" flow (see pages/5_Lure_Inventory.py and
-core/lure_vision.py).
+Looks up real product data on Cabela's, by text query. Originally built for
+the Lure Inventory page's "Scan a lure" flow (see pages/5_Lure_Inventory.py
+and core/lure_vision.py); also used by core.ui.render_lure_block (via
+core.appstate.get_cabelas_suggestions, which adds caching) to suggest up to
+2 real products worth buying whenever a recommended lure category has
+nothing color-matched in the angler's own tackle-box inventory - punch-list
+#8.
 
 Cabela's search results are populated client-side by JavaScript, so a plain
 HTML fetch of a search-results page wouldn't see any products - this
@@ -27,6 +31,7 @@ lure" form that already exists on that page.
 """
 from __future__ import annotations
 import time
+from urllib.parse import quote_plus
 import requests
 
 TOKEN_URL = "https://www.cabelas.com/api/v2/10651/prod/coveo/getCoveoToken"
@@ -128,3 +133,14 @@ def search_lures(query: str, num_results: int = 8) -> list:
     mapped = [map_result(r.get("raw") or {}) for r in results]
     # A result with no SKU or no name isn't a usable product match.
     return [m for m in mapped if m["sku"] and m["description"]]
+
+
+def search_page_url(query: str) -> str:
+    """Best-effort link to Cabela's own site search for `query` - not a
+    specific product page. map_result() above doesn't currently capture a
+    stable per-product URL from the Coveo `raw` fields (only sku/brand/
+    description/price/image/categories), so rather than fabricate one, this
+    links to Cabela's own live search results for the same query text a
+    result was found with - the product should be at or near the top of
+    that search."""
+    return f"https://www.cabelas.com/search?q={quote_plus((query or '').strip())}"

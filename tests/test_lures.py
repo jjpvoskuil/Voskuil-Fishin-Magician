@@ -302,6 +302,41 @@ def test_only_color_matched_owned_items_are_shown_others_dropped():
     assert block.owned_items[0]["description"] == "300 Green Shad"
 
 
+def test_owned_items_are_capped_at_top_2_ranked_by_quantity():
+    # Punch-list #8: "only show the top 2 recommendations in each category...
+    # with a #1 and a #2 choice" - even with 3 color-matched items on hand,
+    # only the 2 with the most quantity in reserve should come back, most
+    # in-stock first.
+    inventory = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad - low stock",
+         "category": "medium_diving_crankbait", "quantity": "1", "sku": "a"},
+        {"brand": "Rapala", "description": "DT Green Shad - most stock",
+         "category": "medium_diving_crankbait", "quantity": "5", "sku": "b"},
+        {"brand": "Bandit", "description": "300 Green Shad - mid stock",
+         "category": "medium_diving_crankbait", "quantity": "3", "sku": "c"},
+    ]
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
+                     inventory=inventory)
+    block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert len(block.owned_items) == 2
+    assert [it["sku"] for it in block.owned_items] == ["b", "c"]
+
+
+def test_owned_items_tie_on_quantity_keeps_original_order():
+    inventory = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad - first",
+         "category": "medium_diving_crankbait", "quantity": "2", "sku": "a"},
+        {"brand": "Rapala", "description": "DT Green Shad - second",
+         "category": "medium_diving_crankbait", "quantity": "2", "sku": "b"},
+        {"brand": "Bandit", "description": "300 Green Shad - third",
+         "category": "medium_diving_crankbait", "quantity": "2", "sku": "c"},
+    ]
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained", fish_depth_ft=9,
+                     inventory=inventory)
+    block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
+    assert [it["sku"] for it in block.owned_items] == ["a", "b"]
+
+
 def test_guess_category_from_text_matches_known_product_names():
     cases = [
         ("Strike King Rattling Thunder Cricket Swim Jig - White", "chatterbait"),

@@ -39,6 +39,13 @@ DEFAULT_BASE_STAIN = "Brown stained"
 # Full set of resolved water-condition keys used to look up lure colors.
 WATER_CLARITY_OPTIONS = ["Clear", "Green stained", "Brown stained", "Muddy"]
 
+# Punch-list #8: "if you show options from my inventory, only show the top 2
+# recommendations in each category... with a #1 and a #2 choice" - caps how
+# many color-matched owned items a single LureBlock ever carries, regardless
+# of how many actually match. See _color_matched_owned_items() below for the
+# ranking (most on-hand stock first) used to pick which ones are "top."
+MAX_OWNED_ITEMS_PER_BLOCK = 2
+
 STRUCTURE_TYPES = [
     "Main-lake point",
     "Creek channel / ledge",
@@ -564,11 +571,21 @@ def _color_matched_owned_items(owned_items: list, suggested_colors: list) -> lis
     item(s) are surfaced now - if none of your on-hand items are actually
     the suggested color, this comes back empty and the block falls back to
     the normal "not in your inventory" treatment, since owning the right
-    lure type in the wrong color isn't the same as being ready to go."""
+    lure type in the wrong color isn't the same as being ready to go.
+
+    Per punch-list #8, even among color-matched items only the top
+    MAX_OWNED_ITEMS_PER_BLOCK are kept (ranked #1/#2 in the UI - see
+    core.ui.render_lure_block) rather than listing every match, so a
+    category with a dozen color-matched items on hand doesn't dominate the
+    card. "Best" is ranked by quantity on hand (more in reserve = more
+    ready to go), ties keeping their original relative order since Python's
+    sort is stable."""
     suggested_tokens = set()
     for c in suggested_colors:
         suggested_tokens |= _color_tokens(c)
-    return [it for it in owned_items if _color_tokens(it.get("description", "")) & suggested_tokens]
+    matched = [it for it in owned_items if _color_tokens(it.get("description", "")) & suggested_tokens]
+    matched.sort(key=lambda it: -(it.get("quantity") or 0))
+    return matched[:MAX_OWNED_ITEMS_PER_BLOCK]
 
 
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",

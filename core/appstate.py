@@ -5,6 +5,7 @@ import streamlit as st
 from .weather import fetch_forecast
 from .lake_level import fetch_lake_level
 from .lake_water_quality import fetch_surface_water_quality
+from .cabelas_lookup import search_lures
 from .spots import load_spots
 from .storage import read_all_trips
 from .calibration import calibrate_weights
@@ -34,6 +35,21 @@ def get_surface_water_quality():
 @st.cache_data(ttl=60 * 5)
 def get_spots():
     return load_spots()
+
+
+# Punch-list #8: cache Cabela's lookups by lure-name query, well past the
+# lifetime of a single page render. The 7-Day Forecast page alone calls
+# core.lures.recommend() once per segment per day (~28 calls), each
+# producing several lure blocks - without caching, every one of those
+# blocks with nothing color-matched in inventory would trigger its own live
+# Cabela's round trip on every single page load, for what's usually the
+# same handful of lure names repeating over and over. A day's worth of TTL
+# is plenty since this is "worth considering buying," not a live price
+# feed - Cabela's own inventory/pricing doesn't need to be second-fresh
+# here. Same "fails soft, returns []" contract as search_lures() itself.
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def get_cabelas_suggestions(query: str, num_results: int = 2):
+    return search_lures(query, num_results=num_results)
 
 
 @st.cache_data(ttl=60 * 5)

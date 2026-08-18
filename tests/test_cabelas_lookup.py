@@ -1,4 +1,4 @@
-from core.cabelas_lookup import map_result, search_lures, _first_number
+from core.cabelas_lookup import map_result, search_lures, search_page_url, _first_number
 
 
 def test_map_result_pulls_expected_fields_from_coveo_raw():
@@ -113,3 +113,17 @@ def test_search_lures_maps_results_and_drops_unusable_ones(monkeypatch):
     assert len(results) == 1
     assert results[0]["sku"] == "111"
     assert results[0]["description"] == "Real Product"
+
+
+def test_search_page_url_url_encodes_the_query():
+    url = search_page_url("Strike King 3XD Chartreuse/Black")
+    assert url.startswith("https://www.cabelas.com/search?q=")
+    assert "Strike+King+3XD" in url or "Strike%20King%203XD" in url
+    assert " " not in url
+
+
+def test_search_page_url_handles_blank_query():
+    # Shouldn't raise on None/empty - a degenerate but harmless search link
+    # rather than an error, matching search_lures()'s own fail-soft contract.
+    assert search_page_url("") == "https://www.cabelas.com/search?q="
+    assert search_page_url(None) == "https://www.cabelas.com/search?q="

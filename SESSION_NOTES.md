@@ -3152,6 +3152,116 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     after every run. Not a numbered punch-list item (a direct follow-up to
     #7, discussed conversationally) - no `data/dev_tasks.csv` change needed.
 
+70. **Punch-list #8: cap owned-lure suggestions to a #1/#2 top-2, and
+    suggest real Cabela's products to buy when nothing's owned.** Two-part
+    ask, both scoped to "any page that suggests lures to use": "if I don't
+    have that in my inventory please show options from Cabelas.com that I
+    should consider buying. Only show a max of 2 best options from cabelas.
+    Also, if you show options from my inventory, only show the top 2
+    recommendations in each category... with a #1 and a #2 choice."
+
+    Both the 7-Day Forecast and Spot Session pages already funnel every
+    lure block through the same shared `core.ui.render_lure_recommendation`/
+    `render_lure_block`, so both parts of this only needed to change in one
+    rendering path (plus one ranking function) to cover every page, rather
+    than being wired into each page separately.
+
+    **Top-2 owned items, ranked #1/#2.** Before this, a `LureBlock`'s
+    `owned_items` (already filtered to color-matched-only, see entry on the
+    "Color-match filtering" feature) could be any length - every matching
+    item was joined into one run-on success message, and the thumbnail
+    section separately capped display at 4 photos with a "+N more" caption.
+    `core.lures._color_matched_owned_items()` now sorts matches by quantity
+    on hand (descending, most in reserve first, stable for ties) and slices
+    to a new `MAX_OWNED_ITEMS_PER_BLOCK = 2` before ever reaching the block
+    - so `owned_items` itself is never longer than 2, not just capped at
+    render time. `core.ui.render_lure_block()` shows each as its own
+    `**#1**`/`**#2**` line instead of one joined string. The now-redundant
+    4-photo/"+N more" thumbnail cap in `core/ui.py` was removed (dead code
+    once the source list itself maxes out at 2) rather than left in place,
+    since it wasn't a separate feature, just an artifact of the old
+    unbounded list.
+
+    **Real Cabela's buy suggestions when nothing's owned.** Reused
+    `core/cabelas_lookup.py`'s existing `search_lures()` (built for the
+    Lure Inventory page's "Scan a lure" flow) rather than building a second
+    integration - it already returns real brand/name/price/photo/SKU data
+    for a text query and fails soft (`[]`) on any lookup problem, which is
+    exactly the "worth considering, no black box" shape this needed.
+    New `core.appstate.get_cabelas_suggestions(query, num_results=2)` wraps
+    it with a 24h `st.cache_data` TTL - important here specifically because
+    the 7-Day Forecast page calls `recommend()` once per segment per day
+    (~28 calls), and without caching, every lure block with nothing owned
+    would trigger its own live Cabela's round trip on every page load, for
+    what's usually the same handful of repeating lure names (e.g.
+    "Squarebill Crankbait" shows up across many days/segments) - a day's
+    staleness is a non-issue for "worth considering buying," unlike a price
+    feed. `core.ui.render_lure_block()`'s previously-unconditional "🛒 Not
+    in your inventory yet" caption is now only the fallback for when
+    `get_cabelas_suggestions()` comes back empty (lookup failure, or
+    genuinely no matches) - otherwise it shows up to `MAX_CABELAS_SUGGESTIONS
+    = 2` product cards (thumbnail via the existing `render_square_thumbnail()`
+    - `resolve_image_source()` already works unmodified against a Cabela's
+    result dict, since it just falls through to the plain `image_url` key
+    when there's no local `image_filename`), brand/name/price, and a
+    `**#1**`/`**#2**` label matching the owned-items styling above.
+
+    New `core.cabelas_lookup.search_page_url(query)`: the mapped Coveo
+    `raw` fields `map_result()` reads (sku/brand/description/price/image/
+    categories) don't include a stable per-product-page URL - none was
+    found in this module's existing field list, and rather than guess at
+    an unverified field name, this links each suggestion to Cabela's own
+    live site search for that product's brand + name, which should surface
+    the same product at or near the top.
+
+    Design choice: kept `core.lures.recommend()` itself free of any
+    network I/O - the top-2/#1/#2 ranking is pure list logic (belongs in
+    `core/lures.py`, stays unit-testable the way it already was), while the
+    Cabela's lookup (I/O, needs caching, needs Streamlit's cache decorator)
+    lives entirely in the `core/ui.py` render layer, matching how
+    `core/lures.py` has never done its own I/O even for the inventory data
+    it's handed (that's always fetched by the caller and passed in).
+
+    Verified the two-step Coveo flow before touching this module further:
+    this dev sandbox still has no outbound network access at all (confirmed
+    again - both `waterservices.usgs.gov` in punch-list #7 and now
+    `www.cabelas.com`'s token endpoint fail with the same sandbox
+    `ProxyError`/403), and this session's real-browser tool
+    (`mcp__claude-in-chrome`) declined permission when tried here, so the
+    Coveo raw-field shape wasn't independently re-verified this round -
+    relied on `core/cabelas_lookup.py`'s existing, already-shipped
+    `map_result()`/`search_lures()` (used for months by "Scan a lure"
+    without a reported field-shape issue) rather than assuming any new
+    field exists that hasn't already been confirmed working.
+
+    New tests: `tests/test_lures.py` gained
+    `test_owned_items_are_capped_at_top_2_ranked_by_quantity` (3
+    color-matched items on hand, quantities 1/5/3 - only the top 2 by
+    quantity come back, most-stock first) and
+    `test_owned_items_tie_on_quantity_keeps_original_order` (3 items tied
+    at quantity 2 - the first 2 in original order come back, confirming the
+    sort is stable rather than reordering ties arbitrarily).
+    `tests/test_cabelas_lookup.py` gained
+    `test_search_page_url_url_encodes_the_query` and
+    `test_search_page_url_handles_blank_query`. `python3 -m pytest tests/ -q`
+    passes at 241 (237 + 4 new).
+
+    Verified end to end with two scratch `AppTest` smoke runs on
+    `pages/1_7_Day_Forecast.py` (both pages funnel through the same shared
+    `core.ui.render_lure_block`, so exercising this once covers both): one
+    with a mocked inventory item and a mocked `core.appstate.search_lures`
+    returning 2 fake products, confirming both a `**#1**` owned-item line
+    and a "Search Cabela's" link render with no exception; a second with
+    empty inventory and `search_lures` mocked to return `[]`, confirming
+    the plain "worth picking one up" fallback caption renders instead (and
+    the Cabela's-specific caption does not) - the graceful-degradation path
+    still works exactly as before this change. `data/trip_log.csv`
+    confirmed byte-identical before/after; `data/segment_score_freeze.csv`
+    picked up an unrelated freeze write from the smoke run itself (today's
+    real date has genuinely-past segments) and was reverted with `git
+    checkout` afterward, same as the pollution-check convention used all
+    session. Marked Development punch-list item #8 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
