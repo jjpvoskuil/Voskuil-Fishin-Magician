@@ -105,7 +105,11 @@ this repo that can override it on this hosting.
   fish" each time and fill in species (Largemouth/Spotted/Striped, or type in your
   own), weight, length, depth caught, presentation/technique, and retrieval speed for
   that one fish; each save adds it to a running list (with a "Remove" if you need to
-  undo one) so you're not committing to a fish count up front. Two buttons at the
+  undo one) so you're not committing to a fish count up front. For a bunch of small
+  fish not worth an entry each, check "Log as a group of small fish (all under 1 lb)"
+  instead - it swaps the weight/length fields for a fish count and an optional approx
+  weight each, and counts as that many fish (not one) toward the trip's total catch
+  count and Trip History's totals. Two buttons at the
   bottom cover the two things you actually do out on the water: **"Log this lure"**
   saves that lure as its own entry, shows a confirmation toast, and immediately resets
   the form for the next lure - the section stays open (it doesn't collapse back shut),
@@ -173,7 +177,13 @@ this repo that can override it on this hosting.
   trailer-used-only, or free-text search. The grid itself shows 14 fields (scroll
   right to see them all) and lets you edit date, time of day, structure, water
   clarity, lure, color, fish caught, biggest fish, and notes right in the cell -
-  changes save automatically, no separate "Save" button. Location, lure type,
+  changes save automatically, no separate "Save" button. Every fish weight shown
+  anywhere on this page - the grid's "Biggest fish" column, the per-trip detail
+  panel's summary line, and each per-fish catch record - displays as lb-oz (e.g.
+  "3 lb 8 oz") rather than a decimal pound, since that's how most anglers actually
+  think and talk about a fish's weight; weight is still stored as decimal pounds
+  underneath, and the grid's "Biggest fish" cell also accepts a plain decimal
+  (e.g. "3.5") if you'd rather type it that way. Location, lure type,
   fish/forage activity, and predicted score are shown for reference but aren't
   grid-editable (they need Spot Session's fuller edit flow to stay consistent
   with the underlying conditions data). Use the "Jump to a trip's full detail"

@@ -2424,6 +2424,76 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     *and* that the next `append_task()` call skipped straight past the deleted
     number rather than reusing it.
 
+61. **Development punch list #1: log small fish as a group; Trip History fish
+    weights now shown as lb-oz.** Two related requests in one round - the
+    Development page's one open item, plus a follow-up asked mid-session.
+
+    **Group entries for small fish** (`pages/6_Spot_Session.py`'s "Add fish"
+    form): a new "Log as a group of small fish (all under 1 lb)" checkbox
+    swaps the Weight/Length inputs for a "How many fish" count (min 2) and an
+    optional "Approx weight each (lb, capped at 1)" - no length field, since a
+    group entry isn't meant to track individual measurements. Every fish
+    record (`conditions["fish"]`, unchanged storage shape otherwise) now
+    carries a `count` field, defaulting to 1 for a normal single-fish entry
+    and set to the entered count for a group; older logged rows with no
+    `count` key are treated as 1 everywhere this is read (`fish.get("count")
+    or 1`), so nothing needed a data migration. `fish_caught` on save is now
+    `sum(f.get("count") or 1 for f in fish_records)` instead of
+    `len(fish_records)`, so a 3-fish group entry correctly counts as 3 toward
+    the trip's catch total (and Trip History's "Total bass caught"/"Trips
+    with a catch" metrics, which read that same field) even though it's one
+    row in the pending-fish list. The pending-fish summary line and Trip
+    History's per-fish detail renderer (`pages/4_Trip_History.py`) both show
+    `"N x Species"` and `"~weight each"` for a count > 1, unchanged single-
+    fish rendering otherwise.
+
+    **Lb-oz weight display** (Trip History only, per explicit scope - Spot
+    Session's own "Weight (lb)"/"Approx weight each" inputs are unchanged,
+    still plain decimal, since that's still the fastest way to type a number
+    standing at the lake): new `core.activity_log.format_weight_lb_oz()` /
+    `parse_weight_lb_oz()` convert a decimal-pound float to/from a string
+    like `"3 lb 8 oz"` (rounds to the nearest ounce - fish weight was never
+    recorded to hundredths-of-a-pound precision to begin with, so this loses
+    nothing meaningful). Applied to the per-trip detail panel's "biggest X
+    lb" summary line and every per-fish weight in the detail list's per-fish
+    renderer (both already existing render paths, entry 39/52's
+    `_render_trip_detail_body`), and to the inline-editable grid's "Biggest
+    fish" column, which changed from a `NumberColumn` to a `TextColumn` -
+    `COLUMN_NORMALIZERS["biggest_fish_lb"]` now parses the cell's lb-oz (or
+    plain-decimal, still accepted) text back to a float for both the auto-
+    save diff check and the value actually written to `trip_log.csv`, so the
+    grid's existing auto-save-on-edit behavior (entry 54) needed no other
+    changes. Verified against every one of the angler's real logged trips
+    (not just synthetic ones) via a scratch `AppTest` script - all render
+    correctly as lb-oz with no exceptions, e.g. an existing 0.75 lb entry
+    reads "12 oz", a 2.1875 lb entry reads "2 lb 3 oz".
+
+    New `tests/test_activity_log.py` cases (10) cover
+    `format_weight_lb_oz`/`parse_weight_lb_oz` directly: whole-pound and
+    pound-plus-ounce formatting, under-1-lb-shows-ounces-only, the 16 oz ->
+    next-whole-pound carry case, blank/None/NaN handling, both lb-oz and
+    plain-decimal parsing, and a round-trip check on whole-ounce values.
+    `python3 -m pytest tests/ -q` passes at 209 (199 + 10 new) - `pytest`
+    alone isn't installed in this sandbox by `requirements.txt` (a dev-only
+    dependency, not something the deployed app needs), so `pip install
+    pytest --break-system-packages` first if starting fresh here. Also
+    verified via two scratch `AppTest` scripts (not committed, `data/
+    trip_log.csv` backed up/restored around both): one driving the actual
+    "Add fish" group flow end-to-end (check the group box, set count=3 and
+    weight=0.6, save, "Log this lure") and confirming the saved row's
+    `fish_caught` is `3` and its one `fish` record has `count: 3`; a second
+    loading that trip in Trip History's detail panel and confirming it
+    renders `"Fish caught (3):"` / `"3 x Largemouth Bass, ~10 oz each"`. A
+    full `AppTest` smoke pass across every page that can run in this sandbox
+    (mocked weather bundle for home.py/7-Day Forecast, same fixture shape as
+    `tests/test_scoring.py`'s `_fake_bundle()`) also caught that running the
+    real 7-Day Forecast page against a fake bundle writes real (fake-
+    derived) rows into `data/segment_score_freeze.csv` - reverted that file
+    to its committed state before pushing, since freeze data belongs to the
+    real deployed app's real weather, not this session's test bundle. Marked
+    Development punch-list item #1 "Done" (`data/dev_tasks.csv`) at the end
+    of this round.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

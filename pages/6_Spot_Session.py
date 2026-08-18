@@ -804,9 +804,10 @@ with results_expander:
     if fish_records:
         for i, fish in enumerate(fish_records):
             frow1, frow2 = st.columns([5, 1])
-            bits = [fish["species"]]
+            count = fish.get("count") or 1
+            bits = [f"{count} x {fish['species']}" if count > 1 else fish["species"]]
             if fish.get("weight_lb"):
-                bits.append(f"{fish['weight_lb']:g} lb")
+                bits.append(f"~{fish['weight_lb']:g} lb each" if count > 1 else f"{fish['weight_lb']:g} lb")
             if fish.get("length_in"):
                 bits.append(f"{fish['length_in']:g} in")
             if fish.get("depth_ft"):
@@ -842,19 +843,44 @@ with results_expander:
                     "Species (type it in)", key=f"log_new_fish_species_other_{spot['spot_id']}_{seq}",
                 )
 
-            fc1, fc2, fc3 = st.columns(3)
-            new_weight_lb = fc1.number_input(
-                "Weight (lb)", min_value=0.0, step=0.1, value=0.0,
-                key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
+            is_group = st.checkbox(
+                "Log as a group of small fish (all under 1 lb)",
+                key=f"log_new_fish_is_group_{spot['spot_id']}_{seq}",
+                help="For a bunch of small dinks caught on the same lure/window that aren't worth a "
+                     "separate entry each - enter how many instead of adding them one at a time.",
             )
-            new_length_in = fc2.number_input(
-                "Length (in)", min_value=0.0, step=0.25, value=0.0,
-                key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
-            )
-            new_depth_ft = fc3.number_input(
-                "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
-                key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
-            )
+
+            if is_group:
+                gc1, gc2, gc3 = st.columns(3)
+                new_count = gc1.number_input(
+                    "How many fish", min_value=2, step=1, value=2,
+                    key=f"log_new_fish_count_{spot['spot_id']}_{seq}",
+                )
+                new_weight_lb = gc2.number_input(
+                    "Approx weight each (lb, optional)", min_value=0.0, max_value=1.0, step=0.1, value=0.0,
+                    key=f"log_new_fish_group_weight_{spot['spot_id']}_{seq}",
+                    help="Leave at 0 if you didn't weigh them - a group entry is for fish under 1 lb each.",
+                )
+                new_depth_ft = gc3.number_input(
+                    "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
+                    key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
+                )
+                new_length_in = 0.0
+            else:
+                fc1, fc2, fc3 = st.columns(3)
+                new_weight_lb = fc1.number_input(
+                    "Weight (lb)", min_value=0.0, step=0.1, value=0.0,
+                    key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
+                )
+                new_length_in = fc2.number_input(
+                    "Length (in)", min_value=0.0, step=0.25, value=0.0,
+                    key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
+                )
+                new_depth_ft = fc3.number_input(
+                    "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
+                    key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
+                )
+                new_count = 1
 
             fc4, fc5 = st.columns(2)
             new_retrieve_style = fc4.selectbox(
@@ -876,6 +902,7 @@ with results_expander:
                 fish_records.append({
                     "species": species_final,
                     "species_other": species_other or None,
+                    "count": int(new_count) if is_group else 1,
                     "weight_lb": new_weight_lb or None,
                     "length_in": new_length_in or None,
                     "depth_ft": new_depth_ft or None,
@@ -1022,7 +1049,7 @@ with results_expander:
             lure_used=lure_used,
             color_used=color_used,
             technique_used=technique_used,
-            fish_caught=len(fish_records),
+            fish_caught=sum((f.get("count") or 1) for f in fish_records),
             biggest_fish_lb=max(fish_weights) if fish_weights else None,
             predicted_score=predicted_score,
             conditions=conditions,

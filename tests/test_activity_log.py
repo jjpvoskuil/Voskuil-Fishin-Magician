@@ -3,6 +3,7 @@ from core.activity_log import (
     OTHER_LABEL, DEPTH_MODES, FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS,
     RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
     inventory_item_label, lure_can_take_trailer, lure_picker_options,
+    format_weight_lb_oz, parse_weight_lb_oz,
 )
 
 
@@ -67,3 +68,60 @@ def test_forage_options_still_importable_for_the_log_forms_forage_multiselect():
     # activity_log.py doesn't define its own forage vocabulary - it reuses
     # core.lures.FORAGE_OPTIONS for both the conditions form and the log form.
     assert len(FORAGE_OPTIONS) > 0
+
+
+# --- format_weight_lb_oz / parse_weight_lb_oz --------------------------------
+
+def test_format_weight_lb_oz_whole_pounds():
+    assert format_weight_lb_oz(3.0) == "3 lb"
+    assert format_weight_lb_oz(1.0) == "1 lb"
+
+
+def test_format_weight_lb_oz_pounds_and_ounces():
+    assert format_weight_lb_oz(3.5) == "3 lb 8 oz"
+    assert format_weight_lb_oz(3.53) == "3 lb 8 oz"  # rounds to nearest ounce
+
+
+def test_format_weight_lb_oz_under_one_pound_shows_ounces_only():
+    assert format_weight_lb_oz(0.5) == "8 oz"
+    assert format_weight_lb_oz(0.0625) == "1 oz"
+
+
+def test_format_weight_lb_oz_rounds_up_to_next_pound_at_16_oz():
+    # 3.99 lb rounds to 16 oz, which should carry over to a whole 4 lb, not
+    # display as "3 lb 16 oz".
+    assert format_weight_lb_oz(3.99) == "4 lb"
+
+
+def test_format_weight_lb_oz_blank_for_none_zero_or_unparseable():
+    assert format_weight_lb_oz(None) == ""
+    assert format_weight_lb_oz(0) == ""
+    assert format_weight_lb_oz("") == ""
+    assert format_weight_lb_oz(float("nan")) == ""
+
+
+def test_parse_weight_lb_oz_full_format():
+    assert parse_weight_lb_oz("3 lb 8 oz") == 3.5
+    assert parse_weight_lb_oz("3lb8oz") == 3.5
+
+
+def test_parse_weight_lb_oz_lb_only_or_oz_only():
+    assert parse_weight_lb_oz("4 lb") == 4.0
+    assert parse_weight_lb_oz("8 oz") == 0.5
+
+
+def test_parse_weight_lb_oz_plain_decimal_fallback():
+    assert parse_weight_lb_oz("3.5") == 3.5
+    assert parse_weight_lb_oz("2") == 2.0
+
+
+def test_parse_weight_lb_oz_blank_or_unparseable_returns_none():
+    assert parse_weight_lb_oz(None) is None
+    assert parse_weight_lb_oz("") is None
+    assert parse_weight_lb_oz("   ") is None
+    assert parse_weight_lb_oz("not a weight") is None
+
+
+def test_format_and_parse_weight_round_trip_on_whole_ounces():
+    for lb in (0.0625, 0.5, 1.0, 3.5, 4.0, 7.9375):
+        assert parse_weight_lb_oz(format_weight_lb_oz(lb)) == lb
