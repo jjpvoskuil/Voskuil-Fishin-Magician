@@ -160,7 +160,38 @@ def _exit_edit_mode():
     st.query_params.pop("edit_trip", None)
 
 
-def _guess_segment(hour: int) -> str:
+def _guess_segment(hour: int, now: datetime = None) -> str:
+    """Best-effort guess at the current time-of-day segment, used to
+    pre-select "Time window" before "Conditions right now" has actually
+    been filled in (see call sites below) - never authoritative, always
+    overridable via the dropdown itself.
+
+    Prefers the real thing: `seg_ranges` (module-level, computed a little
+    below from segment_time_ranges() for this session's date - the same
+    real sunrise/sunset-derived, proportionally-sized windows the "Time
+    window" dropdown's own labels use, see core.scoring._segment_windows())
+    checked against `now`, so this guess now moves with the season the
+    same way the dropdown's labels do, instead of the old fixed clock-hour
+    cutoffs (`<7`/`<11`/`<14`/`<18`/`<20`) silently drifting out of sync
+    with them. One extra case those windows alone don't cover: `now` in
+    the early hours after midnight but before *today's* Dawn actually
+    belongs to the tail end of *last night's* Night window, not today's
+    (`seg_ranges["Night"]` only covers tonight's dusk through tomorrow's
+    dawn) - handled explicitly below rather than falling through to the
+    fixed-hour fallback for that one stretch.
+
+    Falls back to the original fixed-hour cutoffs - still a reasonable
+    rough approximation of a typical day - when no weather bundle is
+    available (offline, or the session date's outside the forecast
+    window's coverage) or `now` isn't given."""
+    if seg_ranges and now is not None:
+        for name in SEGMENTS:
+            window = seg_ranges.get(name)
+            if window and window[0] <= now < window[1]:
+                return name
+        dawn = seg_ranges.get("Dawn")
+        if dawn and now < dawn[0]:
+            return "Night"
     if hour < 7:
         return "Dawn"
     if hour < 11:
@@ -350,7 +381,10 @@ if editing_cond.get("start_time"):
 _cond_forage_seen = editing_cond.get("forage_seen") or []
 _cond_fish_depth_ft = editing_cond.get("fish_depth_ft") or 8.0
 _editing_segment = (editing_trip or {}).get("segment")
-_cond_segment_name = _editing_segment if _editing_segment in SEGMENTS else _guess_segment(lake_now_naive().hour)
+_guess_now = lake_now_naive()
+_cond_segment_name = (
+    _editing_segment if _editing_segment in SEGMENTS else _guess_segment(_guess_now.hour, _guess_now)
+)
 
 st.divider()
 st.header("Conditions right now")
@@ -1097,7 +1131,8 @@ with results_expander:
         elif editing_trip is not None and editing_trip.get("segment") in SEGMENTS:
             entry_segment = editing_trip["segment"]
         else:
-            entry_segment = _guess_segment(lake_now_naive().hour)
+            _entry_guess_now = lake_now_naive()
+            entry_segment = _guess_segment(_entry_guess_now.hour, _entry_guess_now)
 
         # Same story as segment above: water_clarity is derived from cond
         # too, so without "Conditions right now" refilled in this visit,
