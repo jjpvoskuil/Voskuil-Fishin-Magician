@@ -44,8 +44,22 @@ DAILY_VARS = [
 # nothing earlier, so a request for "the last 5 days" would only ever
 # have today's own not-yet-elapsed hours (or literally a single instant,
 # for the very first hour of the day) to work with. See
-# estimate_water_temp_f() below.
+# estimate_water_temp_f() below. This value is tuned (see
+# estimate_water_temp_f()'s docstring) - it's the trailing-average WINDOW
+# for that model, not just "how far back we happen to fetch," so it should
+# stay 5 even though the actual API request now reaches back further (see
+# HOME_TREND_CHART_PAST_DAYS below).
 WATER_TEMP_TREND_PAST_DAYS = 5
+
+# Punch-list #15: how far back home.py's "Today at a glance" trend charts
+# (activity score, est. water temp, pressure trend) go. Separate constant
+# from WATER_TEMP_TREND_PAST_DAYS above on purpose - that one is a tuned
+# model parameter (the water-temp estimate's trailing-average window), this
+# one is purely "how many points does the chart show," and conflating them
+# would mean any future chart-length change quietly retunes the estimate
+# model too. fetch_forecast() below requests max() of the two, so both get
+# enough real past days regardless of which is larger.
+HOME_TREND_CHART_PAST_DAYS = 14
 
 
 @dataclass
@@ -77,7 +91,7 @@ def fetch_forecast(days: int = 7, lat: float = LAKE_LAT, lon: float = LAKE_LON) 
         "daily": ",".join(DAILY_VARS),
         "timezone": LAKE_TZ,
         "forecast_days": min(max(days, 1), 16),
-        "past_days": WATER_TEMP_TREND_PAST_DAYS,
+        "past_days": max(WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS),
         "temperature_unit": "fahrenheit",
         "windspeed_unit": "mph",
         "precipitation_unit": "inch",

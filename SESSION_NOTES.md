@@ -3844,6 +3844,109 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     byte-identical (`md5sum`) before and after every run in this entry.
     Marked Development punch-list item #14 "Done."
 
+77. **Punch-list #15: 14-day trend charts on the Home page, and get the
+    USACE oxygen/water-temp trend actually populated.** Ask (page: Today/
+    Home): "For the today page, lets make the trend charts go out 14 days.
+    Also, I thought we added the oxygen saturation and temperature trends
+    from the government site. Can we get those added?"
+
+    Two separate pieces. First, extended the four existing "Today at a
+    glance" trend charts (activity score, est. water temp, pressure trend,
+    lake level - added in punch-list #13) from 3 days to 14. Added a new
+    `core.weather.HOME_TREND_CHART_PAST_DAYS = 14`, kept deliberately
+    separate from the existing `WATER_TEMP_TREND_PAST_DAYS = 5` rather than
+    just bumping that constant - `WATER_TEMP_TREND_PAST_DAYS` is a tuned
+    model parameter (`estimate_water_temp_f()`'s own trailing-average
+    window, validated against real Spot Session readings per punch-list
+    #7), not a chart-length knob, and conflating the two would mean any
+    future chart-length change quietly retunes the water-temp estimate
+    too. `fetch_forecast()`'s `past_days` request now asks Open-Meteo for
+    `max()` of the two (confirmed via their docs that `past_days` supports
+    up to 92, so 14 is well inside range), so both the model and the chart
+    get enough real history from one fetch. `home.py`'s trend-day range
+    became `range(HOME_TREND_CHART_PAST_DAYS - 1, -1, -1)` (was the
+    literal `(2, 1, 0)`), `get_lake_level_history(days=...)` now passes the
+    same constant instead of a literal `3`, and the expander title/caption
+    text now read "14-day" throughout instead of a mix of hardcoded "3-day"
+    text.
+
+    Second, the USACE oxygen-saturation/water-temp trend: investigated and
+    found it actually WAS already built, in punch-list #13 - the "🌡️ USACE
+    surface reading history" expander - but `data/water_quality_log.csv`
+    had zero rows logged (just the header), so per that section's own `if
+    wq_log:` guard, nothing rendered at all on Home, which is why it looked
+    unbuilt. Root cause: this sandbox has no network path to USACE's report
+    page (`https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html`) - a
+    direct `requests.get()` hit a proxy 403, and even the WebFetch tool
+    failed on that same domain's `robots.txt` with an SSL certificate
+    verification error - so nothing running in this session (including the
+    Streamlit Cloud deploy's own periodic fetch, if it's hit the same kind
+    of restriction, though that's unconfirmed) had ever successfully
+    completed the fetch-and-log step yet. Worked around this by reaching
+    the live page through the angler's own connected Chrome browser
+    (`mcp__claude-in-chrome__navigate` + `get_page_text`) instead, which
+    isn't subject to this sandbox's network restrictions. That confirmed
+    two things directly against the real, current page: (1) the only
+    reading it has ever published is the same Aug 6, 2026, 2:00 PM "Dam
+    Site" 0 ft survey already referenced as the hand-verification example
+    in `core/lake_water_quality.py`'s own docstring (30.3°C, 10.66 mg/l DO)
+    - so this is genuinely the CURRENT reading, not stale test data, and
+    (2) the report page itself still only ever shows one survey at a time,
+    no history section or archive link anywhere on it - reconfirming
+    punch-list #69's exhaustive search that no real historical time series
+    exists for this station from any source. Ran the real, extracted
+    values (temp_c=30.3, do_mg_l=10.66, observed_at=2026-08-06T14:00)
+    through the app's own actual conversion/saturation-formula code
+    (`core.lake_water_quality._do_saturation_concentration_mg_l()`) rather
+    than computing by hand, then called the real `core.water_quality_log.
+    append_if_new()` to add it - so the seeded row is exactly what the
+    app's own fetch-and-log pipeline would have produced had it been able
+    to reach the page itself, not a fabricated or manually-typed value.
+    `data/water_quality_log.csv` now has one real row (86.5°F, 10.66 mg/l
+    DO, 146.9% saturation, 8/6/2026 2:00 PM). Nothing more than this one
+    reading is available anywhere to seed - by design (see
+    `core/water_quality_log.py`'s own docstring), the trend will keep
+    filling in only as USACE publishes new surveys (roughly every 1-2
+    weeks); a genuine second point still needs to wait for that, or for a
+    future session to re-check the live page the same way. With one row,
+    the expander now renders the "only one USACE survey logged so far
+    (8/06/2026)" message (previously the whole section didn't show at
+    all); it'll switch over to the actual two-line trend chart once a
+    second real survey is logged.
+
+    Updated `tests/test_weather.py`'s
+    `test_fetch_forecast_requests_past_days_for_the_water_temp_trend` to
+    assert `past_days == max(WATER_TEMP_TREND_PAST_DAYS,
+    HOME_TREND_CHART_PAST_DAYS)` instead of the old hardcoded
+    `WATER_TEMP_TREND_PAST_DAYS`, plus an explicit assertion that
+    `HOME_TREND_CHART_PAST_DAYS >= WATER_TEMP_TREND_PAST_DAYS` so a future
+    reader doesn't have to re-derive which constant currently wins.
+    `python3 -m pytest tests/ -q` passes at 261 (no net-new tests needed
+    beyond that one update - `find_inventory_gaps`/#14's tests etc. are
+    unaffected). Verified end to end with a scratch `AppTest` script (not
+    committed) against `home.py`, with a fresh fake `WeatherBundle`
+    covering a real 14-day-plus-forecast window (built fresh for this
+    entry rather than reusing `tests/test_scoring.py`'s `_fake_bundle()`
+    helpers, since those are intentionally sized around
+    `WATER_TEMP_TREND_PAST_DAYS` (5), not the new 14-day window) and 14
+    fake `LakeLevel` readings: (1) confirms the expander's title reads
+    "📈 14-day trends" and both it and the USACE expander render with no
+    exception; (2) mocking `core.appstate.get_water_quality_log` to return
+    exactly the real seeded row confirms the single-reading caption
+    (including the "8/06/2026" date) renders correctly; (3) mocking a
+    second, different reading alongside it confirms the two-point case
+    renders both the water-temp and DO charts with no exception. Also ran
+    the standard `AppTest` smoke pass across the app entry point and every
+    page reachable in this sandbox (same set as entries 73-76) - all
+    rendered with no exception. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/lure_inventory.csv` confirmed
+    byte-identical (`md5sum`) before and after every run in this entry;
+    `data/water_quality_log.csv` confirmed unchanged by every *test* run
+    (all mocked), separate from the one deliberate real append described
+    above. Logged this ask as punch-list item #15 (it arrived as a direct
+    follow-up request rather than through the Development page UI) and
+    marked it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

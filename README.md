@@ -32,16 +32,21 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
-- **3-day trend charts** on the Home page ("📈 3-day trends", below "Today at a glance") -
-  activity score, estimated water temp, and 24h pressure trend for the last 3 days
-  (recomputed from the same weather data already fetched for today, no extra live calls),
-  plus a real USGS lake-level trend covering the same window. A separate "🌡️ USACE surface
+- **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") -
+  activity score, estimated water temp, and 24h pressure trend for the last 14 days
+  (recomputed from the same weather data already fetched for today - `core.weather.
+  fetch_forecast()` requests `HOME_TREND_CHART_PAST_DAYS` (14) days of real past weather
+  alongside the forecast, so no extra live calls are needed), plus a real USGS lake-level
+  trend covering the same window. `HOME_TREND_CHART_PAST_DAYS` is kept separate from
+  `WATER_TEMP_TREND_PAST_DAYS` (5, the water-temp estimate model's own tuned trailing-
+  average window - see `core/weather.py`) so changing one never silently retunes the
+  other; `fetch_forecast()` requests the larger of the two. A separate "🌡️ USACE surface
   reading history" section charts the periodic USACE water-temp/dissolved-oxygen survey
   (see below) - since that live report only ever has the CURRENT reading, this app records
   its own local archive (`data/water_quality_log.csv`, git-committed like the trip log)
   every time it fetches a fresh survey, so this one genuinely starts sparse and fills in
   gradually as USACE republishes (roughly every 1-2 weeks) rather than showing a fixed
-  3-day window that would barely move.
+  14-day window that would barely move.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day. Every window's real clock range tracks that day's
   actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,
