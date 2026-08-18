@@ -186,7 +186,12 @@ this repo that can override it on this hosting.
 - **Trip History** - every logged trip in one filterable, wide, scrollable grid:
   filter by date/date range, time of day, location, lure type, water clarity,
   structure type, fish activity, forage activity, wind direction, catches-only,
-  trailer-used-only, or free-text search. The grid itself shows 14 fields (scroll
+  trailer-used-only, or free-text search. The "Time of day" filter and the grid's
+  own "Time of day" cell both label each window with a real clock range in
+  parentheses (e.g. "Dawn (5:52 AM-7:52 AM)") using today's actual sunrise/sunset -
+  a reference point rather than that exact trip's own date, since a filter/grid
+  column spans trips logged on many different days and the windows shift a few
+  minutes day to day. The grid itself shows 14 fields (scroll
   right to see them all) and lets you edit date, time of day, structure, water
   clarity, lure, color, fish caught, biggest fish, and notes right in the cell -
   changes save automatically, no separate "Save" button. Every fish weight shown

@@ -27,13 +27,14 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from core.appstate import get_lake_spots, github_token, repo_slug
+from core.appstate import get_lake_spots, get_weather_bundle, github_token, repo_slug
 from core.storage import (
     read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push,
 )
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
-from core.scoring import SEGMENTS
+from core.scoring import SEGMENTS, segment_time_ranges
+from core.weather import lake_today
 from core.activity_log import format_weight_lb_oz, parse_weight_lb_oz
 from core.ui import inject_mobile_css
 
@@ -278,6 +279,35 @@ def _render_trip_detail_body(row, key_prefix):
                 st.caption(f"　{fish['notes']}")
 
 
+def segment_display_label(name, seg_ranges):
+    """"Dawn" -> "Dawn (5:52 AM-7:52 AM)" when `seg_ranges` (from
+    core.scoring.segment_time_ranges) has a real clock range for `name`,
+    else `name` unchanged (no bundle available, or an unrecognized/legacy
+    value like "" or a hand-edited string) - same idea as Spot Session's
+    "Time window" picker (pages/6_Spot_Session.py's _segment_option_label),
+    kept as its own pure function here (no Streamlit calls) so it - and the
+    label<->name round-trip built from it below - is directly unit
+    testable, same reasoning as the rest of this "Grid inline-edit helpers"
+    section."""
+    if seg_ranges and name in seg_ranges:
+        s, e = seg_ranges[name]
+        return f"{name} ({s.strftime('%-I:%M %p')}-{e.strftime('%-I:%M %p')})"
+    return name
+
+
+def segment_label_maps(canonical_options, seg_ranges):
+    """Builds the two directions of the label<->name translation the grid's
+    "Time of day" SelectboxColumn needs (see grid_editor_input/edited_grid
+    below): `label_by_name` to show real clock ranges in the dropdown,
+    `name_by_label` to translate an edited cell straight back to a plain
+    canonical segment name before it's ever compared or saved. Labels are
+    guaranteed unique here since each is built from a distinct `name` in
+    `canonical_options`."""
+    label_by_name = {name: segment_display_label(name, seg_ranges) for name in canonical_options}
+    name_by_label = {label: name for name, label in label_by_name.items()}
+    return label_by_name, name_by_label
+
+
 # --- Grid inline-edit helpers -------------------------------------------------
 # Pure/pandas-only (no Streamlit calls) so the diffing logic can be unit
 # tested without spinning up a script run - st.data_editor itself isn't
@@ -375,8 +405,31 @@ date_range = f1.date_input(
     "Date range", value=(min_date, max_date) if min_date else None,
     min_value=min_date, max_value=max_date,
 ) if min_date else None
+
+# Labeling each segment with a real clock range makes "Dawn"/"Morning"/etc.
+# concrete rather than requiring the angler to remember the cutoffs - same
+# idea as Spot Session's "Time window" picker. There's no single trip date
+# this filter applies to (it can span the whole trip history), so today's
+# actual sunrise/sunset-derived ranges are used as a representative
+# reference rather than an exact-for-every-row value; the underlying
+# filter values stay the plain segment names either way; format_func only
+# changes what's displayed, so this can't drift from what's actually
+# stored/filtered.
+try:
+    _th_bundle = get_weather_bundle(7)
+except Exception:
+    _th_bundle = None
+_th_seg_ranges = segment_time_ranges(_th_bundle, lake_today())
+
+
 segment_options = sorted(df["segment"].dropna().unique().tolist())
-segments = f2.multiselect("Time of day", segment_options, default=[])
+segments = f2.multiselect(
+    "Time of day", segment_options, default=[],
+    format_func=lambda name: segment_display_label(name, _th_seg_ranges),
+    help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a reference point - "
+         "they shift a few minutes day to day, so a trip logged under this same window name may have "
+         "run a bit earlier or later.",
+)
 spot_options = sorted(df["_location"].dropna().unique().tolist())
 spots = f3.multiselect("Location", spot_options, default=[])
 
@@ -494,8 +547,26 @@ else:
         observed = set(v for v in series.dropna().unique().tolist() if v)
         return [""] + sorted(set(canonical) | observed)
 
+    # SelectboxColumn has no separate display/value distinction like a
+    # regular st.selectbox's format_func - whatever's in the options list IS
+    # what's shown AND what gets written back on edit. So the "Time of day"
+    # column is relabeled with the same today's-clock-range text as the
+    # filter above, but only on a throwaway copy (`grid_editor_input`) fed
+    # into the widget - `grid_display` itself (the diff/save baseline) stays
+    # on plain canonical segment names the whole time, and the labels are
+    # translated straight back to plain names the moment the widget returns,
+    # before any diffing or saving happens. This keeps every stored trip's
+    # `segment` field a bare name like "Dawn" - never "Dawn (5:52 AM-7:52 AM)" -
+    # regardless of what the dropdown displayed while editing.
+    _segment_canonical_options = _select_options(SEGMENTS, grid_display["segment"])
+    _segment_label_by_name, _segment_name_by_label = segment_label_maps(_segment_canonical_options, _th_seg_ranges)
+    grid_editor_input = grid_display.copy()
+    grid_editor_input["segment"] = grid_editor_input["segment"].map(
+        lambda v: _segment_label_by_name.get(v, v)
+    )
+
     edited_grid = st.data_editor(
-        grid_display,
+        grid_editor_input,
         key="trip_history_grid_editor",
         width="stretch",
         hide_index=True,
@@ -504,7 +575,9 @@ else:
         column_config={
             "trip_date": st.column_config.DateColumn("Date"),
             "segment": st.column_config.SelectboxColumn(
-                "Time of day", options=_select_options(SEGMENTS, grid_display["segment"]),
+                "Time of day", options=[_segment_label_by_name[v] for v in _segment_canonical_options],
+                help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a "
+                     "reference point - they shift a few minutes day to day.",
             ),
             "_location": st.column_config.TextColumn("Location"),
             "structure_type": st.column_config.SelectboxColumn(
@@ -527,6 +600,11 @@ else:
             "notes": st.column_config.TextColumn("Notes"),
         },
     )
+
+    # Translate the "Time of day" column straight back from labeled text
+    # ("Dawn (5:52 AM-7:52 AM)") to the plain canonical name ("Dawn") before
+    # any diffing/saving - see the comment above `grid_editor_input` for why.
+    edited_grid["segment"] = edited_grid["segment"].map(lambda v: _segment_name_by_label.get(v, v))
 
     # Auto-save: st.data_editor commits (and reruns the script) as soon as a
     # cell edit is confirmed, so simply diffing the just-rendered edited copy
