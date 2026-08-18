@@ -306,6 +306,23 @@ plausible day/segment combinations, with the tails far more balanced).
   the one on the lake pool itself rather than the separate downstream river gauges. Shown
   on the Home page alongside how far above/below USACE's normal summer pool (515 ft) the
   lake currently sits.
+- Surface water temperature + dissolved oxygen (real reading, secondary to the daily
+  estimate above): [USACE Louisville District's periodic water-quality
+  survey](https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html) for Nolin Lake
+  (`core/lake_water_quality.py`). This is a genuine measured reading at the "Dam Site"
+  station's surface (0 ft), but only republished roughly every 1-2 weeks via a manual
+  USACE survey, so it's shown on the Home page as a clearly-dated secondary caption
+  ("measured 8/06"), not folded into the live/daily metrics. Dissolved oxygen is shown
+  both as raw mg/l and as a computed saturation percentage (standard APHA/Elmore-Hayes
+  polynomial + barometric correction for the lake's elevation).
+
+  Other sources considered and ruled out for surface water temperature: lake-ready.com
+  (a beta site that turned out not to actually publish water temperature anywhere on
+  it, despite the name), USACE's modern CWMS Data API (Nolin Lake is registered, but no
+  working/documented timeseries query was found), USGS's Water Quality Portal for the
+  lake gauge (discontinued since 2017), and USGS site 03311000 (a live feed, but it's
+  the tailwater/river gauge below the dam - cooler released water, not the lake's own
+  surface).
 - Lake spot coordinates (`data/nolin_spots.json`): a handful of general reference spots
   anchored to verified public sources (USACE gauge location, Kentucky State Parks/GNIS
   coordinate, U.S. Census TIGER address geocoding). **These are planning
@@ -595,6 +612,8 @@ core/
   weather.py              Open-Meteo integration + water-temp estimate
   lake_level.py            USGS Water Services integration - real, live pool elevation
                            (not an estimate, unlike everything else weather-derived)
+  lake_water_quality.py     USACE periodic water-quality survey - real (but not live)
+                           surface temp + dissolved oxygen % saturation
   scoring.py              1-10 activity scoring engine (shared by the forecast and
                            Spot Session pages via manual_segment_score())
   forecast_freeze.py       Locks in a 7-Day Forecast time segment's score once its

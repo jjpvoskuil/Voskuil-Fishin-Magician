@@ -3022,6 +3022,136 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `data/trip_log.csv` confirmed untouched. Marked Development punch-list
     item #7 "Done."
 
+69. **Follow-up to #7: a real (not estimated) surface water temperature
+    source, plus dissolved oxygen % saturation.** After #7 shipped, the
+    angler asked whether any site publishes the actual lake surface
+    temperature, flagging one candidate themselves (lake-ready.com, "a beta
+    site... use it if you can't find anything else").
+
+    Checked lake-ready.com directly with a real browser (`mcp__claude-in-chrome`,
+    since this domain wasn't reachable through `WebFetch`) on both its main
+    dashboard and its "Fishing Outlook" subpage - it does not actually
+    publish water temperature anywhere on the site, despite the name. Told
+    the angler this honestly rather than wiring up a source that doesn't
+    exist, and searched further per their reply ("forget this site. Can you
+    keep looking a bit for a government site that might have it?"):
+    - USACE's modern CWMS Data API (`cwms-data.usace.army.mil`) - confirmed
+      Nolin Lake is a registered location (`/locations?office=LRL`), but no
+      working/documented timeseries query was found after several attempts
+      (400s, robots.txt blocks, 404s on the swagger/api-docs paths).
+      Abandoned, inconclusive.
+    - USGS's Water Quality Portal for the lake gauge - has historical
+      readings, but discontinued since 2017. Not usable for current
+      conditions.
+    - USGS site 03311000 - a genuinely live feed, but it's the
+      tailwater/river gauge below the dam (cooler water already released
+      through the dam), not the lake's own surface. Flagged this as a real
+      accuracy tradeoff (a cold bias, ~74.5°F vs. the true ~86°F surface)
+      rather than quietly proposing it.
+    - The legacy USACE Louisville District report
+      (`lrl-wc.usace.army.mil/reports/wq/NRR.html`) - a real, periodic
+      (roughly biweekly) manual survey with actual surface temp + dissolved
+      oxygen readings. Reachable via a real browser but not via `WebFetch`
+      (SSL certificate verification errors against this domain) - disclosed
+      to the angler as an open risk for the deployed app's server-side
+      `requests` calls specifically, since it couldn't be verified through
+      that exact code path.
+
+    Reported all of this honestly (no ideal source exists) and asked how to
+    proceed. Angler's call: **"Add the periodic USACE survey anyway"** -
+    shown as a clearly-dated secondary reading alongside the daily estimate,
+    accepting the staleness and unverified-domain-reliability tradeoffs.
+    Mid-turn, a second ask arrived: **"if you can find oxygen saturation as
+    well, that would be awesome!"** - so this became a temp + DO% feature,
+    not just temp.
+
+    Inspected the real report's HTML directly via the browser tools
+    (`document.body.innerHTML`) to design the parser against the actual
+    markup rather than guessing: a single plain `<table>`, one `<tr>` of 5
+    `<td>`s per depth ("Station", "Date, Time" as `YYYYMMDD, HHMM`, "Depth
+    (ft)", "Water Temperature (deg C)", "Dissolved Oxygen (mg/l)"), blank
+    `<tr></tr>` rows as station separators, and a `<th>`-based header row
+    that never collides with a data-row regex. Two stations profiled:
+    "Tailwater" (river water below the dam - same wrong-location problem as
+    the USGS 03311000 gauge, so deliberately excluded) and "Dam Site" (the
+    lake's own vertical profile, depth 0 through 90 ft) - the depth-0 "Dam
+    Site" row is the real lake surface reading.
+
+    Chose a small stdlib `re` regex over adding `beautifulsoup4`/`html5lib`
+    as a new dependency: confirmed via `pip show`/`python3 -c "import ..."`
+    that neither is installed in this sandbox (only `lxml` is present, and
+    only as an already-installed transitive dependency of `pikepdf`/
+    `python-docx`/`python-pptx`, not something in `requirements.txt` or
+    guaranteed present in the deployed Streamlit Cloud environment) - matches
+    this codebase's existing minimal-dependency philosophy already used for
+    `core.cabelas_lookup`'s own regex-based scraping, and the report's
+    markup is regular enough (one `<tr>` of 5 `<td>`s per row, always) that a
+    full HTML parser isn't needed.
+
+    For dissolved oxygen % saturation (not just raw mg/l), used the standard
+    APHA Standard Methods 4500-O / Elmore-Hayes polynomial for sea-level DO
+    saturation concentration as a function of temperature
+    (`14.652 - 0.41022T + 0.0079910T² - 0.000077774T³`), times a barometric
+    correction for Nolin Lake's ~515 ft elevation
+    (`(1 - 2.25577e-5 * elevation_m)^5.25588`), then
+    `measured_mg_l / saturation_concentration * 100`. Hand-verified this
+    against the real reading (30.3°C, 10.66 mg/l, 515 ft) before writing any
+    code: ~147% - plausible afternoon photosynthetic supersaturation for a
+    warm, productive summer reservoir surface, and cross-checked for
+    plausibility against this app's own `core.onwater.WATER_TEMP_BANDS`
+    "severe oxygen stress" framing, which lines up with the same report's
+    near-zero deep-water DO readings (0.02-0.14 mg/l below ~30 ft).
+
+    New `core/lake_water_quality.py`: `fetch_surface_water_quality()` GETs
+    the report, regex-matches every 5-`<td>` row, keeps the first "Dam
+    Site"/depth-"0" match, parses the `YYYYMMDD, HHMM` timestamp, converts
+    °C to °F, and computes the saturation % above (reusing
+    `core.lake_level.NORMAL_SUMMER_POOL_FT` for the elevation input) -
+    raises on any failure (bad HTTP, no matching row), same "raise, let the
+    caller degrade gracefully" convention as `fetch_lake_level()`/
+    `fetch_forecast()`. New `core.appstate.get_surface_water_quality()`
+    wraps it with a 6-hour `st.cache_data` TTL (much longer than the other
+    sources - USACE only republishes this roughly every 1-2 weeks, no
+    benefit to polling more than a few times a day, and it's a non-API
+    legacy page worth not hammering). `home.py` fetches it in its own
+    independent `try/except` (same pattern as lake level - a stale/
+    unreachable USACE page shouldn't block the weather- or USGS-derived
+    metrics, or vice versa) and shows it as a caption below "Today at a
+    glance" rather than folding it into the metric row - it's explicitly
+    dated ("USACE Dam Site survey, 8/06") and explicitly contrasted against
+    the "Est. water temp" metric above it ("this is a periodic manual
+    survey, not a live/daily feed"), so it can't be mistaken for a live
+    reading. Falls back to simply not showing the caption on fetch failure,
+    same graceful-degradation shape as lake level.
+
+    New `tests/test_lake_water_quality.py` (6 cases, `monkeypatch.setattr(mod.requests,
+    "get", ...)` convention, using the real HTML shape captured from the
+    live page via the browser tools): requests the right URL; picks the
+    Dam Site depth-0 row specifically (not Tailwater, not a deeper Dam Site
+    row - confirmed by including both a Tailwater row and a deep Dam Site
+    row in the fixture and checking neither wins); parses the observation
+    datetime correctly; the saturation-% calc lands in a plausible
+    140-155% range for the real reading; raises `ValueError` when no
+    matching row exists (e.g. a page with only Tailwater data); raises
+    (doesn't swallow) on a network failure. `python3 -m pytest tests/ -q`
+    passes at 237 (231 + 6 new).
+
+    Verified end to end with a scratch `AppTest` smoke run: first with all
+    three external fetches mocked to fail (this sandbox has no outbound
+    network access at all, confirmed again here), confirming no exception
+    and the existing lake-level fallback caption still renders correctly;
+    then with a fully mocked `WeatherBundle` + `LakeLevel` +
+    `SurfaceWaterQuality` (reusing `tests/test_scoring.py`'s `_fake_bundle`
+    shape) to render the real success path - confirmed the new caption
+    reads exactly "🌡️ Most recent real surface reading (USACE Dam Site
+    survey, 8/06): 86.5°F, dissolved oxygen 10.66 mg/l (~147% saturation).
+    This is a periodic manual survey, not a live/daily feed - the "Est.
+    water temp" above is today's model-based estimate." alongside the
+    existing 5 metrics, with no exception. `data/segment_score_freeze.csv`/
+    `data/trip_log.csv` confirmed byte-identical (`md5sum`) before and
+    after every run. Not a numbered punch-list item (a direct follow-up to
+    #7, discussed conversationally) - no `data/dev_tasks.csv` change needed.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

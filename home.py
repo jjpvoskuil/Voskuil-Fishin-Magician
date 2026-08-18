@@ -1,6 +1,6 @@
 import streamlit as st
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_lake_level
+from core.appstate import get_weather_bundle, get_calibrated_weights, get_lake_level, get_surface_water_quality
 from core.scoring import score_day
 from core.weather import lake_today
 from core.lake_level import NORMAL_SUMMER_POOL_FT
@@ -47,6 +47,16 @@ except Exception:
     # a missing "nice to have" live reading shouldn't read as alarming as a
     # failed weather fetch, which blocks the whole scored forecast above.
 
+# Also independent - a stale/unreachable USACE report shouldn't block either
+# of the sources above. This one is a genuine measured reading (not live -
+# see core/lake_water_quality.py), so it's shown separately below as a
+# clearly-dated secondary data point, not folded into "Today at a glance".
+water_quality = None
+try:
+    water_quality = get_surface_water_quality()
+except Exception:
+    pass
+
 if bundle is not None:
     try:
         today = score_day(bundle, lake_today(), weights=weights)
@@ -65,6 +75,16 @@ if bundle is not None:
                 delta_color="off",
                 help=f"Live reading from USGS site 03310900 ({lake_level.site_name}), "
                      f"as of {lake_level.observed_at.strftime('%-I:%M %p %m/%d')}.",
+            )
+
+        if water_quality:
+            st.caption(
+                f"🌡️ Most recent real surface reading (USACE Dam Site survey, "
+                f"{water_quality.observed_at.strftime('%-m/%d')}): "
+                f"{water_quality.water_temp_f}°F, dissolved oxygen "
+                f"{water_quality.do_mg_l:g} mg/l (~{water_quality.do_saturation_pct:.0f}% saturation). "
+                "This is a periodic manual survey, not a live/daily feed - "
+                "the \"Est. water temp\" above is today's model-based estimate."
             )
 
         best_segment = max(today.segments, key=lambda s: s.score)
