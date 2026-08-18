@@ -641,6 +641,24 @@ def _group_owned_by_category(inventory: list) -> dict:
     return grouped
 
 
+def find_inventory_gaps(inventory: list) -> list:
+    """Punch-list #14: every LURE_PROFILES category the angler owns zero of
+    (no row tagged with that category, or every such row is at quantity 0) -
+    i.e. types of bass lures useful for Nolin Lake with nothing in the
+    tackle box to fill that role. Trailers aren't a separate concept here:
+    texas_rig_creature and weightless_soft_plastic (see
+    TRAILER_ELIGIBLE_CATEGORIES below) are themselves LURE_PROFILES entries,
+    so a single pass over all 20 categories already covers "lure types and
+    trailers" the way the angler's own ask grouped them.
+
+    Returns category keys in LURE_PROFILES' own definition order (a rough
+    most-versatile-to-most-niche curation, not alphabetical) rather than
+    sorted some other way, so the Lure Inventory page's gap-filling section
+    reads as a sensible priority list."""
+    owned = _group_owned_by_category(inventory)
+    return [key for key in LURE_PROFILES if key not in owned]
+
+
 @dataclass
 class TrailerInfo:
     type: str

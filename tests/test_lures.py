@@ -1,6 +1,6 @@
 from core.lures import (
     recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES, guess_category_from_text,
-    is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES,
+    is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES, find_inventory_gaps,
 )
 
 
@@ -422,3 +422,59 @@ def test_is_trailer_eligible_matches_real_logged_trailer_uses():
                               description='KVD Perfect Plastics Blade Minnow - Key Lime Pie, 4-1/2", 8-pack')
     assert is_trailer_eligible(craw) is True
     assert is_trailer_eligible(blade_minnow) is True
+
+
+# --- find_inventory_gaps (punch-list #14) -------------------------------
+
+def test_find_inventory_gaps_returns_every_category_for_empty_inventory():
+    assert find_inventory_gaps([]) == list(LURE_PROFILES.keys())
+
+
+def test_find_inventory_gaps_excludes_owned_categories():
+    inventory = [
+        {"brand": "Strike King", "description": "Football Jig", "category": "football_jig", "quantity": "3"},
+        {"brand": "Rapala", "description": "Jerkbait", "category": "suspending_jerkbait", "quantity": "1"},
+    ]
+    gaps = find_inventory_gaps(inventory)
+    assert "football_jig" not in gaps
+    assert "suspending_jerkbait" not in gaps
+    assert len(gaps) == len(LURE_PROFILES) - 2
+
+
+def test_find_inventory_gaps_treats_zero_quantity_as_still_a_gap():
+    inventory = [
+        {"brand": "Strike King", "description": "Football Jig", "category": "football_jig", "quantity": "0"},
+    ]
+    assert "football_jig" in find_inventory_gaps(inventory)
+
+
+def test_find_inventory_gaps_ignores_unrecognized_categories():
+    inventory = [
+        {"brand": "No Name", "description": "Mystery bait", "category": "not_a_real_category", "quantity": "5"},
+    ]
+    assert find_inventory_gaps(inventory) == list(LURE_PROFILES.keys())
+
+
+def test_find_inventory_gaps_includes_trailer_eligible_categories_when_unowned():
+    # texas_rig_creature/weightless_soft_plastic are themselves LURE_PROFILES
+    # entries (the app's two trailer types) - confirms the gap check covers
+    # "trailers" without any separate trailer-specific logic.
+    gaps = find_inventory_gaps([])
+    assert TRAILER_ELIGIBLE_CATEGORIES.issubset(set(gaps))
+
+
+def test_find_inventory_gaps_returns_no_gaps_when_everything_is_owned():
+    inventory = [
+        {"brand": "Brand", "description": "Item", "category": key, "quantity": "1"}
+        for key in LURE_PROFILES
+    ]
+    assert find_inventory_gaps(inventory) == []
+
+
+def test_find_inventory_gaps_preserves_lure_profiles_order():
+    inventory = [
+        {"brand": "Brand", "description": "Item", "category": "suspending_jerkbait", "quantity": "1"},
+    ]
+    gaps = find_inventory_gaps(inventory)
+    expected = [k for k in LURE_PROFILES if k != "suspending_jerkbait"]
+    assert gaps == expected

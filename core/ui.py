@@ -122,6 +122,43 @@ def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
     return True
 
 
+def render_cabelas_suggestions(
+    query: str, found_caption: str, empty_caption: str, num_results: int = MAX_CABELAS_SUGGESTIONS,
+):
+    """Looks up up to `num_results` real Cabela's products for `query` (via
+    the cached core.appstate.get_cabelas_suggestions) and renders them as
+    small cards - thumbnail, brand/description/price, and a "Search
+    Cabela's" link to that same query's live search results. There's no
+    stable link to a specific product page (see core.cabelas_lookup.
+    search_page_url's own docstring for why) - the search-results link is
+    the real, honest thing this app can offer; a genuine one-click "add to
+    cart" isn't possible from a server-side app with no access to the
+    angler's own logged-in Cabela's session (punch-list #14).
+
+    Falls back to `empty_caption` (no cards at all) if the lookup finds
+    nothing or fails - search_lures() fails soft (returns []) on any
+    problem, same "degrade quietly" contract every external source in this
+    app follows. Callers own both caption strings since the same "nothing
+    found"/"found something" moment reads differently in different
+    contexts (a specific lure recommendation vs. a general inventory gap) -
+    shared here (punch-list #8's original block, and #14's gap-filling
+    section) purely to avoid duplicating the card-rendering markup itself."""
+    suggestions = get_cabelas_suggestions(query, num_results=num_results)
+    if not suggestions:
+        st.caption(empty_caption)
+        return
+    st.caption(found_caption)
+    cols = st.columns(len(suggestions))
+    for i, (col, item) in enumerate(zip(cols, suggestions), start=1):
+        with col:
+            if resolve_image_source(item):
+                render_square_thumbnail(item, size_px=OWNED_THUMBNAIL_PX)
+            price_txt = f" – ${item['price']:.2f}" if item.get("price") else ""
+            st.caption(f"**#{i}** {item['brand']} – {item['description']}{price_txt}"[:100])
+            product_query = f"{item['brand']} {item['description']}"
+            st.markdown(f"[Search Cabela's]({search_page_url(product_query)})")
+
+
 def render_lure_block(block: LureBlock):
     with st.container(border=True):
         st.markdown(f"**{block.name}**")
@@ -147,23 +184,11 @@ def render_lure_block(block: LureBlock):
             # core.appstate.get_cabelas_suggestions) so repeated blocks for the same
             # lure name across a page (e.g. the same crankbait recommended for
             # several days/segments at once) don't each trigger a live lookup.
-            # search_lures() fails soft (returns []) on any lookup problem, so this
-            # falls back to the plain "not in your inventory" caption exactly like
-            # before whenever Cabela's can't be reached or has no match.
-            suggestions = get_cabelas_suggestions(block.name, num_results=MAX_CABELAS_SUGGESTIONS)
-            if suggestions:
-                st.caption("🛒 Not in your inventory yet - worth considering from Cabela's:")
-                cols = st.columns(len(suggestions))
-                for i, (col, item) in enumerate(zip(cols, suggestions), start=1):
-                    with col:
-                        if resolve_image_source(item):
-                            render_square_thumbnail(item, size_px=OWNED_THUMBNAIL_PX)
-                        price_txt = f" – ${item['price']:.2f}" if item.get("price") else ""
-                        st.caption(f"**#{i}** {item['brand']} – {item['description']}{price_txt}"[:100])
-                        product_query = f"{item['brand']} {item['description']}"
-                        st.markdown(f"[Search Cabela's]({search_page_url(product_query)})")
-            else:
-                st.caption("🛒 Not in your inventory yet - worth picking one up for this presentation.")
+            render_cabelas_suggestions(
+                block.name,
+                found_caption="🛒 Not in your inventory yet - worth considering from Cabela's:",
+                empty_caption="🛒 Not in your inventory yet - worth picking one up for this presentation.",
+            )
         st.write(f"Colors: {', '.join(block.colors)}")
         if block.trailer:
             st.write(f"Trailer: {block.trailer.type} - {', '.join(block.trailer.colors)}")

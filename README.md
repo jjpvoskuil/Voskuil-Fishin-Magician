@@ -530,6 +530,30 @@ Quantity, price, and category can be edited (or the item deleted) from each card
 trip logs, inventory changes are committed and pushed back to GitHub when a
 `GITHUB_TOKEN` is configured, so they survive Streamlit Cloud restarts.
 
+### Fill your tackle gaps
+
+The "🎯 Fill your tackle gaps" expander (above the inventory grid) checks every lure
+type this app knows how to suggest for Nolin Lake - all of `core/lures.py`'s
+`LURE_PROFILES` categories - against what's actually in your inventory, and lists the
+ones you own nothing of (`core.lures.find_inventory_gaps`). Trailer styles aren't a
+separate list here: craw/creature (Texas-rig creature) and paddle-tail (weightless soft
+plastic) trailers are themselves entries in `LURE_PROFILES`, same as any crankbait or
+jig, so this single gap check already covers "lure types and trailers" together. A
+category with quantity 0 in every matching row still counts as a gap, same as owning
+none at all.
+
+Each gap shows up to two real Cabela's products worth considering (via the same
+`core.appstate.get_cabelas_suggestions` lookup and card layout the forecast page's "not
+in your inventory yet" suggestions use), with a "Search Cabela's" link that opens that
+product's live search results in a new tab. There's no way for this app to add
+something to your cart directly - Cabela's product search doesn't expose a stable
+per-product URL to link to (see "How the Cabela's lookup works" below), and a
+server-side app has no access to your own logged-in Cabela's session to place items in
+a cart on your behalf - so the honest version of "shop this gap" is one click to their
+search results, with the actual add-to-cart click staying on their site. If you own at
+least one of every suggested lure type, this section just shows a "nothing to fill"
+success message instead.
+
 ### How the Cabela's lookup works (and its limits)
 
 Cabela's search results are rendered client-side by JavaScript, so there's no plain
