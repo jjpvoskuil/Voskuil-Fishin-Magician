@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from core.weather import (
     lake_today, LAKE_TZ, LAKE_ZONEINFO, WeatherBundle, fetch_forecast,
-    estimate_water_temp_f, WATER_TEMP_TREND_PAST_DAYS,
+    estimate_water_temp_f, WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS,
 )
 
 
@@ -29,6 +29,12 @@ def test_fetch_forecast_requests_past_days_for_the_water_temp_trend(monkeypatch)
     # Open-Meteo's response otherwise starts exactly at today's local
     # midnight with zero days before it. Confirms the actual HTTP request
     # asks for it, rather than just trusting the estimate function alone.
+    #
+    # Punch-list #15: the request now asks for max(WATER_TEMP_TREND_PAST_DAYS,
+    # HOME_TREND_CHART_PAST_DAYS) so home.py's 14-day trend charts have real
+    # data too, without changing WATER_TEMP_TREND_PAST_DAYS itself - that's a
+    # tuned model parameter (estimate_water_temp_f()'s trailing-average
+    # window), not a chart-length knob, so it must stay independent.
     import core.weather as mod
 
     captured = {}
@@ -48,7 +54,12 @@ def test_fetch_forecast_requests_past_days_for_the_water_temp_trend(monkeypatch)
 
     monkeypatch.setattr(mod.requests, "get", _fake_get)
     fetch_forecast(days=7)
-    assert captured["params"]["past_days"] == WATER_TEMP_TREND_PAST_DAYS
+    assert captured["params"]["past_days"] == max(WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS)
+    # The chart window is the larger of the two in this app today, but the
+    # assertion above is written to stay correct even if that ever flips -
+    # confirm that explicitly so a future reader doesn't have to re-derive it.
+    assert HOME_TREND_CHART_PAST_DAYS >= WATER_TEMP_TREND_PAST_DAYS
+    assert captured["params"]["past_days"] == HOME_TREND_CHART_PAST_DAYS
 
 
 def _bundle_with_daily_highs(d: date, highs_by_offset: dict) -> WeatherBundle:

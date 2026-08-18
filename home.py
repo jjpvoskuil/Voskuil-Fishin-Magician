@@ -8,7 +8,7 @@ from core.appstate import (
     get_surface_water_quality, get_water_quality_log, github_token, repo_slug,
 )
 from core.scoring import score_day
-from core.weather import lake_today
+from core.weather import lake_today, HOME_TREND_CHART_PAST_DAYS
 from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
@@ -136,33 +136,35 @@ if bundle is not None:
         # e.g. a briefly stale cached bundle right at the lake's local day rollover.
         st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
 
-# Punch-list #13: 3-day trend charts for "Today at a glance"'s own metrics.
+# Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,
+# now going back HOME_TREND_CHART_PAST_DAYS (14) days rather than 3.
 # score_day() works for any date the bundle covers, and fetch_forecast()
-# already requests WATER_TEMP_TREND_PAST_DAYS (5) days of real past
-# weather alongside the forecast - so the last 3 days (today included) are
-# already sitting in `bundle` with no extra fetch needed for the first
-# three charts below. Lake level's trend is a separate live USGS request
-# (fetch_lake_level_history()) since that's real telemetry, not something
-# derivable from the weather bundle.
+# requests max(WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS) days
+# of real past weather alongside the forecast - so the last 14 days
+# (today included) are already sitting in `bundle` with no extra fetch
+# needed for the first three charts below. Lake level's trend is a
+# separate live USGS request (fetch_lake_level_history()) since that's
+# real telemetry, not something derivable from the weather bundle.
 trend_forecasts = []
 if bundle is not None:
-    trend_days = [lake_today() - timedelta(days=i) for i in (2, 1, 0)]
+    trend_days = [lake_today() - timedelta(days=i) for i in range(HOME_TREND_CHART_PAST_DAYS - 1, -1, -1)]
     for d in trend_days:
         try:
             trend_forecasts.append(score_day(bundle, d, weights=weights))
         except ValueError:
             pass  # date fell outside the bundle's window - shouldn't normally
-            # happen given past_days=5, but a chart with fewer points is a
-            # much better failure mode here than blowing up the whole page.
+            # happen given fetch_forecast()'s past_days request, but a chart
+            # with fewer points is a much better failure mode here than
+            # blowing up the whole page.
 
 lake_level_history = None
 try:
-    lake_level_history = get_lake_level_history(days=3)
+    lake_level_history = get_lake_level_history(days=HOME_TREND_CHART_PAST_DAYS)
 except Exception:
     pass
 
 if len(trend_forecasts) >= 2 or lake_level_history:
-    with st.expander("📈 3-day trends", expanded=True):
+    with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
         row1_c1, row1_c2 = st.columns(2)
         row2_c1, row2_c2 = st.columns(2)
         if len(trend_forecasts) >= 2:
@@ -180,9 +182,9 @@ if len(trend_forecasts) >= 2 or lake_level_history:
                 index=[lv.observed_at for lv in lake_level_history],
             ))
         st.caption(
-            "Activity score, water temp, and pressure trend are recomputed from the same weather data as "
-            "\"Today at a glance\" above, for the last 3 days. Lake level is real USGS telemetry (readings "
-            "every 15-60 min) for the same window."
+            f"Activity score, water temp, and pressure trend are recomputed from the same weather data as "
+            f"\"Today at a glance\" above, for the last {HOME_TREND_CHART_PAST_DAYS} days. Lake level is real "
+            "USGS telemetry (readings every 15-60 min) for the same window."
         )
 
 # Punch-list #13: "for the data from the corp of engineers, let's do a
