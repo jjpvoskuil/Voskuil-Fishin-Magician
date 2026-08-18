@@ -1,2 +1,3 @@
 task_no,created_at,description,page,status,completed_at
 1,2026-08-15T22:55:45.350748,Add ability to log multiple fish under 1 pound as a group as opposed to a separte entry for each,Spot Session,Open,
+2,2026-08-18T18:30:00.622282,"Need to change the weight for each fish to pounds and oz instead of decimal weights.  Ideally this is still one entry field with the format ""xx - xx"". with the dash prepopulated.  This should just be a manual entry field with no +/- buttons.  Also for both the pound and oz input, it should be a direct overwrite of that field with no backspacing required.",Spot Session,Open,
