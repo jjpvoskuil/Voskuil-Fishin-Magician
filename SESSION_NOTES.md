@@ -3751,6 +3751,99 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     either a temp path or a mocked `append_if_new`. Marked Development
     punch-list item #13 "Done."
 
+76. **Punch-list #14: suggest lures/trailers missing from inventory, with a
+    Cabela's shopping link.** Ask (page: Lure Inventory): "On the lure
+    inventory page, lets add a section that suggest lures that I don't have
+    that fill gaps in types of bass lures and trailers to use for nolin
+    lake. Also add a button on these suggestions that would automatically
+    add this to my cart in cabelas.com"
+
+    Asked one clarifying question before building, about the "automatically
+    add to cart" button specifically: `core/cabelas_lookup.py`'s own
+    docstring already documents that Cabela's site search (via Coveo) never
+    exposes a stable per-product URL, only `sku`/`brand`/`description`/
+    `price`/`image_url`/`categories` - so there's no link to point a button
+    at even for a single click-through, let alone genuine cart automation,
+    which would also need the angler's own authenticated Cabela's session
+    (not available to a server-side Streamlit app) and crosses into this
+    session's own safety-rule boundary around purchases/credentials
+    regardless. Proposed the honest version instead - a "Search Cabela's"
+    link to that item's live search results, the same pattern punch-list
+    #8's existing lure-suggestion cards already use - and the angler picked
+    that ("Yes, link to Cabela's search results").
+
+    Investigated whether "lures" and "trailers" needed separate gap-tracking
+    logic before writing anything: `core.lures.TRAILER_ELIGIBLE_CATEGORIES`
+    (`texas_rig_creature`, `weightless_soft_plastic`) turned out to already
+    be two ordinary entries in `LURE_PROFILES` itself, not a separate
+    taxonomy - so a single gap check across all 20 `LURE_PROFILES` keys
+    naturally covers "lure types and trailers" exactly the way the angler's
+    own ask grouped them, with nothing extra needed.
+
+    New `core.lures.find_inventory_gaps(inventory)` reuses the module's
+    existing `_group_owned_by_category()` helper (already used elsewhere in
+    `core/lures.py`) and returns every `LURE_PROFILES` key with no owned
+    row, or where every owned row is at quantity 0 - in `LURE_PROFILES`'
+    own definition order (a rough most-versatile-to-most-niche curation)
+    rather than alphabetical, so the page's gap list reads as a sensible
+    priority order. Extracted `core.ui.render_cabelas_suggestions(query,
+    found_caption, empty_caption, num_results)` out of the existing
+    `render_lure_block`'s "nothing color-matched on hand" branch (punch-list
+    #8) as a shared helper - both the original block and the new gap
+    section need the identical "look up via the cached
+    `core.appstate.get_cabelas_suggestions`, render thumbnail/brand/
+    description/price + a Cabela's search link per result, or fall back to
+    an empty-state caption" behavior, just with different caption wording
+    for their different contexts. `pages/5_Lure_Inventory.py` gained a new
+    "🎯 Fill your tackle gaps" expander (above the inventory grid, collapsed
+    by default) that calls `find_inventory_gaps()` against the already-
+    loaded inventory and renders one bordered card per gap category (name +
+    up to 2 Cabela's suggestions via the new shared helper), or a "nothing
+    to fill" success message if there are none.
+
+    New tests: `tests/test_lures.py` gained 7 cases for
+    `find_inventory_gaps()` - empty inventory returns all 20 categories;
+    owned categories are excluded; a quantity-0 row still counts as a gap;
+    unrecognized `category` values are ignored; the two trailer-eligible
+    categories are included when unowned (confirming no separate trailer
+    logic is needed); a fully-stocked inventory (one of everything) returns
+    no gaps; and the returned order matches `LURE_PROFILES`' own definition
+    order. `python3 -m pytest tests/ -q` passes at 261 (254 + 7 new), with
+    `data/trip_log.csv`/`data/segment_score_freeze.csv` confirmed
+    byte-identical (`md5sum`) before and after.
+
+    Verified end to end with a scratch `AppTest` script (not committed)
+    against `pages/5_Lure_Inventory.py`, mocking `core.appstate.
+    get_inventory` (works because the page re-execs its own top-level
+    imports fresh every `at.run()`) and `core.ui.get_cabelas_suggestions`
+    (has to be patched at `core.ui`, not `core.appstate` - `core/ui.py` is
+    an ordinary cached-import module, not re-exec'd per run, so patching
+    where the name is actually bound in `core.ui`'s own namespace is what's
+    needed to reach `render_cabelas_suggestions`'s internal call). Real
+    synthetic inventory rows were built via `core.lure_inventory.
+    LureItem(...).to_row()` rather than hand-built dicts, after hand-built
+    fixtures twice raised `KeyError` (`price`, then `item_id`) from
+    pre-existing, unrelated inventory-grid code further down the page that
+    reads every CSV field on every row - a reminder that real rows always
+    carry the full `FIELDNAMES` schema and test fixtures should build
+    through the real dataclass rather than guessing which fields matter.
+    Four scenarios covered: (1) empty inventory shows all 20 gaps with
+    mocked suggestion cards, no exception; (2) a fully-stocked inventory
+    shows the "nothing to fill" success message; (3) a partial inventory
+    (one owned category) shows only the genuinely-unowned categories as gap
+    cards - checked specifically for the bolded `**Football Jig**`
+    gap-header form, since the inventory grid's own (pre-existing, unrelated)
+    `st.write(row["description"])` for the owned row coincidentally also
+    renders "Football Jig" as plain unbolded markdown; (4) a gap category
+    with no Cabela's matches falls back to the plain empty-state caption
+    instead of raising. Also ran the standard `AppTest` smoke pass across
+    the app entry point and every page reachable in this sandbox (same set
+    as entries 73-75) - all rendered with no exception.
+    `data/trip_log.csv`/`data/segment_score_freeze.csv`/
+    `data/water_quality_log.csv`/`data/lure_inventory.csv` confirmed
+    byte-identical (`md5sum`) before and after every run in this entry.
+    Marked Development punch-list item #14 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

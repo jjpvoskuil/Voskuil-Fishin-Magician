@@ -8,9 +8,9 @@ from core.lure_inventory import (
     IMAGES_DIR, INVENTORY_PATH, LureItem, append_item, delete_item, save_image, update_item,
 )
 from core.lure_vision import identify_lure_photo
-from core.lures import LURE_CATEGORY_OPTIONS, guess_category_from_text
+from core.lures import LURE_CATEGORY_OPTIONS, LURE_PROFILES, find_inventory_gaps, guess_category_from_text
 from core.storage import commit_and_push
-from core.ui import render_square_thumbnail, inject_mobile_css
+from core.ui import render_cabelas_suggestions, render_square_thumbnail, inject_mobile_css
 
 CARD_THUMBNAIL_PX = 160
 SCAN_THUMBNAIL_PX = 110
@@ -310,6 +310,30 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
                     "to GitHub and won't survive an app restart. See README for how to add it."
                 )
             st.rerun()
+
+with st.expander("🎯 Fill your tackle gaps", expanded=False):
+    st.caption(
+        "Every lure type (and trailer style - craw/creature and paddle-tail swimbait trailers are "
+        "their own types below, same as any other lure) this app knows how to suggest for Nolin "
+        "Lake, cross-checked against your inventory above. A \"Search Cabela's\" link opens that "
+        "product's real search results in a new tab - there's no way for this app to add something "
+        "to your cart for you (that needs your own logged-in session on their site), so one more "
+        "click there finishes it."
+    )
+    gap_categories = find_inventory_gaps(items)
+    if not gap_categories:
+        st.success("✅ You've got at least one of every lure type this app suggests for Nolin Lake - nothing to fill.")
+    else:
+        st.write(f"**{len(gap_categories)} of {len(LURE_PROFILES)}** lure types have nothing in your inventory yet:")
+        for category_key in gap_categories:
+            profile = LURE_PROFILES[category_key]
+            with st.container(border=True):
+                st.markdown(f"**{profile['name']}**")
+                render_cabelas_suggestions(
+                    profile["name"],
+                    found_caption="🛒 Worth considering from Cabela's:",
+                    empty_caption="🛒 No Cabela's matches found for this one right now - try searching manually.",
+                )
 
 st.divider()
 
