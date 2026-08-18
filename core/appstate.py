@@ -4,6 +4,7 @@ import streamlit as st
 
 from .weather import fetch_forecast
 from .lake_level import fetch_lake_level
+from .lake_water_quality import fetch_surface_water_quality
 from .spots import load_spots
 from .storage import read_all_trips
 from .calibration import calibrate_weights
@@ -20,6 +21,14 @@ def get_weather_bundle(days: int = 7):
 @st.cache_data(ttl=60 * 15, show_spinner="Fetching lake level...")
 def get_lake_level():
     return fetch_lake_level()
+
+
+# Much longer TTL than the other live sources - USACE only republishes this
+# survey roughly every 1-2 weeks, so there's no benefit to re-fetching more
+# than a few times a day, and it saves hammering a non-API legacy page.
+@st.cache_data(ttl=60 * 60 * 6, show_spinner="Fetching USACE water-quality survey...")
+def get_surface_water_quality():
+    return fetch_surface_water_quality()
 
 
 @st.cache_data(ttl=60 * 5)
