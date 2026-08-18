@@ -2827,6 +2827,52 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     numbered punch-list item (a direct follow-up question about #6, not a
     new list entry), so nothing new to mark in `data/dev_tasks.csv`.
 
+67. **Follow-up to entry 66: Spot Session's `_guess_segment()` now uses the
+    real proportional windows too, instead of its own separate fixed-hour
+    cutoffs.** Entry 66 deliberately left this alone as a known, pre-
+    existing approximation; asked to fix it for consistency once the real
+    windows existed to check against.
+
+    `_guess_segment(hour, now=None)` (pages/6_Spot_Session.py) now checks
+    `now` against the module-level `seg_ranges` (segment_time_ranges() for
+    the session's date, already computed a little further down the script
+    for the "Time window" dropdown's own labels - see entry 63/the
+    original `_segment_option_label()` work) and returns whichever real
+    segment's window actually contains it. One gap those windows alone
+    don't cover: `now` between midnight and *today's* Dawn belongs to the
+    tail end of *last night's* Night window, not today's, since
+    `seg_ranges["Night"]` only spans tonight's dusk through tomorrow's
+    dawn - handled with an explicit `now < seg_ranges["Dawn"][0]` check
+    before falling through. Still falls back to the original fixed-hour
+    cutoffs (`<7`/`<11`/`<14`/`<18`/`<20`) when no weather bundle is
+    available (offline, or the session date's outside the forecast
+    window's coverage) or `now` isn't passed - a reasonable rough
+    approximation, same role the whole function always played, just no
+    longer the primary path when real data exists. `hour` stays a required
+    positional arg (the fallback still needs it); `now` is optional so
+    every existing caller's shape barely changes. Both call sites (the
+    "Conditions right now" segment default, and the "Add results" fallback
+    when logging a result with no conditions filled in) now compute
+    `lake_now_naive()` once into a local and pass it as both `hour` and
+    `now`, instead of calling `lake_now_naive()` a second time.
+
+    Verified by extracting the real, just-edited `_guess_segment` source
+    via `ast` (same not-a-duplicate technique as entry 65's grid-helper
+    check) and exercising it directly against real mid-August proportional
+    windows: confirmed it now correctly resolves 11:30 AM to "Midday" and
+    8:00 PM to "Dusk" (both would have been silently wrong under the old
+    fixed-hour cutoffs - "Morning" and "Afternoon" respectively), confirmed
+    the pre-dawn (2:00 AM, 4:59 AM) case correctly resolves to "Night," and
+    confirmed the no-bundle/no-`now` fallback path still returns the
+    original fixed-hour answers unchanged. `python3 -m pytest tests/ -q`
+    still passes at 220 (no scoring-engine logic changed, just this page's
+    own default-guessing wiring). A live scratch `AppTest` run against a
+    mocked bundle confirmed the "Time window" dropdown's actual pre-
+    selected default reflects a real proportional-window label end to end,
+    not just the isolated function. Full-page smoke pass across every page
+    clean; `data/segment_score_freeze.csv` reverted afterward, `data/
+    trip_log.csv` confirmed untouched. Not a numbered punch-list item.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
