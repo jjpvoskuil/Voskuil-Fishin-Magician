@@ -116,7 +116,10 @@ FIELD_SPECS = [
     ("stirred_up", "Muddy / stirred up", lambda v: "Yes" if v else None),
     ("wind_band", "Wind", str),
     ("avg_wind_mph", "Avg wind", lambda v: f"{v:.0f} mph" if isinstance(v, (int, float)) else str(v)),
-    ("light_condition", "Light condition", str),
+    ("light_condition", "Sky condition", str),  # renamed from "Light condition" (punch-list #10);
+    # underlying JSON key is unchanged, so older logged trips (saved with the pre-#10 Night/
+    # Crepuscular/Overcast-Diffuse-Day/Direct-High-Sun vocabulary) still display their real
+    # historical value here as-is, just under the new column label.
     ("precipitation", "Precipitation", str),
     ("avg_cloud_pct", "Cloud cover", lambda v: f"{v:.0f}%" if isinstance(v, (int, float)) else str(v)),
     ("pressure_trend_24h", "Pressure trend (24h)", lambda v: f"{v:+.1f} hPa" if isinstance(v, (int, float)) else str(v)),

@@ -1,13 +1,18 @@
 """
 "What do you see right now" condition bands for the spot-specific fishing
-session page (pages/6_Spot_Session.py) - light, wind, water visibility, and
-water temperature, each broken into a small number of named bands with a
-plain-language description of what that band means for the fish. The exact
-thresholds and band names here were supplied directly by the user (not
-derived from a public source the way most of this app's other reference
-data is), based on lux/Secchi-depth/metabolic-rate ecology concepts, and
-are treated as domain input the same way a hand-entered water-temp reading
-is - not modeled or estimated by this app.
+session page (pages/6_Spot_Session.py) - sky/cloud cover, wind, water
+visibility, and water temperature, each broken into a small number of named
+bands with a plain-language description of what that band means for the
+fish. Most of the exact thresholds and band names here were supplied
+directly by the user (not derived from a public source the way most of this
+app's other reference data is), based on Secchi-depth/metabolic-rate
+ecology concepts, and are treated as domain input the same way a
+hand-entered water-temp reading is - not modeled or estimated by this app.
+The sky-condition bands below are the one exception: they follow the
+National Weather Service's own published oktas-based sky-condition
+terminology (see LIGHT_CONDITIONS below for the source), rather than a
+purely hand-picked scale, since "how cloudy does the sky look" is a
+question with an existing public standard to borrow from.
 
 This module is deliberately just vocabulary + classification (what band is
 a given reading in, and what does it mean) - how a band feeds the actual
@@ -20,29 +25,55 @@ from __future__ import annotations
 
 from .lures import WATER_CLARITY_OPTIONS
 
-# --- Light conditions (light penetration, lux-based) ------------------------
-# Named bands rather than a raw lux number, since no angler carries a lux
-# meter to the lake - pick the band that matches what you're seeing.
-LIGHT_CONDITIONS = ["Night", "Crepuscular (Dawn/Dusk)", "Overcast / Diffuse Day", "Direct High Sun"]
+# --- Sky conditions (cloud cover) --------------------------------------------
+# Punch-list #10: the original 4-option scale here ("Night", "Crepuscular
+# (Dawn/Dusk)", "Overcast / Diffuse Day", "Direct High Sun") mixed two
+# different things into one field - time-of-day light level (which the
+# separate "Time window" dropdown already captures via segment_name, see
+# pages/6_Spot_Session.py's _guess_segment()) and actual cloud cover (this
+# field's only real downstream use - see cloud_proxy_for_light_condition()
+# below). That conflation produced a real, if minor, scoring oddity: "Night"
+# mapped to a cloud proxy of 20.0, which used to fall in the "clear/bright
+# bluebird tough-bite" penalty range below (avg_cloud <= 25 in
+# core.scoring._segment_score()) - a penalty whose whole rationale is glare/
+# high-sun visibility, nonsensical to apply in full darkness.
+#
+# Replaced with the National Weather Service's own published sky-condition
+# terminology (oktas - eighths of the sky covered by opaque clouds; see
+# NOAA's forecast glossary, https://forecast.weather.gov/glossary.php?word=sky+condition):
+# Clear/Sunny (0/8), Mostly Clear/Mostly Sunny (1-2/8), Partly Cloudy/Partly
+# Sunny (3-4/8), Mostly Cloudy (5-7/8), Cloudy/Overcast (8/8) - a real public
+# standard for exactly the "how cloudy does the sky look" question an
+# angler can judge by eye, and (unlike the old scale) purely about cloud
+# cover, not time of day - a clear night sky and a clear midday sky now both
+# just read "Clear / Sunny."
+LIGHT_CONDITIONS = ["Clear / Sunny", "Mostly Clear", "Partly Cloudy", "Mostly Cloudy", "Overcast"]
 
 LIGHT_CONDITION_INFO = {
-    "Night":                      {"range": "< 1 lux", "detail": "Full dark - no crepuscular offset."},
-    "Crepuscular (Dawn/Dusk)":    {"range": "1-1,000 lux", "detail": "Within about 45 min of the horizon."},
-    "Overcast / Diffuse Day":     {"range": "1,000-10,000 lux", "detail": "Daytime, cloud-diffused light."},
-    "Direct High Sun":            {"range": "> 10,000 lux", "detail": "Clear-sky daytime."},
+    "Clear / Sunny":  {"range": "0/8 oktas (~0% cloud)",   "detail": "No clouds, or so few they don't matter."},
+    "Mostly Clear":   {"range": "1-2/8 oktas (~10-25%)",   "detail": "A few scattered clouds, mostly open sky."},
+    "Partly Cloudy":  {"range": "3-4/8 oktas (~35-50%)",   "detail": "A mix of sun and clouds, roughly half and half."},
+    "Mostly Cloudy":  {"range": "5-7/8 oktas (~60-90%)",   "detail": "Sun mostly blocked, patches of blue at most."},
+    "Overcast":       {"range": "8/8 oktas (100%)",        "detail": "Solid cloud deck, no direct sun anywhere."},
 }
 
-# Rough average-cloud-cover-percent proxy for each light condition, so the
-# same activity-score formula score_day() uses for a real forecast (which
-# reacts to avg_cloud_pct >= 60) can be driven by this hand-picked band
-# instead. "Night" doesn't have a meaningful daytime-cloud reading, so it's
-# treated as neutral/not-cloudy for this proxy - the segment/season logic
-# elsewhere already accounts for night conditions.
+# Average-cloud-cover-percent proxy for each sky condition, so the same
+# activity-score formula score_day() uses for a real forecast (which reacts
+# to avg_cloud_pct >= 60 for an "overcast" bonus and <= 25 for a "clear/
+# bright bluebird" penalty - see core.scoring._segment_score()) can be
+# driven by this hand-picked band instead. Values are each band's real
+# okta-range midpoint (see LIGHT_CONDITIONS above) converted to a percent,
+# chosen so the bands land on the correct side of both of those thresholds:
+# Clear/Sunny and Mostly Clear both fall at or under the 25% clear-sky
+# threshold, Mostly Cloudy and Overcast both clear the 60% overcast
+# threshold, and Partly Cloudy sits deliberately in the neutral middle -
+# same three-way split a real forecast's cloudcover reading would produce.
 _LIGHT_CONDITION_CLOUD_PROXY = {
-    "Night": 20.0,
-    "Crepuscular (Dawn/Dusk)": 35.0,
-    "Overcast / Diffuse Day": 75.0,
-    "Direct High Sun": 10.0,
+    "Clear / Sunny": 5.0,
+    "Mostly Clear": 20.0,
+    "Partly Cloudy": 45.0,
+    "Mostly Cloudy": 75.0,
+    "Overcast": 95.0,
 }
 
 

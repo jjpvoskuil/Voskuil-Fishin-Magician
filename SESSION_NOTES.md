@@ -3334,6 +3334,112 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     (Spot Session doesn't write to it). Marked Development punch-list item
     #9 "Done."
 
+72. **Punch-list #10: replace the lux-based "Light conditions" dropdown
+    with a real sky-condition/cloud-cover scale.** Ask: "For the Light
+    Conditions field, let change the dropdown to better describe the sky;
+    i.e. no/minimal clouds, partly cloudy, overcast, etc. (feel free to
+    suggest other sky conditions)."
+
+    First traced what the field actually does before touching it: grepped
+    every use of `light_condition` and found its only real downstream
+    effect is `core.onwater.cloud_proxy_for_light_condition()` -> feeds
+    `avg_cloud_pct` into `manual_segment_score()`. The old 4-option scale
+    (`Night`, `Crepuscular (Dawn/Dusk)`, `Overcast / Diffuse Day`, `Direct
+    High Sun`) conflated two different things into one field: time-of-day
+    light level (already captured separately by the page's own "Time
+    window" dropdown, `segment_name`) and actual cloud cover (this field's
+    one real job). That conflation had a genuine, if minor, side effect
+    worth calling out: `"Night"` mapped to a cloud-proxy of 20.0, which
+    fell inside `core.scoring._segment_score()`'s `avg_cloud <= 25`
+    "clear/bright bluebird tough-bite" penalty band - a penalty whose
+    entire rationale is glare/high-sun visibility, applied at full
+    darkness. Confirmed `core.lures.recommend()`'s own `low_light`
+    lure-selection logic is driven by `segment_name` (Dawn/Dusk/Night),
+    not by this field at all, so nothing about lure selection depends on
+    keeping a time-of-day option here.
+
+    Replaced the vocabulary with the National Weather Service's own
+    published sky-condition terminology - oktas (eighths of the sky
+    covered by opaque clouds) - confirmed via `WebSearch`/`WebFetch`
+    against NOAA's own forecast glossary
+    (https://forecast.weather.gov/glossary.php?word=sky+condition) rather
+    than relying on memory for the exact breakpoints: Clear/Sunny (0/8),
+    Mostly Clear/Mostly Sunny (1-2/8), Partly Cloudy/Partly Sunny (3-4/8),
+    Mostly Cloudy (5-7/8), Cloudy/Overcast (8/8). This is the one band
+    table in `core/onwater.py` that now follows a real public standard
+    rather than user-supplied thresholds - called out explicitly in the
+    module's own docstring, since every other band there (wind, visibility,
+    water temp) is still deliberately hand-specified domain input, not
+    modeled from a source.
+
+    New `_LIGHT_CONDITION_CLOUD_PROXY` values are each band's real okta-
+    range midpoint converted to a percent, chosen specifically so they land
+    on the correct side of `core.scoring._segment_score()`'s two existing
+    thresholds rather than just being "reasonable-sounding" numbers: Clear/
+    Sunny (5.0) and Mostly Clear (20.0) both fall under the 25% clear-sky-
+    penalty cutoff; Mostly Cloudy (75.0) and Overcast (95.0) both clear the
+    60% overcast-bonus cutoff; Partly Cloudy (45.0) sits deliberately in the
+    untouched neutral middle - the same three-way split a real forecast's
+    `cloudcover` reading would produce. Also fixes the "Night" oddity above
+    as a side effect: a clear night sky and a clear midday sky both now
+    correctly read "Clear / Sunny" (proxy 5.0, still triggers the clear-sky
+    penalty - correctly, since bright/clear skies matter for light
+    penetration regardless of whether the sun's up) instead of Night
+    silently landing in that penalty band under an unrelated label.
+
+    Backward compatibility for already-logged trips was a real constraint,
+    not an afterthought - `data/trip_log.csv` has 22 real trips with
+    `conditions_json.light_condition` values from the old vocabulary ("20
+    x Crepuscular (Dawn/Dusk)", 1 Direct High Sun, 1 Night). Checked every
+    call site before changing anything: the Spot Session "edit trip"
+    prefill (`_cond_light_idx = LIGHT_CONDITIONS.index(...) if ... in
+    LIGHT_CONDITIONS else 2`) already had a safe fallback for an unmatched
+    value (same existing pattern used for stain_color/wind_band/
+    precipitation elsewhere on that page), and `cloud_proxy_for_light_
+    condition()` already defaulted unmatched lookups to a neutral 40.0 -
+    both were already written defensively enough that the vocabulary swap
+    needed zero extra migration code. Trip History's own `light_condition`
+    column (renamed "Light condition" -> "Sky condition" for consistency)
+    reads the raw string with no revalidation against the current options
+    list at all, so old trips just keep showing their real historical
+    value under the new column header, exactly as they should - it's a
+    factual record of what was true that day, not something that needs to
+    match today's vocabulary. Internal identifiers (the `light_condition`
+    variable/dict key, `LIGHT_CONDITIONS`/`LIGHT_CONDITION_INFO` module
+    names) were deliberately left unchanged - only the on-screen label
+    ("Light conditions" -> "Sky conditions") and the option strings/values
+    themselves changed, keeping the diff scoped to what the user actually
+    asked to change.
+
+    Updated `tests/test_onwater.py`: split the old single "covers every
+    condition + spot-checks two options" test into
+    `test_cloud_proxy_for_light_condition_covers_every_condition` (still
+    just range-checks every current option) and a new
+    `test_cloud_proxy_for_light_condition_straddles_the_scoring_thresholds_
+    correctly` (explicitly asserts each of the 5 new bands lands on the
+    intended side of the 25/60 thresholds, including Partly Cloudy's
+    neutral middle) plus a new
+    `test_cloud_proxy_for_light_condition_falls_back_to_neutral_for_
+    unrecognized_value` (a retired option string, plus blank/None, all
+    return the 40.0 fallback rather than raising) - covering the backward-
+    compatibility contract explicitly rather than just trusting it by
+    inspection. `python3 -m pytest tests/ -q` passes at 243 (241 + 2 new -
+    net add of 2 since one old test was split into two, with a case added
+    to each half).
+
+    Verified end to end with two scratch `AppTest` runs: `pages/6_Spot_
+    Session.py` (mocked weather bundle, inventory, one fake saved spot) -
+    confirmed the dropdown now reads "Sky conditions" with options `['Clear
+    / Sunny', 'Mostly Clear', 'Partly Cloudy', 'Mostly Cloudy', 'Overcast']`
+    (default "Partly Cloudy," the neutral middle), and that selecting
+    "Overcast" doesn't raise. `pages/4_Trip_History.py` run against the
+    *real* `data/trip_log.csv` (with its 22 old-vocabulary trips, no
+    mocking) - confirmed no exception, i.e. the real historical data
+    genuinely round-trips through the renamed column without special-
+    casing. `data/trip_log.csv`/`data/segment_score_freeze.csv` confirmed
+    byte-identical (`md5sum`) before and after both runs. Marked
+    Development punch-list item #10 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

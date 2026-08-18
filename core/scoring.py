@@ -508,7 +508,7 @@ def manual_segment_score(
     it in - the entered time should win over a generic "now" default.
     Everything else the caller must supply - typically approximated from
     the angler's own observations at the water (core.onwater.py's band
-    helpers turn "Overcast / Diffuse Day" or "Heavy / Turbulent" wind into
+    helpers turn "Mostly Cloudy" sky or "Heavy / Turbulent" wind into
     the same avg_cloud_pct/avg_wind_mph/precip inputs score_day() would
     have extracted from a real bundle) or a real pressure-trend reading if
     a weather bundle happens to be available (core.weather.

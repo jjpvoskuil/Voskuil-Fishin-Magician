@@ -82,8 +82,27 @@ def test_cloud_proxy_for_light_condition_covers_every_condition():
     for lc in LIGHT_CONDITIONS:
         proxy = cloud_proxy_for_light_condition(lc)
         assert 0.0 <= proxy <= 100.0
-    assert cloud_proxy_for_light_condition("Overcast / Diffuse Day") >= 60.0
-    assert cloud_proxy_for_light_condition("Direct High Sun") < 60.0
+
+
+def test_cloud_proxy_for_light_condition_straddles_the_scoring_thresholds_correctly():
+    # core.scoring._segment_score() reacts to avg_cloud >= 60 (overcast bonus)
+    # and avg_cloud <= 25 (clear/bright bluebird penalty) - punch-list #10's
+    # NWS-sourced sky-condition bands need to land on the correct side of
+    # both, with "Partly Cloudy" deliberately in the untouched neutral middle.
+    assert cloud_proxy_for_light_condition("Clear / Sunny") <= 25.0
+    assert cloud_proxy_for_light_condition("Mostly Clear") <= 25.0
+    assert 25.0 < cloud_proxy_for_light_condition("Partly Cloudy") < 60.0
+    assert cloud_proxy_for_light_condition("Mostly Cloudy") >= 60.0
+    assert cloud_proxy_for_light_condition("Overcast") >= 60.0
+
+
+def test_cloud_proxy_for_light_condition_falls_back_to_neutral_for_unrecognized_value():
+    # Older logged trips (pre-#10) stored values from the retired Night/
+    # Crepuscular/Overcast-Diffuse-Day/Direct-High-Sun vocabulary - a lookup
+    # against the current bands shouldn't raise or silently return 0.
+    assert cloud_proxy_for_light_condition("Crepuscular (Dawn/Dusk)") == 40.0
+    assert cloud_proxy_for_light_condition("") == 40.0
+    assert cloud_proxy_for_light_condition(None) == 40.0
 
 
 def test_precipitation_proxy_heavy_rain_crosses_storm_thresholds():

@@ -422,13 +422,22 @@ plausible day/segment combinations, with the tails far more balanced).
   near-universal secondary/alternate forage in Kentucky hill-land reservoirs (craw-pattern
   jig/worm colors are standard advice for this lake type) offered as optional add-ons,
   since they aren't specifically documented for Nolin the way gizzard shad/bluegill are.
-- On-the-water condition bands (`core/onwater.py`), used by the Spot Session page: light
-  conditions (lux-based - Night, Crepuscular/Dawn-Dusk, Overcast/Diffuse Day, Direct High
-  Sun), wind (mph - Glassy, Light Ripple, Moderate Chop/Action Trigger, Heavy/Turbulent),
-  water visibility (Secchi depth - Clear, Stained, Dirty/Muddy), and water temperature
-  (metabolic state - Cold/Lethargic, Pre-Spawn Transition, Peak Optimal Prime, Summer
-  Stratified, Extreme Thermal Load) - all supplied by the angler from general bass-biology
-  reference bands, not derived from a Nolin-specific source.
+- On-the-water condition bands (`core/onwater.py`), used by the Spot Session page: sky
+  conditions/cloud cover (Clear/Sunny, Mostly Clear, Partly Cloudy, Mostly Cloudy,
+  Overcast - the one band here that *does* follow a published public standard, the
+  [National Weather Service's own oktas-based sky-condition terminology]
+  (https://forecast.weather.gov/glossary.php?word=sky+condition), rather than a
+  hand-picked scale), wind (mph - Glassy, Light Ripple, Moderate Chop/Action Trigger,
+  Heavy/Turbulent), water visibility (Secchi depth - Clear, Stained, Dirty/Muddy), and
+  water temperature (metabolic state - Cold/Lethargic, Pre-Spawn Transition, Peak
+  Optimal Prime, Summer Stratified, Extreme Thermal Load) - everything except sky
+  conditions is supplied by the angler from general bass-biology reference bands, not
+  derived from a Nolin-specific source. Sky conditions replaced an earlier lux-based
+  "Light conditions" scale (Night/Crepuscular/Overcast-Diffuse-Day/Direct-High-Sun) that
+  conflated time-of-day light level (already captured separately by the "Time window"
+  field) with actual cloud cover (this field's only real downstream use - it drives the
+  same `avg_cloud_pct` input a real forecast's cloud-cover reading would) - see
+  `core/onwater.py` for the full rationale.
 
 ## Trip logging & calibration
 
@@ -646,7 +655,7 @@ core/
   forecast_freeze.py       Locks in a 7-Day Forecast time segment's score once its
                            window has passed + git commit-back, so it stops drifting
                            with later weather refreshes (data/segment_score_freeze.csv)
-  onwater.py               On-the-water condition bands (light/wind/visibility/water
+  onwater.py               On-the-water condition bands (sky/wind/visibility/water
                            temp/precipitation) used by the Spot Session page
   activity_log.py           Log-form vocabulary + inventory lure/trailer picker
                            helpers used by the Spot Session page's activity log
