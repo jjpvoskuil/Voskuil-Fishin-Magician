@@ -14,6 +14,9 @@ the trip_log.csv column layout were needed to add it.
 """
 from __future__ import annotations
 
+import re
+from typing import Optional
+
 from .lures import LURE_PROFILES
 
 # Sentinel option in the lure/trailer inventory pickers meaning "not in my
@@ -79,3 +82,52 @@ RETRIEVE_STYLE_OPTIONS = [
 # vocabulary matches what was specifically asked for, and "Other" makes it
 # free-text-extensible for anything not listed).
 FISH_SPECIES_OPTIONS = ["Largemouth Bass", "Spotted Bass", "Striped Bass", "Other (type in species)"]
+
+
+# --- Weight display: decimal lb (how it's entered/stored) <-> lb-oz (how it's
+# shown in Trip History, since that's how most anglers actually think/talk
+# about a fish's weight) ------------------------------------------------------
+def format_weight_lb_oz(weight_lb) -> str:
+    """Render a decimal-pound weight (as stored in trip_log.csv/
+    conditions_json - the Add fish form's "Weight (lb)" input is still plain
+    decimal) as a lb-oz string, e.g. 3.53 -> "3 lb 8 oz". Rounds to the
+    nearest ounce - fish weight was never recorded to hundredths-of-a-pound
+    precision to begin with, so this loses nothing meaningful. Returns "" for
+    None/blank/zero (no real reading)."""
+    try:
+        w = float(weight_lb)
+    except (TypeError, ValueError):
+        return ""
+    if w != w or w <= 0:  # w != w is the NaN check (pandas passes NaN for a blank cell)
+        return ""
+    total_oz = round(w * 16)
+    lb, oz = divmod(total_oz, 16)
+    if lb and oz:
+        return f"{lb} lb {oz} oz"
+    if lb:
+        return f"{lb} lb"
+    return f"{oz} oz"
+
+
+def parse_weight_lb_oz(text) -> Optional[float]:
+    """Parse a lb-oz string (as produced by format_weight_lb_oz, or hand-typed
+    into Trip History's inline-editable grid) back into decimal pounds for
+    storage. Accepts "3 lb 8 oz", "3lb 8oz", "8 oz" (lb omitted), or a plain
+    decimal like "3.5" (so pasting/typing an old-style value still works) -
+    returns None for anything blank or unparseable, matching every other
+    optional-numeric-field convention in this app."""
+    if text is None:
+        return None
+    s = str(text).strip().lower()
+    if not s:
+        return None
+    lb_match = re.search(r"(\d+(?:\.\d+)?)\s*lb", s)
+    oz_match = re.search(r"(\d+(?:\.\d+)?)\s*oz", s)
+    if lb_match or oz_match:
+        lb = float(lb_match.group(1)) if lb_match else 0.0
+        oz = float(oz_match.group(1)) if oz_match else 0.0
+        return round(lb + oz / 16, 4)
+    try:
+        return round(float(s), 4)
+    except ValueError:
+        return None

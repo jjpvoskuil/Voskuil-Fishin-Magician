@@ -34,6 +34,7 @@ from core.storage import (
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
 from core.scoring import SEGMENTS
+from core.activity_log import format_weight_lb_oz, parse_weight_lb_oz
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", layout="wide")
@@ -220,7 +221,7 @@ def _render_trip_detail_body(row, key_prefix):
         f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
         f"**Technique:** {row['technique_used'] or '-'}",
         f"**Fish caught:** {row['fish_caught']}"
-        + (f", biggest {row['biggest_fish_lb']} lb" if row.get("biggest_fish_lb") else ""),
+        + (f", biggest {format_weight_lb_oz(row['biggest_fish_lb'])}" if row.get("biggest_fish_lb") else ""),
         f"**Predicted score:** {raw_score}/10" if has_score else "**Predicted score:** n/a (no live conditions entered)",
     ]
     st.markdown("  \n".join(top_bits))
@@ -252,13 +253,19 @@ def _render_trip_detail_body(row, key_prefix):
     # unreadable raw Python list-of-dicts string).
     fish_list = cond.get("fish")
     if isinstance(fish_list, list) and fish_list:
-        st.markdown(f"**Fish caught ({len(fish_list)}):**")
+        # count defaults to 1 for older rows logged before the "group of small
+        # fish" entry type existed - see pages/6_Spot_Session.py's "Add fish" form.
+        total_fish = sum((f.get("count") or 1) for f in fish_list if isinstance(f, dict))
+        st.markdown(f"**Fish caught ({total_fish}):**")
         for i, fish in enumerate(fish_list, start=1):
             if not isinstance(fish, dict):
                 continue
-            bits = [fish.get("species") or "Unknown species"]
+            count = fish.get("count") or 1
+            species_label = fish.get("species") or "Unknown species"
+            bits = [f"{count} x {species_label}" if count > 1 else species_label]
             if fish.get("weight_lb"):
-                bits.append(f"{fish['weight_lb']:g} lb")
+                weight_str = format_weight_lb_oz(fish["weight_lb"])
+                bits.append(f"~{weight_str} each" if count > 1 else weight_str)
             if fish.get("length_in"):
                 bits.append(f"{fish['length_in']:g} in")
             if fish.get("depth_ft"):
@@ -300,6 +307,17 @@ def _norm_float_or_none(v):
     return float(v) if pd.notna(v) else None
 
 
+def _norm_weight_lb_oz(v):
+    """Normalizer for the grid's lb-oz-formatted "Biggest fish" column - parses
+    whatever text is currently in the cell (whether it's the untouched
+    formatted display, e.g. "3 lb 8 oz", or something the angler typed over
+    it) back into decimal pounds for both the diff comparison and the actual
+    saved value. See core.activity_log.parse_weight_lb_oz."""
+    if pd.isna(v):
+        return None
+    return parse_weight_lb_oz(str(v))
+
+
 # Only columns a straightforward flat trip_log.csv field maps to are
 # editable here - segment/structure_type/water_clarity/lure_used/color_used/
 # fish_caught/biggest_fish_lb/notes/trip_date. Location (needs spot_id
@@ -317,7 +335,7 @@ COLUMN_NORMALIZERS = {
     "color_used": _norm_text,
     "notes": _norm_text,
     "fish_caught": _norm_int,
-    "biggest_fish_lb": _norm_float_or_none,
+    "biggest_fish_lb": _norm_weight_lb_oz,
 }
 
 
@@ -458,7 +476,13 @@ else:
     ]].copy()
     grid_display["trip_date"] = pd.to_datetime(grid_display["trip_date"], errors="coerce")
     grid_display["fish_caught"] = pd.to_numeric(grid_display["fish_caught"], errors="coerce").fillna(0).astype(int)
-    grid_display["biggest_fish_lb"] = pd.to_numeric(grid_display["biggest_fish_lb"], errors="coerce")
+    # Displayed/edited as lb-oz text (e.g. "3 lb 8 oz") rather than a raw
+    # decimal - see core.activity_log.format_weight_lb_oz/parse_weight_lb_oz
+    # and _norm_weight_lb_oz above, which parses this column's text back to
+    # decimal pounds for both the diff check and the saved value.
+    grid_display["biggest_fish_lb"] = (
+        pd.to_numeric(grid_display["biggest_fish_lb"], errors="coerce").apply(format_weight_lb_oz)
+    )
     grid_display["predicted_score"] = pd.to_numeric(grid_display["predicted_score"], errors="coerce")
 
     # SelectboxColumn requires every value already present in the column to
@@ -495,7 +519,10 @@ else:
             "_fish_activity": st.column_config.TextColumn("Fish activity"),
             "_forage_activity": st.column_config.TextColumn("Forage activity"),
             "fish_caught": st.column_config.NumberColumn("Fish caught", min_value=0, step=1),
-            "biggest_fish_lb": st.column_config.NumberColumn("Biggest fish (lb)", min_value=0.0, step=0.25, format="%.2f"),
+            "biggest_fish_lb": st.column_config.TextColumn(
+                "Biggest fish",
+                help='e.g. "3 lb 8 oz" (a plain decimal like "3.5" also works).',
+            ),
             "predicted_score": st.column_config.NumberColumn("Score", format="%.1f"),
             "notes": st.column_config.TextColumn("Notes"),
         },
