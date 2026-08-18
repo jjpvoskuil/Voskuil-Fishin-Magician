@@ -2494,6 +2494,81 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     Development punch-list item #1 "Done" (`data/dev_tasks.csv`) at the end
     of this round.
 
+62. **Rework of entry 61 per punch-list items #2/#3, which superseded #1 mid-
+    session.** While entry 61 was in progress, the angler had also been
+    working directly in the live deployed app: they deleted item #1 (the
+    terse original ask this session started from) and replaced it with two
+    much more specific items - #2 (the "Add fish" weight field itself should
+    be a single manual "lb - oz" text field, e.g. "3 - 8", dash pre-filled,
+    no +/- steppers) and #3 (split "Add fish" into two real paths: a full
+    entry for scoreable fish 1 lb+, and a separate button opening a bare
+    species+count block for non-scoreable fish under 1 lb - no weight/
+    length/depth/presentation fields on that path at all). Entry 61's
+    checkbox-based "group of small fish" design didn't match either - it
+    kept a decimal weight input and still asked for depth/retrieve fields on
+    a "grouped" entry. Surfaced this to the angler (via AskUserQuestion)
+    once discovered; they chose "push what's done, then rework to match
+    #2/#3" rather than holding the already-tested entry-61 commit back.
+
+    **Item #2** (`pages/6_Spot_Session.py`'s "Add fish" form): the "Weight
+    (lb)" `st.number_input` is now a plain `st.text_input("Weight (lb - oz)",
+    value="0 - 0", ...)` - a single field, dash pre-filled, parsed on save
+    via `core.activity_log.parse_weight_lb_oz()` (extended with a new dash-
+    separated-shorthand branch, e.g. "3 - 8" or "3-8" -> 3.5, checked before
+    the existing lb/oz-word and plain-decimal fallbacks; a two-number split
+    with no dash, e.g. "3 8", still works too - same idea, no dash). An
+    invalid oz part (>= 16, e.g. "3 - 20") isn't a real lb-oz pair and falls
+    through every parse branch to `None` rather than being misread. One
+    genuine platform limitation, called out to the angler rather than
+    silently skipped: Streamlit's built-in widgets have no way to make
+    typing into a sub-part of a field overwrite it without selecting/
+    backspacing first (the literal "no backspacing required" ask) - that
+    needs a real custom JS component (a full build/packaging step this app
+    doesn't have), not just `unsafe_allow_html`. What's implemented is the
+    closest achievable version: one text field, "xx - xx" format, dash
+    already there to type over, no numeric steppers (a `text_input` never
+    has them, unlike `number_input`).
+
+    **Item #3**: the checkbox from entry 61 is gone. "Fish caught" now shows
+    two buttons when nothing is being added - "➕ Add fish (1 lb+)" and "➕
+    Log small fish (under 1 lb)" - backed by a single `adding_fish_mode_
+    {spot_id}` session-state value (`None` / `"scoreable"` / `"small"`,
+    replacing entry 61's/the original page's boolean `adding_fish_{spot_id}`
+    flag - renamed since it now tracks which of two flows is open, not just
+    whether one is). "Add fish (1 lb+)" is entry 61's/the original full form
+    (species, the new lb-oz weight field, length, depth, presentation,
+    retrieve speed) with `count` always `1`. "Log small fish" is a new,
+    intentionally bare form: species picker + a single "Total number of this
+    type caught" count (`min_value=1`) - nothing else; on save every other
+    field (`weight_lb`, `length_in`, `depth_ft`, `retrieve_speed`,
+    `retrieve_style`) is explicitly `None`. Both still append to the same
+    `conditions["fish"]` list per lure, unchanged storage shape from entry
+    61 (a `count` field, defaulting to 1 for a normal entry) - `fish_caught`
+    on save is still `sum(f.get("count") or 1 for f in fish_records)`, so a
+    4-fish "small fish" entry plus two scoreable singles still correctly
+    totals 6, verified directly.
+
+    Pending-fish summary line and Trip History's per-fish renderer both
+    already handled a missing/None weight and a `count > 1` display from
+    entry 61 - no further change needed there beyond already using
+    `format_weight_lb_oz()` (entry 61) for the weight bit.
+
+    Verified via `python3 -m pytest tests/ -q` (211 passing - 209 + 2 new
+    dash-format parser cases in `tests/test_activity_log.py`) and two scratch
+    `AppTest` scripts (not committed, `data/trip_log.csv` backed up/restored
+    around both): one confirming the "small fish" flow produces a record
+    with only `species`/`count` set and everything else `None`, that the
+    "scoreable" flow's dash-format weight field ("3 - 8") parses to `3.5`,
+    that an untouched default ("0 - 0") saves as `weight_lb: None` (not
+    `0.0`), and that a mixed small+scoreable save produces the correct
+    summed `fish_caught`; a second confirming every page (including Spot
+    Session's edit mode, loaded against a real logged trip) still renders
+    with no exception under the renamed `adding_fish_mode_` key. As with
+    entry 61, running the real 7-Day Forecast page against a fake bundle
+    during the smoke pass wrote fake-derived rows into `data/
+    segment_score_freeze.csv` again - reverted before committing, same as
+    last time. Marked Development punch-list items #2 and #3 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

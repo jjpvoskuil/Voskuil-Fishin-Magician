@@ -110,12 +110,15 @@ def format_weight_lb_oz(weight_lb) -> str:
 
 
 def parse_weight_lb_oz(text) -> Optional[float]:
-    """Parse a lb-oz string (as produced by format_weight_lb_oz, or hand-typed
-    into Trip History's inline-editable grid) back into decimal pounds for
-    storage. Accepts "3 lb 8 oz", "3lb 8oz", "8 oz" (lb omitted), or a plain
-    decimal like "3.5" (so pasting/typing an old-style value still works) -
-    returns None for anything blank or unparseable, matching every other
-    optional-numeric-field convention in this app."""
+    """Parse a lb-oz string back into decimal pounds for storage. Accepts:
+    "3 lb 8 oz"/"3lb 8oz" (as produced by format_weight_lb_oz, or hand-typed
+    into Trip History's inline-editable grid), "3 - 8" (the Spot Session "Add
+    fish" form's own manual weight field, item #2 on the Development punch
+    list - a single dash-separated lb/oz field with no +/- steppers), "3 8"
+    (space-separated, same idea without the dash), or a plain decimal like
+    "3.5" (so pasting/typing an old-style value still works). Returns None
+    for anything blank or unparseable, matching every other optional-
+    numeric-field convention in this app."""
     if text is None:
         return None
     s = str(text).strip().lower()
@@ -127,6 +130,19 @@ def parse_weight_lb_oz(text) -> Optional[float]:
         lb = float(lb_match.group(1)) if lb_match else 0.0
         oz = float(oz_match.group(1)) if oz_match else 0.0
         return round(lb + oz / 16, 4)
+    # "3 - 8" (dash-separated) or "3 8" (space-separated) lb/oz shorthand -
+    # two plain numbers, first is lb, second is oz (must be < 16, or this
+    # isn't really an oz value and the plain-decimal fallback below applies
+    # instead - e.g. "3 - 20" isn't a valid lb-oz pair).
+    dash_parts = [p for p in re.split(r"-", s) if p.strip()]
+    parts = dash_parts if len(dash_parts) == 2 else s.split()
+    if len(parts) == 2:
+        try:
+            lb, oz = float(parts[0].strip()), float(parts[1].strip())
+            if 0 <= oz < 16:
+                return round(lb + oz / 16, 4)
+        except ValueError:
+            pass
     try:
         return round(float(s), 4)
     except ValueError:
