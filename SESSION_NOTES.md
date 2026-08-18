@@ -2762,6 +2762,71 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     trip_log.csv` confirmed byte-identical before/after. Marked
     Development punch-list item #6 "Done."
 
+66. **Follow-up to #6: Morning/Midday/Afternoon now scale proportionally
+    with actual daylight, not fixed 11 AM/2 PM clock cutoffs.** After
+    seeing the real ranges item #6 now displays, the angler asked whether
+    every window was actually consistent with real sunrise/sunset and
+    proportionally adjusted - the honest answer was "partially": Dawn,
+    Dusk, and Night (`core/scoring.py`'s `_segment_windows()`) were always
+    genuinely tied to the day's real sunrise/sunset, but Morning's end and
+    Midday's end were hardcoded to `11:00`/`14:00` regardless of season, so
+    Midday was always exactly 3 hours long year-round and Morning/Afternoon
+    only changed length as an incidental side effect of Dawn/Dusk sliding
+    around those two fixed posts, not a deliberate seasonal scaling.
+    Flagged this as a real change to the scoring engine's segmentation
+    (feeds `score_day()`/the 7-Day Forecast's actual per-window scores and
+    `recommend()` calls, not just display labels) rather than a cosmetic
+    tweak, and confirmed the angler wanted it changed before touching it.
+
+    New `_segment_windows()`: computes the "daytime interior" (Dawn's end
+    to Dusk's start) and splits it into three *equal* proportional thirds
+    for Morning/Midday/Afternoon, replacing the `sunrise.replace(hour=11,
+    ...)`/`sunrise.replace(hour=14, ...)` cutoffs entirely. Dawn (sunrise
+    ±1h) and Dusk (sunset ±1h) are untouched; Night (dusk's end to next
+    day's dawn's start) was already fully real and untouched. Chose equal
+    thirds specifically because it's the most literal, least-opinionated
+    reading of "adjusted proportionately" - no domain-specific weighting
+    (e.g. a longer Afternoon bite window) was asked for, and equal thirds
+    is trivial to verify and explain; can be reweighted later if the
+    angler wants Morning/Midday/Afternoon in different proportions to each
+    other.
+
+    Confirmed the actual behavior change with real Nolin dates: mid-August
+    (sunrise 6:20 AM/sunset 8:15 PM) now gives Morning/Midday/Afternoon
+    each ~3h58m; mid-December (sunrise 7:50 AM/sunset 5:30 PM) gives each
+    ~2h33m - all three windows visibly compress together in winter instead
+    of Midday staying frozen at 3h while Morning/Afternoon absorb all the
+    change. `score_day()`'s per-segment weather inputs (avg cloud/wind)
+    were already whole-day averages, not per-segment, so this only changes
+    each segment's own start/end (used for solunar-overlap detection, the
+    "Best window" pick, and each window's `recommend()` call), not the
+    cloud/wind/pressure/moon scoring math itself.
+
+    One related approximation deliberately left alone: Spot Session's
+    `_guess_segment(hour)` (pages/6_Spot_Session.py, used only to pick a
+    reasonable initial "Time window" default before a session start time
+    is entered) still uses its own separate fixed-hour cutoffs
+    (`<7`/`<11`/`<14`/`<18`/`<20`), which were already an approximation of
+    the *old* fixed-clock segmentation and now drift a bit further from
+    the real proportional windows in the shoulder seasons. Not fixed here -
+    it's just a rough starting guess the angler can freely correct via the
+    dropdown itself before saving, not the source of truth for the actual
+    time-of-day window a session gets scored/recommended against; wiring
+    it to the real weather-bundle ranges instead is a fine future
+    improvement if it turns out to guess wrong often enough to matter.
+
+    Verified with 3 new `tests/test_scoring.py` cases: Dawn/Dusk/Night
+    still compute to the exact real sunrise/sunset-derived bounds;
+    Morning/Midday/Afternoon are contiguous and each exactly one-third of
+    the daytime interior (within a second, allowing for timedelta division
+    slop); and all three visibly shrink on a short winter day relative to
+    a long summer day while Night visibly grows. `python3 -m pytest
+    tests/ -q` passes at 220 (217 + 3 new). Full-page smoke pass across
+    every page clean with no exception; `data/segment_score_freeze.csv`
+    reverted afterward, `data/trip_log.csv` confirmed untouched. Not a
+    numbered punch-list item (a direct follow-up question about #6, not a
+    new list entry), so nothing new to mark in `data/dev_tasks.csv`.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

@@ -196,8 +196,21 @@ def _segment_windows(sunrise: datetime, sunset: datetime, d: date):
     dawn_end = sunrise + timedelta(hours=1)
     dusk_start = sunset - timedelta(hours=1)
     dusk_end = sunset + timedelta(hours=1)
-    morning_end = max(dawn_end, sunrise.replace(hour=11, minute=0))
-    midday_end = sunrise.replace(hour=14, minute=0)
+
+    # Morning/Midday/Afternoon used to end at fixed 11:00 AM/2:00 PM clock
+    # cutoffs - so on a long summer day Midday still stayed a flat 3 hours
+    # while Afternoon absorbed all the extra daylight, and on a short winter
+    # day Morning got squeezed down to barely 2 hours. Splitting the actual
+    # "daytime interior" - the stretch between Dawn's end and Dusk's start -
+    # into three equal proportional thirds instead means all three windows
+    # genuinely grow and shrink with the season, the same way Dawn/Dusk
+    # (always a real ±1h around sunrise/sunset) and Night (whatever's left)
+    # already did - every segment now tracks the actual sunrise/sunset for
+    # date `d`, not a mix of real astronomy and fixed clock time.
+    interior = dusk_start - dawn_end
+    third = interior / 3
+    morning_end = dawn_end + third
+    midday_end = dawn_end + 2 * third
     afternoon_end = dusk_start
     night_start = dusk_end
     next_dawn = dawn_start + timedelta(days=1)

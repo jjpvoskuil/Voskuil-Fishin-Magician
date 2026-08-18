@@ -2,7 +2,7 @@ from datetime import date, timedelta, datetime
 from core.weather import WeatherBundle
 from core.scoring import (
     score_week, score_day, manual_segment_score, realtime_context_from_bundle,
-    segment_time_ranges, lake_now_naive, SEGMENTS,
+    segment_time_ranges, lake_now_naive, SEGMENTS, _segment_windows,
 )
 from core import onwater
 from core import astro
@@ -231,6 +231,54 @@ def test_segment_time_ranges_covers_every_segment_with_a_real_bundle():
 def test_segment_time_ranges_degrades_gracefully_outside_coverage():
     bundle = _bundle_with_partial_daily_coverage(daily_days=0)
     assert segment_time_ranges(bundle, date.today()) is None
+
+
+def test_segment_windows_dawn_dusk_are_a_real_hour_either_side_of_sun_times():
+    d = date(2026, 8, 18)
+    sunrise = datetime(2026, 8, 18, 6, 20)
+    sunset = datetime(2026, 8, 18, 20, 15)
+    windows = {name: (s, e) for name, s, e in _segment_windows(sunrise, sunset, d)}
+    assert windows["Dawn"] == (sunrise - timedelta(hours=1), sunrise + timedelta(hours=1))
+    assert windows["Dusk"] == (sunset - timedelta(hours=1), sunset + timedelta(hours=1))
+    assert windows["Night"] == (sunset + timedelta(hours=1), (sunrise - timedelta(hours=1)) + timedelta(days=1))
+
+
+def test_segment_windows_morning_midday_afternoon_are_equal_daylight_thirds():
+    d = date(2026, 8, 18)
+    sunrise = datetime(2026, 8, 18, 6, 20)
+    sunset = datetime(2026, 8, 18, 20, 15)
+    windows = {name: (s, e) for name, s, e in _segment_windows(sunrise, sunset, d)}
+    morning, midday, afternoon = windows["Morning"], windows["Midday"], windows["Afternoon"]
+    # Contiguous: Morning starts right where Dawn ends, Afternoon ends right where Dusk starts.
+    assert morning[0] == sunrise + timedelta(hours=1)
+    assert afternoon[1] == sunset - timedelta(hours=1)
+    assert morning[1] == midday[0]
+    assert midday[1] == afternoon[0]
+    # Equal thirds of the daytime interior (within a second, for float/rounding slop).
+    interior = afternoon[1] - morning[0]
+    third = interior / 3
+    assert abs((morning[1] - morning[0]) - third) < timedelta(seconds=1)
+    assert abs((midday[1] - midday[0]) - third) < timedelta(seconds=1)
+    assert abs((afternoon[1] - afternoon[0]) - third) < timedelta(seconds=1)
+
+
+def test_segment_windows_daytime_thirds_shrink_on_a_short_winter_day():
+    d_summer = date(2026, 8, 18)
+    summer = {
+        name: (s, e) for name, s, e in
+        _segment_windows(datetime(2026, 8, 18, 6, 20), datetime(2026, 8, 18, 20, 15), d_summer)
+    }
+    d_winter = date(2026, 12, 15)
+    winter = {
+        name: (s, e) for name, s, e in
+        _segment_windows(datetime(2026, 12, 15, 7, 50), datetime(2026, 12, 15, 17, 30), d_winter)
+    }
+    for name in ("Morning", "Midday", "Afternoon"):
+        summer_len = summer[name][1] - summer[name][0]
+        winter_len = winter[name][1] - winter[name][0]
+        assert winter_len < summer_len
+    # Night correctly runs longer on the shorter winter day.
+    assert (winter["Night"][1] - winter["Night"][0]) > (summer["Night"][1] - summer["Night"][0])
 
 
 # --- New "beyond pressure trend and moon phase" manual-only factors --------------
