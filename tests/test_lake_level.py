@@ -1,6 +1,6 @@
 import pytest
 
-from core.lake_level import fetch_lake_level, USGS_SITE_ID, USGS_LAKE_ELEVATION_PARAM_CD
+from core.lake_level import fetch_lake_level, fetch_lake_level_history, USGS_SITE_ID, USGS_LAKE_ELEVATION_PARAM_CD
 
 
 def _fake_usgs_payload(value="515.34", date_time="2026-08-18T14:10:00.000-05:00", site_name="NOLIN LAKE NEAR KYROCK, KY"):
@@ -98,3 +98,58 @@ def test_fetch_lake_level_raises_on_network_failure(monkeypatch):
     monkeypatch.setattr(mod.requests, "get", _boom)
     with pytest.raises(ConnectionError):
         fetch_lake_level()
+
+
+# Punch-list #13: fetch_lake_level_history() - same feed, wider period, full series.
+
+def test_fetch_lake_level_history_requests_a_wider_period(monkeypatch):
+    import core.lake_level as mod
+
+    captured = {}
+
+    def _fake_get(url, params=None, timeout=None):
+        captured["params"] = params
+        return _FakeResp(_fake_usgs_payload())
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    fetch_lake_level_history(days=3)
+    assert captured["params"]["period"] == "P3D"
+    assert captured["params"]["sites"] == USGS_SITE_ID
+    assert captured["params"]["parameterCd"] == USGS_LAKE_ELEVATION_PARAM_CD
+
+
+def test_fetch_lake_level_history_returns_every_reading_oldest_first(monkeypatch):
+    import core.lake_level as mod
+
+    payload = _fake_usgs_payload()
+    payload["value"]["timeSeries"][0]["values"][0]["value"] = [
+        {"value": "515.20", "qualifiers": ["P"], "dateTime": "2026-08-16T13:55:00.000-05:00"},
+        {"value": "515.28", "qualifiers": ["P"], "dateTime": "2026-08-17T13:55:00.000-05:00"},
+        {"value": "515.34", "qualifiers": ["P"], "dateTime": "2026-08-18T14:10:00.000-05:00"},
+    ]
+    monkeypatch.setattr(mod.requests, "get", lambda url, params=None, timeout=None: _FakeResp(payload))
+    result = fetch_lake_level_history(days=3)
+    assert [r.elevation_ft for r in result] == [515.20, 515.28, 515.34]
+    assert result[0].observed_at < result[-1].observed_at
+    assert all(r.site_name == "NOLIN LAKE NEAR KYROCK, KY" for r in result)
+
+
+def test_fetch_lake_level_history_raises_on_zero_readings(monkeypatch):
+    import core.lake_level as mod
+
+    payload = _fake_usgs_payload()
+    payload["value"]["timeSeries"][0]["values"][0]["value"] = []
+    monkeypatch.setattr(mod.requests, "get", lambda url, params=None, timeout=None: _FakeResp(payload))
+    with pytest.raises(ValueError):
+        fetch_lake_level_history()
+
+
+def test_fetch_lake_level_history_raises_on_network_failure(monkeypatch):
+    import core.lake_level as mod
+
+    def _boom(*args, **kwargs):
+        raise ConnectionError("simulated network failure")
+
+    monkeypatch.setattr(mod.requests, "get", _boom)
+    with pytest.raises(ConnectionError):
+        fetch_lake_level_history()

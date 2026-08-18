@@ -1,9 +1,17 @@
+from datetime import timedelta
+
+import pandas as pd
 import streamlit as st
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_lake_level, get_surface_water_quality
+from core.appstate import (
+    get_weather_bundle, get_calibrated_weights, get_lake_level, get_lake_level_history,
+    get_surface_water_quality, get_water_quality_log, github_token, repo_slug,
+)
 from core.scoring import score_day
 from core.weather import lake_today
 from core.lake_level import NORMAL_SUMMER_POOL_FT
+from core.storage import commit_and_push
+from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
@@ -57,6 +65,29 @@ try:
 except Exception:
     pass
 
+# Punch-list #13: record this reading into the local historical log (see
+# core/water_quality_log.py) so a real trend chart can accumulate over
+# time - the live USACE page itself only ever has the CURRENT reading,
+# nothing to chart a history from otherwise. append_if_new() is a cheap
+# no-op except on the rare rerun where USACE has actually published a new
+# survey since the last one logged (roughly every 1-2 weeks); only that
+# case writes anything or reaches the git commit below. Same "nice to
+# have, don't block the page" treatment as everything else on this page -
+# a failure here (e.g. no write access, a git push conflict) just means
+# this particular rerun's reading doesn't get archived, not an error shown
+# to the angler.
+if water_quality is not None:
+    try:
+        if append_if_new(water_quality):
+            token = github_token()
+            if token:
+                commit_and_push(
+                    [WATER_QUALITY_LOG_PATH], token, repo_slug(),
+                    f"Log USACE water-quality reading {water_quality.observed_at.date().isoformat()}",
+                )
+    except Exception:
+        pass
+
 if bundle is not None:
     try:
         today = score_day(bundle, lake_today(), weights=weights)
@@ -104,6 +135,91 @@ if bundle is not None:
         # Weather fetched fine, but today's date fell outside the returned window -
         # e.g. a briefly stale cached bundle right at the lake's local day rollover.
         st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
+
+# Punch-list #13: 3-day trend charts for "Today at a glance"'s own metrics.
+# score_day() works for any date the bundle covers, and fetch_forecast()
+# already requests WATER_TEMP_TREND_PAST_DAYS (5) days of real past
+# weather alongside the forecast - so the last 3 days (today included) are
+# already sitting in `bundle` with no extra fetch needed for the first
+# three charts below. Lake level's trend is a separate live USGS request
+# (fetch_lake_level_history()) since that's real telemetry, not something
+# derivable from the weather bundle.
+trend_forecasts = []
+if bundle is not None:
+    trend_days = [lake_today() - timedelta(days=i) for i in (2, 1, 0)]
+    for d in trend_days:
+        try:
+            trend_forecasts.append(score_day(bundle, d, weights=weights))
+        except ValueError:
+            pass  # date fell outside the bundle's window - shouldn't normally
+            # happen given past_days=5, but a chart with fewer points is a
+            # much better failure mode here than blowing up the whole page.
+
+lake_level_history = None
+try:
+    lake_level_history = get_lake_level_history(days=3)
+except Exception:
+    pass
+
+if len(trend_forecasts) >= 2 or lake_level_history:
+    with st.expander("📈 3-day trends", expanded=True):
+        row1_c1, row1_c2 = st.columns(2)
+        row2_c1, row2_c2 = st.columns(2)
+        if len(trend_forecasts) >= 2:
+            trend_idx = [df.the_date.strftime("%a %-m/%d") for df in trend_forecasts]
+            row1_c1.caption("Activity score")
+            row1_c1.line_chart(pd.Series([df.overall_score for df in trend_forecasts], index=trend_idx))
+            row1_c2.caption("Est. water temp (°F)")
+            row1_c2.line_chart(pd.Series([df.water_temp_f for df in trend_forecasts], index=trend_idx))
+            row2_c1.caption("Pressure trend (24h, hPa)")
+            row2_c1.line_chart(pd.Series([df.pressure_trend_24h for df in trend_forecasts], index=trend_idx))
+        if lake_level_history:
+            row2_c2.caption("Lake level (ft)")
+            row2_c2.line_chart(pd.Series(
+                [lv.elevation_ft for lv in lake_level_history],
+                index=[lv.observed_at for lv in lake_level_history],
+            ))
+        st.caption(
+            "Activity score, water temp, and pressure trend are recomputed from the same weather data as "
+            "\"Today at a glance\" above, for the last 3 days. Lake level is real USGS telemetry (readings "
+            "every 15-60 min) for the same window."
+        )
+
+# Punch-list #13: "for the data from the corp of engineers, let's do a
+# longer trend since that is update[d] less frequently." Unlike the chart
+# above, this can't just be computed from data already on hand - the live
+# USACE page has no history (see core/water_quality_log.py's docstring), so
+# this chart is only ever as long as what's been locally recorded so far,
+# starting from whenever this feature first shipped and growing by roughly
+# one point every 1-2 weeks. Shown independently of `bundle`/weather status
+# above - a weather-fetch failure shouldn't hide a USACE trend that's
+# otherwise available.
+wq_log = []
+try:
+    wq_log = get_water_quality_log()
+except Exception:
+    pass
+
+if wq_log:
+    with st.expander("🌡️ USACE surface reading history", expanded=False):
+        if len(wq_log) == 1:
+            st.caption(
+                f"Only one USACE survey logged so far ({wq_log[0]['observed_at'].strftime('%-m/%d/%Y')}) - "
+                "this trend fills in as more surveys are published, roughly every 1-2 weeks. Real recorded "
+                "history only, never backfilled with guessed past readings."
+            )
+        else:
+            wq_idx = [r["observed_at"].strftime("%-m/%d/%y") for r in wq_log]
+            wq_c1, wq_c2 = st.columns(2)
+            wq_c1.caption("Surface water temp (°F)")
+            wq_c1.line_chart(pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx))
+            wq_c2.caption("Dissolved oxygen (mg/l)")
+            wq_c2.line_chart(pd.Series([r["do_mg_l"] for r in wq_log], index=wq_idx))
+            st.caption(
+                f"{len(wq_log)} USACE surveys logged since this trend started tracking - grows by roughly "
+                "one point every 1-2 weeks as new surveys are published. Real recorded history only, never "
+                "backfilled with guessed past readings."
+            )
 
 st.divider()
 if lake_level is None:
