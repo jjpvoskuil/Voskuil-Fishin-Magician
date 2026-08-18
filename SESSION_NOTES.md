@@ -3262,6 +3262,78 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     checkout` afterward, same as the pollution-check convention used all
     session. Marked Development punch-list item #8 "Done."
 
+71. **Punch-list #9: auto-fill "Time window" from the entered session start
+    time.** Ask: "When I enter the current conditions, automatically fill
+    in the period of the day (dawn, morning, etc.) based on the start time
+    I input." On the Spot Session page's "Conditions right now" section,
+    the "Time window" dropdown (Dawn/Morning/Midday/Afternoon/Dusk/Night)
+    always defaulted from the real current clock time via `_guess_segment()`
+    - independent of whatever the angler typed into "Session start time"
+    right above it, even though that field's own help text already
+    explains it's deliberately NOT tied to "now" ("you might do that before
+    heading out or after you're done"). So logging a morning session in the
+    evening, or planning one ahead of time, left the Time window on
+    whatever segment it currently was in real life, not the one the entered
+    start time actually falls in.
+
+    Root cause was really about *when* the guess got computed, not the
+    guessing logic itself - `_guess_segment()` already took an arbitrary
+    `now: datetime` and checked it against `seg_ranges` (the same real
+    sunrise/sunset-derived windows the dropdown's own labels show), it just
+    always got called with `lake_now_naive()` (the real current time) at a
+    point in the script *before* the `start_time` widget below it had even
+    been rendered - `_cond_segment_name` (the dropdown's default `index=`)
+    was computed at line ~385, `start_time = c6.time_input(...)` not until
+    line ~442. Moved that computation down to right after the `start_time`
+    widget instead, so it can read the *current run's* actual entered
+    value: `_guess_dt = datetime.combine(session_date, start_time) if
+    start_time is not None else lake_now_naive()`, then
+    `_guess_segment(_guess_dt.hour, _guess_dt)` same as before. Falls back
+    to real "now" only when start_time hasn't been entered yet (still a
+    reasonable live default before the required field's filled in).
+
+    Verified empirically (via a scratch `AppTest` two-widget script) exactly
+    how a Streamlit selectbox without an explicit `key=` behaves before
+    relying on it: passing a new `index=` on a rerun DOES override the
+    widget's current value when the computed index has changed since the
+    last run, but a manual pick in the widget survives any rerun where the
+    computed index stays the same as it already was - i.e. this is exactly
+    "auto-follow the input it's derived from, but don't fight a real manual
+    override in between," without needing any extra state-tracking code.
+    That's the exact behavior wanted here, so no explicit `key`/session_state
+    juggling was added - just reordering the existing computation to see
+    the right value at the right time. Updated `_guess_segment()`'s
+    docstring (now called with either the entered start time or "now",
+    depending on the caller/state, not always "now") and added a `help=`
+    string on the dropdown itself explaining the auto-fill.
+
+    No new unit tests - `_guess_segment()`'s own logic (the actual
+    guessing/window-matching) is unchanged and already covered by its
+    existing design; what changed is purely *when* it's called and with
+    *what* argument inside a Streamlit page script, which isn't something
+    `pytest` exercises for this codebase (no `pages/*.py` file is unit
+    tested directly - see `core/scoring.py`/`core/lures.py` for where the
+    actual testable logic lives). `python3 -m pytest tests/ -q` still
+    passes at 241 (unchanged from before this entry).
+
+    Verified end to end with a scratch `AppTest` run against
+    `pages/6_Spot_Session.py` (mocked weather bundle, inventory, and a
+    single fake saved spot loaded via `spot_session_target_id`) driving the
+    actual widget interactions in sequence: start time 8:00 AM -> "Morning
+    (7:00 AM-11:00 AM)"; 1:00 PM -> "Midday (11:00 AM-3:00 PM)"; 8:30 PM ->
+    "Dusk (7:00 PM-9:00 PM)"; 6:00 AM -> "Dawn (5:00 AM-7:00 AM)" - each
+    matching the real proportional sunrise/sunset-derived windows for the
+    synthetic bundle used, not fixed clock cutoffs. Then confirmed the
+    override behavior explicitly: manually picked "Midday" while start time
+    stayed at 6:00 AM, changed an unrelated field (water temperature) and
+    confirmed "Midday" was still selected (override survives unrelated
+    reruns), then changed start time again to 8:30 PM and confirmed the
+    dropdown snapped to "Dusk" (an actual start-time change still re-drives
+    it, as intended). `data/trip_log.csv` confirmed byte-identical
+    before/after; `data/segment_score_freeze.csv` untouched this round
+    (Spot Session doesn't write to it). Marked Development punch-list item
+    #9 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

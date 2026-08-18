@@ -161,10 +161,13 @@ def _exit_edit_mode():
 
 
 def _guess_segment(hour: int, now: datetime = None) -> str:
-    """Best-effort guess at the current time-of-day segment, used to
-    pre-select "Time window" before "Conditions right now" has actually
-    been filled in (see call sites below) - never authoritative, always
-    overridable via the dropdown itself.
+    """Best-effort guess at the time-of-day segment for a given moment
+    (`now`) - despite the name, `now` doesn't have to be the real current
+    time. "Conditions right now"'s own "Time window" dropdown passes in the
+    entered session start time (once one's been entered, punch-list #9),
+    falling back to the real current time before that; "Add results"'
+    fallback further below passes the real current time directly. Never
+    authoritative, always overridable via the dropdown itself.
 
     Prefers the real thing: `seg_ranges` (module-level, computed a little
     below from segment_time_ranges() for this session's date - the same
@@ -381,10 +384,6 @@ if editing_cond.get("start_time"):
 _cond_forage_seen = editing_cond.get("forage_seen") or []
 _cond_fish_depth_ft = editing_cond.get("fish_depth_ft") or 8.0
 _editing_segment = (editing_trip or {}).get("segment")
-_guess_now = lake_now_naive()
-_cond_segment_name = (
-    _editing_segment if _editing_segment in SEGMENTS else _guess_segment(_guess_now.hour, _guess_now)
-)
 
 st.divider()
 st.header("Conditions right now")
@@ -448,10 +447,32 @@ start_time = c6.time_input(
          "log results below.",
 )
 
+# Punch-list #9: "automatically fill in the period of the day based on the
+# start time I input" - guess off the entered `start_time` (combined with
+# `session_date`, so it lines up with the same seg_ranges windows the
+# dropdown's own labels use) instead of the real current clock time,
+# whenever a start time has actually been entered. Falls back to "now"
+# (the previous behavior) before start_time is filled in, since that's
+# still a reasonable live default for an angler filling this out in the
+# moment. Recomputed on every rerun from whatever start_time currently
+# holds - since this selectbox has no explicit `key`, Streamlit re-applies
+# `index=` on every run where the computed value changes, so the dropdown
+# actually follows start_time edits live, not just on first render. A
+# manual pick in the dropdown itself still sticks across unrelated field
+# edits (any rerun where the computed guess doesn't change) - only
+# changing start_time re-drives it, matching "never authoritative, always
+# overridable."
+_guess_dt = datetime.combine(session_date, start_time) if start_time is not None else lake_now_naive()
+_cond_segment_name = (
+    _editing_segment if _editing_segment in SEGMENTS else _guess_segment(_guess_dt.hour, _guess_dt)
+)
+
 segment_display_options = [_segment_option_label(s) for s in SEGMENTS]
 segment_display_choice = st.selectbox(
     "Time window", segment_display_options,
     index=SEGMENTS.index(_cond_segment_name),
+    help="Auto-filled from the session start time above once it's set (falls back to the current time "
+         "before that) - pick a different window here any time to override it.",
 )
 segment_name = SEGMENTS[segment_display_options.index(segment_display_choice)]
 
