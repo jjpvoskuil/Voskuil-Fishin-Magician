@@ -323,11 +323,11 @@ _wind_help = "\n".join(
 # is {} outside edit mode, so every .get() here just falls through to the
 # same hardcoded default the form always used, with no extra branching
 # needed for the non-edit case.
-_cond_water_temp_f = editing_cond.get("water_temp_f", 75.0)
-_cond_secchi_ft = editing_cond.get("secchi_ft", 3.0)
+_cond_water_temp_f = editing_cond.get("water_temp_f", 85.0)
+_cond_secchi_ft = editing_cond.get("secchi_ft", 2.5)
 _cond_stain_idx = (
     STAIN_COLOR_OPTIONS.index(editing_cond["stain_color"])
-    if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS else 1
+    if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS else 0
 )
 _cond_stirred_up = bool(editing_cond.get("stirred_up", False))
 _cond_wind_band_idx = (
@@ -348,7 +348,7 @@ if editing_cond.get("start_time"):
     except ValueError:
         _cond_start_time = None
 _cond_forage_seen = editing_cond.get("forage_seen") or []
-_cond_fish_depth_ft = editing_cond.get("fish_depth_ft") or 0.0
+_cond_fish_depth_ft = editing_cond.get("fish_depth_ft") or 8.0
 _editing_segment = (editing_trip or {}).get("segment")
 _cond_segment_name = _editing_segment if _editing_segment in SEGMENTS else _guess_segment(lake_now_naive().hour)
 

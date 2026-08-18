@@ -2634,6 +2634,61 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     segment_score_freeze.csv` reverted afterward per the now-standard note
     from entries 61/62. Marked Development punch-list item #4 "Done."
 
+64. **Punch-list #5: default the "Conditions right now" and "Lake Setup
+    Options" fields to real early/mid-summer Nolin numbers instead of
+    generic placeholders.** The ask: water temp 85°F, water color Green
+    stained, water clarity 2.5', fish depth 8'. Field names matched Spot
+    Session's "Conditions right now" form exactly; asked the angler whether
+    to also touch the 7-Day Forecast's separate "Lake Setup Options"
+    sidebar (similar but not identical fields, different current defaults)
+    - confirmed "update both."
+
+    `pages/6_Spot_Session.py`: changed the four `_cond_*` default
+    computations that feed the (unkeyed) "Conditions right now" widgets -
+    `_cond_water_temp_f` 75.0→85.0, `_cond_secchi_ft` 3.0→2.5,
+    `_cond_stain_idx` now defaults to `STAIN_COLOR_OPTIONS.index(...)` 0
+    ("Green stained," was 1/"Brown stained"), `_cond_fish_depth_ft`
+    fallback 0.0→8.0. These only apply when `editing_cond` is empty (a new
+    session, not editing a past one) - editing an existing trip still shows
+    whatever was actually logged for it, unchanged.
+
+    `core/ui.py`'s `render_lake_setup_sidebar()`: `default_water_temp_f`
+    75.0→85.0 and `default_fish_depth_ft` 10.0→8.0 in the signature.
+    Deliberately did *not* repoint the shared `core.lures.DEFAULT_BASE_STAIN`
+    constant to "Green stained" for the stain dropdown, since that same
+    constant also doubles as the color-palette fallback key in
+    `recommend()` (`profile["colors"].get(water_clarity,
+    profile["colors"][DEFAULT_BASE_STAIN])`) - repointing it would have
+    silently changed lure-color fallback behavior everywhere, a much bigger
+    blast radius than "what does this one dropdown start on." Added a new
+    `default_base_stain: str = DEFAULT_BASE_STAIN` parameter instead (falls
+    back to the old constant if an out-of-range value is ever passed), and
+    `pages/1_7_Day_Forecast.py`'s call site now passes
+    `default_base_stain="Green stained"` explicitly - the shared constant
+    itself, and every other place that reads it, is untouched.
+
+    One nuance worth recording: the 7-Day Forecast sidebar's water-temp
+    default is already always overridden at the call site
+    (`default_water_temp_f=week[0].water_temp_f`, the real forecasted
+    estimate for today), so the 85.0 signature default is a fallback for
+    any future caller that doesn't pass its own value, not something
+    visible on today's page - the angler's actual water-temp complaint
+    (estimate reads low vs. reality) is separately punch-list item #7, not
+    touched here.
+
+    Verified with the full suite (no new test cases - this is default-value
+    wiring, not new logic; `python3 -m pytest tests/ -q` still passes at
+    217) plus a scratch `AppTest` script (not committed) against a real
+    saved spot: confirmed Spot Session's "Conditions right now" renders
+    Water temperature 85.0, Water visibility/Secchi depth 2.5 (which lands
+    the reading in the "Stained" band, so the stain dropdown appears and
+    defaults to "Green stained"), and fish depth 8.0; confirmed the 7-Day
+    Forecast sidebar's Water stain defaults to "Green stained" and Fish
+    depth to 8.0 (water temp showed the mocked forecast's own estimate, as
+    expected). Full-page smoke pass across every page clean; `data/
+    segment_score_freeze.csv` reverted afterward. Marked Development
+    punch-list item #5 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

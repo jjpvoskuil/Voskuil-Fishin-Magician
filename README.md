@@ -73,7 +73,10 @@ this repo that can override it on this hosting.
   is actually loaded, however you got there. Pick a session date (defaults to today;
   pick an earlier date to log a past session) right under the spot name, then enter
   what you're actually seeing on the water (water temp, visibility/Secchi depth + stain color if
-  it's in the ambiguous mid-range or a "stirred up/muddy" checkbox to override either,
+  it's in the ambiguous mid-range or a "stirred up/muddy" checkbox to override either -
+  these default to 85°F water temp, 2.5 ft Secchi depth (which lands in the "Stained"
+  band, so the stain color field defaults to Green stained), and 8 ft fish depth,
+  matching typical summer conditions on Nolin rather than generic placeholders,
   wind as a plain-language band like "Light Ripple" rather than an mph guess, light
   condition, precipitation, a manually-entered session start time, and a time-of-day
   window shown with today's actual clock range, e.g. "Dawn (5:52 AM-7:52 AM)"), and it
@@ -157,14 +160,17 @@ this repo that can override it on this hosting.
   count-down-to-depth guidance instead.
 - **Lake Setup Options sidebar** (7-Day Forecast page) - a compact, two-column layout
   so it fits without scrolling. Two required, direct inputs since Nolin has no live
-  feed for either: your water surface temp reading, and the depth you're marking fish
-  at on your electronics (e.g. a Garmin Livescope/sonar unit) - these always drive the
-  seasonal pattern used for lure selection and the depth-to-run/countdown guidance on
-  every lure block. A **Location** dropdown lists your own saved spots (from the Lake
-  Map page) - pick one and its structure type is filled in automatically, the same way
-  Spot Session resolves it; pick "Other" to set a structure type by hand instead.
+  feed for either: your water surface temp reading (pre-filled from the forecast's
+  estimate for today, so there's normally nothing to change here), and the depth
+  you're marking fish at on your electronics (e.g. a Garmin Livescope/sonar unit,
+  defaults to 8 ft) - these always drive the seasonal pattern used for lure selection
+  and the depth-to-run/countdown guidance on every lure block. A **Location** dropdown
+  lists your own saved spots (from the Lake Map page) - pick one and its structure type
+  is filled in automatically, the same way Spot Session resolves it; pick "Other" to
+  set a structure type by hand instead.
 - **Water color model** - Nolin normally runs a greenish-brown stain (leaning brown).
-  Pick your usual base stain color (Clear / Green stained / Brown stained) plus a
+  Pick your usual base stain color (Clear / Green stained / Brown stained, defaults to
+  Green stained on both the Lake Setup Options sidebar and Spot Session) plus a
   separate "stirred up / muddy" checkbox for after wind or heavy rain - the two combine
   into one effective water-clarity reading that drives lure color choice, independent
   of the base color you picked.

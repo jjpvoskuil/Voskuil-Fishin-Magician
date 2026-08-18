@@ -72,7 +72,9 @@ for col, day in zip(cols, week):
 
 st.divider()
 
-lake_setup = render_lake_setup_sidebar(include_structure=True, default_water_temp_f=week[0].water_temp_f)
+lake_setup = render_lake_setup_sidebar(
+    include_structure=True, default_water_temp_f=week[0].water_temp_f, default_base_stain="Green stained",
+)
 clarity = lake_setup.water_clarity
 structure = lake_setup.structure_type
 
