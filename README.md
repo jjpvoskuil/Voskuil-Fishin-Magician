@@ -33,7 +33,12 @@ this repo that can override it on this hosting.
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
-  best window(s) to fish each day. Today's scores update live as the weather forecast
+  best window(s) to fish each day. Every window's real clock range tracks that day's
+  actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,
+  Night is whatever's left overnight, and Morning/Midday/Afternoon each get an equal
+  third of the daylight left in between - so all six windows genuinely grow and shrink
+  with the season instead of a couple of them sitting on fixed clock-time cutoffs.
+  Today's scores update live as the weather forecast
   refreshes throughout the day - except a window whose end time has already passed, which
   locks in at whatever score it had the moment it closed instead of continuing to drift
   as later weather data comes in (a forecast for a time that's already over isn't a
