@@ -99,8 +99,12 @@ this repo that can override it on this hosting.
   at this spot, not just one lure. Picking the lure (and trailer, if that lure type
   takes one) comes next, as a searchable, photo card grid instead of a plain dropdown
   - search your tackle box by brand or description, then click the card you want; a
-  "Used a trailer" checkbox reveals the same card-grid picker for the trailer, with
-  its own name/color fields - followed by the time range you fished this particular
+  "Used a trailer" checkbox reveals the same card-grid picker for the trailer, but
+  narrowed to just trailer-style baits (craw/creature soft plastics and paddle-tail
+  swimbait-style ones) - worms, senkos, and finesse baits like Z-Man TRDs are real
+  soft plastics but aren't trailers, so they're left out of this picker even though
+  they show up normally in the main "Lure used" picker above - with its own name/
+  color fields - followed by the time range you fished this particular
   lure and notes for that window. Fish get logged as you catch them, split into two
   entry paths: click "➕ Add fish (1 lb+)" for a scoreable fish worth its own full
   entry - species (Largemouth/Spotted/Striped, or type in your own), weight (as a

@@ -898,3 +898,41 @@ def guess_category_from_text(*texts: str) -> str:
         if any(phrase in combined for phrase in phrases):
             return category_key
     return ""
+
+
+# --- Trailer eligibility (Spot Session's "Used a trailer" picker) ------------
+# A "trailer" is a soft plastic added onto another bait's hook (a jig,
+# chatterbait, spinnerbait, swim jig, or buzzbait - see each profile's own
+# "trailer" dict above, e.g. "Craw trailer"/"Paddle-tail swimbait trailer") -
+# not a standalone rigged bait like a Texas-rigged worm or a wacky-rigged
+# senko. Deliberately narrow: only the two LURE_PROFILES categories that
+# actually match a documented trailer TYPE. texas_rig_creature covers craw/
+# creature-style trailers (the classic jig trailer); weightless_soft_plastic
+# covers paddle-tail swimbait-style trailers (this app has no separate
+# "swimbait" category - guess_category_from_text() above already tags a
+# swimbait as weightless_soft_plastic, so this reuses that same convention
+# rather than inventing a new one). Every other category - including the
+# worm-style ones (texas_rig_worm, wacky_rig_senko, finesse_shaky_head,
+# carolina_rig) the angler specifically said NOT to show here - is excluded.
+TRAILER_ELIGIBLE_CATEGORIES = {"texas_rig_creature", "weightless_soft_plastic"}
+
+# Keyword safety net on top of the category check, same "no black box"
+# keyword-matching philosophy as _color_tokens() elsewhere in this module -
+# excludes an item even if it's mis-categorized, for product lines that are
+# unambiguously worms rather than trailers. Z-Man's "TRD" line is explicitly
+# called out here because it's a real, common miscategorization risk: a TRD
+# is a finesse worm (normally tagged finesse_shaky_head, already excluded by
+# category above), but "TRD" alone gives no hint of that if someone tags it
+# something else by hand.
+TRAILER_EXCLUDE_KEYWORDS = ("worm", "senko", "trd", "stick bait", "stickbait")
+
+
+def is_trailer_eligible(item: dict) -> bool:
+    """Whether an inventory item belongs in the "Trailer" picker (as opposed
+    to the main "Lure used" picker, which shows the whole tackle box).
+    Category-based first, then the keyword safety net above on the item's
+    own brand/description text."""
+    if item.get("category") not in TRAILER_ELIGIBLE_CATEGORIES:
+        return False
+    text = f"{item.get('brand', '')} {item.get('description', '')}".lower()
+    return not any(kw in text for kw in TRAILER_EXCLUDE_KEYWORDS)
