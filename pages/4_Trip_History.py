@@ -128,7 +128,14 @@ FIELD_SPECS = [
     ("forage_seen", "Forage seen (pre-trip)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
     ("lure_start_time", "Lure start time", str),
     ("lure_end_time", "Lure end time", str),
+    # wind_speed_mph (a raw mph number) is punch-list #12's retired field -
+    # only trips logged before that change still have it; wind_band_logged
+    # (the same Glassy/Light Ripple/Moderate Chop/Heavy bands as "Wind"
+    # above, but for the specific lure use rather than the session-start
+    # reading) is what's written now. A row will only ever have one of the
+    # two, so both simply show up under their own row when present.
     ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
+    ("wind_band_logged", "Wind (logged)", str),
     ("wind_direction", "Wind direction (logged)", str),
     # depth_fished_ft/depth_fished_varied_note (an overall "primary depth" for the
     # whole lure use) were dropped from the "Add results" form - per-fish "depth

@@ -7,8 +7,8 @@ from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, git
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
 from core.onwater import (
     LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, cloud_proxy_for_light_condition,
-    WIND_BANDS, WIND_BAND_LABELS, WIND_DIRECTIONS, wind_mph_for_band, resolve_water_clarity, STAIN_COLOR_OPTIONS,
-    water_temp_band, visibility_band, PRECIPITATION_OPTIONS, precipitation_proxy,
+    WIND_BANDS, WIND_BAND_LABELS, WIND_DIRECTIONS, wind_band, wind_mph_for_band, resolve_water_clarity,
+    STAIN_COLOR_OPTIONS, water_temp_band, visibility_band, PRECIPITATION_OPTIONS, precipitation_proxy,
 )
 from core.scoring import (
     SEGMENTS, season_stage, manual_segment_score, realtime_context_from_bundle,
@@ -327,8 +327,23 @@ if _just_entered_edit_mode:
     st.session_state[f"cond_forage_seen_{spot['spot_id']}"] = editing_cond.get("forage_seen") or []
     st.session_state[f"cond_fish_depth_{spot['spot_id']}"] = editing_cond.get("fish_depth_ft") or 8.0
 
-    st.session_state[f"log_wind_speed_{spot['spot_id']}"] = editing_cond.get("wind_speed_mph") or 0.0
-    st.session_state[f"log_wind_dir_{spot['spot_id']}"] = editing_cond.get("wind_direction") or WIND_DIRECTIONS[8]
+    # Punch-list #12: "Wind speed (mph)" -> "Wind" (same band categories as
+    # "Conditions right now"). Trips logged before this change only have the
+    # old numeric wind_speed_mph, not a wind_band_logged string - converted
+    # via wind_band() (mph -> nearest band) so editing an old trip still
+    # prefills something sensible instead of silently falling back to the
+    # generic default. A trip logged AFTER this change has wind_band_logged
+    # directly and that's used as-is.
+    if editing_cond.get("wind_band_logged") in WIND_BAND_LABELS:
+        _prefill_wind_band = editing_cond["wind_band_logged"]
+    elif isinstance(editing_cond.get("wind_speed_mph"), (int, float)):
+        _prefill_wind_band = wind_band(editing_cond["wind_speed_mph"])["label"]
+    else:
+        _prefill_wind_band = WIND_BAND_LABELS[1]
+    st.session_state[f"log_wind_band_{spot['spot_id']}"] = _prefill_wind_band
+    st.session_state[f"log_wind_dir_{spot['spot_id']}"] = (
+        editing_cond["wind_direction"] if editing_cond.get("wind_direction") in WIND_DIRECTIONS else "SW"
+    )
     st.session_state[f"log_fish_activity_{spot['spot_id']}"] = editing_cond.get("fish_activity") or "Moderate"
     st.session_state[f"log_forage_activity_{spot['spot_id']}"] = editing_cond.get("forage_activity") or "Moderate"
     st.session_state[f"log_forage_type_{spot['spot_id']}"] = editing_cond.get("forage_type_seen") or []
@@ -857,7 +872,8 @@ with results_expander:
     # here, right before these widgets are created, on the run that follows.
     session_reset_pending_key = f"session_reset_pending_{spot['spot_id']}"
     condition_field_keys = (
-        f"log_wind_speed_{spot['spot_id']}", f"log_wind_dir_{spot['spot_id']}",
+        f"log_wind_band_{spot['spot_id']}", f"log_wind_band_last_cond_seen_{spot['spot_id']}",
+        f"log_wind_dir_{spot['spot_id']}",
         f"log_fish_activity_{spot['spot_id']}", f"log_forage_activity_{spot['spot_id']}",
         f"log_forage_type_{spot['spot_id']}",
     )
@@ -866,12 +882,41 @@ with results_expander:
             st.session_state.pop(condition_key, None)
 
     wc1, wc2 = st.columns(2)
-    wind_speed_mph = wc1.number_input(
-        "Wind speed (mph)", min_value=0.0, max_value=60.0, value=0.0, step=1.0,
-        key=f"log_wind_speed_{spot['spot_id']}",
+    # Punch-list #12: was a raw "Wind speed (mph)" number field - now the
+    # same Glassy/Light Ripple/Moderate Chop/Heavy band dropdown as
+    # "Conditions right now" uses, defaulting to whatever's currently picked
+    # there. A plain one-time `setdefault` isn't enough here: this widget is
+    # instantiated on every script run regardless of whether its expander is
+    # open (same reasoning as the ordering note above this section), which
+    # includes the very first run of a session - before the angler has had
+    # any chance to touch "Conditions right now" at all - so a `setdefault`
+    # would just lock in that section's own still-unedited default the
+    # instant the page loads, not "whatever I entered" a moment later. Same
+    # auto-follow-until-manually-overridden reconciliation as "Time window"
+    # above (see its comment for the full reasoning): synced to
+    # wind_band_choice on this widget's very first appearance and again
+    # every time wind_band_choice changes to a value not already reacted to
+    # (tracked via a "last cond wind seen" sentinel) - a manual pick here
+    # sticks across any other rerun, including navigating away and back, but
+    # is superseded the next time the angler actually changes "Conditions
+    # right now"'s Wind field itself.
+    _log_wind_key = f"log_wind_band_{spot['spot_id']}"
+    _log_wind_last_cond_seen_key = f"log_wind_band_last_cond_seen_{spot['spot_id']}"
+    if _just_entered_edit_mode:
+        # Prefill block above already seeded _log_wind_key from the trip's own
+        # logged value (or converted its legacy mph reading) - just record
+        # today's cond wind as "already seen" so it's a later actual change to
+        # it, not this same edit-entry run, that triggers the next sync.
+        st.session_state[_log_wind_last_cond_seen_key] = wind_band_choice
+    elif st.session_state.get(_log_wind_last_cond_seen_key, "__unset__") != wind_band_choice:
+        st.session_state[_log_wind_last_cond_seen_key] = wind_band_choice
+        st.session_state[_log_wind_key] = wind_band_choice
+    wind_band_logged = wc1.selectbox(
+        "Wind", WIND_BAND_LABELS, help=_wind_help, key=_log_wind_key,
     )
+    st.session_state.setdefault(f"log_wind_dir_{spot['spot_id']}", "SW")
     wind_direction = wc2.selectbox(
-        "Wind direction", WIND_DIRECTIONS, index=8, key=f"log_wind_dir_{spot['spot_id']}",
+        "Wind direction", WIND_DIRECTIONS, key=f"log_wind_dir_{spot['spot_id']}",
     )
 
     ac1, ac2 = st.columns(2)
@@ -1188,7 +1233,13 @@ with results_expander:
             "trailer_category": selected_trailer_item.get("category") if selected_trailer_item else None,
             "lure_start_time": lure_start_time.isoformat() if lure_start_time else None,
             "lure_end_time": lure_end_time.isoformat() if lure_end_time else None,
-            "wind_speed_mph": wind_speed_mph or None,
+            # wind_speed_mph (a raw mph number) is punch-list #12's old field
+            # name/shape - no longer written by this page, but deliberately
+            # not backfilled here either, so it stays a clean signal in
+            # trip_log.csv of "logged before #12" vs. "logged after" (Trip
+            # History still displays old rows' real historical mph value
+            # under its own column). wind_band_logged is the new field.
+            "wind_band_logged": wind_band_logged,
             "wind_direction": wind_direction,
             "fish_activity": fish_activity,
             "forage_activity": forage_activity,

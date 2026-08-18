@@ -3541,6 +3541,88 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     identical (`md5sum`) before and after every run. Marked Development
     punch-list item #11 "Done."
 
+74. **Punch-list #12: "Conditions during this lure use" wind field - use the
+    same band categories as the session-start reading, and default it
+    sensibly.** Ask (page: Spot Session): "In conditions during lure use,
+    lets change wind speed to just wind and use the same dropdown
+    categories as for the session start. This field should also default to
+    whatever I entered in the session conditions for wind. For wind
+    direction, set the default to SW."
+
+    Replaced the raw "Wind speed (mph)" `number_input` in "Conditions
+    during this lure use" with a `selectbox` over the same
+    `WIND_BAND_LABELS` (Glassy/Light Ripple/Moderate Chop/Heavy) as
+    "Conditions right now"'s own "Wind" field, and changed "Wind
+    direction"'s default from `WIND_DIRECTIONS[8]` ("Variable") to "SW".
+
+    The "default to whatever I entered in the session conditions for wind"
+    part needed more than a plain one-time default: this widget (like every
+    other widget in "Conditions during this lure use") is instantiated on
+    *every* script run regardless of whether its expander is open, which
+    includes the very first run of a brand-new session - before the angler
+    has touched "Conditions right now" at all. A plain `st.session_state.
+    setdefault(key, wind_band_choice)` would lock in "Conditions right
+    now"'s own still-unedited default ("Light Ripple") the instant the page
+    loads, not whatever the angler actually picks there a moment later.
+    Solved with the same auto-follow-until-manually-overridden
+    reconciliation already established for "Time window" (punch-list #9/
+    #11): a "last cond wind seen" sentinel key tracks the most recent
+    "Conditions right now" Wind value this field has already synced from;
+    any run where that value has changed re-syncs this field to match,
+    while a manual pick here sticks across every other rerun (including
+    navigating away and back, same as everything else on this page since
+    #11) - only an actual "Conditions right now" Wind change, not just any
+    rerun, ever overrides a manual pick. Entering edit mode is handled the
+    same way "Time window" handles it: the edit-prefill block seeds this
+    field from the trip's own logged value first, and the sync logic below
+    just records that run's cond-wind reading as "already seen" rather than
+    immediately overwriting the freshly-prefilled value.
+
+    Backward compatibility: this page's own "conditions during lure use"
+    section stores its wind reading as a new `wind_band_logged` string key
+    now, not the old `wind_speed_mph` float - a real, structural type
+    change (float mph -> band string), not just a rename, so the two keys
+    can't share a slot the way #10's light_condition vocabulary swap could.
+    `data/trip_log.csv` has 26 real trips, 12 of them with a real (nonzero)
+    `wind_speed_mph` value logged before this change. The edit-mode prefill
+    checks for `wind_band_logged` first (any trip saved after this change),
+    then falls back to converting a legacy `wind_speed_mph` reading through
+    `core.onwater.wind_band()` (the same mph->band function `wind_band()`
+    that `tests/test_onwater.py::test_wind_band_boundaries` already covers)
+    so editing an old trip still prefills a sensible band instead of
+    silently landing on the generic default. Newly-saved trips simply don't
+    write `wind_speed_mph` at all anymore (left absent, not backfilled) -
+    Trip History's `FIELD_SPECS` keeps both `("wind_speed_mph", "Wind speed
+    (logged)", ...)` (for old rows) and a new `("wind_band_logged", "Wind
+    (logged)", str)` (for new ones) side by side, since a given row will
+    only ever have one or the other.
+
+    No new pure-logic unit tests - same reasoning as entries 71/73 (this is
+    Streamlit widget/session_state wiring in a page script, and the one
+    real logic dependency, `wind_band()`'s mph->label conversion, is
+    already covered by existing tests). `python3 -m pytest tests/ -q`
+    still passes at 243 (unchanged).
+
+    Verified end to end with a scratch `AppTest` script (not committed)
+    against the real `data/lake_spots.csv`/`data/trip_log.csv`: (1) a fresh
+    session's lure-use "Wind" field matched "Conditions right now"'s Wind
+    field, and "Wind direction" defaulted to SW; (2) changing "Conditions
+    right now"'s Wind *before* the lure-use field had ever been manually
+    touched still updated the lure-use field to match, confirming the
+    sync-not-just-setdefault design actually matters in the realistic
+    "fill in Conditions right now first" flow; (3) opening the one real
+    logged trip with a nonzero legacy `wind_speed_mph` (3.0 mph) in edit
+    mode prefilled "Glassy" - confirmed against `wind_band(3.0)["label"]`
+    directly, not just "didn't crash"; (4) saved a real new trip via the
+    actual "Log this lure" button (not just calling internal functions) and
+    confirmed the saved row's `conditions_json` had `wind_band_logged`
+    set to the picked value and `wind_speed_mph` absent - `data/
+    trip_log.csv` backed up before this step and restored immediately
+    after, confirmed byte-identical (`md5sum`) once restored. Also ran the
+    standard `AppTest` smoke pass across the app entry point and every page
+    reachable in this sandbox (same set as entry 73) - all rendered with no
+    exception. Marked Development punch-list item #12 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
