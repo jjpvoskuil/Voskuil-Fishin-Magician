@@ -108,9 +108,12 @@ this repo that can override it on this hosting.
   in at all, so you can jump straight to logging a catch without scoring the moment
   first if that's all you want to do (the trip is saved with a blank predicted score
   and "Unknown" water clarity in that case, everything else logs normally). It opens
-  with a "Conditions during this lure use" group - wind speed and direction, fish
-  activity, forage activity, and forage type seen - describing the whole time you're
-  at this spot, not just one lure. Picking the lure (and trailer, if that lure type
+  with a "Conditions during this lure use" group - wind (the same Glassy/Light
+  Ripple/Moderate Chop/Heavy band picker as "Conditions right now" above, defaulting
+  to whatever you picked there and following it live until you change this one
+  yourself) and direction (defaults to SW), fish activity, forage activity, and
+  forage type seen - describing the whole time you're at this spot, not just one
+  lure. Picking the lure (and trailer, if that lure type
   takes one) comes next, as a searchable, photo card grid instead of a plain dropdown
   - search your tackle box by brand or description, then click the card you want; a
   "Used a trailer" checkbox reveals the same card-grid picker for the trailer, but
@@ -143,7 +146,7 @@ this repo that can override it on this hosting.
   defaults and leaves the section open and empty, ready for a genuinely new session -
   next time you fish this spot, its conditions won't carry over from today's. A green
   "✅ Session closed" banner confirms this happened even when nothing on screen visibly
-  changed (e.g. wind speed/fish activity were already at their defaults) - it's not
+  changed (e.g. wind/fish activity were already at their defaults) - it's not
   just a toast, so it's still there to read a moment later. A
   running "📋 Already logged for this spot today" line lists everything saved so far
   today, across however many lures and sessions. Each lure still lands as its own row
