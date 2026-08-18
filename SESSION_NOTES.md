@@ -2873,6 +2873,155 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     clean; `data/segment_score_freeze.csv` reverted afterward, `data/
     trip_log.csv` confirmed untouched. Not a numbered punch-list item.
 
+68. **Punch-list #7: add live lake level, and fix the water-temp estimate
+    that was reading well below real conditions.** Two-part ask: "Also all
+    the current lake level to the data shown. Also, can you look at where
+    you get the water temperature from? It is always much lower than
+    actual. Please make sure this is surface temperature."
+
+    **Lake level.** No live gauge was already wired up, and the angler
+    wasn't sure of the exact source ("I think the corp of engineers has a
+    site that records this, but not sure what it is"). This dev sandbox has
+    no outbound network access at all (confirmed - even a plain `curl` to
+    Open-Meteo times out), so used `WebSearch`/`WebFetch` instead of
+    guessing at an endpoint from memory: found USGS site 03310900 ("Nolin
+    Lake near Kyrock, KY," a Corps-operated reservoir monitored by USGS
+    under their usual cooperative agreement), and directly hit the real
+    `waterservices.usgs.gov/nwis/iv` API to confirm it live before writing
+    any code - it reports 3 parameters (precip, gage height, and parameter
+    code 62614 "Lake or reservoir water surface elevation above NGVD 1929,
+    ft"), the last of which returned a real reading of 515.34 ft at fetch
+    time, right at/near the 515 ft normal summer pool this app's own footer
+    caption already quotes - strong confirmation this is the right gauge.
+    No water temperature parameter exists at this site, so the estimate
+    below is still necessary.
+
+    New `core/lake_level.py`: `fetch_lake_level(site_id=USGS_SITE_ID)` hits
+    that same endpoint (`parameterCd=62614`, `period=P1D`), parses the JSON
+    down to `value.timeSeries[0]` (`sourceInfo.siteName` +
+    `values[0].value[-1]` for the most recent reading), and raises on any
+    failure - same "raise, let the caller degrade gracefully" convention as
+    `core.weather.fetch_forecast()`. New `core.appstate.get_lake_level()`
+    wraps it with `st.cache_data(ttl=15min)` (shorter than the weather
+    bundle's 1h TTL, matching USGS's ~5-15min real telemetry cadence).
+    `home.py` fetches it in its own independent `try/except` (a USGS outage
+    shouldn't block the weather-derived metrics above it, or vice versa),
+    adds a 5th "Lake level" metric to "Today at a glance" showing the live
+    reading plus a `delta` of how far above/below the 515 ft normal pool
+    it currently sits (`delta_color="off"` - neither direction is
+    inherently good/bad for fishing), and falls back to an explanatory
+    caption instead of the metric when the fetch fails, rather than an
+    alarming `st.error` (a missing "nice to have" reading isn't the same
+    severity as a failed forecast).
+
+    **Water temperature.** Root-caused two compounding bugs in
+    `core.weather.estimate_water_temp_f()`, confirmed both numerically
+    before touching any code:
+
+    1. The "5-day trailing average" had no real 5 days to average for
+       TODAY specifically. `fetch_forecast()` never passed Open-Meteo's
+       `past_days` parameter, so the returned `hourly`/`daily` arrays start
+       exactly at today's local midnight - nothing earlier. For `d=today`,
+       the old window (`d - 5 days` through `d`'s midnight) could only ever
+       match that single first hourly value (the coldest part of the day,
+       right after midnight) - simulated the real production bundle shape
+       and confirmed the estimate collapsed to ~76.5°F, essentially just
+       that one midnight reading, not a 5-day trend at all.
+    2. Even with genuine 5-day history, the formula averaged ALL 24 hourly
+       readings a day (dragging the number down with overnight lows a
+       reservoir surface doesn't track nearly as closely as it tracks
+       daytime heating) and then subtracted another flat 4°F on top of
+       that already-low average - simulated with a realistic diurnal air
+       curve and confirmed even a proper 5-day average still landed around
+       77.8°F, well below the angler's real Spot Session readings for the
+       same stretch of days (83.0-88.9°F, mid-August 2026).
+
+    Asked the angler how thorough to make the fix (structural bugs only,
+    vs. also retuning the seasonal baseline curve using real logged data as
+    ground truth) - chose "fix everything." Changes, all in
+    `core/weather.py`:
+    - `fetch_forecast()` now requests `past_days=WATER_TEMP_TREND_PAST_DAYS`
+      (5) alongside `forecast_days` - real history, not just forecast, is
+      now actually present in the bundle every time, not just once `d` is
+      5+ days out into the week. Confirmed this doesn't add unwanted extra
+      days to the 7-Day Forecast page itself: `score_week()`/`score_day()`
+      look up specific dates (`start + i` for `i in range(days)`), they
+      don't iterate whatever's in the bundle, so the padded-in past days
+      are only ever reachable via `estimate_water_temp_f()`'s own trailing
+      window, not shown as extra forecast days.
+    - `estimate_water_temp_f()` switched from a raw all-hours average of
+      `bundle.hourly["temperature_2m"]` to a trailing average of
+      `bundle.daily["temperature_2m_max"]` (each day's actual high) for the
+      `WATER_TEMP_TREND_PAST_DAYS` days strictly before `d` - a much better
+      proxy for what's actually warming the surface layer. The flat "-4"
+      offset became "-3" applied to the daily-high average instead of the
+      (already much lower) all-hours average.
+    - The seasonal baseline curve (`60 + 24*sin(2π*(day_of_year-105)/365)`,
+      peak 84°F around day 196/mid-July) was retuned to
+      `60 + 27*sin(2π*(day_of_year-124)/365)` (peak ~87°F around day
+      215/early August) - the old curve's best day was already below
+      several real August readings, and a reservoir's actual thermal lag
+      tends to push peak surface temps later than the solar solstice.
+      Explicitly still a best-effort model outside the one narrow window
+      (mid-August 2026) real ground truth currently covers - noted in the
+      function's own docstring as a candidate to revisit once trips get
+      logged across more of the year, rather than treated as fully solved.
+    - This isn't purely cosmetic: `season_stage()`'s bands are keyed on
+      `water_temp_f` thresholds (80°F = summer_peak), so mid-August now
+      correctly classifies as `summer_peak` instead of the old estimate's
+      `post_spawn_summer` - a real accuracy improvement to lure/season
+      selection app-wide, not just the Home page's displayed number.
+
+    Fixed two `tests/test_scoring.py` cases the new (correctly higher)
+    estimate broke - not by reverting behavior, but by fixing what were
+    genuine test gaps the old, artificially-low estimate had been masking:
+    `test_manual_segment_score_matches_score_day_for_equivalent_inputs`
+    wasn't actually passing an equivalent `water_temp_f` into
+    `manual_segment_score()` (silently relied on the old estimate always
+    landing in the no-op 77-84°F band); now passes `day.water_temp_f`
+    explicitly, matching what the test's own name claims to verify.
+    `test_score_day_water_temp_summer_stratified_band_stays_neutral`'s
+    fixture parameter (`air_temp_f=84.0`) no longer lands in its target
+    band under daily-high-based averaging - changed to `66.0`, documented
+    inline why a cooler input value is now what's needed. Also updated
+    `_fake_bundle()`/`_fake_bundle_with_air_temp()` themselves (shared
+    across most of `test_scoring.py`) to pad `daily` back
+    `WATER_TEMP_TREND_PAST_DAYS` days before `d`/today, matching the real
+    past_days-extended shape `fetch_forecast()` now requests - without
+    this, every test's trailing-average window would silently find zero
+    days and fall through to the seasonal-only branch, leaving that whole
+    code path untested even though this is exactly the fix meant to keep
+    it populated.
+
+    New coverage: `tests/test_weather.py` gained 6 cases (`fetch_forecast`
+    actually requests `past_days` - via `monkeypatch.setattr(mod.requests,
+    "get", ...)`, same mocking convention as `test_cabelas_lookup.py`;
+    `estimate_water_temp_f` falls back to seasonal-only with no daily data
+    and still lands in the real 83-89°F range for mid-August; only days
+    strictly before `d` are averaged, not `d` itself or later; only days
+    inside the trailing window count, confirmed by adding an "outside the
+    window" day and checking the result doesn't move; a genuinely hot vs.
+    cold recent trend moves the estimate in the right direction; and a
+    representative low-90s recent-highs trend lands the estimate inside the
+    angler's real 83-89°F logged range). New `tests/test_lake_level.py`
+    (5 cases, same `monkeypatch` convention, using the real JSON shape
+    confirmed against the live API above): requests the right site/
+    parameter, parses the most recent reading correctly, takes the LAST
+    value when multiple are present (not the first), raises on zero
+    readings, and raises (doesn't swallow) on a network failure so `home.py`
+    is the one that decides how to degrade. `python3 -m pytest tests/ -q`
+    passes at 231 (220 + 11 new).
+
+    Verified end to end with a scratch `AppTest` smoke run (mocked weather
+    bundle + mocked `get_lake_level`) across every page: no exceptions;
+    `home.py`'s metrics read "Est. water temp = 86.5°F" (vs. the old
+    formula's ~77-79°F for the same fixture) and "Lake level = 515.34 ft
+    +0.3 ft vs. normal pool" as a real 5th metric; a second run simulating
+    a USGS outage confirmed the graceful 4-metric-plus-caption fallback
+    with no exception. `data/segment_score_freeze.csv` reverted afterward,
+    `data/trip_log.csv` confirmed untouched. Marked Development punch-list
+    item #7 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

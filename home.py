@@ -1,8 +1,9 @@
 import streamlit as st
 
-from core.appstate import get_weather_bundle, get_calibrated_weights
+from core.appstate import get_weather_bundle, get_calibrated_weights, get_lake_level
 from core.scoring import score_day
 from core.weather import lake_today
+from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
@@ -33,16 +34,38 @@ except Exception as e:
     st.error(f"Couldn't fetch live weather data right now: {e}")
     st.caption("This can happen if Open-Meteo is briefly unreachable - try refreshing in a minute.")
 
+# Independent of the weather bundle above - a USGS outage shouldn't block
+# the weather-derived metrics, and vice versa. Unlike everything else on
+# this page (all weather-derived estimates), lake level is a genuine live
+# measurement - USGS gauge 03310900 ("Nolin Lake near Kyrock, KY") reports
+# the reservoir's actual real-time pool elevation. See core/lake_level.py.
+lake_level = None
+try:
+    lake_level = get_lake_level()
+except Exception:
+    pass  # Shown as a footer caption fallback below rather than an st.error -
+    # a missing "nice to have" live reading shouldn't read as alarming as a
+    # failed weather fetch, which blocks the whole scored forecast above.
+
 if bundle is not None:
     try:
         today = score_day(bundle, lake_today(), weights=weights)
 
         st.subheader("Today at a glance")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Activity score", f"{today.overall_score} / 10")
-        col2.metric("Est. water temp", f"{today.water_temp_f}°F")
-        col3.metric("Moon phase", today.moon.name)
-        col4.metric("Pressure trend (24h)", f"{today.pressure_trend_24h:+.1f} hPa")
+        cols = st.columns(5 if lake_level else 4)
+        cols[0].metric("Activity score", f"{today.overall_score} / 10")
+        cols[1].metric("Est. water temp", f"{today.water_temp_f}°F")
+        cols[2].metric("Moon phase", today.moon.name)
+        cols[3].metric("Pressure trend (24h)", f"{today.pressure_trend_24h:+.1f} hPa")
+        if lake_level:
+            cols[4].metric(
+                "Lake level",
+                f"{lake_level.elevation_ft:g} ft",
+                delta=f"{lake_level.elevation_ft - NORMAL_SUMMER_POOL_FT:+.1f} ft vs. normal pool",
+                delta_color="off",
+                help=f"Live reading from USGS site 03310900 ({lake_level.site_name}), "
+                     f"as of {lake_level.observed_at.strftime('%-I:%M %p %m/%d')}.",
+            )
 
         best_segment = max(today.segments, key=lambda s: s.score)
         st.info(f"Best window today: **{best_segment.name}** ({best_segment.start.strftime('%-I:%M %p')} - "
@@ -63,7 +86,12 @@ if bundle is not None:
         st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
 
 st.divider()
+if lake_level is None:
+    st.caption(
+        "Couldn't fetch the live lake level just now (USGS site 03310900 may be briefly unreachable) - "
+        "try refreshing in a minute."
+    )
 st.caption(
-    "Nolin River Lake summer/normal pool: 515 ft elevation, ~5,795 surface acres. "
+    f"Nolin River Lake summer/normal pool: {NORMAL_SUMMER_POOL_FT:g} ft elevation, ~5,795 surface acres. "
     "Lake map locations are planning approximations - verify with your own GPS/chartplotter on the water."
 )
