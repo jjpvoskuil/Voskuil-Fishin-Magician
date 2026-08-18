@@ -2689,6 +2689,79 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     segment_score_freeze.csv` reverted afterward. Marked Development
     punch-list item #5 "Done."
 
+65. **Punch-list #6: label every period-of-day dropdown with its real clock
+    range.** Ask: "In any drop down that lists the period of the day (Dawn,
+    Morning, afternoon, etc.) also should the time range that this
+    represents in parathesis." Audited every page for a Dawn/Morning/
+    Midday/Afternoon/Dusk/Night dropdown: Spot Session's own "Time window"
+    picker already did this (`_segment_option_label()`, entry from an
+    earlier session, unchanged); the 7-Day Forecast page shows segment time
+    ranges too but only as read-only expander/success-box text, not a
+    dropdown, so out of scope. That left two spots on `pages/
+    4_Trip_History.py`: the "Time of day" filter `multiselect`, and the
+    inline-editable grid's "Time of day" `SelectboxColumn`.
+
+    Both reuse a new pure helper, `segment_display_label(name, seg_ranges)`
+    ("Dawn" + a `core.scoring.segment_time_ranges()` lookup ->
+    "Dawn (5:52 AM-7:52 AM)", or `name` unchanged if no range is known for
+    it) - same formatting Spot Session already used, just factored out so
+    it's directly unit-testable (no Streamlit calls) rather than
+    copy-pasted. Neither dropdown corresponds to one specific trip's date
+    (the filter spans the whole trip history; the grid column covers every
+    row at once with a single shared option list), so both use *today's*
+    actual sunrise/sunset-derived ranges as a representative reference
+    point rather than claiming to be that exact historical trip's real
+    times - called out in both widgets' `help` text since the windows shift
+    a few minutes day to day.
+
+    The filter `multiselect` was the easy case: `st.multiselect` has a
+    `format_func` parameter, so the underlying selected values stay plain
+    segment names (still compared directly against `df["segment"]` for
+    filtering) while only the on-screen text gets the range suffix - zero
+    risk of the label leaking into stored/filtered data.
+
+    The grid's `SelectboxColumn` has no such display/value split - whatever
+    string is in its `options` list is both what's shown *and* what gets
+    written back into the cell on edit. Repointing that column's options
+    straight at labeled text would have meant a saved trip's `segment`
+    field could end up literally holding `"Dawn (5:52 AM-7:52 AM)"` instead
+    of `"Dawn"`, breaking every other place in the app that expects a bare
+    `SEGMENTS` value (filtering, `_guess_segment()`, `recommend()` calls,
+    etc.) - unacceptable for a field this load-bearing. Solved with a
+    strictly one-way-at-a-time translation at the widget boundary: a new
+    `segment_label_maps(canonical_options, seg_ranges)` builds both
+    `label_by_name` and its exact inverse `name_by_label`; a throwaway copy
+    of the grid's data (`grid_editor_input`, not the real `grid_display`
+    used for diffing) gets its `segment` column relabeled before being
+    handed to `st.data_editor`, and the instant `edited_grid` comes back
+    from the widget, its `segment` column is translated straight back to
+    plain names via `name_by_label` - before the existing `_grid_edit_diff`
+    diff/save logic ever sees it. `grid_display` itself (the diff
+    baseline, and everything downstream of it) never holds a labeled
+    value, so a saved trip's `segment` is exactly what it always was.
+
+    Verified with the full suite (unchanged behavior, no new logic beyond
+    label formatting; `python3 -m pytest tests/ -q` still passes at 217 -
+    this page's pure helpers have never had committed pytest coverage,
+    same reasoning as the existing `_norm_text`/`_grid_edit_diff` note in
+    the file's own comments: `st.data_editor` isn't reachable from AppTest
+    in the pinned Streamlit/testing version). Checked
+    `segment_display_label`/`segment_label_maps` directly by extracting
+    their real source via `ast` and `exec`-ing just those two definitions
+    in isolation (not a hand-copied duplicate) - confirmed the label
+    round-trips back to the exact original name for every canonical
+    segment plus `""` and an unrecognized legacy value, and that all
+    labels are unique. A scratch `AppTest` run against a mocked weather
+    bundle confirmed the real, in-page filter multiselect's `format_func`
+    produces genuine ranges (e.g. `"Afternoon (2:00 PM-7:15 PM)"`) with no
+    exception; the grid's `SelectboxColumn` itself couldn't be exercised
+    the same way (the AppTest limitation above), so its correctness rests
+    on the verified-in-isolation `segment_label_maps()` round-trip plus the
+    page rendering with no exception. Full-page smoke pass across every
+    page clean; `data/segment_score_freeze.csv` reverted afterward, `data/
+    trip_log.csv` confirmed byte-identical before/after. Marked
+    Development punch-list item #6 "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
