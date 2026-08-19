@@ -4030,6 +4030,64 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     byte-identical (`md5sum`) before and after every run. Logged this ask
     as punch-list item #16 and marked it "Done."
 
+79. **Punch-list #17: the USACE tile still wasn't showing - fall back to
+    the last logged reading when the live fetch fails.** After #16 shipped,
+    the angler sent a live screenshot of the deployed Home page: weather
+    had recovered (no more 429), "Today at a glance" now correctly showed
+    5 tiles including Lake level, but there was still no "USACE water
+    temp" tile - "The USACE data is still not showing with the other
+    data."
+
+    #16's fix was actually working correctly (the tile renders whenever
+    `water_quality` is truthy, independent of the weather bundle) - the
+    real problem is that `get_surface_water_quality()`'s LIVE fetch has
+    apparently been failing on the deployed app the same way it fails from
+    this dev sandbox: entry 76 already found this sandbox gets a proxy 403
+    AND a WebFetch SSL error against `lrl-wc.usace.army.mil`, and entry 77
+    already suspected (but couldn't confirm) production might be hitting
+    something similar. This screenshot is that confirmation - a run where
+    weather clearly succeeded still had no USACE tile, meaning
+    `water_quality` was None, meaning the live USACE fetch itself failed
+    on that run.
+
+    Rather than keep depending on a fresh successful fetch every single
+    page load - USACE only republishes this survey every 1-2 weeks
+    anyway, so "fresh this run" was never really the point, and the one
+    real reading already sitting in `data/water_quality_log.csv` (seeded
+    in entry 76) is still perfectly valid to show - added a fallback in
+    home.py: when `get_surface_water_quality()` fails, look at
+    `get_water_quality_log()`'s last row and build a `SurfaceWaterQuality`
+    from it (`SurfaceWaterQuality(**logged[-1])` - `parsed_log()`'s dict
+    keys line up exactly with the dataclass's field names) to display
+    instead. A new `is_live_reading` flag tracks which case is active
+    purely for the tile's own honesty: the help tooltip already always
+    states the real survey date, but now it also says "USACE's own site
+    couldn't be reached just now, so this is the last reading logged
+    locally" specifically when showing the fallback, so the tile never
+    reads as more current than it actually is. The `append_if_new()`/
+    commit-back logic right above this is untouched and still only ever
+    acts on a genuinely fresh fetch - the fallback value is display-only,
+    never re-logged (avoids any risk of the same reading being written
+    twice or the "only log a survey we haven't seen before" logic getting
+    confused).
+
+    Ran a scratch `AppTest` script (not committed) covering exactly this:
+    (1) live fetch fails, a real reading is logged - "USACE water temp"
+    tile still renders with the logged value (86.5°F) and the help text
+    contains "couldn't be reached just now"; (2) live fetch succeeds -
+    tile shows the fresh value instead, with no fallback note in the help
+    text; (3) live fetch fails AND nothing is logged yet - no tile, no
+    exception (matches the very first deploy's state, before entry 76
+    seeded anything). `python3 -m pytest tests/ -q` still passes at 261
+    (no core logic changed, same as entry 78 - this is page code only).
+    Also ran the standard `AppTest` smoke pass across the app entry point
+    and every page reachable in this sandbox (same set as entries 73-78) -
+    all rendered with no exception. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/water_quality_log.csv`/
+    `data/lure_inventory.csv` confirmed byte-identical (`md5sum`) before
+    and after every run. Logged this ask as punch-list item #17 and
+    marked it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
