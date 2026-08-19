@@ -101,7 +101,19 @@ HIT_TYPE_OPTIONS = ["Hard hit", "Light hit", "Double tap", "Swallowed", "Fouled"
 # precipitation_proxy() already use for their own hand-picked pickers - see
 # weight_lb_for_slider_option()/length_in_for_slider_option() below for the
 # reverse mapping back to the decimal lb/in this app stores everywhere else.
-WEIGHT_SLIDER_OPTIONS = ["<1 lb", "1 lb", "2 lb", "3 lb", "4 lb", "5 lb", "6 lb", "7 lb", "8 lb", "9 lb", "10 lb"]
+#
+# Weight slides in 1 oz increments (per the angler's own follow-up ask) from
+# a "<1 lb" catch-all at the bottom (anything under a pound isn't worth
+# splitting into individual ounces) up through 6 lb 15 oz, then an open-
+# ended "+7 lb" catch-all at the top - built programmatically rather than
+# hand-typed, since spelling out 96 individual lb/oz labels by hand invites
+# a typo.
+def _format_weight_option(total_oz: int) -> str:
+    lb, oz = divmod(total_oz, 16)
+    return f"{lb} lb" if oz == 0 else f"{lb} lb {oz} oz"
+
+
+WEIGHT_SLIDER_OPTIONS = ["<1 lb"] + [_format_weight_option(oz) for oz in range(16, 112)] + ["+7 lb"]
 
 LENGTH_SLIDER_OPTIONS = [
     "<13 in", "13 in", "14 in", "15 in", "16 in", "17 in", "18 in", "19 in", "20 in",
@@ -112,19 +124,25 @@ LENGTH_SLIDER_OPTIONS = [
 def weight_lb_for_slider_option(option) -> Optional[float]:
     """Converts one of WEIGHT_SLIDER_OPTIONS to a decimal-pound value for
     storage (core.storage.TripEntry / Trip History's existing decimal-lb
-    schema, same as the old "Weight (lb)" number input used). "<1 lb" stores
-    as 0.5 lb (that open-low-end band's representative value) - every other
-    option is already a literal whole-pound reading. Returns None for a
-    blank/unrecognized option."""
+    schema). "<1 lb" stores as 0.5 lb and "+7 lb" stores as 7.5 lb (each
+    open-ended catch-all's representative value, same convention as
+    length_in_for_slider_option()'s "<13 in"/"26+ in" below) - every other
+    option is a literal "X lb" or "X lb Y oz" reading, parsed directly.
+    Returns None for a blank/unrecognized option."""
     if not option:
         return None
-    s = str(option).strip().lower().replace("lb", "").strip()
-    if s == "<1":
+    s = str(option).strip().lower()
+    if s == "<1 lb":
         return 0.5
-    try:
-        return float(s)
-    except ValueError:
+    if s.startswith("+"):
+        m = re.match(r"\+(\d+(?:\.\d+)?)\s*lb", s)
+        return float(m.group(1)) + 0.5 if m else None
+    m = re.match(r"(\d+)\s*lb(?:\s+(\d+)\s*oz)?", s)
+    if not m:
         return None
+    lb = int(m.group(1))
+    oz = int(m.group(2)) if m.group(2) else 0
+    return round(lb + oz / 16, 4)
 
 
 def length_in_for_slider_option(option) -> Optional[float]:
