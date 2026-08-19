@@ -2,9 +2,10 @@ from core.lures import FORAGE_OPTIONS
 from core.activity_log import (
     OTHER_LABEL, DEPTH_MODES, FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS,
     HIT_TYPE_OPTIONS, LENGTH_SLIDER_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
-    WEIGHT_SLIDER_OPTIONS,
+    WEIGHT_SLIDER_OPTIONS, WEIGHT_SLIDER_TOP_LB,
     inventory_item_label, length_in_for_slider_option, lure_can_take_trailer, lure_picker_options,
     format_weight_lb_oz, parse_weight_lb_oz, weight_lb_for_slider_option,
+    nearest_weight_slider_option, nearest_length_slider_option,
 )
 
 
@@ -94,12 +95,12 @@ def test_weight_and_length_slider_vocabulary_lists_are_nonempty_and_string_only(
 def test_weight_lb_for_slider_option_under_one_lb_and_whole_pounds():
     assert weight_lb_for_slider_option("<1 lb") == 0.5
     assert weight_lb_for_slider_option("1 lb") == 1.0
-    assert weight_lb_for_slider_option("+7 lb") == 7.5
+    assert weight_lb_for_slider_option("+5 lb") == 5.5
 
 
 def test_weight_lb_for_slider_option_one_ounce_increments():
     assert weight_lb_for_slider_option("1 lb 1 oz") == round(1 + 1 / 16, 4)
-    assert weight_lb_for_slider_option("6 lb 15 oz") == round(6 + 15 / 16, 4)
+    assert weight_lb_for_slider_option("4 lb 15 oz") == round(4 + 15 / 16, 4)
 
 
 def test_weight_lb_for_slider_option_blank_or_unrecognized_returns_none():
@@ -113,18 +114,48 @@ def test_weight_lb_for_slider_option_covers_every_option():
         assert weight_lb_for_slider_option(option) is not None
 
 
-def test_weight_slider_options_span_under_1lb_to_1oz_increments_to_plus_7lb():
+def test_weight_slider_options_span_under_1lb_to_1oz_increments_to_plus_5lb():
+    assert WEIGHT_SLIDER_TOP_LB == 5
     assert WEIGHT_SLIDER_OPTIONS[0] == "<1 lb"
     assert WEIGHT_SLIDER_OPTIONS[1] == "1 lb"
     assert WEIGHT_SLIDER_OPTIONS[2] == "1 lb 1 oz"
-    assert WEIGHT_SLIDER_OPTIONS[-2] == "6 lb 15 oz"
-    assert WEIGHT_SLIDER_OPTIONS[-1] == "+7 lb"
+    assert WEIGHT_SLIDER_OPTIONS[-2] == "4 lb 15 oz"
+    assert WEIGHT_SLIDER_OPTIONS[-1] == "+5 lb"
     # Every consecutive pair of the real (non-sentinel) options should be
     # exactly 1 oz apart.
     real_options = WEIGHT_SLIDER_OPTIONS[1:-1]
     weights = [weight_lb_for_slider_option(o) for o in real_options]
     diffs = [round(b - a, 4) for a, b in zip(weights, weights[1:])]
     assert all(d == round(1 / 16, 4) for d in diffs)
+
+
+def test_nearest_weight_slider_option_snaps_below_and_above_the_concrete_range():
+    assert nearest_weight_slider_option(0.2) == "<1 lb"
+    assert nearest_weight_slider_option(0.99) == "<1 lb"
+    assert nearest_weight_slider_option(50) == "+5 lb"
+    assert nearest_weight_slider_option(4.95) == "+5 lb"  # just past 4 lb 15 oz (4.9375)
+
+
+def test_nearest_weight_slider_option_snaps_to_nearest_ounce_in_range():
+    assert nearest_weight_slider_option(1.0) == "1 lb"
+    assert nearest_weight_slider_option(1.0 + 1 / 16) == "1 lb 1 oz"
+    # Splits the difference between two adjacent 1-oz options - either
+    # neighbor is an acceptable "nearest," just confirm it's one of them.
+    assert nearest_weight_slider_option(1.0 + 0.5 / 16) in ("1 lb", "1 lb 1 oz")
+
+
+def test_nearest_weight_slider_option_handles_blank_or_garbage():
+    assert nearest_weight_slider_option(None) == "<1 lb"
+    assert nearest_weight_slider_option("not a number") == "<1 lb"
+
+
+def test_nearest_length_slider_option_snaps_below_above_and_within_range():
+    assert nearest_length_slider_option(10) == "<13 in"
+    assert nearest_length_slider_option(12.4) == "<13 in"
+    assert nearest_length_slider_option(30) == "26+ in"
+    assert nearest_length_slider_option(15.0) == "15 in"
+    assert nearest_length_slider_option(15.4) == "15 in"
+    assert nearest_length_slider_option(15.6) == "16 in"
 
 
 def test_length_in_for_slider_option_under_thirteen_and_whole_inches_and_plus():

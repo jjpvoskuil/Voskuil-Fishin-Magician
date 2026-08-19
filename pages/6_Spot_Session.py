@@ -21,6 +21,7 @@ from core.activity_log import (
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
     FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, WEIGHT_SLIDER_OPTIONS, LENGTH_SLIDER_OPTIONS,
     weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
+    nearest_weight_slider_option, nearest_length_slider_option,
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES
 from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
@@ -765,7 +766,113 @@ def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefi
 
 
 # --- Per-fish entry (used by both the active-session dialog and edit mode) --
-def _new_fish_from_form(species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed) -> dict:
+def _parse_nonneg_int(text) -> int:
+    """Parses a manual lb/oz field's typed text into a non-negative int,
+    defaulting to 0 for blank/garbage input rather than raising - same
+    fail-soft convention as every other optional numeric field in this
+    app."""
+    try:
+        v = int(str(text).strip())
+    except (TypeError, ValueError):
+        return 0
+    return max(v, 0)
+
+
+def _parse_nonneg_float(text) -> float:
+    try:
+        v = float(str(text).strip())
+    except (TypeError, ValueError):
+        return 0.0
+    return max(v, 0.0)
+
+
+def _format_number(v) -> str:
+    """Renders a number without a trailing ".0" for whole values (15.0 ->
+    "15", 15.5 -> "15.5") - used to seed the manual length field from a
+    slider-derived value without an odd-looking decimal point."""
+    v = float(v or 0)
+    return str(int(v)) if v == int(v) else str(v)
+
+
+def _weight_input(key_prefix: str) -> float:
+    """Punch-list #31: a 1-oz-increment weight slider
+    (core.activity_log.WEIGHT_SLIDER_OPTIONS) plus manual lb/oz fields to
+    its right, two-way synced - moving the slider updates the manual
+    fields to match, and typing into either manual field snaps the slider
+    to its nearest matching position
+    (core.activity_log.nearest_weight_slider_option()). A slider alone, 1
+    oz at a time across several pounds, turned out too easy to overshoot
+    by feel/touch on the water - the manual fields are the real source of
+    truth for the value this returns (full 1-oz precision, not limited to
+    the slider's own <1 lb floor or +N lb ceiling); the slider is a fast,
+    rough starting point, not the final say. Typing an oz value of 16+
+    carries over into lb automatically (e.g. "20" oz becomes 1 lb 4 oz),
+    so there's no need to do that arithmetic by hand. Returns the resolved
+    weight in decimal pounds (0.0 if both fields are left at 0)."""
+    slider_key = f"{key_prefix}_slider"
+    lb_key = f"{key_prefix}_lb"
+    oz_key = f"{key_prefix}_oz"
+
+    def _slider_changed():
+        lb, oz = divmod(round((weight_lb_for_slider_option(st.session_state.get(slider_key)) or 0) * 16), 16)
+        st.session_state[lb_key] = str(lb)
+        st.session_state[oz_key] = str(oz)
+
+    def _manual_changed():
+        lb = _parse_nonneg_int(st.session_state.get(lb_key))
+        oz = _parse_nonneg_int(st.session_state.get(oz_key))
+        lb, oz = lb + oz // 16, oz % 16
+        st.session_state[lb_key] = str(lb)
+        st.session_state[oz_key] = str(oz)
+        st.session_state[slider_key] = nearest_weight_slider_option(lb + oz / 16)
+
+    scol, lcol, ocol = st.columns([3, 1, 1])
+    scol.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=slider_key, on_change=_slider_changed)
+    if lb_key not in st.session_state:
+        # First render of this key prefix - seed the manual fields from the
+        # slider's own default ("<1 lb" -> 0 lb 8 oz) so nothing changes if
+        # the angler never touches weight at all, same as before this round.
+        _seed_lb, _seed_oz = divmod(round((weight_lb_for_slider_option(st.session_state[slider_key]) or 0) * 16), 16)
+        st.session_state[lb_key] = str(_seed_lb)
+        st.session_state[oz_key] = str(_seed_oz)
+    lcol.text_input("lb", key=lb_key, on_change=_manual_changed)
+    ocol.text_input("oz", key=oz_key, on_change=_manual_changed)
+
+    lb = _parse_nonneg_int(st.session_state.get(lb_key))
+    oz = _parse_nonneg_int(st.session_state.get(oz_key))
+    return round(lb + oz / 16, 4)
+
+
+def _length_input(key_prefix: str) -> float:
+    """Same idea as _weight_input() above but for length: the
+    LENGTH_SLIDER_OPTIONS slider plus one manual inches field to its
+    right, two-way synced. Punch-list #31 only asked for the manual field
+    here, not a wider slider range - length wasn't reported as fiddly the
+    way weight was, so LENGTH_SLIDER_OPTIONS itself is unchanged. The
+    manual field is still the real source of truth for the returned value
+    (e.g. it accepts a half-inch reading the whole-inch slider alone
+    can't represent)."""
+    slider_key = f"{key_prefix}_slider"
+    in_key = f"{key_prefix}_manual"
+
+    def _slider_changed():
+        st.session_state[in_key] = _format_number(length_in_for_slider_option(st.session_state.get(slider_key)))
+
+    def _manual_changed():
+        v = _parse_nonneg_float(st.session_state.get(in_key))
+        st.session_state[in_key] = _format_number(v)
+        st.session_state[slider_key] = nearest_length_slider_option(v)
+
+    scol, icol = st.columns([3, 1])
+    scol.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=slider_key, on_change=_slider_changed)
+    if in_key not in st.session_state:
+        st.session_state[in_key] = _format_number(length_in_for_slider_option(st.session_state[slider_key]))
+    icol.text_input("in", key=in_key, on_change=_manual_changed)
+
+    return _parse_nonneg_float(st.session_state.get(in_key))
+
+
+def _new_fish_from_form(species_label, species_other, weight_lb, length_in, hit_types, retrieve_style, retrieve_speed) -> dict:
     species_final = (
         species_other.strip() if (species_label == "Other (type in species)" and species_other.strip())
         else species_label
@@ -774,8 +881,8 @@ def _new_fish_from_form(species_label, species_other, weight_option, length_opti
         "species": species_final,
         "species_other": species_other or None,
         "count": 1,
-        "weight_lb": weight_lb_for_slider_option(weight_option),
-        "length_in": length_in_for_slider_option(length_option),
+        "weight_lb": weight_lb or None,
+        "length_in": length_in or None,
         "hit_types": hit_types,
         "retrieve_speed": retrieve_speed,
         "retrieve_style": retrieve_style,
@@ -977,8 +1084,8 @@ def _fish_entry_dialog(spot_id: str, lure_index: int):
     if species_label == "Other (type in species)":
         species_other = st.text_input("Species (type it in)", key=f"fish_species_other_{spot_id}_{lure_index}_{dseq}")
 
-    weight_option = st.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=f"fish_weight_{spot_id}_{lure_index}_{dseq}")
-    length_option = st.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=f"fish_length_{spot_id}_{lure_index}_{dseq}")
+    weight_lb_value = _weight_input(f"fish_weight_{spot_id}_{lure_index}_{dseq}")
+    length_in_value = _length_input(f"fish_length_{spot_id}_{lure_index}_{dseq}")
     hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"fish_hit_types_{spot_id}_{lure_index}_{dseq}")
 
     rc1, rc2 = st.columns(2)
@@ -988,7 +1095,7 @@ def _fish_entry_dialog(spot_id: str, lure_index: int):
     fc1, fc2 = st.columns(2)
     if fc1.button("✅ Record", type="primary", width='stretch', key=f"fish_record_{spot_id}_{lure_index}_{dseq}"):
         fish_record = _new_fish_from_form(
-            species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed,
+            species_label, species_other, weight_lb_value, length_in_value, hit_types, retrieve_style, retrieve_speed,
         )
         _record_fish(spot_id, lure_index, fish_record)
         st.session_state[dseq_key] = dseq + 1
@@ -1293,15 +1400,15 @@ if editing_trip is not None:
         species_other = ""
         if species_label == "Other (type in species)":
             species_other = st.text_input("Species (type it in)", key=f"edit_new_fish_species_other_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        weight_option = st.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=f"edit_new_fish_weight_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        length_option = st.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=f"edit_new_fish_length_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        weight_lb_value = _weight_input(f"edit_new_fish_weight_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        length_in_value = _length_input(f"edit_new_fish_length_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"edit_new_fish_hit_types_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         rc1, rc2 = st.columns(2)
         retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"edit_new_fish_style_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         retrieve_speed = rc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"edit_new_fish_speed_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         if st.button("Add fish", key=f"edit_new_fish_add_{edit_trip_id}_{spot['spot_id']}_{_efseq}", type="primary", width='stretch'):
             edit_fish_records.append(_new_fish_from_form(
-                species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed,
+                species_label, species_other, weight_lb_value, length_in_value, hit_types, retrieve_style, retrieve_speed,
             ))
             st.session_state[_edit_fish_key] = edit_fish_records
             st.session_state[_edit_fish_seq_key] = _efseq + 1

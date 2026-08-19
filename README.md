@@ -153,12 +153,19 @@ this repo that can override it on this hosting.
   view**: one button per active lure (each showing a running catch count) alongside
   its own **"🔄 Change"** button, plus a collapsed "Retired lures" section for
   anything you've already swapped out. Land a fish? Tap the lure you were using - a
-  popup opens with a weight slider (1 oz increments from "<1 lb" up through "6 lb 15
-  oz", then an open-ended "+7 lb"), a length slider ("<13 in" through "26+ in"), a
-  species dropdown (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or
-  type in your own), a multiple-choice "Type of hit" field (Hard hit/Light hit/Double
-  tap/Swallowed/Fouled/Surface hit - a strike can genuinely be more than one of
-  these), and retrieve style/speed. **"✅ Record"** saves that catch immediately (it's
+  popup opens with a weight slider (1 oz increments from "<1 lb" up through "4 lb 15
+  oz", then an open-ended "+5 lb") with manual **lb**/**oz** text fields right next to
+  it, and a length slider ("<13 in" through "26+ in") with its own manual **in** text
+  field. Both pairs are two-way synced: dragging the slider updates its manual fields
+  to match, and typing into a manual field snaps the slider to its nearest position -
+  the 1-oz slider alone turned out too easy to overshoot by feel on the water, so the
+  manual fields are the real precision entry (typing an ounce value of 16 or more
+  carries over into pounds automatically, e.g. "20" oz becomes 1 lb 4 oz), with the
+  slider as a fast rough starting point. The dialog also has a species dropdown
+  (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or type in your own), a
+  multiple-choice "Type of hit" field (Hard hit/Light hit/Double tap/Swallowed/Fouled/
+  Surface hit - a strike can genuinely be more than one of these), and retrieve
+  style/speed. **"✅ Record"** saves that catch immediately (it's
   written and pushed to that lure's trip-log row right away, not batched until the
   session ends) and reopens a blank form so you're straight back to fishing; the
   button's catch count updates, and an expander under each lure lists everything
