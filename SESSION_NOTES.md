@@ -5031,6 +5031,92 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     punch-list #28 and marked "Done" - no open punch-list items remain as
     of this entry.
 
+90. **Punch-list #29: an in-progress Spot Session "reset" after a real-world
+    field test, following a dropped/reconnected connection.** Ask (verbatim,
+    reported after actually fishing with the redesigned page): "I put in the
+    current conditions, pick lures and started logging fish. However, if
+    there was a few minute delay between fish and I clicked the lure button
+    to enter fish, it would go back to a session start again. It would have
+    the conditions and same spot still there from the prior session but it
+    then showed lure suggestions and below that, the lures I selected were
+    gone... my cell coverage is spotty in some areas that I fish, so maybe it
+    dropped out. Either way, if it does drop out, it should just continue as
+    an offline app until a connection is restored and then the data captured
+    offline can sync up."
+
+    Root cause: `active_session_{spot_id}` (which lures are active/tappable,
+    right now) has only ever lived in `st.session_state` - in-memory on the
+    server, tied to one browser session. Spotty cell coverage dropping the
+    WebSocket, a phone locking its screen mid-session (iOS/Android commonly
+    suspend a backgrounded tab's JS entirely rather than just pausing it,
+    tearing the connection down for real), or the server itself restarting
+    all wipe that in-memory state, and the next successful reconnect gets
+    treated as a genuinely new browser session with empty `session_state` -
+    matching the report exactly: spot/conditions rode along fine (those
+    already travel via `st.query_params`, see entry 34), but the active-lure
+    buttons vanished and the page fell back to the pre-session builder.
+
+    True "continue offline, sync later" isn't achievable on this platform:
+    every interaction in a Streamlit app - clicking a button, opening a
+    dialog, anything - is a live round trip to the Python server; there's no
+    offline-capable client-side code, no service worker, nothing that could
+    keep working with zero connectivity short of rearchitecting this as a
+    different kind of application entirely (a native app or a from-scratch
+    PWA with local storage + background sync) - out of scope for a
+    Streamlit-based tool. Explained this limitation directly rather than
+    promising something the stack can't do.
+
+    What IS achievable, and turned out to close nearly the whole practical
+    gap: no data was ever actually being lost in the first place. Every
+    lure added to a session and every fish caught already gets written to
+    `data/trip_log.csv` immediately (`append_trip()`/`update_trip()` +
+    push, right in `_add_lure_to_active_session()`/`_record_fish()`/the
+    Start Session handler - see their own docstrings, this was true well
+    before this round). The only thing that was ephemeral was the BROWSER'S
+    knowledge that a session was in progress. So the fix rebuilds that view
+    from disk instead of trying to prevent the disconnect: new
+    `_open_session_rows()`/`_reconstruct_active_session()` in
+    `pages/6_Spot_Session.py`, hooked in right where `active_session_{spot_id}`
+    is read - if it's missing, look for today's trip rows at this spot that
+    are still "open" (no `lure_end_time` yet) before falling through to the
+    pre-session builder, and rebuild the exact same active-session shape
+    from them if found. Sessions are grouped by their shared
+    `conditions["start_time"]` (the one value every lure in a session
+    carries unchanged, captured once at Start Session) since there's no
+    explicit session id stored anywhere - a properly `⏹ End Session`-ed
+    group has every row's `lure_end_time` stamped and is correctly left
+    alone (verified this specific negative case too, not just the recovery
+    path). A one-time "Reconnected - picked this session back up..." info
+    banner (popped from session_state after one render, so it doesn't
+    nag on every rerun) tells the angler what happened. One known,
+    documented gap: a persisted row never recorded which inventory item_id
+    a lure was, only its display label, so a reconstructed lure's item_id
+    is always `None` - the "already added" dedupe check in
+    `_add_lure_to_active_session()` won't catch re-picking the exact same
+    inventory item after a reconnect (shows up as a harmless second row,
+    not data loss - clean up manually via Trip History if it happens).
+
+    Verification: full suite still 312 passing (all page-level logic, no
+    core/ changes, consistent with this page's existing test-coverage
+    pattern). Two scratch `AppTest` walkthroughs against real spot/data:
+    (1) start a session with one lure, directly mutate that lure's saved
+    row to simulate "a fish was already landed" (independent of any browser
+    session, exactly like `_record_fish()` itself would have left it),
+    then point a BRAND NEW `AppTest` instance (genuinely fresh
+    `session_state`, simulating the reconnect) at the same spot - confirmed
+    it reconstructs the in-progress session with the correct active lure
+    AND its already-logged fish intact, shows the header/banner instead of
+    the pre-session builder (asserted no "Start Session" button rendered),
+    and that End Session from that reconstructed instance still works
+    correctly with no duplicate trip rows created; (2) start and PROPERLY
+    end a session, then load a fresh instance at the same spot/date and
+    confirm it does NOT get resurrected as "in progress" - only a genuinely
+    open session should ever rebuild. Also ran the standing full-page smoke
+    pass across the entry point and all 7 pages, clean. `data/trip_log.csv`
+    (the only file this touched) confirmed reverted to byte-identical
+    (`md5sum` + `git checkout`) after every scratch run. Logged as
+    punch-list #29 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -5256,6 +5342,24 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   there's no password. Fine for this app's private, small-shared-group
   deployment; would need real logins (`st.login()`/OIDC, the option
   declined this round) if that ever stops being true.
+- (entry 90) This app cannot work with zero connectivity - every
+  interaction is a live round trip to the Python server, by Streamlit's
+  own architecture, so "keep working while fully offline" isn't achievable
+  without rearchitecting this as a different kind of app entirely (native,
+  or a from-scratch PWA with local storage + background sync). What
+  entry 90 actually fixed is the practical consequence anglers hit in the
+  field - a dropped/reconnected session no longer loses track of an
+  in-progress Spot Session, since it's rebuilt from already-saved data. If
+  the connection is down at the exact moment a button is tapped, that tap
+  itself still just fails/spins the same as any web app would - there's no
+  local queueing of an action taken while offline.
+- (entry 90) A session reconstructed after a reconnect can't recover which
+  inventory item_id a lure was (only its saved display label - `item_id`
+  was never itself written to disk) - re-picking that same inventory item
+  again after a reconnect won't be caught by the "already added" dedupe
+  check the way it would in an unbroken session. Shows up as a harmless
+  extra row for the same lure, not lost data; clean up via Trip History if
+  it ever happens.
 
 ## Operating notes
 
