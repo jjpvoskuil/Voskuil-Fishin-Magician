@@ -1111,7 +1111,21 @@ def _fish_entry_dialog(spot_id: str, lure_index: int):
 
     weight_lb_value = _weight_input(f"fish_weight_{spot_id}_{lure_index}_{dseq}")
     length_in_value = _length_input(f"fish_length_{spot_id}_{lure_index}_{dseq}")
-    hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"fish_hit_types_{spot_id}_{lure_index}_{dseq}")
+    # Punch-list #33: st.pills instead of st.multiselect - a multiselect's
+    # option list opens in a floating dropdown that, on a phone, was
+    # reported to cut off the last option ("Surface hit") with no way to
+    # scroll down to it. Pills render all options as always-visible,
+    # directly tappable chips (wrapping onto a second line on a narrow
+    # screen instead of hiding anything behind a popover), which sidesteps
+    # that failure mode entirely rather than trying to patch the dropdown's
+    # scroll behavior. selection_mode="multi" keeps the same "pick any
+    # number of these" behavior and still returns a plain list, so nothing
+    # downstream (_new_fish_from_form, the ", ".join(...) display bit)
+    # needed to change.
+    hit_types = st.pills(
+        "Type of hit", HIT_TYPE_OPTIONS, selection_mode="multi",
+        key=f"fish_hit_types_{spot_id}_{lure_index}_{dseq}",
+    )
 
     rc1, rc2 = st.columns(2)
     retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"fish_retrieve_style_{spot_id}_{lure_index}_{dseq}")
@@ -1454,7 +1468,12 @@ if editing_trip is not None:
             species_other = st.text_input("Species (type it in)", key=f"edit_new_fish_species_other_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         weight_lb_value = _weight_input(f"edit_new_fish_weight_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         length_in_value = _length_input(f"edit_new_fish_length_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"edit_new_fish_hit_types_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        # Punch-list #33: st.pills, same reasoning as _fish_entry_dialog's
+        # own "Type of hit" field above - see that call site's comment.
+        hit_types = st.pills(
+            "Type of hit", HIT_TYPE_OPTIONS, selection_mode="multi",
+            key=f"edit_new_fish_hit_types_{edit_trip_id}_{spot['spot_id']}_{_efseq}",
+        )
         rc1, rc2 = st.columns(2)
         retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"edit_new_fish_style_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
         retrieve_speed = rc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"edit_new_fish_speed_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
@@ -1659,7 +1678,11 @@ else:
     )
 
     st.divider()
-    with st.expander("Suggestions for right now", expanded=True):
+    # Punch-list #33: starts collapsed now (was expanded=True) - the angler's
+    # own ask, so the score/lure-suggestion block doesn't take up the whole
+    # screen above the actual "Lures for this session" picker every time this
+    # page loads; still one tap away whenever it's actually wanted.
+    with st.expander("Suggestions for right now", expanded=False):
         m1, m2 = st.columns([1, 2])
         m1.metric(
             f"{_preview_segment} activity score", f"{score_result.score}/10",

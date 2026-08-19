@@ -125,8 +125,9 @@ this repo that can override it on this hosting.
   shows), so there's normally nothing to type unless what you're actually seeing
   differs from the forecast - every field stays a normal, freely overridable widget
   either way, and whatever you've entered sticks around if you navigate away and back.
-  Below that, a live **"Suggestions for right now"** panel shows the activity score
-  (hover the ⓘ for the full factor-by-factor breakdown) and the same lure/color
+  Below that, a live **"Suggestions for right now"** panel (collapsed by default -
+  expand it whenever you actually want to see it) shows the activity score (hover
+  the ⓘ for the full factor-by-factor breakdown) and the same lure/color
   recommendation engine the 7-Day Forecast page uses, scored against the current
   moment as a rolling preview - no button to click, it just updates as you adjust
   conditions. Each recommended lure you already own shows a **"+ Add to session"**
@@ -164,7 +165,9 @@ this repo that can override it on this hosting.
   slider as a fast rough starting point. The dialog also has a species dropdown
   (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or type in your own), a
   multiple-choice "Type of hit" field (Hard hit/Light hit/Double tap/Swallowed/Fouled/
-  Surface hit - a strike can genuinely be more than one of these), and retrieve
+  Surface hit - a strike can genuinely be more than one of these) shown as tappable
+  pill buttons rather than a dropdown, so every option is always visible and reachable
+  on a phone with nothing to scroll past, and retrieve
   style/speed. **"✅ Record"** saves that catch immediately (it's
   written and pushed to that lure's trip-log row right away, not batched until the
   session ends) and reopens a blank form so you're straight back to fishing; the
