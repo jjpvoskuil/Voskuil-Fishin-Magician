@@ -38,15 +38,28 @@ TOKEN_URL = "https://www.cabelas.com/api/v2/10651/prod/coveo/getCoveoToken"
 SEARCH_URL = "https://platform.cloud.coveo.com/rest/search/v2"
 COVEO_ORG_ID = "bassproshopsproductionl92epymr"
 
-# A real desktop-browser User-Agent - both endpoints sit behind Cabela's/
-# Coveo's normal bot-mitigation, and an obvious non-browser UA (e.g.
-# Python's default "python-requests/...") is the kind of thing that gets
-# filtered before the request is even considered.
+# A real desktop-browser User-Agent (plus a few other headers a real
+# browser tab would always send: Accept, Accept-Language, Referer/Origin
+# pointing back at cabelas.com) - both endpoints sit behind Cabela's/
+# Coveo's normal bot-mitigation, and an obvious non-browser request (e.g.
+# Python's default "python-requests/..." UA, or missing Referer/Origin) is
+# the kind of thing that gets filtered before the request is even
+# considered. Confirmed via a real browser (punch-list #21 investigation)
+# that both endpoints work fine and return real product data when called
+# exactly this way from cabelas.com itself - so if this app's own
+# server-side calls still get blocked, it's most likely something these
+# headers can't fix (e.g. TLS/network-level fingerprinting of the
+# underlying HTTP client, not just header content) - see search_lures()'s
+# fails-soft contract below for how that's handled either way.
 _BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.cabelas.com/",
+    "Origin": "https://www.cabelas.com",
 }
 REQUEST_TIMEOUT_S = 10
 
