@@ -209,17 +209,28 @@ def render_cabelas_suggestions(
     cart" isn't possible from a server-side app with no access to the
     angler's own logged-in Cabela's session (punch-list #14).
 
-    Falls back to `empty_caption` (no cards at all) if the lookup finds
+    Falls back to `empty_caption` (no product cards) if the lookup finds
     nothing or fails - search_lures() fails soft (returns []) on any
     problem, same "degrade quietly" contract every external source in this
     app follows. Callers own both caption strings since the same "nothing
     found"/"found something" moment reads differently in different
     contexts (a specific lure recommendation vs. a general inventory gap) -
     shared here (punch-list #8's original block, and #14's gap-filling
-    section) purely to avoid duplicating the card-rendering markup itself."""
+    section) purely to avoid duplicating the card-rendering markup itself.
+
+    Punch-list #21: even in the fallback case, still show a "Search
+    Cabela's" link for `query` - confirmed live that Cabela's/Coveo's
+    search API (which needs a server-side lookup to work at all) can fail
+    from Streamlit Community Cloud's own servers while working fine from a
+    real browser on the same network (the same kind of server-side-only
+    network restriction already seen with the USACE water-quality site) -
+    search_page_url() is a pure link-building function with no network
+    call, so it's always safe to show regardless of whether the live
+    product lookup itself succeeded."""
     suggestions = get_cabelas_suggestions(query, num_results=num_results)
     if not suggestions:
         st.caption(empty_caption)
+        st.markdown(f"[Search Cabela's]({search_page_url(query)})")
         return
     st.caption(found_caption)
     cols = st.columns(len(suggestions))

@@ -295,7 +295,14 @@ this repo that can override it on this hosting.
   per lure name so the 7-Day Forecast page's ~28 recommendation calls (one per
   segment per day) don't each trigger a live lookup for the same handful of repeating
   lure names. Falls back to the plain pick-up note if Cabela's has no match or can't
-  be reached, same fail-soft behavior as everywhere else this integration is used.
+  be reached, same fail-soft behavior as everywhere else this integration is used -
+  that fallback note always includes a "Search Cabela's" link for the lure category
+  even when the live product lookup itself fails (punch-list #21), since that link is
+  just a URL (no network call needed) and Cabela's/Coveo's search API has been
+  observed to work from a real browser while failing from this app's own
+  server-side requests (the same kind of server-side-only network restriction seen
+  with the USACE water-quality integration) - see "How the Cabela's lookup works"
+  below.
 
 ## How the model works (and its limits)
 
@@ -598,6 +605,23 @@ that module fails soft (returns `[]`, never raises) specifically so a lookup fai
 just falls back to "no matches found" in the UI and the manual "Add a lure" form still
 works - it never breaks the page. If scanning stops finding matches, that module is
 the first place to check.
+
+**Punch-list #21 finding:** confirmed by calling both endpoints directly from a real
+browser that Cabela's/Coveo's search API itself still works exactly as this module
+expects (same token shape, same request/response shape, real product data back) - but
+the live 7-Day Forecast and Spot Session pages were showing no suggestions at all in
+this app's actual deployment. That means the *lookup* is fine but this app's own
+server-side requests to it (from Streamlit Community Cloud) are apparently being
+blocked or filtered somewhere between the two - the exact same "works from a browser,
+fails from this app's own server" pattern already seen with the USACE water-quality
+site. `_BROWSER_HEADERS` now also sends `Accept`/`Accept-Language`/`Referer`/`Origin`
+headers a real browser tab would send (previously only `User-Agent`) as a best-effort
+improvement, but if the real cause is TLS/network-level fingerprinting of the
+underlying HTTP client rather than header content, no header change fixes it - which
+is why the "not in your inventory" fallback (see above) now always shows a working
+"Search Cabela's" link regardless of whether the live product lookup succeeds, so
+there's always something useful there even if this integration stays blocked
+indefinitely.
 
 The photo-identify step (`core/lure_vision.py`) is deliberately kept separate from the
 product lookup - it only reads whatever's legible on the package well enough to build
