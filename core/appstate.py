@@ -7,6 +7,7 @@ from .lake_level import fetch_lake_level, fetch_lake_level_history
 from .lake_water_quality import fetch_surface_water_quality
 from .water_quality_log import parsed_log as read_water_quality_log
 from .cabelas_lookup import search_lures
+from .cabelas_picks_cache import get_cached_picks
 from .spots import load_spots
 from .storage import read_all_trips
 from .calibration import calibrate_weights
@@ -67,10 +68,24 @@ def get_spots():
 # same handful of lure names repeating over and over. A day's worth of TTL
 # is plenty since this is "worth considering buying," not a live price
 # feed - Cabela's own inventory/pricing doesn't need to be second-fresh
-# here. Same "fails soft, returns []" contract as search_lures() itself.
+# here.
+#
+# Punch-list #22: falls back to a curated data/cabelas_picks_cache.csv
+# (core.cabelas_picks_cache.get_cached_picks) whenever the live lookup
+# comes back empty - confirmed the live Cabela's/Coveo search can fail from
+# this app's own deployed server while working fine from a real browser
+# (see core/cabelas_lookup.py and core/cabelas_picks_cache.py's own
+# docstrings for the full story), so an empty live result here isn't
+# necessarily "no matches" - it might just be this app's server-side calls
+# being blocked. Returns (suggestions, is_live) instead of a plain list now
+# so core.ui.render_cabelas_suggestions can be honest with the angler about
+# which one they're looking at.
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
 def get_cabelas_suggestions(query: str, num_results: int = 2):
-    return search_lures(query, num_results=num_results)
+    live = search_lures(query, num_results=num_results)
+    if live:
+        return live, True
+    return get_cached_picks(query)[:num_results], False
 
 
 @st.cache_data(ttl=60 * 5)

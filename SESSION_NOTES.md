@@ -4359,6 +4359,169 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and after every run; scratch scripts deleted afterward. Logged this ask
     as punch-list item #21 and marked it "Done."
 
+84. **Punch-list #22: try to make the live Cabela's lookup actually work in
+    production, and add a curated fallback as a safety net either way.**
+    Ask (page: 7-Day Forecast/Spot Session, direct follow-up to entry 83):
+    "Everything now comes up as search cabelas....can the app actually
+    search cabelas automatically and populate with the 2 best options
+    available?" - after presenting two options (try a TLS-impersonation
+    fix server-side, and/or build a curated fallback cache), the angler
+    said: "try option a and set up B as a safety net."
+
+    First ruled out a third option before starting: could this app fetch
+    Cabela's/Coveo directly from the *browser* (client-side JS embedded in
+    the page) instead of server-side, sidestepping the block entirely?
+    Tested live via `mcp__claude-in-chrome__javascript_tool` - a `fetch()`
+    to Cabela's token endpoint from this app's own deployed domain
+    (`https://voskuil-fishin-magician.streamlit.app`) failed outright
+    ("Failed to fetch"), while the identical call from `cabelas.com`
+    itself (same technique used in entry 83) succeeded - confirming
+    Cabela's endpoint is CORS-restricted to their own origin, so a
+    client-side call from this app's own page can never work regardless of
+    what's blocking the server-side path. Ruled out, moved on.
+
+    **Option A (try to fix the live lookup):** the leading theory from
+    entry 83 was that Cabela's/Coveo's bot-mitigation checks the actual
+    TLS handshake, not just the `User-Agent` header - a plain `requests`/
+    urllib3 connection has a completely different TLS fingerprint from a
+    real Chrome browser no matter what headers are set. Installed
+    `curl_cffi` (a `requests`-API-compatible HTTP client backed by a
+    patched libcurl that can impersonate real browsers' TLS/JA3
+    fingerprints) and swapped it in for both of `core/cabelas_lookup.py`'s
+    live calls (`_get_token()`'s GET, `search_lures()`'s POST), passing
+    `impersonate="chrome124"` (matching the Chrome version already claimed
+    in `_BROWSER_HEADERS`' User-Agent). curl_cffi's `get`/`post` functions
+    are close enough to plain `requests`' that the rest of the module's
+    logic (`.raise_for_status()`, `.json()`, try/except fails-soft
+    contract) needed no changes. Added `IMPERSONATE_BROWSER = "chrome124"`
+    as a named constant and a dedicated test
+    (`test_search_lures_impersonates_a_real_browser_tls_fingerprint`)
+    asserting both calls actually pass that kwarg through - the point of
+    this change, not just an implementation detail. Existing tests'
+    `_fake_get`/`_fake_post` stand-ins needed `**kwargs` added to their
+    signatures (they were failing silently before this was caught - a
+    `TypeError` for the new unexpected `impersonate` kwarg was getting
+    swallowed by `search_lures()`'s own broad `except Exception: return
+    []`, so the test failure showed up as "0 results" rather than an
+    obvious error). Documented plainly in the module's own docstring that
+    this is still not a guaranteed fix - if Cabela's/Coveo is blocking by
+    IP/network reputation rather than fingerprint, no amount of TLS or
+    header spoofing gets around that, which is exactly why option B exists
+    regardless of whether this works. This sandbox's own network can't
+    reach `cabelas.com` at all (confirmed since entry 83), so whether this
+    actually fixes production can only be confirmed by the angler checking
+    the live app after this deploys.
+
+    **Option B (curated fallback cache, the safety net):** `LureBlock.name`
+    (what `core.ui.render_cabelas_suggestions()` is ever queried with, for
+    this specific punch-list #8 use case) only ever comes from
+    `core.lures.LURE_PROFILES`' 20 fixed `"name"` values - a small, closed
+    vocabulary, not arbitrary text (confirmed via `grep`) - which makes a
+    pre-captured cache actually tractable, unlike the Lure Inventory page's
+    "Scan a lure" flow (`core.cabelas_lookup.search_lures()` called
+    directly there with an arbitrary vision-model-guessed query), which
+    intentionally does NOT get this fallback and keeps its existing
+    "no matches -> manual Add a lure form" behavior unchanged.
+
+    Captured real product data for all 20 categories via the same
+    real-browser technique validated in entry 83 (`javascript_tool`
+    executing on `cabelas.com`'s own origin, fetching a token then
+    querying Coveo search directly) - large batch JS output kept hitting
+    the tool's truncation limit, so results were staged into `window.*`
+    variables in the page's own JS context and paged out in small chunks
+    across several calls rather than requested all at once. The obvious
+    category-name-as-query approach came back empty for 7 of the 20
+    categories ("Texas-Rigged Worm", "Wacky-Rigged Senko", etc. aren't how
+    products are actually named/tagged in Cabela's catalog) - retried
+    those with more natural search terms ("Ribbon Tail Worm", "Senko
+    Worm", "Finesse Worm", etc.) until all 20 had 2 real matches. Two
+    "Blade Bait" picks (SteelShad Original/Mini Series) came back with a
+    broken `ec_name` field on Bass Pro's own catalog side - literally the
+    literal string `"++STEELSHAD ORIGINAL SERIES"`, quotes included, not a
+    truncation or parsing bug on this app's end (confirmed by trying a
+    second, differently-worded blade-bait query and a completely different
+    brand/SKU, which had the exact same `"++...++"`-wrapped placeholder
+    pattern) - real SKU/brand/price, just an unpopulated product-name
+    template, so those two descriptions were manually cleaned up to
+    something readable rather than shown verbatim or dropped. Confirmed
+    the image URL Coveo returns (`fullimage`) is a deterministic template
+    keyed only by SKU (`.../fn_select:jq:.../{sku}.json`) by comparing
+    several real responses, so the cache stores that reconstructed URL
+    rather than needing 40 separate network round-trips.
+
+    New `data/cabelas_picks_cache.csv` (40 rows: 20 categories x 2 picks,
+    columns `category,rank,sku,brand,description,price,image_url,
+    captured_at`) and new `core/cabelas_picks_cache.py`
+    (`get_cached_picks(category)`, an exact-match lookup returning results
+    in the same dict shape `core.cabelas_lookup.map_result()` produces, so
+    callers can treat live and cached results identically) - same
+    small-CSV-plus-thin-reader-module pattern as `core/water_quality_log.py`
+    (entry 68-ish), including the same "missing file -> [] rather than
+    raising" fails-soft contract.
+
+    Wired in at `core.appstate.get_cabelas_suggestions()`: tries the live
+    `search_lures()` first, falls back to `get_cached_picks()` if that
+    comes back empty, and now returns `(suggestions, is_live)` instead of
+    a plain list - a breaking change to that function's return shape, but
+    it has exactly one caller (`core.ui.render_cabelas_suggestions()`,
+    confirmed via `grep` - the Lure Inventory "Scan a lure" flow calls
+    `search_lures()` directly, untouched by this change), which now
+    unpacks the tuple and, when `is_live` is `False`, adds a caption
+    ("🛈 Cabela's live search couldn't be reached just now - showing picks
+    saved from a previous lookup...") so the angler always knows whether
+    what's on screen is a live check or a saved pick - same "be honest
+    about what's live vs. saved" pattern as entry 79's USACE fallback note.
+
+    Test coverage: new `tests/test_cabelas_picks_cache.py` (6 cases) -
+    missing file, unrecognized category, rank-sorted output in the mapped
+    dict shape, skipping rows with unparseable rank/price, blank-query
+    handling, and (importantly) a coverage guard that loads the real
+    shipped `data/cabelas_picks_cache.csv` and asserts every single
+    `core.lures.LURE_PROFILES` category actually has 2 real picks with a
+    non-empty SKU/description - this is the test that would catch a future
+    `LURE_PROFILES` addition silently losing its fallback coverage. New
+    `tests/test_appstate.py` (first-ever test file for that module, 4
+    cases) covers `get_cabelas_suggestions()`'s live-hit/live-miss-falls-
+    back-to-cache/both-miss/cap-to-num_results branches by monkeypatching
+    `appstate.search_lures`/`appstate.get_cached_picks` directly - confirmed
+    the `@st.cache_data`-wrapped function is still directly callable
+    outside a full Streamlit runtime (with a "no runtime found" warning,
+    same as every other scratch `AppTest`-adjacent check this session has
+    made), and used a distinct query string per test case specifically to
+    avoid the 24h cache silently returning a stale result from an earlier
+    test's monkeypatch. `python3 -m pytest tests/ -q` now passes at 276
+    (266 + 10 new: 6 cache + 4 appstate).
+
+    End-to-end scratch verification (not committed): monkeypatched
+    `appstate.search_lures` to always return `[]` (simulating the live
+    lookup failing exactly as confirmed in production) and rendered the
+    real "Walking Topwater (Spook-style)" block - the exact block the
+    angler's original screenshot-equivalent bug report reproduced against
+    in entry 83 - through the real, unmodified `render_cabelas_suggestions()`.
+    Confirmed it now shows 2 real Livingston Lures product cards (photo,
+    brand, description, price, working per-product "Search Cabela's" link)
+    plus the "showing picks saved from a previous lookup" caption, instead
+    of the plain empty-inventory text the angler originally reported. Also
+    ran the standard `AppTest` smoke pass across every page reachable in
+    this sandbox (same set as entries 73-83) - all still render with no
+    exception; confirmed (as already known/documented) that
+    `pages/1_7_Day_Forecast.py` itself still can't be smoke-tested directly
+    in this sandbox (Open-Meteo is blocked here, unrelated to this change).
+    `data/trip_log.csv`/`data/segment_score_freeze.csv`/
+    `data/water_quality_log.csv`/`data/lure_inventory.csv` confirmed
+    byte-identical (`md5sum`) before and after every run; scratch scripts
+    deleted afterward.
+
+    `requirements.txt` gained `curl_cffi>=0.7` (ships a compiled
+    libcurl-impersonate binding via a manylinux wheel, not a pure-Python
+    package - a small deploy risk worth naming, though the wheel installed
+    cleanly in this sandbox and manylinux wheels are broadly compatible).
+    Logged this ask as punch-list item #22 and marked it "Done" - but
+    flagged to the angler that Option A's actual effectiveness in
+    production can only be confirmed by checking the live app after
+    deploy, since this sandbox can't reach Cabela's at all to verify it
+    directly.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
