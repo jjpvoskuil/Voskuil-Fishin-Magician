@@ -101,6 +101,77 @@ def test_score_week_returns_seven_days_in_range():
             assert 1 <= seg.score <= 10
 
 
+def _fake_bundle_with_afternoon_front(days=9):
+    # Punch-list #35: pressure holds flat at 1015 hPa everywhere EXCEPT it
+    # steps down to 1012 hPa starting at 3:00 PM today (a front arriving
+    # this afternoon) and stays down from then on - a real front's pressure
+    # signal is a step/slope change at a specific TIME, not the same trend
+    # at every hour of the day. This lets a test tell apart "compute the
+    # trend once at noon, reuse it everywhere" (would show flat/near-zero
+    # for the whole day, since noon is still before the front) from
+    # "compute each segment's trend anchored at its own time" (Dawn/Morning/
+    # Midday should be ~flat; Afternoon/Dusk/Night, whose midpoints fall at
+    # or after 3 PM, should show the front's real -3 hPa drop).
+    today = date.today()
+    front_time = datetime(today.year, today.month, today.day, 15, 0)
+    t0 = datetime(today.year, today.month, today.day) - timedelta(days=1)
+    times, pres, cloud, wind, wdir, pprob, precip, temps = [], [], [], [], [], [], [], []
+    for h in range(24 * days):
+        dt = t0 + timedelta(hours=h)
+        times.append(dt.isoformat())
+        temps.append(78)
+        pres.append(1012.0 if dt >= front_time else 1015.0)
+        cloud.append(40)
+        wind.append(7)
+        wdir.append(180)
+        pprob.append(10)
+        precip.append(0)
+    hourly = {"time": times, "temperature_2m": temps, "surface_pressure": pres, "cloudcover": cloud,
+              "windspeed_10m": wind, "winddirection_10m": wdir, "precipitation_probability": pprob,
+              "precipitation": precip}
+    daily_start = today - timedelta(days=WATER_TEMP_TREND_PAST_DAYS)
+    daily_days = WATER_TEMP_TREND_PAST_DAYS + 7
+    daily = {
+        "time": [(daily_start + timedelta(days=i)).isoformat() for i in range(daily_days)],
+        "sunrise": [
+            (datetime(today.year, today.month, today.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=6, minutes=20)).isoformat()
+            for i in range(daily_days)
+        ],
+        "sunset": [
+            (datetime(today.year, today.month, today.day) + timedelta(days=i - WATER_TEMP_TREND_PAST_DAYS, hours=20, minutes=15)).isoformat()
+            for i in range(daily_days)
+        ],
+        "temperature_2m_max": [90] * daily_days,
+        "temperature_2m_min": [72] * daily_days,
+    }
+    return WeatherBundle(hourly=hourly, daily=daily)
+
+
+def test_score_day_computes_pressure_trend_per_segment_not_once_at_noon():
+    bundle = _fake_bundle_with_afternoon_front()
+    day = score_day(bundle, date.today())
+    by_name = {s.name: s for s in day.segments}
+
+    # Segments entirely before the 3 PM front (Dawn/Morning/Midday, and the
+    # day-level noon-anchored headline number) see no drop yet.
+    assert by_name["Dawn"].pressure_trend_24h == 0.0
+    assert by_name["Morning"].pressure_trend_24h == 0.0
+    assert day.pressure_trend_24h == 0.0
+
+    # Segments at/after the front (Afternoon's window runs into the evening,
+    # Dusk and Night are entirely after 3 PM) see the real -3 hPa drop - the
+    # bug this fixes is these silently reusing the pre-front noon value instead.
+    assert by_name["Dusk"].pressure_trend_24h == -3.0
+    assert by_name["Night"].pressure_trend_24h == -3.0
+
+    # And that real per-segment drop is big enough to cross the
+    # "pressure_falling" scoring bonus threshold that the flat noon value
+    # never would have.
+    assert by_name["Dusk"].score > by_name["Dawn"].score or "Falling pressure" in " ".join(by_name["Dusk"].notes)
+    assert any("Falling pressure" in n for n in by_name["Dusk"].notes)
+    assert not any("Falling pressure" in n for n in by_name["Dawn"].notes)
+
+
 def test_score_day_raises_outside_window():
     bundle = _fake_bundle()
     try:
@@ -181,9 +252,12 @@ def test_manual_segment_score_matches_score_day_for_equivalent_inputs():
     dawn = next(s for s in day.segments if s.name == "Dawn")
 
     result = manual_segment_score(
+        # Punch-list #35: each segment now carries its OWN pressure trend
+        # (anchored at its own time of day), not the day's single noon-anchored
+        # value - dawn.pressure_trend_24h is the equivalent input here.
         "Dawn", day.season, avg_cloud_pct=40, avg_wind_mph=7,
         total_precip_in=0.0, max_precip_prob_pct=10,
-        pressure_trend_24h=day.pressure_trend_24h, solunar_overlap=dawn.solunar_overlap,
+        pressure_trend_24h=dawn.pressure_trend_24h, solunar_overlap=dawn.solunar_overlap,
         moon=day.moon, water_temp_f=day.water_temp_f,
     )
     assert result.score == dawn.score

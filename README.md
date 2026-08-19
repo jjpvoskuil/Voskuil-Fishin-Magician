@@ -347,6 +347,21 @@ reduced light penetration and surface disturbance make fish less wary), distinct
 the storm penalty that still applies to genuinely heavy rain/high storm probability on
 both pages too.
 
+**Pressure trend is computed per time-of-day segment, not once for the whole day.**
+Each segment's 24h pressure trend is anchored at that segment's own midpoint (Dawn at
+its own hour, Afternoon at its own hour, Night at its own hour, etc.) rather than
+sharing one value computed at noon - so a front moving through overnight or in the
+afternoon shows up as a falling-pressure bonus for the segments it actually affects,
+instead of only counting if it happened to be falling right at noon. The 24-hour,
+same-hour-of-day lookback window itself is unchanged (and deliberately not shortened) -
+real Open-Meteo pressure data for Nolin Lake confirmed a genuine ~12-hour semidiurnal
+atmospheric "pressure tide" is layered under the real frontal signal, and comparing
+each hour against the same hour 24h earlier is what cancels that tide out. The
+single day-level "24h pressure trend" number shown at a glance on Home/7-Day
+Forecast's summary line is still the noon-anchored snapshot, unchanged - it's each
+segment's own score and lure recommendation underneath that now reflect that
+segment's own trend.
+
 **2026 evidence-based rebalance:** the weights above weren't tuned in a vacuum - after
 noticing forecast scores skewing consistently high (averaging well above the "5 =
 average day" the scale is meant to represent), each factor was checked against outside

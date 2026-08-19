@@ -5509,6 +5509,104 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     stale earlier-session snapshot, per the now-standing practice from
     entry 93). Logged as punch-list #34 and marked "Done."
 
+96. **Punch-list #35: pressure trend is now computed per time-of-day
+    segment, not once for the whole day.** Prompted by: "can you take a
+    look at the 7 day forecast score (and anywhere the score is listed).
+    There is a cold front coming through tonight at 4AM so I would have
+    thought the scores would be a bit higher for this afternoon and
+    evening ahead of the front."
+
+    Root cause, confirmed by reading (not guessing at) `core/scoring.py`:
+    `score_day()` computed `p_trend = pressure_trend_hpa_per_24h(bundle,
+    noon)` exactly ONCE per day, anchored at 12:00 PM, then reused that
+    single value for every one of the day's six segments (`_segment_score()`
+    calls). So a front sliding through overnight, in the afternoon, or
+    any time other than "was pressure already falling at noon" never
+    triggered `_segment_score()`'s `pressure_falling` bonus for the
+    segments it actually affected.
+
+    Before touching anything, spent real effort ruling out a much simpler
+    "just stale cached weather data" explanation, since a quick reproduction
+    initially looked contradictory: the live app displayed "+0.3 hPa" for
+    today's headline 24h pressure trend, but a fresh, exact-same-formula
+    calculation against LIVE Open-Meteo data (pulled via `javascript_tool`'s
+    real internet access in a Claude-in-Chrome tab open on the live app -
+    this sandbox's own `bash` has no outbound network to Open-Meteo,
+    confirmed failing with a proxy 403 both this session and previously)
+    came back -1.7 hPa for the identical noon-anchored comparison - itself
+    already past the falling-pressure threshold. Reproduced this three
+    times (different lat/lon precision, different `past_days`/`forecast_days`,
+    a full page reload of the live app to rule out a stale browser tab) and
+    got a consistent ~-1.6 to -1.7 hPa every time, while the live app kept
+    showing +0.3 hPa even right after a fresh reload - meaning the gap is
+    real staleness in the app's own `get_weather_bundle()` (`@st.cache_data
+    (ttl=60*60)`, server-side, shared across all sessions) against Open-
+    Meteo's own model output shifting in the time since that cache last
+    filled, not a browser-tab or reproduction-script artifact. Left the
+    1-hour TTL itself alone (out of scope for this ask, and Home/7-Day's
+    "at a glance" headline number staying a reasonably fresh once-an-hour
+    snapshot rather than hammering Open-Meteo every page load is a
+    deliberate, sane tradeoff) - flagging it here in case a future "why
+    doesn't this match what I'm seeing on my phone" report traces back here.
+
+    Also used that same live-data access to directly confirm the fix
+    hypothesis before writing any code: recomputed the 24h trend anchored
+    at each segment's own representative hour (Dawn ~6 AM, Afternoon ~4 PM,
+    Night ~11 PM) instead of always noon, and got genuinely different,
+    correctly-falling values for the segments after the front (Afternoon
+    -2.2, Night -1.9) versus the still-flat segments before it (Morning
+    -0.6) - confirming the per-segment approach would actually change the
+    right segments' scores, not just add noise.
+
+    **The fix.** `SegmentForecast` (`core/scoring.py`) gained its own
+    `pressure_trend_24h: float` field. Inside `score_day()`'s per-segment
+    loop, each segment now computes `pressure_trend_hpa_per_24h(bundle,
+    segment_midpoint)` at ITS OWN midpoint (`start + (end - start) / 2`)
+    and feeds that into `_segment_score()`, instead of the single
+    noon-anchored `p_trend` shared by every segment. `DayForecast.
+    pressure_trend_24h` (the day-level, noon-anchored number) is
+    deliberately left alone and unchanged - it's still what Home/7-Day
+    Forecast's "24h pressure trend" at-a-glance summary line shows; only
+    each segment's own score and lure recommendation now use that
+    segment's own trend. `pages/1_7_Day_Forecast.py`'s lure-recommendation
+    call (`recommend(...)`) was passing `day.pressure_trend_24h` per
+    segment too (same bug, different symptom - lure picks, not just
+    scores) - switched to `seg.pressure_trend_24h`. Deliberately did NOT
+    touch `pressure_trend_hpa_per_24h()`'s underlying 24-hour, same-hour-
+    of-day lookback window itself - real Open-Meteo hourly pressure data
+    for Nolin Lake confirmed a genuine ~12-hour semidiurnal atmospheric
+    "pressure tide" layered under the real frontal signal, and that
+    same-hour-24h-ago comparison is precisely what cancels the tide out;
+    shortening the window would reintroduce that noise, not fix anything.
+    Checked `manual_segment_score()`'s real caller (Spot Session's "right
+    now" live score, via `realtime_context_from_bundle()`) for the same
+    class of bug and found it already anchors at the actual current/entered
+    time (`at_time or lake_now_naive()`), not noon - no change needed there,
+    since it was never sharing one fixed-time value across multiple
+    segments in the first place.
+
+    Verification: added `test_score_day_computes_pressure_trend_per_
+    segment_not_once_at_noon` to `tests/test_scoring.py` - a synthetic
+    bundle where pressure steps down 3 hPa at exactly 3 PM today (a
+    front, not a uniform trend) - asserting Dawn/Morning stay at 0.0
+    (before the front) while Dusk/Night correctly show -3.0 and fire the
+    "Falling pressure ahead of a front" note, which the old noon-shared
+    value could never have produced. Also updated
+    `test_manual_segment_score_matches_score_day_for_equivalent_inputs`,
+    which fed `day.pressure_trend_24h` into `manual_segment_score()` to
+    compare against Dawn's score - now correctly feeds `dawn.
+    pressure_trend_24h` instead, since those two are no longer the same
+    number. Full suite: 317 passing (was 316; +1 net test). A scratch
+    `AppTest` run against the real `pages/1_7_Day_Forecast.py` (mocking
+    `get_weather_bundle`/`get_inventory`/`get_spots`/`github_token` and
+    `apply_freeze`, the same afternoon-front synthetic bundle as the new
+    unit test) confirmed the actual rendered page's Dusk metric tooltip
+    now reads "Falling pressure ahead of a front - bite often turns on."
+    while Dawn's does not, and that the page still renders with no
+    exception. No data files touched by any of this (core/pages/tests
+    changes only) - `data/*.csv` md5s confirmed identical before/after
+    the scratch run. Logged as punch-list #35 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

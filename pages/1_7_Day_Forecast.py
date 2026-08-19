@@ -115,7 +115,10 @@ for day in week:
         st.write("**Lure setup by time of day** (expand a window for full lure blocks):")
         best_name = max(day.segments, key=lambda s: s.score).name
         for seg in day.segments:
-            rec = recommend(eff_season, eff_water_temp, seg.name, day.pressure_trend_24h, structure, clarity,
+            # Punch-list #35: this segment's OWN pressure trend (anchored at its
+            # own time of day), not the day's single noon-anchored value - see
+            # core.scoring.score_day()'s comment on SegmentForecast.pressure_trend_24h.
+            rec = recommend(eff_season, eff_water_temp, seg.name, seg.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
                              inventory=inventory)
             with st.expander(
