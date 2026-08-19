@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 
 from .videos import get_videos_by_key
 from .thermocline import thermocline_caveat
+from .lure_history import lure_track_records, track_record_note
 
 # Base stain color the angler picks (Nolin runs greenish-brown, leaning brown,
 # under normal conditions - "Brown stained" is the default). A separate
@@ -112,9 +113,9 @@ FORAGE_NOTES = {
 # didn't happen to include one.
 FORAGE_LURE_BOOST = {
     "Gizzard Shad": ["lipless_crankbait", "spinnerbait", "suspending_jerkbait",
-                      "squarebill_crankbait", "deep_diving_crankbait", "swim_jig"],
+                      "squarebill_crankbait", "deep_diving_crankbait", "swim_jig", "soft_swimbait"],
     "Threadfin Shad": ["lipless_crankbait", "spinnerbait", "suspending_jerkbait",
-                        "squarebill_crankbait", "medium_diving_crankbait", "swim_jig"],
+                        "squarebill_crankbait", "medium_diving_crankbait", "swim_jig", "soft_swimbait"],
     "Bluegill / Sunfish": ["swim_jig", "walking_topwater", "popper",
                             "squarebill_crankbait", "chatterbait"],
     "Crawfish": ["football_jig", "texas_rig_creature", "carolina_rig", "squarebill_crankbait"],
@@ -455,6 +456,51 @@ LURE_PROFILES = {
         "depth_range_ft": (6, 20), "depth_style": "dragged/shaken in place",
         "presentation": "Cast out, let it hit bottom, then shake it in place with the rod tip without moving it far - a subtle, tough-bite bait for high-pressure days.",
     },
+    # Punch-list #37: drop_shot and soft_swimbait below are new - neither
+    # existed in this taxonomy before. Both came out of actually researching
+    # real, documented Nolin Lake experience (not just generic bass-fishing
+    # knowledge) rather than being added speculatively: a real angler forum
+    # tip (fishin.com's "Nolin Lake Tips?" thread) specifically describes
+    # drop-shotting ~45 ft dam points and bluff walls at Nolin, and Omnia
+    # Fishing's documented Nolin-specific season-by-season pattern data lists
+    # "soft swimbaits (small/medium)" as a real post-spawn/winter Nolin lure -
+    # see the season-pattern comments in recommend() below for the full
+    # source-by-source breakdown. Neither lure had a home in this taxonomy
+    # until that research surfaced them as things that specifically catch
+    # fish here, which is exactly the gap the angler asked to close.
+    "drop_shot": {
+        "name": "Drop Shot",
+        "video_key": "drop_shot",
+        "vertical_style": "bottom",
+        "colors": {
+            "Clear": ["Green pumpkin", "Watermelon shad"],
+            "Green stained": ["Green pumpkin/chartreuse", "Natural shad"],
+            "Brown stained": ["Green pumpkin", "June bug"],
+            "Muddy": ["Black/blue", "Junebug"],
+        },
+        "trailer": None,
+        "depth_range_ft": (15, 45), "depth_style": "suspended just off bottom on deep points/bluffs",
+        "presentation": "Drop straight down (or cast and let it settle) on deep main-lake structure - dam-face points, "
+                         "bluff walls, humps - then work it in place with small, subtle rod-tip shakes rather than "
+                         "moving it far; a real Nolin angler report specifically describes this working ~45 ft off "
+                         "deep dam points for bass that won't commit to anything moving fast.",
+    },
+    "soft_swimbait": {
+        "name": "Soft Swimbait (paddle tail)",
+        "video_key": "soft_swimbait",
+        "vertical_style": "column",
+        "colors": {
+            "Clear": ["Natural shad", "Ghost shad"],
+            "Green stained": ["Chartreuse shad", "Natural shad"],
+            "Brown stained": ["Natural shad", "Green pumpkin"],
+            "Muddy": ["Black/chartreuse", "Solid white"],
+        },
+        "trailer": None,
+        "depth_range_ft": (2, 12), "depth_style": "swum through the water column on a steady/rolling retrieve",
+        "presentation": "Cast out and reel with a steady-to-rolling retrieve, letting the paddle tail do the work - "
+                         "a real, documented Nolin post-spawn and fall pattern (per Omnia Fishing's Nolin-specific "
+                         "pattern data) for shad-imitating baitfish presentations without a hard bill to snag cover.",
+    },
 }
 
 
@@ -709,6 +755,8 @@ def recommend(
     forage: list = None,
     thermocline_ft: float = None,
     inventory: list = None,
+    trip_history: list = None,
+    spot_id: str = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
@@ -724,38 +772,117 @@ def recommend(
         rationale.append(caveat)
 
     # --- Seasonal base pattern: which lure keys are first vs second choice -----
+    #
+    # Punch-list #37 rewrite: these used to be generic, unsourced bass-fishing
+    # rules ("crankbaits pre-spawn, jigs in cold water" - true of largemouth
+    # bass almost anywhere, not specific to this lake). The angler's own ask
+    # was direct: "general information is really not all the helpful ...
+    # we need to get this more specific to the lake." So each branch below
+    # now leads with Omnia Fishing's documented, Nolin-Lake-specific
+    # season-by-season pattern data (structure/lure/color/depth, scraped from
+    # real reports at https://www.omniafishing.com/w/nolin-lake-2-fishing-
+    # reports/fishing-patterns), folding in a couple of corroborating,
+    # independently-found real sources rather than replacing proven general
+    # picks outright: a real angler's first-hand report on Nolin specifically
+    # (fishin.com forum thread "Nolin Lake Tips?" - bluff walls, ~45 ft dam
+    # points fished on drop shot, dawn/dusk topwater "jumps" with poppers and
+    # soft jerkbaits) and KDFWR's own official 2026 Fishing Forecast, which
+    # calls out Nolin by name for one specific tactical note: "During late
+    # spring through summer, best results are often at night" (applied below
+    # as a Night-segment rationale note, not just folded silently into the
+    # lure list). Previously-first-choice generic picks that aren't
+    # contradicted by any of this stay on as second choices rather than being
+    # dropped, so a real pattern someone here has actually caught fish on
+    # (this app's own trip log, see the personal-history section further
+    # down) still gets full credit even if Omnia's data doesn't happen to
+    # mention it by name.
     if season == "winter":
-        first_keys = ["football_jig", "suspending_jerkbait", "blade_bait"]
-        second_keys = ["deep_diving_crankbait"]
-        rationale.append("Cold water (<50F) - bass are lethargic and hold on deep, stable structure.")
+        # Omnia (47-52F): rock piles/boulders near channel swings, points with
+        # deep access; hard jerkbaits (long pauses), medium divers (7-12ft),
+        # soft swimbaits. A local Nolin guide's own paid tip content on
+        # fishtips.com is literally titled "Winter time cranking," backing
+        # the crankbait emphasis specifically for this lake.
+        first_keys = ["suspending_jerkbait", "medium_diving_crankbait", "football_jig"]
+        second_keys = ["soft_swimbait", "blade_bait", "deep_diving_crankbait"]
+        rationale.append(
+            "Cold water (<50F) - Nolin's own documented winter pattern (Omnia Fishing) targets rock piles/"
+            "boulders near channel swings and deep-access points with long-pause jerkbaits and 7-12 ft "
+            "crankbaits; a local Nolin guide's own paid tip content is literally titled 'Winter time cranking.'"
+        )
     elif season == "pre_spawn":
-        first_keys = ["lipless_crankbait", "chatterbait", "football_jig"]
-        second_keys = ["suspending_jerkbait", "squarebill_crankbait"]
-        rationale.append("Pre-spawn (50-60F) - fish are staging and feeding heavily before the move shallow.")
+        # Omnia (47-58F): rip-rap with stumps/laydowns, creek mouths with chunk
+        # rock; medium diving cranks (7-12ft), Texas rigs, shallow divers (0-6ft).
+        first_keys = ["medium_diving_crankbait", "texas_rig_worm", "lipless_crankbait"]
+        second_keys = ["squarebill_crankbait", "chatterbait", "football_jig"]
+        rationale.append(
+            "Pre-spawn (50-60F) - Nolin's documented pattern (Omnia Fishing) is rip-rap with stumps/laydowns "
+            "and creek mouths with chunk rock, worked with 7-12 ft crankbaits and Texas rigs as fish stage "
+            "before the move shallow."
+        )
     elif season == "spawn":
-        first_keys = ["texas_rig_creature", "wacky_rig_senko", "weightless_soft_plastic"]
-        second_keys = ["hollow_body_frog", "squarebill_crankbait"]
-        rationale.append("Spawn window (60-75F) - bass are shallow and cover/bed-oriented.")
+        # Omnia (58-68F): protected shallow bays/coves with hard bottom near
+        # rip-rap; Texas rigs (pitch/flip), shakey heads, shallow divers.
+        first_keys = ["texas_rig_creature", "finesse_shaky_head", "squarebill_crankbait"]
+        second_keys = ["wacky_rig_senko", "weightless_soft_plastic"]
+        rationale.append(
+            "Spawn window (60-75F) - Nolin's documented pattern (Omnia Fishing) is protected shallow bays/"
+            "coves with hard bottom near rip-rap, pitched/flipped with Texas rigs and shakey heads."
+        )
     elif season == "post_spawn_summer":
-        first_keys = ["spinnerbait", "swim_jig", "texas_rig_worm"]
-        second_keys = ["squarebill_crankbait", "walking_topwater"]
-        rationale.append("Post-spawn recovery - fish are moving from spawning flats toward summer haunts.")
+        # Omnia post-spawn (62-75F): stumps/woody cover, rip-rap near bridges;
+        # shakey heads, walking topwater, small/medium soft swimbaits.
+        first_keys = ["finesse_shaky_head", "walking_topwater", "soft_swimbait"]
+        second_keys = ["spinnerbait", "swim_jig", "texas_rig_worm"]
+        rationale.append(
+            "Post-spawn recovery - Nolin's documented pattern (Omnia Fishing) is stumps/woody cover and "
+            "rip-rap near bridges, worked with shakey heads, walking topwater, and small/medium swimbaits as "
+            "fish move from spawning flats toward summer haunts."
+        )
     elif season == "summer_peak":
         if low_light:
-            first_keys = ["buzzbait", "walking_topwater", "swim_jig"]
-            second_keys = ["popper", "squarebill_crankbait", "hollow_body_frog"]
+            # A real Nolin angler report (fishin.com forum) specifically
+            # describes "poppers and white super flukes" working dawn/dusk
+            # ("the jumps") - flukes map to weightless_soft_plastic here.
+            first_keys = ["walking_topwater", "buzzbait", "weightless_soft_plastic"]
+            second_keys = ["popper", "swim_jig", "squarebill_crankbait"]
+            if segment_name == "Night":
+                rationale.append(
+                    "KDFWR's own 2026 official Fishing Forecast calls out Nolin by name: 'During late spring "
+                    "through summer, best results are often at night' - the same real angler report also "
+                    "notes night fishing is productive here in summer."
+                )
         else:
+            # Omnia (75-85F): main-lake points with deep-water access and rock
+            # structure; deep crankbaits (13ft+), football jigs, Carolina rigs -
+            # this already matched the app's prior generic picks closely. Added
+            # drop_shot as a second choice per the same forum report's specific
+            # ~45 ft dam-point/bluff-wall drop-shot tip for scattered, tough-
+            # bite summer fish that won't commit to anything moving fast.
             first_keys = ["football_jig", "deep_diving_crankbait", "carolina_rig"]
-            second_keys = ["suspending_jerkbait", "lipless_crankbait"]
-        rationale.append("Summer heat - fish relate to shade/current early/late and deep structure midday.")
+            second_keys = ["drop_shot", "suspending_jerkbait", "lipless_crankbait"]
+        rationale.append(
+            "Summer heat - Nolin's documented pattern (Omnia Fishing) is main-lake points with deep-water "
+            "access and rock structure, worked with 13 ft+ crankbaits, football jigs, and Carolina rigs "
+            "outside low light."
+        )
     elif season == "fall_feed_up":
-        first_keys = ["squarebill_crankbait", "spinnerbait", "swim_jig"]
-        second_keys = ["walking_topwater", "lipless_crankbait", "suspending_jerkbait"]
-        rationale.append("Fall feed-up - shad move shallow/into creeks and bass feed aggressively to follow.")
+        # Omnia fall (58-72F): laydowns, timber in pockets, bluff walls with
+        # woody cover; popping topwater, Texas rigs, drop shot, buzzbaits.
+        first_keys = ["popper", "texas_rig_worm", "buzzbait"]
+        second_keys = ["drop_shot", "squarebill_crankbait", "spinnerbait"]
+        rationale.append(
+            "Fall feed-up - Nolin's documented pattern (Omnia Fishing) is laydowns/timber in pockets and "
+            "bluff walls with woody cover, worked with popping topwater, Texas rigs, and drop shot as shad "
+            "move shallow/into creeks and bass feed aggressively to follow."
+        )
     else:  # fall_turnover
         first_keys = ["football_jig", "suspending_jerkbait", "blade_bait"]
-        second_keys = ["lipless_crankbait", "deep_diving_crankbait"]
-        rationale.append("Fall turnover - oxygen/temp mixing makes bass location and mood unpredictable.")
+        second_keys = ["drop_shot", "lipless_crankbait", "deep_diving_crankbait"]
+        rationale.append(
+            "Fall turnover - oxygen/temp mixing makes bass location and mood unpredictable; added drop shot "
+            "as a second choice for scattered, suspended fish (same deep-structure pattern that works Nolin's "
+            "bluff walls/dam points per real angler reports, not turnover-specific on its own)."
+        )
 
     # --- Structure-specific nudge (context note, not a lure swap) ---------------
     structure_notes = {
@@ -764,7 +891,11 @@ def recommend(
         "Cove / pocket (shallow cover)": "Target isolated wood, laydowns, and grass clumps inside the cove.",
         "Flat": "Cover water efficiently - flats reward moving baits (spinnerbait, swim jig, crank).",
         "Standing timber": "Vertical presentations (jig, drop shot) worked tight to individual trees.",
-        "Riprap / dam face": "Parallel casts down the rock, crawl a jig or crank to deflect off rip-rap.",
+        "Riprap / dam face": (
+            "Parallel casts down the rock, crawl a jig or crank to deflect off rip-rap. A real Nolin angler "
+            "report also specifically describes bluff walls with channels nearby and deep points along the "
+            "dam (~45 ft) as a drop-shot pattern for fish that won't commit to anything faster."
+        ),
         "Bridge piling": "Cast tight to pilings/riprap transitions; vertical jig the shady side.",
         "Boat dock": "Skip a jig or wacky worm under the dock into the shade line.",
     }
@@ -852,22 +983,61 @@ def recommend(
         first_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
         second_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
 
+    # --- Personal history: your own catch record in similar situations ----------
+    # Punch-list #37, the angler's own direct ask: "influence the lure choice by
+    # my actual experience ... take into account where the lure was used in the
+    # past, that success, and where it is planned to be used." See
+    # core.lure_history for the full matching/gating logic (situation-similarity
+    # scored, minimum-sample-gated - conservative by design, same "small data,
+    # capped nudge" philosophy as core.calibration.py's score-weight nudging).
+    # This never overrides the season/structure/pressure picks above - it only
+    # (a) tags an already-recommended lure with your own real track record on it
+    # in a similar spot/situation, and (b) surfaces up to two additional lures
+    # you've genuinely caught fish on before in a similar spot/situation, even
+    # if they're not part of this situation's seasonal pattern and even if
+    # they're not in your tackle box today - the exact "before I decide to go
+    # out and buy that lure" case the angler described.
+    history_notes = {}
+    if trip_history:
+        situation = {
+            "spot_id": spot_id,
+            "structure_type": structure_type,
+            "water_clarity": water_clarity,
+            "low_light": low_light,
+            "water_temp_f": water_temp_f,
+        }
+        records = lure_track_records(trip_history, situation)
+        already_picked = set(first_keys_unique) | set(second_keys_unique)
+        for key in already_picked:
+            if key in records:
+                history_notes[key] = track_record_note(records[key], in_plan_already=True)
+        # Inject genuinely fish-producing lures not already in either tier -
+        # capped at 2 so this can't balloon the list, best-catch-rate-first
+        # among candidates that actually have one.
+        injectable = sorted(
+            (rec for key, rec in records.items() if key not in already_picked and rec.trips_with_fish > 0),
+            key=lambda r: (r.catch_rate, r.similar_trips), reverse=True,
+        )
+        for rec in injectable[:2]:
+            second_keys_unique.insert(0, rec.lure_category)
+            history_notes[rec.lure_category] = track_record_note(rec, in_plan_already=False)
+
     # --- Tackle-box inventory: annotate + surface what you actually have --------
     # This never adds/removes/reorders-by-situation which lures are recommended -
-    # season/structure/pressure/forage/depth above already decided that. It only
-    # tags each resulting block with any matching inventory you own (category
-    # field on data/lure_inventory.csv rows, see core.lure_inventory), then, only
-    # when inventory was passed in, stable-sorts each tier so owned lures bubble
-    # to the top ("best options you have") while unowned ones stay in the list
-    # right behind them as pick-up suggestions.
+    # season/structure/pressure/forage/depth/history above already decided that.
+    # It only tags each resulting block with any matching inventory you own
+    # (category field on data/lure_inventory.csv rows, see core.lure_inventory),
+    # then, only when inventory was passed in, stable-sorts each tier so owned
+    # lures bubble to the top ("best options you have") while unowned ones stay
+    # in the list right behind them as pick-up suggestions.
     owned_by_category = _group_owned_by_category(inventory)
 
     first_choice = [
-        _build_block(k, water_clarity, fish_depth_ft, owned_items=owned_by_category.get(k))
+        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""), owned_items=owned_by_category.get(k))
         for k in first_keys_unique
     ]
     second_choice = [
-        _build_block(k, water_clarity, fish_depth_ft, owned_items=owned_by_category.get(k))
+        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""), owned_items=owned_by_category.get(k))
         for k in second_keys_unique
     ]
 
@@ -921,7 +1091,15 @@ _CATEGORY_KEYWORD_RULES = [
     ("blade_bait", ["blade bait"]),
     ("suspending_jerkbait", ["jerkbait", "jerk bait"]),
     ("spinnerbait", ["spinnerbait", "spinner bait"]),
-    ("weightless_soft_plastic", ["fluke", "soft jerkbait", "swimbait"]),
+    ("drop_shot", ["drop shot", "dropshot", "drop-shot"]),  # punch-list #37
+    # Punch-list #37: "swimbait" used to route here too (weightless_soft_plastic
+    # was this app's only soft-plastic-that-swims category before soft_swimbait
+    # existed) - now that a real paddle-tail swimbait category exists, "swimbait"
+    # routes there instead; "fluke"/"soft jerkbait" stay here since a fluke-style
+    # bait is a genuinely different presentation (darted/twitched, no paddle
+    # tail) from a steady-retrieve paddle-tail swimbait.
+    ("weightless_soft_plastic", ["fluke", "soft jerkbait"]),
+    ("soft_swimbait", ["swimbait", "paddle tail", "paddletail"]),  # punch-list #37
     ("medium_diving_crankbait", ["crankbait"]),  # generic fallback - depth unknown, assume mid-range
 ]
 
@@ -949,12 +1127,16 @@ def guess_category_from_text(*texts: str) -> str:
 # senko. Deliberately narrow: only the two LURE_PROFILES categories that
 # actually match a documented trailer TYPE. texas_rig_creature covers craw/
 # creature-style trailers (the classic jig trailer); weightless_soft_plastic
-# covers paddle-tail swimbait-style trailers (this app has no separate
-# "swimbait" category - guess_category_from_text() above already tags a
-# swimbait as weightless_soft_plastic, so this reuses that same convention
-# rather than inventing a new one). Every other category - including the
-# worm-style ones (texas_rig_worm, wacky_rig_senko, finesse_shaky_head,
-# carolina_rig) the angler specifically said NOT to show here - is excluded.
+# covers fluke/soft-jerkbait-style trailers - an established convention from
+# before this app had a real "swimbait" category of its own (see the earlier
+# tests already locking in weightless_soft_plastic as trailer-eligible),
+# deliberately left as-is here rather than swapped for the newer, more
+# anatomically-correct soft_swimbait (punch-list #37) - that would be a real
+# behavior change to the existing trailer picker with no angler ask behind
+# it, out of scope for the lure-recommendation work that added soft_swimbait.
+# Every other category - including the worm-style ones (texas_rig_worm,
+# wacky_rig_senko, finesse_shaky_head, carolina_rig) the angler specifically
+# said NOT to show here - is excluded.
 TRAILER_ELIGIBLE_CATEGORIES = {"texas_rig_creature", "weightless_soft_plastic"}
 
 # Keyword safety net on top of the category check, same "no black box"

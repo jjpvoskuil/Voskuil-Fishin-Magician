@@ -1,6 +1,8 @@
 import streamlit as st
 
-from core.appstate import get_weather_bundle, get_calibrated_weights, get_spots, get_inventory, github_token, repo_slug
+from core.appstate import (
+    get_weather_bundle, get_calibrated_weights, get_spots, get_inventory, get_trip_history, github_token, repo_slug,
+)
 from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar, inject_mobile_css
@@ -17,6 +19,7 @@ weights, n_trips = get_calibrated_weights()
 bundle = get_weather_bundle(7)
 week = score_week(bundle, today, 7, weights=weights)
 inventory = get_inventory()
+trip_history = get_trip_history()
 
 # Once a time-of-day window's end time has passed, its score/notes/solunar
 # overlap are locked in at whatever they were the moment it was first
@@ -118,9 +121,15 @@ for day in week:
             # Punch-list #35: this segment's OWN pressure trend (anchored at its
             # own time of day), not the day's single noon-anchored value - see
             # core.scoring.score_day()'s comment on SegmentForecast.pressure_trend_24h.
+            # Punch-list #37: trip_history lets recommend() nudge/inject picks
+            # backed by your own logged catches in a similar structure/water-
+            # clarity/light/temp situation - no spot_id here, since this page's
+            # "structure type" is a general Lake Setup selection, not a specific
+            # spot (Spot Session's own call to recommend() passes spot_id too,
+            # for the strongest possible match).
             rec = recommend(eff_season, eff_water_temp, seg.name, seg.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
-                             inventory=inventory)
+                             inventory=inventory, trip_history=trip_history)
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),

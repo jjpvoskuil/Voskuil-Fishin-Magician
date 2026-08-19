@@ -95,6 +95,17 @@ def get_calibrated_weights():
     return calibrate_weights(trips), len(trips)
 
 
+# Punch-list #37: core.lures.recommend()'s personal-history lure boost
+# (core.lure_history) needs the raw trip rows too - a separate cache entry
+# from get_calibrated_weights() above (different return shape: raw rows vs.
+# a weights dict) even though both start from the same read_all_trips()
+# call. Same 5-minute TTL/reasoning as that one: trip data only changes when
+# the angler logs something, no need to re-read the CSV on every rerun.
+@st.cache_data(ttl=60 * 5)
+def get_trip_history():
+    return read_all_trips()
+
+
 @st.cache_data(ttl=60)
 def get_inventory():
     return read_all_items()
