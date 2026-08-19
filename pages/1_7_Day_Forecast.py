@@ -60,7 +60,7 @@ st.caption(
 )
 if inventory:
     st.caption(
-        "🧰 Lure blocks below are checked against your Lure Inventory - ones you already own are "
+        "🧰 Lure blocks below are checked against your Tackle Box - ones you already own are "
         "flagged and bubble to the top of each list; the rest are still shown as suggestions worth "
         "picking up."
     )

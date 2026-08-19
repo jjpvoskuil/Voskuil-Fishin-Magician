@@ -61,7 +61,7 @@ def test_search_lures_returns_empty_list_for_blank_query():
 def test_search_lures_fails_soft_when_token_endpoint_unreachable(monkeypatch):
     # Simulate the token endpoint being unreachable (network error, site
     # change, bot-blocked, etc.) - search_lures() must return [] rather than
-    # raising, so the Lure Inventory page's "Scan a lure" flow can fall back
+    # raising, so the Tackle Box page's "Scan a lure" flow can fall back
     # to the manual "Add a lure" form cleanly.
     import core.cabelas_lookup as mod
 

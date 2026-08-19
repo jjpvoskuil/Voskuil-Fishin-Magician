@@ -140,7 +140,7 @@ def resolve_image_source(item: dict, images_dir: Path = IMAGES_DIR) -> Optional[
     """Given an inventory row/dict (with image_filename/image_url keys), return
     whatever st.image() should be pointed at: a local file path if the user's
     own uploaded/captured photo exists on disk, else the vendor's linked CDN
-    URL, else None if there's no photo at all. Shared by the Lure Inventory
+    URL, else None if there's no photo at all. Shared by the Tackle Box
     page and the forecast/map "owned lure" rendering (core/ui.py) so both
     follow the exact same local-photo-wins-over-link rule."""
     filename = item.get("image_filename")

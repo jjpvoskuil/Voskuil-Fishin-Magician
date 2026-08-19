@@ -359,7 +359,7 @@ def test_guess_category_from_text_matches_known_product_names():
 
 def test_guess_category_from_text_every_returned_key_is_real():
     # Every non-blank key this function can ever return must be a real
-    # LURE_PROFILES key, or the Lure Inventory page's category dropdown
+    # LURE_PROFILES key, or the Tackle Box page's category dropdown
     # (built from LURE_CATEGORY_OPTIONS) wouldn't recognize it.
     from core.lures import _CATEGORY_KEYWORD_RULES
     for key, _phrases in _CATEGORY_KEYWORD_RULES:

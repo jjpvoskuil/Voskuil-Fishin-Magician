@@ -19,7 +19,7 @@ punch-list #21/#22 investigation confirmed the live lookup itself still
 works. Unlike the live lookup, this only covers a fixed, closed vocabulary
 - the 20 category names in core.lures.LURE_PROFILES (that's literally
 every `LureBlock.name` this app's recommendation engine ever produces) -
-not arbitrary free text, so it's meaningless for the Lure Inventory page's
+not arbitrary free text, so it's meaningless for the Tackle Box page's
 "Scan a lure" flow (core.cabelas_lookup.search_lures() is called directly
 there, by a vision-model-guessed query that isn't from this fixed
 vocabulary, and intentionally doesn't use this fallback - that flow

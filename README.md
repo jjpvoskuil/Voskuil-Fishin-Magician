@@ -251,11 +251,11 @@ this repo that can override it on this hosting.
   (see "Spot Session page" above), and "🗑️ Delete this trip" asks you to
   confirm, then removes it for good. The model's calibration status sits below
   the grid too.
-- **Lure inventory** - your tackle box, tracked: brand, full description, a category
-  (matching it to one of the forecast engine's lure types), a photo, the last price
-  paid, and how many you have on hand. Seeded from a Cabela's order history import; add
-  more any time by typing them in or by uploading/taking a photo. See "Lure inventory"
-  below for details.
+- **Tackle Box (lure inventory)** - your tackle box, tracked: brand, full description,
+  a category (matching it to one of the forecast engine's lure types), a photo, the
+  last price paid, and how many you have on hand. Seeded from a Cabela's order history
+  import; add more any time by typing them in or by uploading/taking a photo. See
+  "Tackle Box (lure inventory)" below for details.
 - **Inventory-aware lure suggestions** - every page that recommends lures (7-Day
   Forecast, Spot Session) checks each recommended lure against your tackle inventory:
   lures you already own are flagged (✅ "In your tackle box", with the specific
@@ -279,7 +279,7 @@ this repo that can override it on this hosting.
   a lure block has *nothing* color-matched on hand, up to 2 real products from
   Cabela's (brand, name, price, photo, and a link to search for it on Cabela's own
   site) are suggested instead of the plain "not in your inventory" note, using the
-  same `core/cabelas_lookup.py` integration the Lure Inventory page's "Scan a lure"
+  same `core/cabelas_lookup.py` integration the Tackle Box page's "Scan a lure"
   flow already uses (see "How the Cabela's lookup works" below) - cached for a day
   per lure name so the 7-Day Forecast page's ~28 recommendation calls (one per
   segment per day) don't each trigger a live lookup for the same handful of repeating
@@ -518,11 +518,11 @@ calibration and analytics either way.
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
 History** page in the app for calibration status.
 
-## Lure inventory
+## Tackle Box (lure inventory)
 
-The **Lure Inventory** page (`pages/5_Lure_Inventory.py`) is a tackle-box tracker that
-also feeds the forecast/recommendation engine (`core/lures.py`) - the two stay loosely
-coupled through a single `category` field rather than sharing internals. For each lure
+The **Tackle Box** page (`pages/5_Lure_Inventory.py`) is a tackle inventory tracker
+that also feeds the forecast/recommendation engine (`core/lures.py`) - the two stay
+loosely coupled through a single `category` field rather than sharing internals. For each lure
 it shows brand, full product description, a category, a photo, the last price paid, and
 current quantity on hand. Two ways items get in:
 
@@ -688,7 +688,7 @@ color. If so, the block is flagged ✅ **"In your tackle box"** with the top 2
 color-matched items (ranked #1/#2 by quantity on hand, not every match) - specific
 brand/description/quantity, plus a photo thumbnail per owned item, using
 `core.lure_inventory.resolve_image_source()`, the same local-photo-wins-over-vendor-link
-rule the Lure Inventory page itself uses - and that block is stable-sorted to the front
+rule the Tackle Box page itself uses - and that block is stable-sorted to the front
 of its choice tier (first choice or second choice) - so the best options you actually
 own surface first. Lures you don't have anything color-matched for instead show up to 2
 real Cabela's product suggestions worth buying (see "Top-2-per-category capping..."
@@ -809,7 +809,7 @@ core/
   lure_inventory.py       Tackle inventory read/write + photo storage (category field
                            links each item to a core.lures lure type)
   lure_vision.py           Photo -> brand/product-name read via Claude's vision API,
-                           for the Lure Inventory page's "Scan a lure" flow
+                           for the Tackle Box page's "Scan a lure" flow
   cabelas_lookup.py        Text query -> real Cabela's product data (SKU/price/photo),
                            via the same JSON endpoints Cabela's own site search calls
   cabelas_picks_cache.py   Curated fallback picks (data/cabelas_picks_cache.csv) for

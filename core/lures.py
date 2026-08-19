@@ -659,7 +659,7 @@ def find_inventory_gaps(inventory: list) -> list:
 
     Returns category keys in LURE_PROFILES' own definition order (a rough
     most-versatile-to-most-niche curation, not alphabetical) rather than
-    sorted some other way, so the Lure Inventory page's gap-filling section
+    sorted some other way, so the Tackle Box page's gap-filling section
     reads as a sensible priority list."""
     owned = _group_owned_by_category(inventory)
     return [key for key in LURE_PROFILES if key not in owned]
@@ -879,7 +879,7 @@ def recommend(
 
 
 # (key, display name) pairs for every lure category the recommendation engine
-# knows about - used by the Lure Inventory page to let you tag/re-tag each
+# knows about - used by the Tackle Box page to let you tag/re-tag each
 # tackle item with the category it matches here, so ownership can be matched
 # up against the forecast's lure suggestions.
 LURE_CATEGORY_OPTIONS = [(key, profile["name"]) for key, profile in LURE_PROFILES.items()]
@@ -892,7 +892,7 @@ LURE_CATEGORY_OPTIONS = [(key, profile["name"]) for key, profile in LURE_PROFILE
 # description string, the same kind of guess a person skimming the name
 # would make - it's meant to prefill a category the angler can spot-check
 # and correct, not to be authoritative. Used by both the Cabela's
-# order-history/cart import workflow and the Lure Inventory "Scan a lure"
+# order-history/cart import workflow and the Tackle Box "Scan a lure"
 # feature (core.cabelas_lookup) to auto-tag newly added items.
 _CATEGORY_KEYWORD_RULES = [
     ("hollow_body_frog", ["hollow body frog", "hollow-body frog", " frog"]),

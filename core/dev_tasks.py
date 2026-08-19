@@ -54,7 +54,7 @@ PAGE_OPTIONS = [
     "7 Day Forecast",
     "Lake Map",
     "Trip History",
-    "Lure Inventory",
+    "Tackle Box",
     "Spot Session",
     "Development",
     "General / whole app",

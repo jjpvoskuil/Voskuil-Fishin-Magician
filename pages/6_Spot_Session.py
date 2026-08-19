@@ -505,7 +505,7 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: s
     if not inventory_items:
         st.caption(
             empty_message or
-            "No lures in your tackle box yet - add some on the Lure Inventory page, "
+            "No lures in your tackle box yet - add some on the Tackle Box page, "
             "or just type this one in below."
         )
         return None
@@ -692,7 +692,7 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
     never picked here as their own rod."""
     standalone_items = [it for it in inventory_items if not is_trailer_eligible(it)]
     if not standalone_items:
-        st.caption("No lures in your tackle box yet - add some on the Lure Inventory page.")
+        st.caption("No lures in your tackle box yet - add some on the Tackle Box page.")
         return
     search = st.text_input(
         "Search", key=f"{key_prefix}_search",
@@ -1110,7 +1110,7 @@ if editing_trip is not None:
             st.session_state.setdefault(f"{_edit_trailer_prefix}_selected_id", _matched_trailer["item_id"])
         selected_trailer_item = _visual_lure_picker(
             trailer_items, key_prefix=_edit_trailer_prefix,
-            empty_message="No trailer-style baits found in your tackle box - add one on the Lure Inventory page, or type this one in below.",
+            empty_message="No trailer-style baits found in your tackle box - add one on the Tackle Box page, or type this one in below.",
         )
         if selected_trailer_item is None:
             _trailer_name_key = f"edit_trailer_name_{edit_trip_id}_{spot['spot_id']}"

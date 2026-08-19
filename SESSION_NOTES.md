@@ -4991,6 +4991,46 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `data/anglers.csv` all confirmed byte-identical (`md5sum`) before and
     after. Logged as punch-list #27 and marked "Done".
 
+89. **Punch-list #28: rename the Tackle Box (formerly "Lure Inventory") page.**
+    Ask (verbatim): "Lets change the name of lure inventory page to 'Tackle
+    Box'." Scope call: rename every *user-visible* string (sidebar nav title
+    in `app.py`, the page's own `st.set_page_config`/`st.title`, cross-page
+    help text/captions that reference "the Lure Inventory page" from 7-Day
+    Forecast and Spot Session, the punch-list page-tagging dropdown's option
+    in `core/dev_tasks.py`'s `PAGE_OPTIONS`, and README) plus every code
+    comment/docstring that documents "the Lure Inventory page" as a current-
+    state proper-noun reference (`core/appstate.py`, `core/cabelas_lookup.py`,
+    `core/cabelas_picks_cache.py`, `core/lure_inventory.py`, `core/lure_vision.py`,
+    `core/lures.py`, and the matching test-file comments) - all a plain
+    `Lure Inventory` -> `Tackle Box` swap, safe as a blanket replace since
+    the actual filenames use an underscore (`Lure_Inventory.py`) rather than
+    a space and were never touched by it. Deliberately did NOT rename any
+    file or Python identifier (`pages/5_Lure_Inventory.py`, `core/lure_inventory.py`,
+    `read_all_items()`, etc.) - the ask was about the page's displayed name,
+    and this codebase already treats a page's filename as internal/cosmetic
+    only, not the source of its displayed title (see entry 88, same round).
+    Also deliberately left every *historical* mention of "Lure Inventory"
+    alone - this dev-log's own past entries, and the `page` column on
+    already-logged punch-list rows #14/#28 in `data/dev_tasks.csv` - since
+    those are a record of what was true at the time, the same reasoning as
+    never rewriting old commit messages; `PAGE_OPTIONS`'s existing "an
+    unrecognized `page` value gets unioned into that row's own edit dropdown
+    instead of being coerced" behavior (`pages/7_Development.py`) already
+    means those old rows keep working fine without a data migration.
+    README's "Lure inventory" section additionally got its own heading
+    reworded to "Tackle Box (lure inventory)" and its opening sentence
+    de-duplicated (it used to read "The Tackle Box page ... is a tackle-box
+    tracker," an artifact of the plain string swap landing next to the
+    section's own pre-existing "tackle-box tracker" phrasing). Verification:
+    full suite still 312 passing; a scratch `AppTest` run confirmed the
+    Tackle Box page's own rendered `st.title` really reads "🧰 Tackle Box"
+    and that `app.py`'s nav titles contain "Tackle Box" and no longer
+    contain "Lure Inventory"; the standing full-page smoke pass across the
+    entry point and all 7 pages stayed clean; all six `data/*.csv` files
+    confirmed byte-identical (`md5sum`) before and after. Logged as
+    punch-list #28 and marked "Done" - no open punch-list items remain as
+    of this entry.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

@@ -134,7 +134,7 @@ def repo_slug() -> str:
 
 
 def anthropic_api_key() -> str:
-    """API key for the Lure Inventory page's "Scan a lure" photo-identify
+    """API key for the Tackle Box page's "Scan a lure" photo-identify
     feature (core.lure_vision). Same graceful-degradation pattern as
     github_token() above - an empty string just means that feature stays
     hidden, not an error."""

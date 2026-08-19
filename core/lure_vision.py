@@ -1,6 +1,6 @@
 """
 Identifies a lure from a photo of its packaging using Claude's vision, via
-the Anthropic API - the first step of the Lure Inventory page's "Scan a
+the Anthropic API - the first step of the Tackle Box page's "Scan a
 lure" flow (see pages/5_Lure_Inventory.py).
 
 Deliberately kept as two separate steps, not one: this module only reads
@@ -9,12 +9,12 @@ search query. core.cabelas_lookup.search_lures() then finds the *real*
 product data (exact SKU, current price, category) from Cabela's own catalog
 for that query. A vision model's read of a small, possibly glare-y package
 photo is a good search query, but isn't a reliable enough source to trust
-for exact price/SKU on its own - and the Lure Inventory page always shows
+for exact price/SKU on its own - and the Tackle Box page always shows
 the angler the matched candidates to confirm before anything is saved.
 
 Requires an Anthropic API key in Streamlit secrets (ANTHROPIC_API_KEY) -
 see core.appstate.anthropic_api_key(). Without one, the "Scan a lure"
-section on the Lure Inventory page stays hidden and only the existing
+section on the Tackle Box page stays hidden and only the existing
 manual "Add a lure" form shows - same graceful-degradation pattern already
 used for GITHUB_TOKEN elsewhere in this app.
 """
