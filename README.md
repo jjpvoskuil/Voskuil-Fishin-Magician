@@ -32,19 +32,24 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
-- **"Today at a glance"** on the Home page - up to six metric tiles in one compact row (smaller
-  metric font than Streamlit's default so all six fit across a normal page width - see
+- **"Today at a glance"** on the Home page - up to seven metric tiles in one compact row (smaller
+  metric font than Streamlit's default so all seven fit across a normal page width - see
   `core.ui.inject_compact_metric_css()`): activity score, estimated water temp, moon phase, and
-  24h pressure trend (all from today's weather-derived score), plus real USGS lake level and the
-  current USACE surface reading (water temp; dissolved oxygen mg/l and saturation % on hover) -
-  each of those last two is its own independent fetch, so a weather outage (e.g. Open-Meteo's
-  free-tier rate limit) only removes the four weather-derived tiles, never hides lake level or
-  the USACE reading if either of *those* fetched fine. The USACE tile specifically falls back to
-  the most recent reading in `data/water_quality_log.csv` whenever the live fetch itself fails
-  (the USACE report page has turned out to be unreachable from some hosting environments) - it's
-  a periodic survey anyway, not something that needs a fresh successful fetch on every single page
-  load to be worth showing, and the tile's hover text always states the real survey date either
-  way, plus a note when it's showing that cached fallback rather than a just-fetched reading.
+  24h pressure trend (all from today's weather-derived score), plus real USGS lake level and two
+  tiles for the current USACE surface reading - water temp and dissolved-oxygen saturation % each
+  get their own tile (mg/l and the survey date are in each tile's hover text) - each of those last
+  three is its own independent fetch, so a weather outage (e.g. Open-Meteo's free-tier rate limit)
+  only removes the four weather-derived tiles, never hides lake level or the USACE tiles if either
+  of *those* fetched fine. The two USACE tiles specifically fall back to the most recent reading
+  in `data/water_quality_log.csv` whenever the live fetch itself fails (the USACE report page has
+  turned out to be unreachable from some hosting environments) - it's a periodic survey anyway,
+  not something that needs a fresh successful fetch on every single page load to be worth showing,
+  and each tile's hover text always states the real survey date either way, plus a note when it's
+  showing that cached fallback rather than a just-fetched reading. The "🌡️ USACE surface reading
+  history" expander below (see next bullet) shows the same reading's actual numbers even with only
+  one survey logged so far, rather than just a "not enough data yet" caption with nothing to look
+  at, and once a second survey is logged it charts DO saturation % alongside water temp and DO
+  mg/l (previously only those first two were charted).
 - **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") -
   activity score, estimated water temp, and 24h pressure trend for the last 14 days
   (recomputed from the same weather data already fetched for today - `core.weather.

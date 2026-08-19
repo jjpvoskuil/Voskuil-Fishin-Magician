@@ -4088,6 +4088,60 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and after every run. Logged this ask as punch-list item #17 and
     marked it "Done."
 
+80. **Punch-list #18: show DO saturation on the metrics line too, and make
+    the "USACE surface reading history" section show something even with
+    one point.** After confirming #17's fix worked (a fresh screenshot
+    showed "USACE water temp" now on the "Today at a glance" line
+    alongside the other five tiles), the angler said: "The USACE water
+    temp is there but not the oxygen saturation data. Can we also show
+    that and show it in the USACE charts that currently show nothing."
+    That second screenshot showed the "🌡️ USACE surface reading history"
+    expander open, displaying only the "Only one USACE survey logged so
+    far (8/06/2026)..." caption - no numbers, no chart - which is
+    technically correct (a "chart" of one point is meaningless) but does
+    read as showing nothing at all.
+
+    Two changes, same spirit as the "put it on the line, don't bury it in
+    a caption" push from #16. First, added a second "Today at a glance"
+    tile, "USACE DO saturation" (`f"{do_saturation_pct:.0f}%"`), next to
+    the existing "USACE water temp" tile - both now read straight off
+    `water_quality_display` (the #17 fallback-aware value) and share a
+    `survey_note` string built once for the survey-date/live-vs-fallback
+    framing, referenced from both tiles' `help=` text so the two don't
+    duplicate that explanation differently. `n_cols` in the metrics row
+    is now `... + (2 if water_quality_display else 0)` - up to 7 tiles
+    total. Second, reworked the "USACE surface reading history" expander's
+    single-point branch: instead of only a caption, it now also renders 3
+    `st.metric()` tiles (surface water temp, dissolved oxygen mg/l, DO
+    saturation %) reading directly off `wq_log[0]`, so the one real
+    reading on hand is actually visible there, not just referenced by
+    date. The multi-point branch gained a third `st.columns()`/
+    `line_chart()` pair for `do_saturation_pct` (previously only water
+    temp and DO mg/l were charted there, even though DO saturation was the
+    number the angler had actually asked about back in the original #15
+    USACE ask) - `st.columns(3)` instead of `st.columns(2)` in both
+    branches now.
+
+    Ran a scratch `AppTest` script (not committed) covering all three
+    cases: (1) a fresh USACE reading -> both "USACE water temp" and
+    "USACE DO saturation" tiles render on "Today at a glance", with the DO
+    tile's value confirmed as "147%" for the same Aug 6 reading used
+    throughout this session; (2) a single-row USACE log -> the history
+    expander's three metric labels ("Surface water temp", "Dissolved
+    oxygen", "DO saturation") are all present, confirming real numbers
+    show instead of just the caption; (3) a two-row USACE log -> all three
+    chart captions ("Surface water temp (°F)", "Dissolved oxygen (mg/l)",
+    "DO saturation (%)") are present, confirming the third chart renders
+    alongside the original two. `python3 -m pytest tests/ -q` still passes
+    at 261 (page code only, no core logic changed, same as entries 78-79).
+    Also ran the standard `AppTest` smoke pass across the app entry point
+    and every page reachable in this sandbox (same set as entries 73-79) -
+    all rendered with no exception. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/water_quality_log.csv`/
+    `data/lure_inventory.csv` confirmed byte-identical (`md5sum`) before
+    and after every run. Logged this ask as punch-list item #18 and marked
+    it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
