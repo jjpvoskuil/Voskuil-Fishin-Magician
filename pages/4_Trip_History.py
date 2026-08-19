@@ -22,7 +22,7 @@ separate filter entry per historical name. Falls back to the row's stored
 reference-spot list).
 """
 import json
-from datetime import datetime
+from datetime import datetime, time as dtime
 
 import pandas as pd
 import streamlit as st
@@ -64,6 +64,16 @@ def _parse_conditions(row: dict) -> dict:
         return json.loads(row["conditions_json"]) if row.get("conditions_json") else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _format_fish_caught_at(iso_time_str) -> str:
+    """"08:15:32.123456" -> "8:15 AM" - same formatting Spot Session's own
+    _format_fish_time() helper uses. Returns None (bit simply omitted) for
+    a blank/unparseable value."""
+    try:
+        return dtime.fromisoformat(iso_time_str).strftime("%-I:%M %p")
+    except (TypeError, ValueError):
+        return None
 
 
 def _lure_type_label(cond: dict) -> str:
@@ -279,6 +289,15 @@ def _render_trip_detail_body(row, key_prefix):
             count = fish.get("count") or 1
             species_label = fish.get("species") or "Unknown species"
             bits = [f"{count} x {species_label}" if count > 1 else species_label]
+            # Punch-list #32: the real clock time this catch was logged
+            # (core/activity_log.py-adjacent convention, stamped by
+            # pages/6_Spot_Session.py's _new_fish_from_form() as
+            # "caught_at") - absent on rows logged before that existed, in
+            # which case this bit is simply skipped like every other
+            # optional per-fish field here.
+            caught_at_label = _format_fish_caught_at(fish.get("caught_at"))
+            if caught_at_label:
+                bits.append(caught_at_label)
             if fish.get("weight_lb"):
                 weight_str = format_weight_lb_oz(fish["weight_lb"])
                 bits.append(f"~{weight_str} each" if count > 1 else weight_str)
