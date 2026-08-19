@@ -4204,6 +4204,70 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     byte-identical (`md5sum`) before and after every run. Logged this ask
     as punch-list item #19 and marked it "Done."
 
+82. **Punch-list #20: fix the Y-axis scale on the temperature charts to
+    45-95°F.** Ask (page: Today/Home): "can you change the scale on the
+    temp charts to be between 45 degrees and 95 degrees."
+
+    `st.line_chart()` (used for every chart in the merged "14-day trends"
+    expander from entry 81) auto-scales its Y axis to the data's own min/
+    max, with no parameter to pin it - confirmed by inspecting the
+    installed Streamlit 1.61.1's actual `line_chart()` signature. A small
+    real swing (a degree or two) then fills the whole chart height and
+    reads as far more dramatic than it is - exactly what a fixed 45-95°F
+    band (the real range Nolin Lake's surface plausibly sees across a
+    season) fixes. Since `st.line_chart()` has no such parameter, added
+    `core.ui.render_line_chart(col, series, y_domain=None)`: with
+    `y_domain=None` it's exactly the old `col.line_chart(series)`
+    (unchanged for every non-temperature chart); with `y_domain=(lo, hi)`
+    it builds a raw `alt.Chart(...).mark_line().encode(x=..., y=alt.Y(...,
+    scale=alt.Scale(domain=[lo, hi])))` and calls `col.altair_chart()`
+    instead - the documented Streamlit escape hatch for anything
+    `st.line_chart()` doesn't expose. `x=alt.X("x", sort=None, ...)`
+    matters here specifically: Vega-Lite's default sort for a nominal
+    (string) field is alphabetical by value, which would scramble this
+    app's "Mon 8/17"/"Tue 8/18"-style day labels; `sort=None` (which
+    serializes as an explicit `"sort": null` in the Vega-Lite spec, not
+    just an absent key - confirmed by comparing both dict outputs
+    directly) tells Vega-Lite to keep the data's own point order instead.
+
+    `home.py` gained `TEMP_CHART_Y_DOMAIN = (45, 95)` and now builds each
+    `trend_items` entry as a 3-tuple `(caption, series, y_domain)` instead
+    of 2 - `y_domain` is `TEMP_CHART_Y_DOMAIN` for exactly the two °F
+    series ("Est. water temp (°F)", "USACE surface water temp (°F)") and
+    `None` for everything else (activity score, pressure trend, lake
+    level, USACE dissolved oxygen mg/l, USACE DO saturation %) - so only
+    the two temperature charts get the fixed scale; every other chart on
+    the page keeps auto-scaling exactly as before.
+
+    This is genuinely new core logic (not just page layout, unlike entries
+    78-81's home.py-only changes), so it got real committed unit tests
+    this time instead of only a scratch `AppTest` script - new
+    `tests/test_ui.py` (4 cases, using a tiny `_FakeCol` stand-in that
+    just records what gets called on it, no Streamlit runtime needed):
+    `y_domain=None` calls `col.line_chart(series)` with the exact Series
+    and never touches `altair_chart`; `y_domain=(45, 95)` calls
+    `col.altair_chart()` instead, and the resulting chart's own
+    `.to_dict()` has `encoding.y.scale.domain == [45, 95]` and
+    `width == "stretch"`; a second, different domain `(0, 10)` proves nothing's
+    hardcoded inside the function itself; and the `x` encoding's `sort`
+    key is confirmed present with value `None` (not just absent) via
+    `.to_dict()`, directly verifying the alphabetical-sort bug this
+    guards against. `python3 -m pytest tests/ -q` now passes at 265 (261 +
+    4 new). Also ran a scratch `AppTest` script (not committed) against
+    the real `home.py` with both temperature series present, confirming
+    the page renders with no exception and both "Est. water temp (°F)"/
+    "USACE surface water temp (°F)" captions appear (the Altair spec
+    correctness itself is what `tests/test_ui.py` checks - AppTest has no
+    accessor to introspect a rendered Altair chart's own encoding, so this
+    scratch run's job is purely "does wiring it into the real page still
+    work end to end"). Ran the standard `AppTest` smoke pass across the
+    app entry point and every page reachable in this sandbox (same set as
+    entries 73-81) - all rendered with no exception. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/water_quality_log.csv`/
+    `data/lure_inventory.csv` confirmed byte-identical (`md5sum`) before
+    and after every run. Logged this ask as punch-list item #20 and
+    marked it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

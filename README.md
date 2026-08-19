@@ -63,7 +63,12 @@ this repo that can override it on this hosting.
   republishes, roughly every 1-2 weeks). `HOME_TREND_CHART_PAST_DAYS` is kept separate from
   `WATER_TEMP_TREND_PAST_DAYS` (5, the water-temp estimate model's own tuned trailing-average
   window - see `core/weather.py`) so changing one never silently retunes the other;
-  `fetch_forecast()` requests the larger of the two.
+  `fetch_forecast()` requests the larger of the two. The two °F charts (est. water temp, USACE
+  surface water temp) use a fixed 45-95°F Y-axis (`home.py`'s `TEMP_CHART_Y_DOMAIN`) instead of
+  auto-scaling, so a real but small swing doesn't fill the whole chart height and read as more
+  dramatic than it is - every other chart on this page still auto-scales. See
+  `core.ui.render_line_chart()` for how the fixed range is drawn (a raw `st.altair_chart()` with an
+  explicit `alt.Scale(domain=...)`, since plain `st.line_chart()` has no way to pin its Y axis).
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day. Every window's real clock range tracks that day's
   actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,

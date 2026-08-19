@@ -127,6 +127,47 @@ def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label
     )
 
 
+def render_line_chart(col, series, y_domain: tuple | None = None):
+    """Renders one `pd.Series` as a line chart in `col` (an `st.columns()`
+    slot, container, or the page itself). Punch-list #20: plain
+    `st.line_chart()` always auto-scales its Y axis to whatever the data's
+    own min/max happen to be, with no built-in way to pin it - for a
+    temperature series that reads as misleadingly volatile (a real swing
+    of a degree or two fills the whole chart height) when the angler wants
+    to see it against a fixed, meaningful band instead (e.g. 45-95°F, the
+    real range Nolin Lake's surface actually sees across a season).
+
+    `y_domain=None` (the default) is just `st.line_chart(series)`,
+    unchanged from before this existed - every other trend chart on the
+    page (activity score, pressure trend, lake level, dissolved oxygen)
+    keeps auto-scaling, since a fixed range only makes sense for a metric
+    with a known real-world band. Passing `y_domain=(lo, hi)` drops down
+    to a raw `st.altair_chart()` instead, the documented escape hatch for
+    anything `st.line_chart()` doesn't expose a parameter for - built from
+    the same Series' values/index (renamed to plain "x"/"value" columns
+    since Altair encodes off column names, not a Series' own name/index
+    labels), with an explicit `alt.Scale(domain=[lo, hi])` on the Y
+    encoding. `sort=None` on the X encoding keeps the data's own point
+    order instead of Altair's default alphabetical-by-value sort for
+    string axis labels (this app's non-USACE trend charts use formatted
+    day strings like "Mon 8/10", not dates, as their X labels)."""
+    if y_domain is None:
+        col.line_chart(series)
+        return
+    import altair as alt
+
+    df = series.rename("value").rename_axis("x").reset_index()
+    chart = (
+        alt.Chart(df)
+        .mark_line()
+        .encode(
+            x=alt.X("x", sort=None, title=None),
+            y=alt.Y("value", scale=alt.Scale(domain=list(y_domain)), title=None),
+        )
+    )
+    col.altair_chart(chart, width="stretch")
+
+
 def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
     """Render one inventory item's photo (if it has one) as a fixed-size,
     center-cropped square via inline HTML/CSS (object-fit: cover). Returns
