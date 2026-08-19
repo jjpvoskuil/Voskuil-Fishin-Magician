@@ -5607,6 +5607,50 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     changes only) - `data/*.csv` md5s confirmed identical before/after
     the scratch run. Logged as punch-list #35 and marked "Done."
 
+97. **Punch-list #36: fixed the "Search Cabela's" links (7-Day Forecast's
+    lure suggestions, Lure Inventory's gap-filling cards) 404ing on
+    Cabela's site.** The angler sent a screenshot: clicking through landed
+    on Cabela's own "OOPS! The page you are looking for can't be found"
+    page, with the search box showing literal `+` characters
+    ("Gambler+Gambler+GOAT+Swim+Jig+-+Crappie+-+5/16+oz.") instead of
+    spaces, and correctly guessed the `+` encoding was the problem.
+
+    Investigated by actually driving Cabela's live site rather than
+    guessing at a fix: `core.cabelas_lookup.search_page_url()` was
+    building `https://www.cabelas.com/search?q=<quote_plus(query)>` - a
+    plausible-looking but never-verified guess at their search route.
+    Tested that exact URL live and found the real bug is bigger than the
+    `+`-vs-`%20` encoding: `/search?q=Gambler` 404s even for a single bare
+    word with no special characters at all - `/search` simply isn't
+    Cabela's real search path. Found the actual route by typing "Gambler"
+    into Cabela's own live search box and watching where the page actually
+    navigated: `https://www.cabelas.com/SearchDisplay#q=Gambler` - a URL
+    FRAGMENT (`#...`), not a query string (`?...`), since their search is
+    a single-page-app view. That also explains the literal `+` the angler
+    saw: a fragment isn't parsed as `application/x-www-form-urlencoded`
+    the way a query string is, so `+` was never going to be read as a
+    space there no matter how it got encoded - only `%20` reliably means
+    space in a fragment. Confirmed the fix live with the angler's own
+    exact query text (real result: "6 Results for 'Gambler Gambler GOAT
+    Swim Jig - Crappie - 5/16 oz.'", top hit "Gambler GOAT Swim Jig" - the
+    actual lure) and a second query containing a raw `/` in the middle of
+    a word ("Strike King 3XD Chartreuse/Black" - real result: 5 relevant
+    crankbait results, no encoding of the `/` needed).
+
+    **The fix.** `search_page_url()` now builds
+    `https://www.cabelas.com/SearchDisplay#q=<quote(query)>` -
+    `urllib.parse.quote()` (percent-encodes spaces as `%20`) in place of
+    `quote_plus()` (encoded them as literal `+`). Both existing tests
+    (`test_search_page_url_url_encodes_the_query`,
+    `test_search_page_url_handles_blank_query`) updated to check the new
+    route/encoding instead of the old, wrong one.
+
+    Verification: full suite 317 passing (same count - two tests updated
+    in place, none added/removed, since this was a pure link-format bug
+    with no new branch/edge case to cover beyond what those two tests
+    already exercised). No data files touched (`core/cabelas_lookup.py`
+    and its test file only). Logged as punch-list #36 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
