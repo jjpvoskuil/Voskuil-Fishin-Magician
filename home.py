@@ -13,7 +13,14 @@ from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
-from core.ui import inject_mobile_css, inject_compact_metric_css
+from core.ui import inject_mobile_css, inject_compact_metric_css, render_line_chart
+
+# Punch-list #20: fixed Y-axis range (°F) for this page's temperature trend
+# charts (est. water temp, USACE surface water temp) - the real range
+# Nolin Lake's surface plausibly sees across a season, so a real but small
+# swing doesn't fill the whole chart height and read as more dramatic than
+# it is. See core.ui.render_line_chart() for how this is actually applied.
+TEMP_CHART_Y_DOMAIN = (45, 95)
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
@@ -260,34 +267,39 @@ except Exception:
 # on a single-value Series just renders one dot, which reads fine sitting
 # alongside the fuller weather/lake-level charts rather than needing its
 # own "not enough data yet" special case. Each entry here is (caption,
-# pd.Series) - USACE's own index is however many real surveys have been
-# logged (not the same 14-day window as the weather-derived charts, and
-# deliberately not forced onto it - see the note above).
+# pd.Series, y_domain) - USACE's own index is however many real surveys
+# have been logged (not the same 14-day window as the weather-derived
+# charts, and deliberately not forced onto it - see the note above).
+# y_domain is None for most charts (auto-scaled, as before) except the two
+# °F series - punch-list #20 pins those to TEMP_CHART_Y_DOMAIN so a real
+# but small swing (a degree or two) doesn't fill the whole chart height
+# and read as more dramatic than it is; see core.ui.render_line_chart()
+# for how the fixed scale is actually drawn.
 trend_items = []
 if len(trend_forecasts) >= 2:
     trend_idx = [df.the_date.strftime("%a %-m/%d") for df in trend_forecasts]
-    trend_items.append(("Activity score", pd.Series([df.overall_score for df in trend_forecasts], index=trend_idx)))
-    trend_items.append(("Est. water temp (°F)", pd.Series([df.water_temp_f for df in trend_forecasts], index=trend_idx)))
-    trend_items.append(("Pressure trend (24h, hPa)", pd.Series([df.pressure_trend_24h for df in trend_forecasts], index=trend_idx)))
+    trend_items.append(("Activity score", pd.Series([df.overall_score for df in trend_forecasts], index=trend_idx), None))
+    trend_items.append(("Est. water temp (°F)", pd.Series([df.water_temp_f for df in trend_forecasts], index=trend_idx), TEMP_CHART_Y_DOMAIN))
+    trend_items.append(("Pressure trend (24h, hPa)", pd.Series([df.pressure_trend_24h for df in trend_forecasts], index=trend_idx), None))
 if lake_level_history:
     trend_items.append(("Lake level (ft)", pd.Series(
         [lv.elevation_ft for lv in lake_level_history],
         index=[lv.observed_at for lv in lake_level_history],
-    )))
+    ), None))
 if wq_log:
     wq_idx = [r["observed_at"].strftime("%-m/%d/%y") for r in wq_log]
-    trend_items.append(("USACE dissolved oxygen (mg/l)", pd.Series([r["do_mg_l"] for r in wq_log], index=wq_idx)))
-    trend_items.append(("USACE DO saturation (%)", pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx)))
-    trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx)))
+    trend_items.append(("USACE dissolved oxygen (mg/l)", pd.Series([r["do_mg_l"] for r in wq_log], index=wq_idx), None))
+    trend_items.append(("USACE DO saturation (%)", pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx), None))
+    trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx), TEMP_CHART_Y_DOMAIN))
 
 if trend_items:
     with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
         for row_start in range(0, len(trend_items), 3):
             row_items = trend_items[row_start:row_start + 3]
             row_cols = st.columns(len(row_items))
-            for col, (caption, series) in zip(row_cols, row_items):
+            for col, (caption, series, y_domain) in zip(row_cols, row_items):
                 col.caption(caption)
-                col.line_chart(series)
+                render_line_chart(col, series, y_domain)
         caption_bits = []
         if len(trend_forecasts) >= 2:
             caption_bits.append(
