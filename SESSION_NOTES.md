@@ -5117,6 +5117,73 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     (`md5sum` + `git checkout`) after every scratch run. Logged as
     punch-list #29 and marked "Done."
 
+91. **Punch-list #30 (SOMEDAY/MAYBE, logged Open): scoped true offline field
+    logging and a possible public-app rebuild - not built, research
+    preserved for whenever it's picked up.** After entry 90 shipped the
+    reconnect-resilience fix, the angler asked what TRUE offline capability
+    (works with zero signal, syncs later) would actually take, since some
+    areas of the lake have real, sustained dead zones (this morning's
+    reported issue was most likely his phone locking, per his own read, but
+    the dead-zone question is separate and real). Researched rather than
+    guessed at the constraints:
+    - Confirmed via caniuse.com that iOS Safari has never supported the Web
+      Background Sync API (`registration.sync`) - no WebKit roadmap signal
+      either. Any offline design for this app's actual users (phones) can't
+      rely on it; sync has to be "try when the app is reopened with
+      signal," not silent background sync.
+    - Confirmed iOS Safari DOES support Service Workers/Cache API/IndexedDB
+      well enough for a real offline-capable PWA (home-screen web apps get
+      Safari's own storage quota per WebKit's 2023 policy update), but
+      Safari's Intelligent Tracking Prevention can evict script-writable
+      storage after ~7 days with no user interaction - fine for a same-day
+      sync, a real constraint for anything meant to sit unopened longer.
+    - Confirmed on the Streamlit community forum that Streamlit itself has
+      no official PWA/offline support and a maintainer's stated reason:
+      "the frontend always requires a connection with the backend Streamlit
+      server." This isn't a missing feature to request, it's this
+      framework's actual architecture - genuinely not fixable inside
+      Streamlit.
+    - Real offline-first field-data tools (ODK Collect, KoboCollect, ArcGIS
+      Field Maps, Fulcrum, GoCanvas) are consistently NATIVE mobile apps,
+      not PWAs or web apps, precisely because of the iOS limitations above
+      plus needing robust camera/GPS access.
+
+    Presented three tiers: (A) no-code workflow mitigation - jot catches in
+    the phone's own Notes/voice memo app in a dead zone, batch-enter once
+    back in range (works today, costs nothing, and entry 90's fix means
+    re-entering won't lose or duplicate anything); (B) a small standalone
+    offline "catch logger" PWA (new codebase, local IndexedDB storage, a
+    small serverless sync relay since a GitHub push token can't safely live
+    in client-side JS) - real but bounded engineering, roughly a multi-day
+    side project; (C) a full native/cross-platform rebuild, the way
+    professional tools actually solve this.
+
+    The angler's follow-up reframed this as a possible future public-app
+    rebuild (better look/feel too, not just offline), so this entry scopes
+    tier C at a high level rather than committing to any tier now: (1) data
+    layer - real database (e.g. Postgres via Supabase/Neon) replacing
+    trip_log.csv-in-git for genuine concurrent multi-user writes, real
+    accounts/auth replacing both "no auth" and the who's-fishing name tag,
+    a real API layer (FastAPI fits well - `core/scoring.py`/`core/lures.py`/
+    `core/weather.py` etc. are plain Python with no Streamlit dependency,
+    so most of the actual fishing logic carries over behind API endpoints
+    rather than being rewritten); (2) a React Native or Flutter mobile app
+    (one codebase, both stores) with on-device SQLite for full offline
+    read/write and sync-on-reconnect, native camera/GPS instead of browser
+    widgets; (3) a separately designed public web frontend for
+    browsing/planning without installing an app; (4) public-readiness
+    hardening - rate limits/caching on external calls (Open-Meteo, USGS,
+    USACE, Cabela's lookup, the Claude vision lure-scanner) that are fine
+    at 2 users but need real per-user caps at scale, real non-free
+    hosting/ops, a privacy policy (anglers are protective of their spot
+    locations), and a scope call on single-lake (everything right now -
+    bathymetry, shoreline, fish attractors - is Nolin-specific data) vs.
+    multi-lake. Explicitly a genuine rebuild as a different KIND of project
+    (months, real staging/prod environments, app-store review cycles) -
+    not an incremental feature on this codebase. Logged as punch-list #30
+    and deliberately left "Open" (not "Done") - this is a someday/maybe
+    item to revisit, not something built this round.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
