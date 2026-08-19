@@ -20,9 +20,9 @@ pg = st.navigation([
     st.Page("home.py", title="Today", icon="🎣", default=True),
     st.Page("pages/1_7_Day_Forecast.py", title="7 Day Forecast", icon="📅"),
     st.Page("pages/2_Lake_Map.py", title="Lake Map", icon="🗺️"),
+    st.Page("pages/6_Spot_Session.py", title="Spot Session", icon="🎯"),
     st.Page("pages/4_Trip_History.py", title="Trip History", icon="📊"),
     st.Page("pages/5_Lure_Inventory.py", title="Lure Inventory", icon="🧰"),
-    st.Page("pages/6_Spot_Session.py", title="Spot Session", icon="🎯"),
     st.Page("pages/7_Development.py", title="Development", icon="🛠️"),
 ])
 pg.run()

@@ -4965,6 +4965,32 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `data/anglers.csv` this feature actually ships with. Logged as
     punch-list #26 and marked "Done".
 
+88. **Punch-list #27: reorder the sidebar pages.** Ask (verbatim): "Lets
+    reorder the app pages as follows: Today, 7 Day Forecast, Lake Map,
+    Spot Sessions, Trip History, Lure Inventory, Development." The only
+    change needed was the order of the `st.Page(...)` entries in
+    `app.py`'s `st.navigation([...])` list - that list, not the pages'
+    numeric filename prefixes, is what actually controls sidebar order
+    (the prefixes are leftovers from the old file-based `pages/`
+    auto-discovery this app stopped using once `st.navigation`/`st.Page`
+    landed - see `app.py`'s own docstring). Moved `Spot Session` up to sit
+    right after `Lake Map` and before `Trip History`; left every page's
+    filename untouched (renaming them to match the new numeric order would
+    have touched every test/README reference to those paths for zero
+    functional benefit, since the filenames no longer drive anything).
+    README's "Project layout" file listing reordered to match, with a note
+    added clarifying that the list order there is cosmetic/documentation
+    only. Verification: full suite still 312 passing (untouched by this
+    change); a scratch `AppTest` run parsed `app.py`'s own AST to confirm
+    the six `st.Page(title=...)` calls now appear in the exact requested
+    order (`AppTest` itself doesn't expose the rendered sidebar's labels
+    directly, so reading the source was the reliable check); the standing
+    full-page `AppTest` smoke pass (entry point + all 6 pages) still comes
+    back clean; `data/trip_log.csv`/`data/lure_inventory.csv`/
+    `data/lake_spots.csv`/`data/dev_tasks.csv`/`data/water_quality_log.csv`/
+    `data/anglers.csv` all confirmed byte-identical (`md5sum`) before and
+    after. Logged as punch-list #27 and marked "Done".
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
