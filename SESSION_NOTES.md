@@ -5184,6 +5184,92 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and deliberately left "Open" (not "Done") - this is a someday/maybe
     item to revisit, not something built this round.
 
+92. **Punch-list #31: paired the fish-weight slider with manual lb/oz (and
+    length with manual inches) entry fields, two-way synced - the 1-oz
+    slider alone was "really touchy" for real on-the-water use.** Verbatim
+    ask: "On the fish weight slider when entering a caught fish, it is
+    really touchy given it is in 1 oz increments. Two ideas to improve; 1)
+    lets change the top end to +5lbs instead of +7lbs and then right to the
+    right of the slider, lets add manual fields for lbs and ozs. The slider
+    should also populate the manual fields as it slides. This way I can get
+    close and then manual enter is needed. I should also be able to just
+    straight manual enter and the slider would then adjust to that weight.
+    This is less of an issue with the inches, but lets do the same thing
+    but keep the slider range as is for now." Two changes:
+
+    - `core.activity_log.WEIGHT_SLIDER_OPTIONS`' top end narrowed from a
+      "+7 lb" open-ended catch-all to "+5 lb" (`WEIGHT_SLIDER_TOP_LB = 5`,
+      a new constant rather than a hardcoded literal, same rationale as
+      every other named constant in this module) - trims 16 fiddly
+      1-oz steps off the slider's far end that real catches here rarely
+      reach anyway; the "+5 lb" catch-all and the new manual field both
+      still handle a genuine outlier. Two new functions,
+      `nearest_weight_slider_option()`/`nearest_length_slider_option()`,
+      snap an arbitrary decimal lb/in value to its closest slider option
+      (clamped to the two open-ended catch-alls outside the concrete
+      range) - the reverse direction of the existing
+      `weight_lb_for_slider_option()`/`length_in_for_slider_option()`,
+      needed so a manual entry can move the slider to match.
+    - `pages/6_Spot_Session.py` gained `_weight_input()`/`_length_input()`,
+      each rendering its slider plus one or two `st.text_input` manual
+      fields (`st.text_input`, not `st.number_input` - this app has
+      avoided `number_input`'s built-in +/- steppers since punch-list #2/
+      entry 62's original "no +/- buttons" ask, and the same reasoning
+      applies here) using the `on_change`-callback two-way-sync pattern
+      this project's own widget rules already document: moving the slider
+      (`on_change=_slider_changed`) writes the manual field(s) to match;
+      typing into a manual field (`on_change=_manual_changed`) re-derives
+      the slider's nearest position. The manual fields are the real
+      source of truth for the value these functions return (full 1-oz/
+      any-decimal-inch precision, not limited to the slider's own bands) -
+      the slider is a fast, rough starting point per the angler's own
+      framing ("get close and then manual enter"), not the final say. An
+      oz value of 16+ typed into the manual field carries over into lb
+      automatically (`lb, oz = lb + oz // 16, oz % 16` - e.g. "20" oz
+      becomes 1 lb 4 oz) so there's no mental math needed at the water.
+      Both call sites - the live "Log a fish" dialog (`_fish_entry_dialog`)
+      and edit mode's "Add a fish" block - swapped their old
+      `st.select_slider` + `weight_lb_for_slider_option()`/
+      `length_in_for_slider_option()` pair for a single call to the new
+      helper; `_new_fish_from_form()`'s signature changed from
+      `(..., weight_option, length_option, ...)` to
+      `(..., weight_lb, length_in, ...)` accordingly, storing the already-
+      resolved decimal values directly instead of converting from a slider
+      label. Length's slider RANGE is unchanged (`LENGTH_SLIDER_OPTIONS`
+      untouched) per the angler's explicit "keep the slider range as is
+      for now" - only the manual-field pairing is new there.
+
+    Verification: `tests/test_activity_log.py` updated (top-end tests
+    changed from "+7 lb"/7.5 to "+5 lb"/5.5, `WEIGHT_SLIDER_TOP_LB == 5`
+    asserted, four new tests for `nearest_weight_slider_option()`/
+    `nearest_length_slider_option()` covering in-range snapping,
+    below/above-range clamping to the two catch-alls, and blank/garbage
+    input) - full suite 316 passing. A scratch `AppTest` walkthrough
+    (uncommitted) seeded a real active session with one lure at a real
+    tackle spot, opened the "Log a fish" dialog, and used the widgets'
+    real `.set_value()`/`.click()` interaction API (not raw
+    `session_state` writes, which bypass `on_change` entirely and don't
+    reflect what actually happens at click-time) to confirm: correct
+    default seeding (slider "<1 lb" seeds manual fields to 0 lb/8 oz, the
+    band's own representative value); moving the weight slider to "3 lb 4
+    oz" updates the manual fields to match; typing lb=2/oz=20 into the
+    manual fields snaps the slider to "3 lb 4 oz" with the oz carrying
+    over into lb correctly; the same slider->manual and manual->slider
+    sync for length, including a half-inch manual value (21.5) the
+    whole-inch slider itself can't represent, snapping to its nearest
+    whole-inch option; and that clicking "✅ Record" with those manually-
+    typed values lands the exact precise `weight_lb`/`length_in` (3.25 and
+    21.5, not slider-rounded values) in the resulting trip-log row's
+    `conditions_json["fish"]` entry. Also re-ran the standing full-page
+    smoke pass across the entry point and all 7 pages (needed a proper
+    fake weather bundle and lat/lon on the fake spot this time, since
+    `1_7_Day_Forecast`/`2_Lake_Map` both need real-shaped forecast/spot
+    data to render - not a regression from this change, just this round's
+    scratch mocks needing to be more complete than a bare `None`/no-`lat`
+    stub). `data/trip_log.csv` and every other data file confirmed
+    byte-identical (`md5sum`) before and after every scratch run. Logged as
+    punch-list #31 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

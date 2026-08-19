@@ -104,16 +104,30 @@ HIT_TYPE_OPTIONS = ["Hard hit", "Light hit", "Double tap", "Swallowed", "Fouled"
 #
 # Weight slides in 1 oz increments (per the angler's own follow-up ask) from
 # a "<1 lb" catch-all at the bottom (anything under a pound isn't worth
-# splitting into individual ounces) up through 6 lb 15 oz, then an open-
-# ended "+7 lb" catch-all at the top - built programmatically rather than
-# hand-typed, since spelling out 96 individual lb/oz labels by hand invites
-# a typo.
+# splitting into individual ounces) up through WEIGHT_SLIDER_TOP_LB - 1 oz,
+# then an open-ended "+N lb" catch-all at the top - built programmatically
+# rather than hand-typed, since spelling out dozens of individual lb/oz
+# labels by hand invites a typo.
+#
+# Punch-list #31: at 1-oz resolution across a several-pound range, dragging
+# the slider by feel/touch to hit an exact ounce turned out too fiddly/
+# "touchy" for real on-the-water use - narrowed the top end from 7 lb to 5
+# lb (nearly every real catch here is well under that; outliers are exactly
+# what the "+5 lb" catch-all and the manual fields below are for) and paired
+# the slider with manual lb/oz fields (see _weight_input() in
+# pages/6_Spot_Session.py) so the slider gets you close fast and the manual
+# fields get you exact.
 def _format_weight_option(total_oz: int) -> str:
     lb, oz = divmod(total_oz, 16)
     return f"{lb} lb" if oz == 0 else f"{lb} lb {oz} oz"
 
 
-WEIGHT_SLIDER_OPTIONS = ["<1 lb"] + [_format_weight_option(oz) for oz in range(16, 112)] + ["+7 lb"]
+WEIGHT_SLIDER_TOP_LB = 5
+
+WEIGHT_SLIDER_OPTIONS = (
+    ["<1 lb"] + [_format_weight_option(oz) for oz in range(16, WEIGHT_SLIDER_TOP_LB * 16)]
+    + [f"+{WEIGHT_SLIDER_TOP_LB} lb"]
+)
 
 LENGTH_SLIDER_OPTIONS = [
     "<13 in", "13 in", "14 in", "15 in", "16 in", "17 in", "18 in", "19 in", "20 in",
@@ -124,7 +138,7 @@ LENGTH_SLIDER_OPTIONS = [
 def weight_lb_for_slider_option(option) -> Optional[float]:
     """Converts one of WEIGHT_SLIDER_OPTIONS to a decimal-pound value for
     storage (core.storage.TripEntry / Trip History's existing decimal-lb
-    schema). "<1 lb" stores as 0.5 lb and "+7 lb" stores as 7.5 lb (each
+    schema). "<1 lb" stores as 0.5 lb and "+5 lb" stores as 5.5 lb (each
     open-ended catch-all's representative value, same convention as
     length_in_for_slider_option()'s "<13 in"/"26+ in" below) - every other
     option is a literal "X lb" or "X lb Y oz" reading, parsed directly.
@@ -166,6 +180,51 @@ def length_in_for_slider_option(option) -> Optional[float]:
         return float(s)
     except ValueError:
         return None
+
+
+def nearest_weight_slider_option(weight_lb) -> str:
+    """Punch-list #31: given an arbitrary decimal-pound weight (from the
+    manual lb/oz fields - see _weight_input() in pages/6_Spot_Session.py),
+    returns whichever WEIGHT_SLIDER_OPTIONS entry best represents it, so
+    the slider can be kept visually in sync with manual entry. Below the
+    smallest concrete (1-oz-increment) option's own value, "<1 lb" wins
+    outright; above the largest concrete option's own value, the "+N lb"
+    catch-all wins outright (not just "whichever is numerically closest" -
+    once you're past the top of the slider's real range, the open-ended
+    top bucket is always the right one to show); everything in between
+    snaps to its nearest concrete option. This never needs to change if
+    WEIGHT_SLIDER_TOP_LB is ever retuned again - every boundary here is
+    read from WEIGHT_SLIDER_OPTIONS itself, not hand-copied."""
+    try:
+        v = float(weight_lb)
+    except (TypeError, ValueError):
+        v = 0.0
+    concrete = WEIGHT_SLIDER_OPTIONS[1:-1]
+    lo = weight_lb_for_slider_option(concrete[0])
+    hi = weight_lb_for_slider_option(concrete[-1])
+    if v < lo:
+        return WEIGHT_SLIDER_OPTIONS[0]
+    if v > hi:
+        return WEIGHT_SLIDER_OPTIONS[-1]
+    return min(concrete, key=lambda opt: abs((weight_lb_for_slider_option(opt) or 0) - v))
+
+
+def nearest_length_slider_option(length_in) -> str:
+    """Same idea as nearest_weight_slider_option() above, for
+    LENGTH_SLIDER_OPTIONS - keeps the length slider in sync with its own
+    manual inches field (punch-list #31)."""
+    try:
+        v = float(length_in)
+    except (TypeError, ValueError):
+        v = 0.0
+    concrete = LENGTH_SLIDER_OPTIONS[1:-1]
+    lo = length_in_for_slider_option(concrete[0])
+    hi = length_in_for_slider_option(concrete[-1])
+    if v < lo:
+        return LENGTH_SLIDER_OPTIONS[0]
+    if v > hi:
+        return LENGTH_SLIDER_OPTIONS[-1]
+    return min(concrete, key=lambda opt: abs((length_in_for_slider_option(opt) or 0) - v))
 
 
 # --- Weight display: decimal lb (how it's entered/stored) <-> lb-oz (how it's
