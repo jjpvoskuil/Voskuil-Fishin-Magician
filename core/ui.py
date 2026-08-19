@@ -94,6 +94,39 @@ def inject_mobile_css():
     )
 
 
+def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label_rem: float = 0.72):
+    """Punch-list #16: shrink `st.metric()`'s label/value/delta font size,
+    scoped to one `st.container(key=container_key)` rather than site-wide -
+    for a row that's grown past the 4-5 columns Streamlit's default metric
+    sizing comfortably fits on one line (home.py's "Today at a glance" row,
+    now up to 6 tiles wide after adding the USACE reading), the default
+    ~2.25rem value / ~0.875rem label wraps or gets cramped well before a
+    normal desktop width runs out. `st.container(key=...)` renders a
+    `st-key-<container_key>` wrapper class (see Streamlit's own
+    `elements/layouts.py`), which is what this targets - unlike the
+    `:nth-child(3)` column-count selector `inject_mobile_css()` uses above
+    (deliberately wide-reaching, for any multi-column row on any page),
+    this only ever affects the one caller-chosen row, so it's safe to call
+    from just the one page that needs it without touching metric sizing
+    anywhere else in the app."""
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{container_key} [data-testid="stMetricValue"] {{
+            font-size: {value_rem}rem !important;
+        }}
+        .st-key-{container_key} [data-testid="stMetricLabel"] {{
+            font-size: {label_rem}rem !important;
+        }}
+        .st-key-{container_key} [data-testid="stMetricDelta"] {{
+            font-size: {label_rem}rem !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
     """Render one inventory item's photo (if it has one) as a fixed-size,
     center-cropped square via inline HTML/CSS (object-fit: cover). Returns

@@ -32,6 +32,14 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
+- **"Today at a glance"** on the Home page - up to six metric tiles in one compact row (smaller
+  metric font than Streamlit's default so all six fit across a normal page width - see
+  `core.ui.inject_compact_metric_css()`): activity score, estimated water temp, moon phase, and
+  24h pressure trend (all from today's weather-derived score), plus real USGS lake level and the
+  current USACE surface reading (water temp; dissolved oxygen mg/l and saturation % on hover) -
+  each of those last two is its own independent fetch, so a weather outage (e.g. Open-Meteo's
+  free-tier rate limit) only removes the four weather-derived tiles, never hides lake level or
+  the USACE reading if either of *those* fetched fine.
 - **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") -
   activity score, estimated water temp, and 24h pressure trend for the last 14 days
   (recomputed from the same weather data already fetched for today - `core.weather.
