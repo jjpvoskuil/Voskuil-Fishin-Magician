@@ -36,35 +36,34 @@ this repo that can override it on this hosting.
   metric font than Streamlit's default so all seven fit across a normal page width - see
   `core.ui.inject_compact_metric_css()`): activity score, estimated water temp, moon phase, and
   24h pressure trend (all from today's weather-derived score), plus real USGS lake level and two
-  tiles for the current USACE surface reading - water temp and dissolved-oxygen saturation % each
-  get their own tile (mg/l and the survey date are in each tile's hover text) - each of those last
-  three is its own independent fetch, so a weather outage (e.g. Open-Meteo's free-tier rate limit)
-  only removes the four weather-derived tiles, never hides lake level or the USACE tiles if either
-  of *those* fetched fine. The two USACE tiles specifically fall back to the most recent reading
-  in `data/water_quality_log.csv` whenever the live fetch itself fails (the USACE report page has
-  turned out to be unreachable from some hosting environments) - it's a periodic survey anyway,
-  not something that needs a fresh successful fetch on every single page load to be worth showing,
-  and each tile's hover text always states the real survey date either way, plus a note when it's
-  showing that cached fallback rather than a just-fetched reading. The "🌡️ USACE surface reading
-  history" expander below (see next bullet) shows the same reading's actual numbers even with only
-  one survey logged so far, rather than just a "not enough data yet" caption with nothing to look
-  at, and once a second survey is logged it charts DO saturation % alongside water temp and DO
-  mg/l (previously only those first two were charted).
-- **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") -
-  activity score, estimated water temp, and 24h pressure trend for the last 14 days
-  (recomputed from the same weather data already fetched for today - `core.weather.
-  fetch_forecast()` requests `HOME_TREND_CHART_PAST_DAYS` (14) days of real past weather
-  alongside the forecast, so no extra live calls are needed), plus a real USGS lake-level
-  trend covering the same window. `HOME_TREND_CHART_PAST_DAYS` is kept separate from
-  `WATER_TEMP_TREND_PAST_DAYS` (5, the water-temp estimate model's own tuned trailing-
-  average window - see `core/weather.py`) so changing one never silently retunes the
-  other; `fetch_forecast()` requests the larger of the two. A separate "🌡️ USACE surface
-  reading history" section charts the periodic USACE water-temp/dissolved-oxygen survey
-  (see below) - since that live report only ever has the CURRENT reading, this app records
-  its own local archive (`data/water_quality_log.csv`, git-committed like the trip log)
-  every time it fetches a fresh survey, so this one genuinely starts sparse and fills in
-  gradually as USACE republishes (roughly every 1-2 weeks) rather than showing a fixed
-  14-day window that would barely move.
+  tiles for the current USACE reading - dissolved oxygen (mg/l) and DO saturation % each get their
+  own tile (surface water temp and the survey date are in each tile's hover text; USACE's own
+  surface temp is charted below rather than tiled here, since "Est. water temp" already covers
+  temperature on this row) - each of those last three is its own independent fetch, so a weather
+  outage (e.g. Open-Meteo's free-tier rate limit) only removes the four weather-derived tiles,
+  never hides lake level or the USACE tiles if either of *those* fetched fine. The two USACE tiles
+  fall back to the most recent reading in `data/water_quality_log.csv` whenever the live fetch
+  itself fails (the USACE report page has turned out to be unreachable from some hosting
+  environments) - it's a periodic survey anyway, not something that needs a fresh successful fetch
+  on every single page load to be worth showing, and each tile's hover text always states the real
+  survey date either way, plus a note when it's showing that cached fallback rather than a
+  just-fetched reading.
+- **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") - one
+  expander with every trend on this page, not split across separate dropdowns: activity score,
+  estimated water temp, and 24h pressure trend for the last 14 days (recomputed from the same
+  weather data already fetched for today - `core.weather.fetch_forecast()` requests
+  `HOME_TREND_CHART_PAST_DAYS` (14) days of real past weather alongside the forecast, so no extra
+  live calls are needed), a real USGS lake-level trend covering the same window, and the periodic
+  USACE water-quality survey - surface water temp, dissolved oxygen (mg/l), and DO saturation % -
+  charted on its own real-survey timeline rather than forced onto the 14-day window (since that
+  live USACE report only ever has the CURRENT reading, this app records its own local archive,
+  `data/water_quality_log.csv`, git-committed like the trip log, every time it fetches a fresh
+  survey, and charts it starting from the very first point - even a single real reading renders as
+  a genuine chart rather than a "not enough data yet" placeholder - filling in further as USACE
+  republishes, roughly every 1-2 weeks). `HOME_TREND_CHART_PAST_DAYS` is kept separate from
+  `WATER_TEMP_TREND_PAST_DAYS` (5, the water-temp estimate model's own tuned trailing-average
+  window - see `core/weather.py`) so changing one never silently retunes the other;
+  `fetch_forecast()` requests the larger of the two.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day. Every window's real clock range tracks that day's
   actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,

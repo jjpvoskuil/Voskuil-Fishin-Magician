@@ -4142,6 +4142,68 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and after every run. Logged this ask as punch-list item #18 and marked
     it "Done."
 
+81. **Punch-list #19: drop the USACE water-temp tile for dissolved oxygen,
+    merge the USACE charts into the same trends dropdown, chart from the
+    first point.** Ask (page: Today/Home): "lets remove the USACE water
+    temp from the top and add the USACE dissolved oxygen. For the USACE
+    charts, lets show those with even just the one data point and not as
+    a separate dropdown of USACE charts.... just with the other charts."
+
+    Two changes, both continuing the same "put it on the line, don't bury
+    it in its own corner" direction from #16-#18. First, on "Today at a
+    glance": removed the "USACE water temp" tile (the "Est. water temp"
+    tile already covers water temp on this row, and USACE's own real
+    surface temp is still charted below, just no longer tiled up top) and
+    added "USACE dissolved oxygen" (`f"{do_mg_l:g} mg/l"`) alongside the
+    existing "USACE DO saturation" tile - both now the mg/l and %
+    readings the angler actually wanted visible, sharing the same
+    `survey_note` help-text framing built in #18. `n_cols`'s `water_quality_
+    display` term stays `2` (still 2 USACE tiles, just a different pair).
+
+    Second, and the bigger structural change: removed the separate "🌡️
+    USACE surface reading history" expander entirely and folded its three
+    series (surface water temp, dissolved oxygen mg/l, DO saturation %)
+    into the same "N-day trends" expander as the weather/lake-level
+    charts, so there's one dropdown for every trend on the page instead of
+    two. Rebuilt that section around a `trend_items` list of `(caption,
+    pd.Series)` pairs - built conditionally per source (weather-derived
+    trio only if `len(trend_forecasts) >= 2`, lake level only if
+    `lake_level_history`, the three USACE series only if `wq_log`) - then
+    rendered `3` at a time via `st.columns(len(row_items))` inside one
+    loop, rather than the old fixed 2x2 grid plus a separate fixed-3-
+    column USACE block. USACE's own index (`wq_idx`, however many real
+    surveys have been logged) is deliberately its own x-axis, not forced
+    onto the 14-day weather window - a `pd.Series` with a different index
+    length/labels renders in `st.line_chart()` exactly like any of the
+    others, so this needed no special-casing to sit in the same grid.
+
+    Also dropped #18's single-point special case (3 `st.metric()` tiles
+    instead of a chart, added last entry specifically because "a chart of
+    one point is meaningless") per this ask's explicit "show those with
+    even just the one data point" - `st.line_chart()` on a length-1
+    `pd.Series` just renders a single dot, which turns out to read
+    perfectly fine now that it's sitting alongside the other, fuller
+    charts rather than alone in its own section looking sparse. The old
+    "Only one USACE survey logged so far..." caption is gone too; the
+    merged section's closing caption now just states how many USACE
+    readings are logged and since when, unconditionally.
+
+    Ran a scratch `AppTest` script (not committed) covering: (1) a single
+    logged USACE reading - confirms "USACE water temp" is no longer among
+    the metric labels, "USACE dissolved oxygen" and "USACE DO saturation"
+    both are, there's exactly one expander with "day trends" in its label
+    (no separate USACE expander), all three USACE chart captions appear
+    inside it, and the old "Only one USACE survey logged" text is gone;
+    (2) two logged readings - confirms the merge and charting still hold
+    with more data. `python3 -m pytest tests/ -q` still passes at 261
+    (page code only, same as entries 78-80). Also ran the standard
+    `AppTest` smoke pass across the app entry point and every page
+    reachable in this sandbox (same set as entries 73-80) - all rendered
+    with no exception. `data/trip_log.csv`/`data/segment_score_freeze.csv`/
+    `data/water_quality_log.csv`/`data/lure_inventory.csv` confirmed
+    byte-identical (`md5sum`) before and after every run. Logged this ask
+    as punch-list item #19 and marked it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
