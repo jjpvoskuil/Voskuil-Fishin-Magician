@@ -616,7 +616,12 @@ def _group_owned_by_category(inventory: list) -> dict:
     inventory) matched to the recommendation engine's lure taxonomy without
     the two modules depending on each other's internals. Rows with no
     category, an unrecognized category, or zero quantity on hand are
-    skipped (not currently owned)."""
+    skipped (not currently owned).
+
+    Each grouped item dict includes the source row's `item_id` (Spot
+    Session's recommendation-card "+ Add to session" quick-add buttons key
+    off this directly, rather than re-matching the item by its display
+    label the way the page's older edit-mode code had to)."""
     grouped: dict = {}
     if not inventory:
         return grouped
@@ -631,6 +636,7 @@ def _group_owned_by_category(inventory: list) -> dict:
         if qty <= 0:
             continue
         grouped.setdefault(category, []).append({
+            "item_id": row.get("item_id", ""),
             "brand": row.get("brand", ""),
             "description": row.get("description", ""),
             "quantity": qty,

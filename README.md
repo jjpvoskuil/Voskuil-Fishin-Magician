@@ -111,95 +111,66 @@ this repo that can override it on this hosting.
   open the Spot Session page directly and pick a saved spot from the "📍 Location"
   dropdown right at the top, no trip through the map required. That dropdown stays at
   the top even once a spot's loaded, so switching to a different saved spot is always
-  one click away without going back to the map first; it always shows whichever spot
-  is actually loaded, however you got there. Pick a session date (defaults to today;
-  pick an earlier date to log a past session) right under the spot name, then enter
-  what you're actually seeing on the water (water temp, visibility/Secchi depth + stain color if
-  it's in the ambiguous mid-range or a "stirred up/muddy" checkbox to override either -
-  these default to 85°F water temp, 2.5 ft Secchi depth (which lands in the "Stained"
-  band, so the stain color field defaults to Green stained), and 8 ft fish depth,
-  matching typical summer conditions on Nolin rather than generic placeholders,
-  wind as a plain-language band like "Light Ripple" rather than an mph guess, light
-  condition, precipitation, a manually-entered session start time, and a time-of-day
-  window shown with today's actual clock range, e.g. "Dawn (5:52 AM-7:52 AM)").
-  Whatever you've entered here sticks around if you navigate to another page and
-  come back, or reload the browser tab, so a half-filled-out session never gets
-  lost. The
-  time-of-day window auto-fills to match whatever start time you enter (falling back
-  to the real current time before a start time is set) - pick a different window
-  yourself any time to override it, which sticks until you change the start time
-  again. It scores that moment - using the time you actually entered, not whatever time you
-  happened to be filling out the page - and calls the same lure/color recommendation
-  engine the 7-Day Forecast page uses, just fed by a live reading instead of a
-  forecast. This score factors in your entered water temperature, water clarity, and
-  whether you reported seeing forage, on top of pressure trend and moon phase (see
-  "How the model works" below for exactly how); hover the small ⓘ next to the score
-  to see the full factor-by-factor breakdown of how it was calculated. That score and
-  the lure recommendation sit in their own collapsible "Suggestions for right now"
-  section (open by default) - there's no button to click and nothing to submit, it
-  appears and updates live the moment a session start time is entered (the one field
-  in Conditions right now with no default; everything else already has a sane one),
-  and it attaches to the trip once logged whether or not you ever open or read that
-  section. Below it, a second collapsible section, "Add results" (closed by default),
-  lets you log what actually happened - and this one doesn't need Conditions filled
-  in at all, so you can jump straight to logging a catch without scoring the moment
-  first if that's all you want to do (the trip is saved with a blank predicted score
-  and "Unknown" water clarity in that case, everything else logs normally). It opens
-  with a "Conditions during this lure use" group - wind (the same Glassy/Light
-  Ripple/Moderate Chop/Heavy band picker as "Conditions right now" above, defaulting
-  to whatever you picked there and following it live until you change this one
-  yourself) and direction (defaults to SW), fish activity, forage activity, and
-  forage type seen - describing the whole time you're at this spot, not just one
-  lure. Picking the lure (and trailer, if that lure type
-  takes one) comes next, as a searchable, photo card grid instead of a plain dropdown
-  - search your tackle box by brand or description, then click the card you want; a
-  "Used a trailer" checkbox reveals the same card-grid picker for the trailer, but
-  narrowed to just trailer-style baits (craw/creature soft plastics and paddle-tail
-  swimbait-style ones) - worms, senkos, and finesse baits like Z-Man TRDs are real
-  soft plastics but aren't trailers, so they're left out of this picker even though
-  they show up normally in the main "Lure used" picker above - with its own name/
-  color fields - followed by the time range you fished this particular
-  lure and notes for that window. Fish get logged as you catch them, split into two
-  entry paths: click "➕ Add fish (1 lb+)" for a scoreable fish worth its own full
-  entry - species (Largemouth/Spotted/Striped, or type in your own), weight (as a
-  manual "lb - oz" field, e.g. "3 - 8" for 3 lb 8 oz - the dash comes pre-filled so
-  you just type over it), length, depth caught, presentation/technique, and retrieval
-  speed. For fish too small to bother scoring (under 1 lb), click "➕ Log small fish
-  (under 1 lb)" instead - a much shorter entry with just the species and a running
-  count, no weight/length/depth/presentation fields at all; it still counts as that
-  many fish (not one) toward the trip's total catch count and Trip History's totals.
-  Either way, each save adds it to a running list (with a "Remove" if you need to undo
-  one) so you're not committing to a fish count up front. Two buttons at the
-  bottom cover the two things you actually do out on the water: **"Log this lure"**
-  saves that lure as its own entry, shows a confirmation toast, and immediately resets
-  the form for the next lure - the section stays open (it doesn't collapse back shut),
-  the lure/trailer picker, timing, and notes all go blank, but the conditions group
-  above keeps whatever you last entered, ready to log another lure fished in those
-  same conditions right away; use this every time you switch lures during the same
-  time at the spot. **"Log this session"** is for when you're done fishing this spot
-  for now - it saves whatever lure is currently filled in too (so you don't have to
-  remember to click "Log this lure" one last time before wrapping up; it's a no-op if
-  nothing's actually filled in), then clears the conditions group back to blank
-  defaults and leaves the section open and empty, ready for a genuinely new session -
-  next time you fish this spot, its conditions won't carry over from today's. A green
-  "✅ Session closed" banner confirms this happened even when nothing on screen visibly
-  changed (e.g. wind/fish activity were already at their defaults) - it's not
-  just a toast, so it's still there to read a moment later. A
-  running "📋 Already logged for this spot today" line lists everything saved so far
-  today, across however many lures and sessions. Each lure still lands as its own row
-  in the trip log (no combined/bundled entry), so Trip History's per-trip filtering
-  and detail view keep working exactly as before. It all writes into the same shared
-  trip log the **Trip History** page reads from - Spot Session is now the only way to
-  log a trip; see "How the model works" below for the condition bands behind this
-  page's inputs. Made a mistake on a past trip, or just want to fix it up? Click
-  "✏️ Edit this trip" on that trip's entry on the Trip History page - it opens Spot
-  Session on that same spot with everything pre-filled from that trip (conditions,
-  lure/trailer, timing, notes, fish caught), and the usual "Log this lure"/"Log this
-  session" pair is replaced with a single **"💾 Save changes"**/"Cancel edit" pair -
-  saving updates that same trip in place rather than adding a duplicate. Logged it
-  against the wrong spot? While editing, just pick the right one from the "📍
-  Location" dropdown at the top before saving - everything else you'd already
-  filled in carries over to the new spot instead of clearing out.
+  one click away without going back to the map first. Pick a session date (defaults to
+  today; pick an earlier date to log a past session) right under the spot name, then
+  the page walks through one flow: enter conditions, get suggestions and pick your
+  lure(s), start the session, log fish as you catch them, end the session.
+  **Conditions** is a single consolidated block covering everything about right now
+  and about how you're about to fish it (water temp, visibility/Secchi depth + stain
+  color/stirred-up override, wind band + direction, sky condition, precipitation,
+  forage seen, fish activity, forage activity, and the depth fish are showing up on
+  electronics) - every weather-related field defaults from the live forecast the
+  moment the block first appears (nearest-hour wind speed/direction, cloud cover, and
+  precipitation from Open-Meteo, water temp from the same estimate the Home page
+  shows), so there's normally nothing to type unless what you're actually seeing
+  differs from the forecast - every field stays a normal, freely overridable widget
+  either way, and whatever you've entered sticks around if you navigate away and back.
+  Below that, a live **"Suggestions for right now"** panel shows the activity score
+  (hover the ⓘ for the full factor-by-factor breakdown) and the same lure/color
+  recommendation engine the 7-Day Forecast page uses, scored against the current
+  moment as a rolling preview - no button to click, it just updates as you adjust
+  conditions. Each recommended lure you already own shows a **"+ Add to session"**
+  button right on its card - one click adds that exact item to a running "Lures for
+  this session" list shown below (with its own "Remove"). Don't want a suggested one,
+  or want more than one rod ready to switch between? An "➕ Add from tackle box"
+  section offers the same searchable photo-card grid as before, except every card
+  toggles "added" instead of picking just one, so you can queue up as many lures as
+  you're bringing to the spot; a plain text box below it covers anything not in your
+  inventory. Once at least one lure is queued, **"▶ Start Session"** locks everything
+  in: it stamps the real current time as the session's start time, re-derives the
+  time-of-day window from that exact moment (e.g. "Dawn"), and writes one entry per
+  selected lure to the trip log - your conditions snapshot, that start time, and an
+  empty catch list on each. From there the page switches to an **active-session
+  view**: one button per lure you queued, each showing a running catch count. Land a
+  fish? Tap the lure you were using - a popup opens with a weight slider ("<1 lb"
+  through "10 lb"), a length slider ("<13 in" through "26+ in"), a species dropdown
+  (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or type in your own),
+  a multiple-choice "Type of hit" field (Hard hit/Light hit/Double tap/Swallowed/
+  Fouled/Surface hit - a strike can genuinely be more than one of these), and
+  retrieve style/speed. **"✅ Record"** saves that catch immediately (it's written and
+  pushed to that lure's trip-log row right away, not batched until the session ends)
+  and reopens a blank form so you're straight back to fishing; the button's catch
+  count updates, and an expander under each lure lists everything logged on it so far
+  (each with its own "Remove", in case of a mis-tap). When you're done at this spot,
+  **"⏹ End Session"** stamps the real end time on every lure's row and drops you back
+  at a fresh, blank Conditions setup - ready for the next spot or the next session
+  here later. Each lure still lands as its own row in the trip log (no combined/
+  bundled entry), so Trip History's per-trip filtering and detail view keep working
+  exactly as before; a "📋 Already logged for this spot" line above Conditions lists
+  everything already saved for the selected date. It all writes into the same shared
+  trip log the **Trip History** page reads from - Spot Session is the only way to log
+  a trip; see "How the model works" below for the condition bands behind this page's
+  inputs. Made a mistake on a past trip, or just want to fix it up? Click "✏️ Edit
+  this trip" on that trip's entry on the Trip History page - it opens Spot Session on
+  that same spot with a simplified single-trip editor: the same consolidated
+  Conditions block plus an editable start time/time window (both freely correctable,
+  since you're fixing historical data), the lure/trailer pickers, a plain inline fish
+  list (add/remove, same fields as the popup above, no dialog needed since you're not
+  mid-session), and a single **"💾 Save changes"**/"Cancel edit" pair - saving updates
+  that same trip in place rather than adding a duplicate. Logged it against the wrong
+  spot? While editing, just pick the right one from the "📍 Location" dropdown at the
+  top before saving - everything else you'd already filled in carries over to the new
+  spot instead of clearing out.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a

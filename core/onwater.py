@@ -81,6 +81,28 @@ def cloud_proxy_for_light_condition(light_condition: str) -> float:
     return _LIGHT_CONDITION_CLOUD_PROXY.get(light_condition, 40.0)
 
 
+# Reverse of the proxy table above - lets the Spot Session page default its
+# "Sky condition" picker from a live forecast's cloudcover percentage
+# (core.weather's hourly_rows_for_date()) instead of a hardcoded literal,
+# while still leaving the field a normal overridable selectbox. Boundaries
+# are the midpoints between each pair of proxy values above (5/20/45/75/95),
+# so a cloud_pct that exactly matches a band's own proxy always rounds back
+# to that same band.
+def light_condition_for_cloud_pct(cloud_pct: float) -> str:
+    """Buckets a live cloudcover percentage (0-100) into one of LIGHT_CONDITIONS."""
+    if cloud_pct is None:
+        return LIGHT_CONDITIONS[2]  # Partly Cloudy - neutral fallback
+    if cloud_pct <= 12.5:
+        return "Clear / Sunny"
+    if cloud_pct <= 32.5:
+        return "Mostly Clear"
+    if cloud_pct <= 60.0:
+        return "Partly Cloudy"
+    if cloud_pct <= 85.0:
+        return "Mostly Cloudy"
+    return "Overcast"
+
+
 # --- Wind (current/bait movement) -------------------------------------------
 WIND_BANDS = [
     (0.0, 3.0, "Glassy", "Mirror surface intact."),
@@ -117,6 +139,25 @@ def wind_mph_for_band(label: str) -> float:
 # entry on the Spot Session page (distinct from the plain-language WIND_BANDS
 # picker above, which drives the live score instead of being a logged fact).
 WIND_DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable", "Calm"]
+
+_COMPASS_POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def wind_direction_for_degrees(deg: float) -> str:
+    """Buckets a live wind-direction reading (degrees, meteorological
+    convention - 0/360=N, 90=E, etc., matching Open-Meteo's winddirection_10m)
+    into one of the 8 compass points in WIND_DIRECTIONS. Each point covers a
+    45-degree sector centered on itself (e.g. "N" is 337.5-22.5).
+
+    Only returns a compass point or "Variable" for a missing reading - it has
+    no way to know the wind is calm from direction alone, so callers that
+    want to default to "Calm" should check the paired wind-speed reading
+    themselves (e.g. treat anything under ~2 mph as calm) before falling
+    back to this function."""
+    if deg is None:
+        return "Variable"
+    idx = int(((deg % 360) + 22.5) // 45) % 8
+    return _COMPASS_POINTS[idx]
 
 
 # --- Water visibility (Secchi depth / sensory mode) -------------------------
@@ -206,3 +247,26 @@ _PRECIPITATION_PROXY = {
 
 def precipitation_proxy(precipitation: str) -> tuple:
     return _PRECIPITATION_PROXY.get(precipitation, (0.0, 0.0))
+
+
+# Reverse of the proxy table above - lets the Spot Session page default its
+# "Precipitation" picker from a live forecast's hourly precipitation amount
+# + probability (core.weather's hourly_rows_for_date()) instead of always
+# defaulting to "None". Boundaries are the midpoints between each pair of
+# proxy values above for both signals (in: 0.0/0.3/0.8/1.5, prob:
+# 0/40/70/95); either signal alone crossing its threshold is enough to bump
+# the bucket, since a forecast can show a confident probability with a low
+# modeled amount (or vice versa) and either should be enough to warn an
+# angler checking the default before heading out.
+def precipitation_option_for_forecast(precip_in: float, precip_prob_pct: float) -> str:
+    """Buckets a live precipitation amount (inches) + probability (0-100)
+    into one of PRECIPITATION_OPTIONS."""
+    precip_in = precip_in or 0.0
+    precip_prob_pct = precip_prob_pct or 0.0
+    if precip_in >= 1.15 or precip_prob_pct >= 82.5:
+        return "Heavy rain / storm"
+    if precip_in >= 0.55 or precip_prob_pct >= 55.0:
+        return "Steady rain"
+    if precip_in >= 0.15 or precip_prob_pct >= 20.0:
+        return "Light rain"
+    return "None"

@@ -6,9 +6,10 @@ import streamlit as st
 from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, github_token, repo_slug
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
 from core.onwater import (
-    LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, cloud_proxy_for_light_condition,
-    WIND_BANDS, WIND_BAND_LABELS, WIND_DIRECTIONS, wind_band, wind_mph_for_band, resolve_water_clarity,
-    STAIN_COLOR_OPTIONS, water_temp_band, visibility_band, PRECIPITATION_OPTIONS, precipitation_proxy,
+    LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, cloud_proxy_for_light_condition, light_condition_for_cloud_pct,
+    WIND_BANDS, WIND_BAND_LABELS, WIND_DIRECTIONS, wind_band, wind_mph_for_band, wind_direction_for_degrees,
+    resolve_water_clarity, STAIN_COLOR_OPTIONS, water_temp_band, visibility_band,
+    PRECIPITATION_OPTIONS, precipitation_proxy, precipitation_option_for_forecast,
 )
 from core.scoring import (
     SEGMENTS, season_stage, manual_segment_score, realtime_context_from_bundle,
@@ -17,17 +18,19 @@ from core.scoring import (
 from core.activity_log import (
     inventory_item_label, lure_can_take_trailer,
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
-    FISH_SPECIES_OPTIONS, format_weight_lb_oz, parse_weight_lb_oz,
+    FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, WEIGHT_SLIDER_OPTIONS, LENGTH_SLIDER_OPTIONS,
+    weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
-from core.ui import render_lure_recommendation, render_square_thumbnail, inject_mobile_css
+from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip
-from core.weather import lake_today
+from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
 inject_mobile_css()
 st.title("🎯 Spot Session")
 
+# --- Spot picker (unchanged from before the redesign) ------------------------
 # session_state is the reliable channel from the "Fish this spot now" button on the
 # Lake Map page (st.switch_page doesn't consistently carry query params set in that
 # same run over to this page's initial load); query_params is kept as a fallback so a
@@ -37,8 +40,6 @@ spots = get_lake_spots()
 spot = next((s for s in spots if s["spot_id"] == spot_id), None) if spot_id else None
 
 if spot is not None:
-    # Keep both channels in sync once resolved, so a refresh of this exact page
-    # keeps working from the URL alone, and the URL is shareable/bookmarkable.
     st.session_state["spot_session_target_id"] = spot_id
     st.query_params["spot_id"] = spot_id
 
@@ -54,15 +55,6 @@ if not spots:
 
 sorted_spots = sorted(spots, key=lambda s: s["name"])
 
-# Location picker - always visible at the top, so a spot can be switched
-# directly from this page instead of always having to go back to the Lake
-# Map first. Keyed on the CURRENTLY loaded spot_id (rather than one fixed
-# key) so that however a spot got selected - clicking "Fish this spot now"
-# on the Lake Map, a bookmarked/shared ?spot_id= link, or picking a
-# different spot from this exact dropdown a moment ago - it always shows
-# the right thing already selected: a fresh key means Streamlit applies the
-# `index=` default fresh every time spot_id changes, instead of clinging to
-# a stale selection tied to the previous spot's widget instance.
 if spot is not None:
     current_spot_idx = next(i for i, s in enumerate(sorted_spots) if s["spot_id"] == spot["spot_id"])
     picked_idx = st.selectbox(
@@ -71,12 +63,6 @@ if spot is not None:
     )
     picked_spot = sorted_spots[picked_idx]
     if picked_spot["spot_id"] != spot["spot_id"]:
-        # Same session_state-primary/query_params-fallback handoff the Lake Map
-        # page's "Fish this spot now" button uses (see comment above) - setting
-        # it here means the rest of this page (which reads spot_id from those
-        # same two places) picks it up identically on the rerun below, no
-        # separate code path needed for "arrived via this dropdown" vs. "arrived
-        # via the map".
         st.session_state["spot_session_target_id"] = picked_spot["spot_id"]
         st.query_params["spot_id"] = picked_spot["spot_id"]
         st.rerun()
@@ -101,42 +87,19 @@ else:
         st.switch_page("pages/2_Lake_Map.py")
     st.stop()
 
-# Edit mode: arrived here via Trip History's "Edit this trip" button (or a
-# bookmarked/shared ?edit_trip=... link) instead of a normal new-session
-# visit - session_state is primary / query_params is the page-refresh
-# fallback, same handoff pattern spot_id itself uses above. When set, the
-# "Add results" section below gets pre-populated from that trip's stored
-# data and "Log this lure"/"Log this session" are replaced with a single
-# "Save changes" that updates that same row in place (see update_trip in
-# core/storage.py) instead of appending a new one.
+# --- Edit mode detection (arrived via Trip History's "Edit this trip") ------
 edit_trip_id = st.session_state.get("spot_session_edit_trip_id") or st.query_params.get("edit_trip")
 editing_trip = None
 editing_cond = {}
-edit_prefill_done_key = None
 if edit_trip_id:
     editing_trip = next((t for t in read_all_trips() if t.get("trip_id") == edit_trip_id), None)
     if editing_trip is None:
-        # Stale/broken link, or the trip was deleted out from under an open
-        # edit - drop out of edit mode instead of getting stuck pointing at
-        # nothing.
         st.session_state.pop("spot_session_edit_trip_id", None)
         st.query_params.pop("edit_trip", None)
         edit_trip_id = None
     else:
         st.session_state["spot_session_edit_trip_id"] = edit_trip_id
         st.query_params["edit_trip"] = edit_trip_id
-        # Keyed by BOTH edit_trip_id and the currently-loaded spot_id, not
-        # just edit_trip_id alone - every widget the prefill block below
-        # seeds is scoped to spot_id (e.g. f"log_wind_speed_{spot_id}"), so
-        # switching the "📍 Location" picker to a different spot WHILE
-        # editing (the angler correcting which spot a trip actually
-        # happened at) lands on a brand-new set of spot-scoped widget keys
-        # that have never been seeded. A key that only tracked edit_trip_id
-        # would already read as "done" from the original spot and skip
-        # re-seeding these - which is exactly what happened when reported:
-        # switching location mid-edit made the lure/conditions/notes/fish
-        # fields all revert to blank, as if starting a brand new session.
-        edit_prefill_done_key = f"edit_prefill_done_{edit_trip_id}_{spot['spot_id']}"
         try:
             editing_cond = json.loads(editing_trip.get("conditions_json") or "{}")
         except json.JSONDecodeError:
@@ -144,49 +107,20 @@ if edit_trip_id:
 
 
 def _exit_edit_mode():
-    """Drop every bit of edit-mode state for whichever trip was being
-    edited, so the next run lands back in normal "log a new session" mode
-    for this same spot. Sweeps every edit_prefill_done_<trip_id>_<spot_id>
-    flag for this trip, not just the current spot's - switching location
-    mid-edit (see above) can leave one behind per spot visited, and a stale
-    leftover from a spot no longer being edited would silently skip
-    prefill if this same trip is ever edited again in this browser
-    session."""
-    if edit_trip_id:
-        prefix = f"edit_prefill_done_{edit_trip_id}_"
-        for stale_key in [k for k in st.session_state.keys() if k.startswith(prefix)]:
-            st.session_state.pop(stale_key, None)
     st.session_state.pop("spot_session_edit_trip_id", None)
     st.query_params.pop("edit_trip", None)
 
 
 def _guess_segment(hour: int, now: datetime = None) -> str:
     """Best-effort guess at the time-of-day segment for a given moment
-    (`now`) - despite the name, `now` doesn't have to be the real current
-    time. "Conditions right now"'s own "Time window" dropdown passes in the
-    entered session start time (once one's been entered, punch-list #9),
-    falling back to the real current time before that; "Add results"'
-    fallback further below passes the real current time directly. Never
-    authoritative, always overridable via the dropdown itself.
-
-    Prefers the real thing: `seg_ranges` (module-level, computed a little
-    below from segment_time_ranges() for this session's date - the same
-    real sunrise/sunset-derived, proportionally-sized windows the "Time
-    window" dropdown's own labels use, see core.scoring._segment_windows())
-    checked against `now`, so this guess now moves with the season the
-    same way the dropdown's labels do, instead of the old fixed clock-hour
-    cutoffs (`<7`/`<11`/`<14`/`<18`/`<20`) silently drifting out of sync
-    with them. One extra case those windows alone don't cover: `now` in
-    the early hours after midnight but before *today's* Dawn actually
-    belongs to the tail end of *last night's* Night window, not today's
-    (`seg_ranges["Night"]` only covers tonight's dusk through tomorrow's
-    dawn) - handled explicitly below rather than falling through to the
-    fixed-hour fallback for that one stretch.
-
-    Falls back to the original fixed-hour cutoffs - still a reasonable
-    rough approximation of a typical day - when no weather bundle is
-    available (offline, or the session date's outside the forecast
-    window's coverage) or `now` isn't given."""
+    (`now`). Prefers the real thing - `seg_ranges` (module-level, computed a
+    little below from segment_time_ranges() for this session's date, the
+    same real sunrise/sunset-derived windows the 7-Day Forecast page's own
+    labels use) checked against `now`. One extra case those windows alone
+    don't cover: `now` in the early hours after midnight but before *today's*
+    Dawn actually belongs to the tail end of *last night's* Night window.
+    Falls back to fixed clock-hour cutoffs when no weather bundle is
+    available or `now` isn't given."""
     if seg_ranges and now is not None:
         for name in SEGMENTS:
             window = seg_ranges.get(name)
@@ -234,154 +168,21 @@ if editing_trip is not None:
 if st.button("← Back to Lake Map"):
     st.switch_page("pages/2_Lake_Map.py")
 
-# Computed from the spot alone (not from the Conditions form below), so it's always
-# available - "Add results" needs it even if the angler never fills in conditions.
+# Computed from the spot alone, so it's always available regardless of mode.
 structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), "Main-lake point")
 
-# lure_entry_seq_key/lure_seq are computed here (rather than down by "Add
-# results", where the reset logic that bumps them lives) because the
-# edit-mode prefill block right below needs a fresh, not-currently-in-use
-# seq number to seed lure/trailer/time/notes widget keys into before they're
-# ever instantiated - see the "must happen before instantiation in this
-# run" rule explained down at results_expander_reopen_key.
-lure_entry_seq_key = f"lure_entry_seq_{spot['spot_id']}"
-st.session_state.setdefault(lure_entry_seq_key, 0)
-lure_seq = st.session_state[lure_entry_seq_key]
+if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
+    st.success("✅ Session closed - pick lures below whenever you're ready to start a new one.")
 
-# Captured as a plain variable (not re-derived later) because the prefill
-# block below immediately marks edit_prefill_done_key True once it runs -
-# the "Time window" guard further down (punch-list #9's start-time-follow
-# logic vs. punch-list #11's persisted-widget-key logic) needs to know
-# specifically "did prefill seeding JUST happen this run", which re-reading
-# edit_prefill_done_key at that point could no longer distinguish from
-# "seeding already happened on some earlier run."
-_just_entered_edit_mode = editing_trip is not None and not st.session_state.get(edit_prefill_done_key)
-
-if _just_entered_edit_mode:
-    # One-time seed of every widget-backed session_state key the "Conditions
-    # right now" section, "Add results" section, and the Session date field
-    # read, so the form opens already showing this trip's data instead of
-    # blank defaults. Guarded by edit_prefill_done_key so it only runs once
-    # per edit visit - otherwise every rerun (e.g. typing in a text field)
-    # would stomp whatever the angler had just changed back to the original
-    # values.
-    #
-    # Bump lure_entry_seq_key first so the lure/trailer/time/notes keys we
-    # seed below (which fold lure_seq into their key) are guaranteed unused,
-    # even if this exact spot already had some unsaved lure entry in
-    # progress earlier in this same browser session.
-    st.session_state[lure_entry_seq_key] = lure_seq + 1
-    lure_seq = st.session_state[lure_entry_seq_key]
-
-    def _find_inventory_item_by_label(label, items):
-        """Best-effort match back to an inventory item by its display label -
-        conditions_json only stores the resolved lure_used/trailer_name
-        label and category, not the item_id itself (see
-        _save_current_lure_entry below), so a renamed or since-deleted item
-        just won't preselect and this falls back to blank, same as if
-        nothing had been picked at all."""
-        if not label:
-            return None
-        return next((it for it in items if inventory_item_label(it) == label), None)
-
-    def _parse_iso_date(s):
-        try:
-            return ddate.fromisoformat(s) if s else None
-        except ValueError:
-            return None
-
-    def _parse_iso_time(s):
-        try:
-            return dtime.fromisoformat(s) if s else None
-        except ValueError:
-            return None
-
-    st.session_state[f"session_date_{spot['spot_id']}"] = _parse_iso_date(editing_trip.get("trip_date")) or lake_today()
-
-    # Punch-list #11: "Conditions right now" fields, same one-time-seed-on-
-    # edit-entry treatment as everything else in this block, now that those
-    # widgets are keyed (persisted) below instead of just reading a locally
-    # computed default every run. "Time window" is deliberately NOT seeded
-    # here - it depends on start_time (seeded below) and seg_ranges (not
-    # computed until after this block runs), so it's handled separately,
-    # right at its own widget, guarded by this same _just_entered_edit_mode.
-    st.session_state[f"cond_water_temp_{spot['spot_id']}"] = editing_cond.get("water_temp_f", 85.0)
-    st.session_state[f"cond_secchi_{spot['spot_id']}"] = editing_cond.get("secchi_ft", 2.5)
-    st.session_state[f"cond_stain_color_{spot['spot_id']}"] = (
-        editing_cond["stain_color"] if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS
-        else STAIN_COLOR_OPTIONS[0]
-    )
-    st.session_state[f"cond_stirred_up_{spot['spot_id']}"] = bool(editing_cond.get("stirred_up", False))
-    st.session_state[f"cond_wind_band_{spot['spot_id']}"] = (
-        editing_cond["wind_band"] if editing_cond.get("wind_band") in WIND_BAND_LABELS else WIND_BAND_LABELS[1]
-    )
-    st.session_state[f"cond_light_condition_{spot['spot_id']}"] = (
-        editing_cond["light_condition"] if editing_cond.get("light_condition") in LIGHT_CONDITIONS
-        else LIGHT_CONDITIONS[2]
-    )
-    st.session_state[f"cond_precipitation_{spot['spot_id']}"] = (
-        editing_cond["precipitation"] if editing_cond.get("precipitation") in PRECIPITATION_OPTIONS
-        else PRECIPITATION_OPTIONS[0]
-    )
-    st.session_state[f"cond_start_time_{spot['spot_id']}"] = _parse_iso_time(editing_cond.get("start_time"))
-    st.session_state[f"cond_forage_seen_{spot['spot_id']}"] = editing_cond.get("forage_seen") or []
-    st.session_state[f"cond_fish_depth_{spot['spot_id']}"] = editing_cond.get("fish_depth_ft") or 8.0
-
-    # Punch-list #12: "Wind speed (mph)" -> "Wind" (same band categories as
-    # "Conditions right now"). Trips logged before this change only have the
-    # old numeric wind_speed_mph, not a wind_band_logged string - converted
-    # via wind_band() (mph -> nearest band) so editing an old trip still
-    # prefills something sensible instead of silently falling back to the
-    # generic default. A trip logged AFTER this change has wind_band_logged
-    # directly and that's used as-is.
-    if editing_cond.get("wind_band_logged") in WIND_BAND_LABELS:
-        _prefill_wind_band = editing_cond["wind_band_logged"]
-    elif isinstance(editing_cond.get("wind_speed_mph"), (int, float)):
-        _prefill_wind_band = wind_band(editing_cond["wind_speed_mph"])["label"]
-    else:
-        _prefill_wind_band = WIND_BAND_LABELS[1]
-    st.session_state[f"log_wind_band_{spot['spot_id']}"] = _prefill_wind_band
-    st.session_state[f"log_wind_dir_{spot['spot_id']}"] = (
-        editing_cond["wind_direction"] if editing_cond.get("wind_direction") in WIND_DIRECTIONS else "SW"
-    )
-    st.session_state[f"log_fish_activity_{spot['spot_id']}"] = editing_cond.get("fish_activity") or "Moderate"
-    st.session_state[f"log_forage_activity_{spot['spot_id']}"] = editing_cond.get("forage_activity") or "Moderate"
-    st.session_state[f"log_forage_type_{spot['spot_id']}"] = editing_cond.get("forage_type_seen") or []
-
-    prefill_inventory = get_inventory()
-    matched_lure = _find_inventory_item_by_label(editing_trip.get("lure_used"), prefill_inventory)
-    if matched_lure:
-        st.session_state[f"log_lure_{spot['spot_id']}_{lure_seq}_selected_id"] = matched_lure["item_id"]
-
-    st.session_state[f"log_use_trailer_{spot['spot_id']}_{lure_seq}"] = bool(editing_cond.get("trailer_used"))
-    if editing_cond.get("trailer_used"):
-        matched_trailer = _find_inventory_item_by_label(editing_cond.get("trailer_name"), prefill_inventory)
-        if matched_trailer:
-            st.session_state[f"log_trailer_{spot['spot_id']}_{lure_seq}_selected_id"] = matched_trailer["item_id"]
-        else:
-            st.session_state[f"log_trailer_name_{spot['spot_id']}_{lure_seq}"] = editing_cond.get("trailer_name") or ""
-
-    st.session_state[f"log_start_time_{spot['spot_id']}_{lure_seq}"] = _parse_iso_time(editing_cond.get("lure_start_time"))
-    st.session_state[f"log_end_time_{spot['spot_id']}_{lure_seq}"] = _parse_iso_time(editing_cond.get("lure_end_time"))
-    st.session_state[f"log_notes_{spot['spot_id']}_{lure_seq}"] = editing_trip.get("notes") or ""
-
-    edit_fish_list = editing_cond.get("fish")
-    st.session_state[f"pending_fish_{spot['spot_id']}"] = list(edit_fish_list) if isinstance(edit_fish_list, list) else []
-    st.session_state[f"adding_fish_mode_{spot['spot_id']}"] = None
-
-    st.session_state[f"results_expander_{spot['spot_id']}"] = True
-    st.session_state[edit_prefill_done_key] = True
-
-# Punch-list #11 cleanup: this predates #11 (it's always been keyed, since
-# it needs to survive the "Get suggestions" reruns below), but it used to
-# pass `value=st.session_state.get(key, lake_today())` alongside `key=` -
-# which still trips Streamlit's "widget was created with a default value
-# but also had its value set via the Session State API" warning on any run
-# where the edit-prefill block above just explicitly assigned this same key
-# (confirmed empirically while building #11). Switched to the same
-# `setdefault` + bare-`key=` pattern used by every "Conditions right now"
-# widget below, which was verified warning-free for exactly this scenario.
 st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
+if editing_trip is not None:
+    try:
+        _edit_date = ddate.fromisoformat(editing_trip.get("trip_date")) if editing_trip.get("trip_date") else None
+    except ValueError:
+        _edit_date = None
+    if _edit_date:
+        st.session_state[f"session_date_{spot['spot_id']}"] = _edit_date
+
 session_date = st.date_input(
     "Session date",
     max_value=lake_today(),
@@ -409,219 +210,175 @@ _wind_help = "\n".join(
     for lo, hi, label, detail in WIND_BANDS
 )
 
-# Punch-list #11: "Conditions right now" widgets below are now all keyed
-# (session_state-backed via f"cond_<field>_{spot_id}"), so whatever's typed
-# in survives navigating to another page and back, exactly like the "Add
-# results" section's log_* fields already do - each widget's `st.session_
-# state.setdefault(key, ...)` immediately above it only ever applies the
-# very first time its key is created for this spot (a brand-new, never-
-# before-visited session); every other case (a returning visit, or
-# entering edit mode - handled by the prefill block above seeding these
-# same keys) is served straight from session_state instead, since the
-# widget itself is never given a competing `value=`/`index=`.
-_editing_segment = (editing_trip or {}).get("segment")
+todays_entries = [
+    t for t in read_all_trips()
+    if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date.isoformat()
+    and t.get("trip_id") != edit_trip_id
+]
+if todays_entries:
+    summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
+    st.caption(f"📋 Already logged for this spot on {session_date.isoformat()}: {', '.join(summary_bits)}")
 
-st.divider()
-st.header("Conditions right now")
-st.caption(
-    "Enter what you're actually seeing at the water - unlike the 7-Day Forecast page (which relies on "
-    "a weather API), everything here is your own on-the-spot reading, so it drives suggestions "
-    "specific to this exact moment at this exact spot. As soon as a session start time is set below, "
-    "these values are saved and scored automatically - no extra button to click, and no need to open "
-    "the suggestions panel below for that to happen."
-)
 
-# No st.form here (there used to be one, gated behind a "Get lure suggestions"
-# submit button) - these fields update cond/score_result live on every
-# rerun, same as any other widget outside a form. That's the point: an
-# activity score gets computed and attached to a logged trip as soon as
-# these fields are filled in, whether or not the angler ever opens "Add
-# results" below to see it. The only genuinely required field is session
-# start time (deliberately blank by default, per its help text below) -
-# every other field already has a sane default, so cond starts existing the
-# moment a start time is entered.
-# Every widget below is seeded via `st.session_state.setdefault(key, ...)`
-# immediately before it's created, then constructed with `key=` alone - no
-# `value=`/`index=` argument at all. Passing a literal `value=`/`index=`
-# alongside `key=` (even one computed by reading back from session_state)
-# still trips Streamlit's "widget was created with a default value but also
-# had its value set via the Session State API" warning on any run where the
-# edit-prefill block above just explicitly assigned that same key
-# (confirmed empirically before writing this). `setdefault` sidesteps it
-# entirely: it only writes when the key doesn't exist yet (a first-ever
-# visit for this spot), so it never collides with the prefill block's
-# assignment, and the widget itself has exactly one source of truth -
-# session_state - from then on.
-c1, c2 = st.columns(2)
-st.session_state.setdefault(f"cond_water_temp_{spot['spot_id']}", 85.0)
-water_temp_f = c1.number_input(
-    "Water temperature (°F)", min_value=32.0, max_value=100.0, step=0.5,
-    key=f"cond_water_temp_{spot['spot_id']}",
-)
-st.session_state.setdefault(f"cond_secchi_{spot['spot_id']}", 2.5)
-secchi_ft = c2.number_input(
-    "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
-    help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
-    key=f"cond_secchi_{spot['spot_id']}",
-)
-temp_band = water_temp_band(water_temp_f)
-st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
-vis_band = visibility_band(secchi_ft)
-st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
+# --- Weather-driven defaults for the consolidated conditions block ----------
+def _weather_defaults(bundle, d, now) -> dict:
+    """Best-effort live-forecast-driven defaults for the conditions block
+    below, computed fresh every run (cheap - a plain list scan over one
+    day's ~24 hourly rows). Any field it can't compute (no bundle, no
+    hourly coverage for this date) is simply left out, so the conditions
+    block falls back to its own hardcoded default for that one field via
+    st.session_state.setdefault()."""
+    defaults = {}
+    if bundle is None:
+        return defaults
+    try:
+        water_temp = estimate_water_temp_f(bundle, d, d.timetuple().tm_yday)
+        if water_temp:
+            defaults["water_temp_f"] = round(water_temp, 1)
+    except Exception:
+        pass
+    rows = hourly_rows_for_date(bundle, d)
+    if rows:
+        nearest = min(rows, key=lambda r: abs((r["time"] - now).total_seconds()))
+        if nearest.get("windspeed_10m") is not None:
+            defaults["wind_band"] = wind_band(nearest["windspeed_10m"])["label"]
+        if nearest.get("winddirection_10m") is not None:
+            defaults["wind_direction"] = wind_direction_for_degrees(nearest["winddirection_10m"])
+        if nearest.get("cloudcover") is not None:
+            defaults["light_condition"] = light_condition_for_cloud_pct(nearest["cloudcover"])
+        defaults["precipitation"] = precipitation_option_for_forecast(
+            nearest.get("precipitation"), nearest.get("precipitation_probability"),
+        )
+    return defaults
 
-stain_color = None
-if vis_band["label"] == "Stained":
-    _stain_key = f"cond_stain_color_{spot['spot_id']}"
-    st.session_state.setdefault(_stain_key, STAIN_COLOR_OPTIONS[0])
-    stain_color = st.selectbox(
-        "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
-        key=_stain_key,
+
+def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict = None):
+    """The single consolidated "conditions" block - merges what used to be
+    two separate sections ("Conditions right now" and "Conditions during
+    this lure use") into one, per the angler's own redesign ask, with
+    redundant fields (there used to be two separate Wind fields, and two
+    separate forage-seen fields) shown just once each. Every
+    weather-related field defaults from the live forecast
+    (`weather_defaults`, see _weather_defaults() above) rather than a fixed
+    literal, with the angler always free to override.
+
+    `key_ns` namespaces every widget key so this same function can render a
+    brand-new blank block (new session) or an edit-mode block seeded from
+    an already-logged trip's data (`prefill`) without the two colliding.
+    Each field is seeded via st.session_state.setdefault() - which only
+    ever applies the FIRST time this exact key exists - so `prefill`/
+    `weather_defaults` only ever set the initial value, never fight a
+    manual override on a later rerun, the same pattern every other keyed
+    widget on this page follows."""
+    prefill = prefill or {}
+
+    def _default(field, fallback):
+        if field in prefill and prefill[field] not in (None, ""):
+            return prefill[field]
+        return weather_defaults.get(field, fallback)
+
+    c1, c2 = st.columns(2)
+    wt_key = f"{key_ns}_water_temp"
+    st.session_state.setdefault(wt_key, _default("water_temp_f", 85.0))
+    water_temp_f = c1.number_input(
+        "Water temperature (°F)", min_value=32.0, max_value=100.0, step=0.5, key=wt_key,
     )
-st.session_state.setdefault(f"cond_stirred_up_{spot['spot_id']}", False)
-stirred_up = st.checkbox(
-    "Stirred up / muddy right now (recent wind or rain)",
-    help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color - a "
-         "fresh disturbance can outrun what you can see or measure yet.",
-    key=f"cond_stirred_up_{spot['spot_id']}",
-)
+    sec_key = f"{key_ns}_secchi"
+    st.session_state.setdefault(sec_key, _default("secchi_ft", 2.5))
+    secchi_ft = c2.number_input(
+        "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
+        help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
+        key=sec_key,
+    )
+    temp_band = water_temp_band(water_temp_f)
+    st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
+    vis_band = visibility_band(secchi_ft)
+    st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
 
-c3, c4 = st.columns(2)
-_wind_band_key = f"cond_wind_band_{spot['spot_id']}"
-st.session_state.setdefault(_wind_band_key, WIND_BAND_LABELS[1])
-wind_band_choice = c3.selectbox(
-    "Wind", WIND_BAND_LABELS,
-    help=_wind_help, key=_wind_band_key,
-)
-_light_key = f"cond_light_condition_{spot['spot_id']}"
-st.session_state.setdefault(_light_key, LIGHT_CONDITIONS[2])
-light_condition = c4.selectbox(
-    # Renamed from "Light conditions" (punch-list #10) - describes the sky
-    # itself (cloud cover) now, not a lux-based light-penetration guess; see
-    # core.onwater.LIGHT_CONDITIONS for the NWS-sourced band definitions.
-    # Internal variable/key names (light_condition, LIGHT_CONDITIONS, the
-    # conditions_json "light_condition" field) are left as-is - only the
-    # on-screen label and options changed, so past logged trips' saved
-    # values still read back correctly.
-    "Sky conditions", LIGHT_CONDITIONS,
-    help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
-    key=_light_key,
-)
+    stain_color = None
+    if vis_band["label"] == "Stained":
+        stain_key = f"{key_ns}_stain_color"
+        st.session_state.setdefault(stain_key, _default("stain_color", STAIN_COLOR_OPTIONS[0]))
+        stain_color = st.selectbox(
+            "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
+            key=stain_key,
+        )
+    stirred_key = f"{key_ns}_stirred_up"
+    st.session_state.setdefault(stirred_key, _default("stirred_up", False))
+    stirred_up = st.checkbox(
+        "Stirred up / muddy right now (recent wind or rain)",
+        help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color.",
+        key=stirred_key,
+    )
 
-c5, c6 = st.columns(2)
-_precip_key = f"cond_precipitation_{spot['spot_id']}"
-st.session_state.setdefault(_precip_key, PRECIPITATION_OPTIONS[0])
-precipitation = c5.selectbox(
-    "Precipitation", PRECIPITATION_OPTIONS,
-    key=_precip_key,
-)
-st.session_state.setdefault(f"cond_start_time_{spot['spot_id']}", None)
-start_time = c6.time_input(
-    "Session start time (enter manually)",
-    step=300,
-    help="When you actually started fishing this spot - enter it yourself rather than relying on "
-         "whatever time it happens to be while you're filling this out, since you might do that "
-         "before heading out or after you're done. Used to line up the score/suggestions below with "
-         "that exact moment, and is what triggers a live score to be saved with this trip once you "
-         "log results below.",
-    key=f"cond_start_time_{spot['spot_id']}",
-)
+    c3, c4 = st.columns(2)
+    wind_key = f"{key_ns}_wind_band"
+    st.session_state.setdefault(wind_key, _default("wind_band", WIND_BAND_LABELS[1]))
+    wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, help=_wind_help, key=wind_key)
+    wind_dir_key = f"{key_ns}_wind_dir"
+    st.session_state.setdefault(wind_dir_key, _default("wind_direction", "SW"))
+    wind_direction = c4.selectbox("Wind direction", WIND_DIRECTIONS, key=wind_dir_key)
 
-# Punch-list #9 ("automatically fill in the period of the day based on the
-# start time I input") and punch-list #11 (persist whatever's entered
-# across a page visit and back) pull in slightly different directions for
-# this one widget: #9 wants the guess to actively follow start_time edits,
-# while #11 wants a manual pick to survive reruns this widget isn't
-# involved in (including navigating away and back). A plain keyless
-# selectbox (the original #9 implementation) satisfies the first but not
-# the second - without a `key`, nothing here would be in session_state to
-# read back after navigating away. A plain keyed selectbox satisfies the
-# second but not the first - once keyed, Streamlit ignores `index=` after
-# the very first render, so a later start_time edit would never re-drive
-# it. Reconciled by keying the widget AND explicitly re-seeding its
-# session_state value on exactly the runs where that's warranted: entering
-# edit mode for the first time (prefers the trip's own saved segment, same
-# as every other edit-prefill field above), or start_time changing to a
-# value we haven't already reacted to (tracked via a small "last seen"
-# sentinel key) - any other rerun leaves the session-state value, and thus
-# the widget, untouched. Uses `format_func` to show the real clock range
-# (e.g. "Dawn (5:52 AM-7:52 AM)") without baking that formatted, session-
-# date-dependent string into the persisted value itself - SEGMENTS (the
-# actual options) never changes, so there's no risk of a stale formatted
-# label no longer matching a current option after a session-date edit.
-_segment_key = f"cond_segment_{spot['spot_id']}"
-_start_time_seen_key = f"cond_segment_last_start_time_seen_{spot['spot_id']}"
-if _just_entered_edit_mode and _editing_segment in SEGMENTS:
-    st.session_state[_segment_key] = _editing_segment
-    st.session_state[_start_time_seen_key] = start_time
-elif st.session_state.get(_start_time_seen_key, "__unset__") != start_time:
-    st.session_state[_start_time_seen_key] = start_time
-    _guess_dt = datetime.combine(session_date, start_time) if start_time is not None else lake_now_naive()
-    st.session_state[_segment_key] = _guess_segment(_guess_dt.hour, _guess_dt)
+    c5, c6 = st.columns(2)
+    light_key = f"{key_ns}_light_condition"
+    st.session_state.setdefault(light_key, _default("light_condition", LIGHT_CONDITIONS[2]))
+    light_condition = c5.selectbox(
+        "Sky conditions", LIGHT_CONDITIONS,
+        help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
+        key=light_key,
+    )
+    precip_key = f"{key_ns}_precipitation"
+    st.session_state.setdefault(precip_key, _default("precipitation", PRECIPITATION_OPTIONS[0]))
+    precipitation = c6.selectbox("Precipitation", PRECIPITATION_OPTIONS, key=precip_key)
 
-segment_name = st.selectbox(
-    "Time window", SEGMENTS, format_func=_segment_option_label, key=_segment_key,
-    help="Auto-filled from the session start time above once it's set (falls back to the current time "
-         "before that) - pick a different window here any time to override it. Sticks around if you "
-         "leave this page and come back, same as everything else above.",
-)
+    forage_key = f"{key_ns}_forage_seen"
+    st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
+    forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)
 
-c7, c8 = st.columns(2)
-st.session_state.setdefault(f"cond_forage_seen_{spot['spot_id']}", [])
-forage_seen = c7.multiselect(
-    "Forage seen (optional)", FORAGE_OPTIONS,
-    key=f"cond_forage_seen_{spot['spot_id']}",
-)
-st.session_state.setdefault(f"cond_fish_depth_{spot['spot_id']}", 8.0)
-fish_depth_ft = c8.number_input(
-    "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, step=1.0,
-    key=f"cond_fish_depth_{spot['spot_id']}",
-)
+    c7, c8 = st.columns(2)
+    fish_act_key = f"{key_ns}_fish_activity"
+    st.session_state.setdefault(fish_act_key, _default("fish_activity", "Moderate"))
+    fish_activity = c7.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, key=fish_act_key)
+    forage_act_key = f"{key_ns}_forage_activity"
+    st.session_state.setdefault(forage_act_key, _default("forage_activity", "Moderate"))
+    forage_activity = c8.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, key=forage_act_key)
 
-if start_time is not None:
-    st.session_state.setdefault("spot_session_conditions", {})[spot["spot_id"]] = {
+    depth_key = f"{key_ns}_fish_depth"
+    st.session_state.setdefault(depth_key, _default("fish_depth_ft", 8.0))
+    fish_depth_ft = st.number_input(
+        "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, step=1.0,
+        key=depth_key,
+    )
+
+    return {
         "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,
-        "stirred_up": stirred_up, "wind_band": wind_band_choice, "light_condition": light_condition,
-        "precipitation": precipitation, "start_time": start_time.isoformat(), "segment_name": segment_name,
-        "forage_seen": forage_seen, "fish_depth_ft": fish_depth_ft or None,
+        "stirred_up": stirred_up, "wind_band": wind_band_choice, "wind_direction": wind_direction,
+        "light_condition": light_condition, "precipitation": precipitation,
+        "forage_seen": forage_seen, "fish_activity": fish_activity, "forage_activity": forage_activity,
+        "fish_depth_ft": fish_depth_ft or None,
     }
-else:
-    # Nothing typed into "Session start time" yet - clear out any stale
-    # snapshot for this spot rather than leaving a previous visit's cond
-    # (and score) hanging around after the one required field got blanked.
-    st.session_state.setdefault("spot_session_conditions", {}).pop(spot["spot_id"], None)
 
-cond = st.session_state.get("spot_session_conditions", {}).get(spot["spot_id"])
 
-# Everything below (score, recommendation, and the values folded into a logged
-# entry's conditions) only exists once a session start time has been entered
-# above - but "Add results" further down must NOT be gated on that, so nothing
-# here calls st.stop(). water_clarity/season/at_time/rt/score_result all stay
-# None when cond is empty, and every place downstream that reads them (the
-# Suggestions expander, "Log this session"/"Save changes") checks for that
-# instead of assuming they exist.
-water_clarity = season = avg_cloud_pct = avg_wind_mph = at_time = rt = score_result = None
-
-if cond:
-    water_clarity = resolve_water_clarity(cond["secchi_ft"], cond.get("stain_color"), cond.get("stirred_up", False))
-    season = season_stage(session_date.timetuple().tm_yday, cond["water_temp_f"])
-    avg_cloud_pct = cloud_proxy_for_light_condition(cond["light_condition"])
-    avg_wind_mph = wind_mph_for_band(cond["wind_band"])
-    total_precip_in, max_precip_prob_pct = precipitation_proxy(cond["precipitation"])
-
-    # The angler's own entered session-start time - not "right now" - is what "for
-    # that exact time of day" should mean here, so it overrides the generic
-    # wall-clock-now default that pressure-trend/moon-phase lookups would
-    # otherwise fall back to.
-    at_time = datetime.combine(session_date, dtime.fromisoformat(cond["start_time"]))
-
-    rt = realtime_context_from_bundle(bundle, cond["segment_name"], session_date, at_time=at_time)
-
-    score_result = manual_segment_score(
-        cond["segment_name"], season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
-        pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
-        water_temp_f=cond["water_temp_f"], water_clarity=water_clarity,
-        forage_present=bool(cond.get("forage_seen")),
+def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime, segment_name: str):
+    """Shared scoring path for both a live setup preview (using "right now"
+    as at_time/segment) and edit mode (using that trip's own logged time/
+    segment) - one formula, one place, instead of the old page's separate
+    "cond may or may not exist yet" branches."""
+    water_clarity = resolve_water_clarity(
+        cond_values["secchi_ft"], cond_values.get("stain_color"), cond_values.get("stirred_up", False),
     )
+    season = season_stage(session_date.timetuple().tm_yday, cond_values["water_temp_f"])
+    avg_cloud_pct = cloud_proxy_for_light_condition(cond_values["light_condition"])
+    avg_wind_mph = wind_mph_for_band(cond_values["wind_band"])
+    total_precip_in, max_precip_prob_pct = precipitation_proxy(cond_values["precipitation"])
+    rt = realtime_context_from_bundle(bundle, segment_name, session_date, at_time=at_time)
+    score_result = manual_segment_score(
+        segment_name, season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
+        pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
+        water_temp_f=cond_values["water_temp_f"], water_clarity=water_clarity,
+        forage_present=bool(cond_values.get("forage_seen")),
+    )
+    return water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result
 
 
 def _score_breakdown_help(breakdown: list, final_score: float) -> str:
@@ -637,72 +394,35 @@ def _score_breakdown_help(breakdown: list, final_score: float) -> str:
     return "\n".join(lines)
 
 
-st.divider()
-if cond:
-    with st.expander("Suggestions for right now", expanded=True):
-        m1, m2 = st.columns([1, 2])
-        m1.metric(
-            f"{cond['segment_name']} activity score", f"{score_result.score}/10",
-            help=_score_breakdown_help(score_result.breakdown, score_result.score),
-        )
-        m2.write(
-            f"**Season:** {season.replace('_', ' ').title()}  \n"
-            f"**Structure:** {structure_type} (from this spot's saved type)  \n"
-            f"**Water clarity:** {water_clarity}"
-        )
-        st.caption(f"Scored for about {at_time.strftime('%-I:%M %p')} - your entered session start time.")
-        if score_result.notes:
-            st.caption(" · ".join(score_result.notes))
-        for warn in score_result.warnings:
-            st.warning(warn)
-        if bundle is None:
-            st.caption(
-                "Pressure trend and solunar timing aren't factored into the score above - no weather forecast "
-                "data was available just now."
-            )
+def _build_base_conditions(cond_values: dict, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name):
+    """Everything about the SESSION as a whole (not any one lure) that gets
+    saved into every lure's TripEntry.conditions this session produces."""
+    d = dict(cond_values)
+    d.update({
+        "avg_cloud_pct": avg_cloud_pct,
+        "avg_wind_mph": avg_wind_mph,
+        "pressure_trend_24h": rt["pressure_trend_24h"] if rt else None,
+        "moon_near_new_full": score_result.moon.is_new_or_full_window if score_result else None,
+        "moon_phase": score_result.moon.name if score_result else None,
+        "start_time": start_time.isoformat() if start_time else None,
+        "segment_name": segment_name,
+        # Trip History's FIELD_SPECS still reads a separate "Wind (logged)"
+        # column under its old name - both that and "Wind" above now just
+        # show this same single reading, since the redesign merged what
+        # used to be two separate Wind fields into one.
+        "wind_band_logged": cond_values.get("wind_band"),
+    })
+    return d
 
-        rec = recommend(
-            season, cond["water_temp_f"], cond["segment_name"], rt["pressure_trend_24h"],
-            structure_type=structure_type, water_clarity=water_clarity,
-            fish_depth_ft=cond.get("fish_depth_ft"), forage=cond.get("forage_seen"),
-            inventory=get_inventory(),
-        )
-        render_lure_recommendation(rec)
-else:
-    st.caption(
-        "Enter a **session start time** in Conditions right now above to compute a live activity score "
-        "and lure recommendation here - it'll save automatically with this trip too. You don't need to "
-        "fill any of this in to log results below, though."
-    )
 
 LURE_PICKER_COLS = 4
 LURE_PICKER_THUMBNAIL_PX = 90
 
 
 def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: str = None):
-    """Searchable, image-card picker over the tackle inventory. A plain
-    st.selectbox can't show a photo inside its own option list - no browser
-    <select> element supports that - so this renders a compact card grid
-    instead (reusing core.ui.render_square_thumbnail, the same thumbnail
-    helper the Lure Inventory page's browse grid already uses), with a
-    search box to narrow a bigger tackle box down first. It lives entirely
-    outside any st.form: clicking a card needs an immediate rerun so
-    downstream fields (default color, trailer eligibility) update in the
-    same pass, and a form only reruns on submit.
-
-    `inventory_items` is whatever the caller wants shown as options - the
-    full tackle box for the main "Lure used" picker, or a pre-filtered
-    subset (see core.lures.is_trailer_eligible) for the "Trailer" picker, so
-    this function itself has no opinion on what belongs in either list.
-    `empty_message` overrides the default "no lures" caption for a
-    filtered/empty list, e.g. "no trailer-eligible items" rather than the
-    generic message when the filter (not an empty tackle box) is why
-    nothing's showing.
-
-    Returns the selected inventory row, or None if nothing's picked (the
-    caller then falls back to a plain text entry, same as the old "Other /
-    not in inventory" selectbox option did).
-    """
+    """Searchable, single-select image-card picker over the tackle
+    inventory (edit mode's "Lure used"/"Trailer" pickers). Returns the
+    selected inventory row, or None if nothing's picked."""
     selected_key = f"{key_prefix}_selected_id"
     if not inventory_items:
         st.caption(
@@ -725,8 +445,6 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: s
             if s in (it.get("description") or "").lower() or s in (it.get("brand") or "").lower()
         ]
 
-    current_id = st.session_state.get(selected_key)
-
     if not filtered:
         st.caption("No matches for that search.")
     else:
@@ -739,7 +457,7 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: s
                         if not render_square_thumbnail(item, size_px=LURE_PICKER_THUMBNAIL_PX):
                             st.caption("No photo")
                         st.caption(f"**{item.get('brand', '')}**  \n{item.get('description', '')}"[:90])
-                        is_selected = item.get("item_id") == current_id
+                        is_selected = item.get("item_id") == st.session_state.get(selected_key)
                         if st.button(
                             "✅ Selected" if is_selected else "Select",
                             key=f"{key_prefix}_pick_{item['item_id']}",
@@ -759,675 +477,653 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: s
     return selected_item
 
 
-st.divider()
-st.subheader("Add results")
-st.caption(
-    "Log what actually happened, tagged to this exact spot and these exact conditions - see the "
-    "Trip History page to review, filter, and let it calibrate future suggestions."
-)
+# --- Multi-lure selection for a NEW session ----------------------------------
+def _pending_lures_key(spot_id: str, seq: int) -> str:
+    return f"pending_session_lures_{spot_id}_{seq}"
 
-# One-shot, non-toast confirmation that "Log this session" actually did
-# something - reported directly: after logging several lures with "Log
-# this lure" (which worked), clicking "Log this session" left the angler
-# unsure whether it saved and whether the form had actually reset for a
-# new session. Root cause, confirmed with a scratch AppTest repro against
-# real data (reverted afterward, no data lost): "Log this session" DOES
-# correctly skip writing a duplicate row when nothing new was picked (by
-# design - see has_pending_lure_data below) and DOES correctly reset
-# "Conditions during this lure use" back to defaults - but the only
-# confirmation was st.toast(), which is easy to miss on a phone, and if
-# those condition fields already happened to be sitting at their defaults
-# (very plausible - wind speed/fish activity aren't touched every visit),
-# there was no VISIBLE difference on screen before vs. after clicking, so
-# it read as "nothing happened" even though everything worked correctly.
-# Popped (shown once) rather than a standing banner, so it doesn't linger
-# on an unrelated later visit to this page.
-if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
-    st.success(
-        "✅ Session closed - conditions cleared for a new session. Pick a lure below whenever "
-        "you're ready to start logging again."
+
+def _add_lure_to_pending(spot_id: str, seq: int, lure: dict):
+    key = _pending_lures_key(spot_id, seq)
+    pending = st.session_state.setdefault(key, [])
+    if lure.get("item_id") is not None:
+        if any(p.get("item_id") == lure["item_id"] for p in pending):
+            return
+    else:
+        # Manual (not-in-inventory) entries have no item_id - dedupe by
+        # label instead, so typing the exact same name twice doesn't add it
+        # twice.
+        if any(p.get("item_id") is None and p.get("label") == lure.get("label") for p in pending):
+            return
+    pending.append(lure)
+    st.session_state[key] = pending
+
+
+def _remove_lure_from_pending(spot_id: str, seq: int, index: int):
+    key = _pending_lures_key(spot_id, seq)
+    pending = st.session_state.get(key, [])
+    if 0 <= index < len(pending):
+        pending.pop(index)
+        st.session_state[key] = pending
+
+
+def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq: int):
+    """Multi-select sibling of _visual_lure_picker - same searchable card
+    grid, but each card toggles membership in the running "lures for this
+    session" list (see _pending_lures_key) instead of picking exactly one."""
+    if not inventory_items:
+        st.caption("No lures in your tackle box yet - add some on the Lure Inventory page.")
+        return
+    search = st.text_input(
+        "Search", key=f"{key_prefix}_search",
+        placeholder="Search your tackle box by brand or description...",
+        label_visibility="collapsed",
+    )
+    filtered = inventory_items
+    if search:
+        s = search.lower()
+        filtered = [
+            it for it in filtered
+            if s in (it.get("description") or "").lower() or s in (it.get("brand") or "").lower()
+        ]
+    if not filtered:
+        st.caption("No matches for that search.")
+        return
+    pending_ids = {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
+    for row_start in range(0, len(filtered), LURE_PICKER_COLS):
+        row_items = filtered[row_start:row_start + LURE_PICKER_COLS]
+        cols = st.columns(LURE_PICKER_COLS)
+        for col, item in zip(cols, row_items):
+            with col:
+                with st.container(border=True):
+                    if not render_square_thumbnail(item, size_px=LURE_PICKER_THUMBNAIL_PX):
+                        st.caption("No photo")
+                    st.caption(f"**{item.get('brand', '')}**  \n{item.get('description', '')}"[:90])
+                    is_added = item.get("item_id") in pending_ids
+                    if st.button(
+                        "✓ Added" if is_added else "+ Add", key=f"{key_prefix}_toggle_{item['item_id']}",
+                        disabled=is_added, width='stretch',
+                    ):
+                        _add_lure_to_pending(spot_id, seq, {
+                            "item_id": item["item_id"], "label": inventory_item_label(item),
+                            "category": item.get("category"),
+                        })
+                        st.rerun()
+
+
+def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str):
+    """Displays the lure recommendation (reusing core.ui.render_lure_block
+    unchanged, so this stays in sync with the 7-Day Forecast page's own
+    display) with a "+ Add to session" button under each color-matched
+    owned item, so a suggested lure can be added to this session with one
+    click instead of having to go find it again in the tackle-box picker
+    below."""
+    pending_ids = {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
+    for label, blocks in (("First choice", rec.first_choice), ("Second choice", rec.second_choice)):
+        if not blocks:
+            continue
+        st.markdown(f"**{label}**")
+        for block in blocks:
+            render_lure_block(block)
+            for item in block.owned_items:
+                item_id = item.get("item_id")
+                if not item_id:
+                    continue
+                is_added = item_id in pending_ids
+                btn_label = "✓ Added to session" if is_added else f"+ Add {item.get('brand', '')} - {item.get('description', '')}"[:60]
+                if st.button(btn_label, key=f"{key_prefix}_{block.key}_{item_id}", disabled=is_added):
+                    _add_lure_to_pending(spot_id, seq, {
+                        "item_id": item_id, "label": inventory_item_label(item), "category": block.key,
+                    })
+                    st.rerun()
+    if rec.rationale:
+        st.caption(" · ".join(rec.rationale))
+
+
+# --- Per-fish entry (used by both the active-session dialog and edit mode) --
+def _new_fish_from_form(species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed) -> dict:
+    species_final = (
+        species_other.strip() if (species_label == "Other (type in species)" and species_other.strip())
+        else species_label
+    )
+    return {
+        "species": species_final,
+        "species_other": species_other or None,
+        "count": 1,
+        "weight_lb": weight_lb_for_slider_option(weight_option),
+        "length_in": length_in_for_slider_option(length_option),
+        "hit_types": hit_types,
+        "retrieve_speed": retrieve_speed,
+        "retrieve_style": retrieve_style,
+    }
+
+
+def _fish_summary_bits(fish: dict) -> list:
+    count = fish.get("count") or 1
+    bits = [f"{count} x {fish['species']}" if count > 1 else (fish.get("species") or "Unknown species")]
+    if fish.get("weight_lb"):
+        bits.append(format_weight_lb_oz(fish["weight_lb"]))
+    if fish.get("length_in"):
+        bits.append(f"{fish['length_in']:g} in")
+    if fish.get("hit_types"):
+        bits.append(", ".join(fish["hit_types"]))
+    presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
+    if presentation:
+        bits.append(presentation)
+    return bits
+
+
+def _push_or_toast(paths, commit_message, local_message):
+    token = github_token()
+    if token:
+        ok, msg = commit_and_push(paths, token, repo_slug(), commit_message)
+        st.toast(msg, icon="✅" if ok else "⚠️")
+    else:
+        st.toast(local_message, icon="ℹ️")
+
+
+def _record_fish(spot_id: str, lure_index: int, fish_record: dict):
+    """Appends one fish to the given lure's running catch list, immediately
+    saving that lure's TripEntry (via update_trip) and pushing - per the
+    angler's own ask, each catch is saved right away rather than batched
+    until the session ends."""
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None or lure_index >= len(active["lures"]):
+        return
+    lure = active["lures"][lure_index]
+    lure["fish"].append(fish_record)
+    entry_kwargs = dict(lure["entry_kwargs"])
+    conditions = dict(entry_kwargs["conditions"])
+    conditions["fish"] = lure["fish"]
+    entry_kwargs["conditions"] = conditions
+    fish_weights = [f["weight_lb"] for f in lure["fish"] if f.get("weight_lb")]
+    entry_kwargs["fish_caught"] = sum((f.get("count") or 1) for f in lure["fish"])
+    entry_kwargs["biggest_fish_lb"] = max(fish_weights) if fish_weights else None
+    entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **entry_kwargs)
+    update_trip(entry)
+    lure["entry_kwargs"] = entry_kwargs
+    active["lures"][lure_index] = lure
+    st.session_state[active_key] = active
+    _push_or_toast(
+        [TRIP_LOG_PATH], f"Log a fish on {lure['label']} ({active.get('spot_name', spot_id)})",
+        "Fish logged locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
     )
 
-# Fresh from the CSV every render (cheap - this file is small) rather than a
-# separate in-memory list, so it's correct even across a page refresh: every
-# result already logged for this exact spot+date, so switching lures mid-visit
-# reads as one cohesive "session" even though each lure is still its own row.
-todays_entries = [
-    t for t in read_all_trips()
-    if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date.isoformat()
-]
-if todays_entries:
-    summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
-    st.caption(f"📋 Already logged for this spot today: {', '.join(summary_bits)}")
 
-# Keyed + on_change="rerun" (same fix as the Lure Inventory "Scan a lure" section -
-# see SESSION_NOTES entry 46) so its expanded/collapsed state actually round-trips
-# through st.session_state instead of being purely a client-side toggle. That
-# matters here specifically because the submit handler below explicitly re-opens
-# it after a save (see results_expander_reopen_key there) - without a key, a plain
-# st.expander(expanded=False) always reverts to closed on the st.rerun() that
-# follows a save, since "expanded" is only read as the INITIAL default. Losing
-# all that expanded content collapses the page by hundreds of pixels, which
-# looks exactly like "the page jumped back to the top and nothing happened" -
-# reported after this feature first shipped, even though the save itself was
-# working correctly the whole time.
-#
-# The submit handler can't write st.session_state[results_expander_key] directly
-# to force it back open - Streamlit forbids writing to a keyed widget's state
-# once that widget has already been instantiated in the current run, and the
-# submit button lives inside `with results_expander:`, i.e. after it. So the
-# handler instead sets a separate plain (non-widget) "pending reopen" flag, and
-# it's applied here, right before the widget is created, on the following run.
-results_expander_key = f"results_expander_{spot['spot_id']}"
-results_expander_reopen_key = f"{results_expander_key}_reopen"
-if st.session_state.pop(results_expander_reopen_key, False):
-    st.session_state[results_expander_key] = True
-st.session_state.setdefault(results_expander_key, False)
-results_expander = st.expander(
-    "Log a lure/time-window result and any fish caught",
-    expanded=st.session_state[results_expander_key], key=results_expander_key, on_change="rerun",
-)
-
-# lure_entry_seq_key/lure_seq were already computed up near the top of the
-# script (see the comment there) - repeated here as a reminder of why they
-# exist: bumped after each successful "Log this session" save (see the
-# submit handler below) so the lure/trailer/time/notes widgets below all get
-# fresh, blank keys for the next lure - a full reset, ready to log another
-# lure in the same visit right away. The "Conditions during this lure use"
-# fields further down (wind/fish activity/forage activity/forage seen)
-# deliberately do NOT fold this in, so they keep showing whatever was last
-# entered instead of resetting - per the angler's own call: those conditions
-# apply to the whole time at this spot, not just to one lure, so carrying
-# them forward into the next lure entry is the right default (still
-# editable if something actually changed).
-
-with results_expander:
-    inventory_items = get_inventory()
-
-    # "Conditions during this lure use" is rendered FIRST, before the lure/trailer
-    # pickers below - not just for reading order. The pickers' "Select" buttons
-    # call st.rerun() mid-script the instant they're clicked, and Streamlit drops
-    # session_state for any widget whose key hasn't been (re-)declared yet in the
-    # script run that triggers a rerun - it only keeps state for widgets already
-    # "seen" earlier in that same run. Declaring these here means they're always
-    # registered before any picker click can interrupt the run, so their values
-    # (wind/fish activity/forage activity/forage seen) actually survive picking a
-    # lure instead of silently snapping back to their defaults. Confirmed with a
-    # minimal repro during development - this ordering matters, don't move these
-    # below the pickers again without re-testing.
-    st.markdown("#### Conditions during this lure use")
-    st.caption(
-        "These carry over automatically to the next lure you log in this same session - "
-        "update them here if something actually changed."
+def _remove_fish(spot_id: str, lure_index: int, fish_index: int):
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None or lure_index >= len(active["lures"]):
+        return
+    lure = active["lures"][lure_index]
+    if not (0 <= fish_index < len(lure["fish"])):
+        return
+    lure["fish"].pop(fish_index)
+    entry_kwargs = dict(lure["entry_kwargs"])
+    conditions = dict(entry_kwargs["conditions"])
+    conditions["fish"] = lure["fish"]
+    entry_kwargs["conditions"] = conditions
+    fish_weights = [f["weight_lb"] for f in lure["fish"] if f.get("weight_lb")]
+    entry_kwargs["fish_caught"] = sum((f.get("count") or 1) for f in lure["fish"])
+    entry_kwargs["biggest_fish_lb"] = max(fish_weights) if fish_weights else None
+    entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **entry_kwargs)
+    update_trip(entry)
+    lure["entry_kwargs"] = entry_kwargs
+    active["lures"][lure_index] = lure
+    st.session_state[active_key] = active
+    _push_or_toast(
+        [TRIP_LOG_PATH], f"Remove a fish from {lure['label']} ({active.get('spot_name', spot_id)})",
+        "Removed locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
     )
 
-    # These four fields intentionally keep a stable key (no lure_seq folded in) -
-    # see the comment above lure_entry_seq_key for why they carry over between
-    # lures instead of resetting. "Log this session" (below) is the one action
-    # that clears them back to their own coded defaults, for a genuinely new
-    # session - it can't write st.session_state[key] for these directly, since
-    # by the time that button handler runs they're already instantiated this
-    # run (same restriction, and same deferred-flag fix, as
-    # results_expander_reopen_key above); session_reset_pending_key is applied
-    # here, right before these widgets are created, on the run that follows.
-    session_reset_pending_key = f"session_reset_pending_{spot['spot_id']}"
-    condition_field_keys = (
-        f"log_wind_band_{spot['spot_id']}", f"log_wind_band_last_cond_seen_{spot['spot_id']}",
-        f"log_wind_dir_{spot['spot_id']}",
-        f"log_fish_activity_{spot['spot_id']}", f"log_forage_activity_{spot['spot_id']}",
-        f"log_forage_type_{spot['spot_id']}",
-    )
-    if st.session_state.pop(session_reset_pending_key, False):
-        for condition_key in condition_field_keys:
-            st.session_state.pop(condition_key, None)
 
-    wc1, wc2 = st.columns(2)
-    # Punch-list #12: was a raw "Wind speed (mph)" number field - now the
-    # same Glassy/Light Ripple/Moderate Chop/Heavy band dropdown as
-    # "Conditions right now" uses, defaulting to whatever's currently picked
-    # there. A plain one-time `setdefault` isn't enough here: this widget is
-    # instantiated on every script run regardless of whether its expander is
-    # open (same reasoning as the ordering note above this section), which
-    # includes the very first run of a session - before the angler has had
-    # any chance to touch "Conditions right now" at all - so a `setdefault`
-    # would just lock in that section's own still-unedited default the
-    # instant the page loads, not "whatever I entered" a moment later. Same
-    # auto-follow-until-manually-overridden reconciliation as "Time window"
-    # above (see its comment for the full reasoning): synced to
-    # wind_band_choice on this widget's very first appearance and again
-    # every time wind_band_choice changes to a value not already reacted to
-    # (tracked via a "last cond wind seen" sentinel) - a manual pick here
-    # sticks across any other rerun, including navigating away and back, but
-    # is superseded the next time the angler actually changes "Conditions
-    # right now"'s Wind field itself.
-    _log_wind_key = f"log_wind_band_{spot['spot_id']}"
-    _log_wind_last_cond_seen_key = f"log_wind_band_last_cond_seen_{spot['spot_id']}"
-    if _just_entered_edit_mode:
-        # Prefill block above already seeded _log_wind_key from the trip's own
-        # logged value (or converted its legacy mph reading) - just record
-        # today's cond wind as "already seen" so it's a later actual change to
-        # it, not this same edit-entry run, that triggers the next sync.
-        st.session_state[_log_wind_last_cond_seen_key] = wind_band_choice
-    elif st.session_state.get(_log_wind_last_cond_seen_key, "__unset__") != wind_band_choice:
-        st.session_state[_log_wind_last_cond_seen_key] = wind_band_choice
-        st.session_state[_log_wind_key] = wind_band_choice
-    wind_band_logged = wc1.selectbox(
-        "Wind", WIND_BAND_LABELS, help=_wind_help, key=_log_wind_key,
-    )
-    st.session_state.setdefault(f"log_wind_dir_{spot['spot_id']}", "SW")
-    wind_direction = wc2.selectbox(
-        "Wind direction", WIND_DIRECTIONS, key=f"log_wind_dir_{spot['spot_id']}",
-    )
+@st.dialog("Log a fish")
+def _fish_entry_dialog(spot_id: str, lure_index: int):
+    active = st.session_state.get(f"active_session_{spot_id}")
+    if active is None or lure_index >= len(active["lures"]):
+        st.error("This session has ended.")
+        return
+    lure = active["lures"][lure_index]
+    st.markdown(f"**{lure['label']}**")
 
-    ac1, ac2 = st.columns(2)
-    fish_activity = ac1.select_slider(
-        "Fish activity", options=FISH_ACTIVITY_OPTIONS, value="Moderate", key=f"log_fish_activity_{spot['spot_id']}",
-    )
-    forage_activity = ac2.select_slider(
-        "Forage activity", options=FORAGE_ACTIVITY_OPTIONS, value="Moderate", key=f"log_forage_activity_{spot['spot_id']}",
-    )
+    dseq_key = f"fish_dialog_seq_{spot_id}_{lure_index}"
+    st.session_state.setdefault(dseq_key, 0)
+    dseq = st.session_state[dseq_key]
 
-    forage_type_seen = st.multiselect(
-        "Forage type/species seen", FORAGE_OPTIONS, default=(cond.get("forage_seen", []) if cond else []),
-        key=f"log_forage_type_{spot['spot_id']}",
+    species_idx = st.selectbox(
+        "Species", options=list(range(len(FISH_SPECIES_OPTIONS))), format_func=lambda j: FISH_SPECIES_OPTIONS[j],
+        key=f"fish_species_{spot_id}_{lure_index}_{dseq}",
     )
+    species_label = FISH_SPECIES_OPTIONS[species_idx]
+    species_other = ""
+    if species_label == "Other (type in species)":
+        species_other = st.text_input("Species (type it in)", key=f"fish_species_other_{spot_id}_{lure_index}_{dseq}")
+
+    weight_option = st.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=f"fish_weight_{spot_id}_{lure_index}_{dseq}")
+    length_option = st.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=f"fish_length_{spot_id}_{lure_index}_{dseq}")
+    hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"fish_hit_types_{spot_id}_{lure_index}_{dseq}")
+
+    rc1, rc2 = st.columns(2)
+    retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"fish_retrieve_style_{spot_id}_{lure_index}_{dseq}")
+    retrieve_speed = rc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"fish_retrieve_speed_{spot_id}_{lure_index}_{dseq}")
+
+    fc1, fc2 = st.columns(2)
+    if fc1.button("✅ Record", type="primary", width='stretch', key=f"fish_record_{spot_id}_{lure_index}_{dseq}"):
+        fish_record = _new_fish_from_form(
+            species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed,
+        )
+        _record_fish(spot_id, lure_index, fish_record)
+        st.session_state[dseq_key] = dseq + 1
+        st.rerun()
+    if fc2.button("Cancel", width='stretch', key=f"fish_cancel_{spot_id}_{lure_index}_{dseq}"):
+        st.rerun()
+
+
+def _end_session(spot_id: str):
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None:
+        return
+    end_time = lake_now_naive().time()
+    for lure in active["lures"]:
+        entry_kwargs = dict(lure["entry_kwargs"])
+        conditions = dict(entry_kwargs["conditions"])
+        conditions["lure_end_time"] = end_time.isoformat()
+        entry_kwargs["conditions"] = conditions
+        entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **entry_kwargs)
+        update_trip(entry)
+    _push_or_toast(
+        [TRIP_LOG_PATH], f"End spot session ({active.get('spot_name', spot_id)})",
+        "Session ended locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+    st.session_state.pop(active_key, None)
+    st.session_state[f"session_closed_banner_{spot_id}"] = True
+
+
+# ==============================================================================
+# EDIT MODE - correcting one already-logged trip
+# ==============================================================================
+if editing_trip is not None:
+    st.divider()
+    st.header("Conditions")
+
+    def _find_inventory_item_by_label(label, items):
+        if not label:
+            return None
+        return next((it for it in items if inventory_item_label(it) == label), None)
+
+    def _parse_iso_time(s):
+        try:
+            return dtime.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
+    if editing_cond.get("wind_band_logged") in WIND_BAND_LABELS:
+        _prefill_wind_band = editing_cond["wind_band_logged"]
+    elif editing_cond.get("wind_band") in WIND_BAND_LABELS:
+        _prefill_wind_band = editing_cond["wind_band"]
+    elif isinstance(editing_cond.get("wind_speed_mph"), (int, float)):
+        _prefill_wind_band = wind_band(editing_cond["wind_speed_mph"])["label"]
+    else:
+        _prefill_wind_band = None
+
+    edit_prefill = {
+        "water_temp_f": editing_cond.get("water_temp_f"),
+        "secchi_ft": editing_cond.get("secchi_ft"),
+        "stain_color": editing_cond.get("stain_color") if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS else None,
+        "stirred_up": bool(editing_cond.get("stirred_up", False)),
+        "wind_band": _prefill_wind_band,
+        "wind_direction": editing_cond.get("wind_direction") if editing_cond.get("wind_direction") in WIND_DIRECTIONS else None,
+        "light_condition": editing_cond.get("light_condition") if editing_cond.get("light_condition") in LIGHT_CONDITIONS else None,
+        "precipitation": editing_cond.get("precipitation") if editing_cond.get("precipitation") in PRECIPITATION_OPTIONS else None,
+        "forage_seen": editing_cond.get("forage_seen") or editing_cond.get("forage_type_seen") or [],
+        "fish_activity": editing_cond.get("fish_activity"),
+        "forage_activity": editing_cond.get("forage_activity"),
+        "fish_depth_ft": editing_cond.get("fish_depth_ft"),
+    }
+    edit_key_ns = f"editcond_{edit_trip_id}_{spot['spot_id']}"
+    cond_values = render_conditions_block(edit_key_ns, weather_defaults={}, prefill=edit_prefill)
+
+    tc1, tc2 = st.columns(2)
+    _edit_start_key = f"{edit_key_ns}_start_time"
+    st.session_state.setdefault(_edit_start_key, _parse_iso_time(editing_cond.get("start_time")) or lake_now_naive().time())
+    edit_start_time = tc1.time_input("Session start time", key=_edit_start_key)
+    _edit_segment_default = editing_trip.get("segment") if editing_trip.get("segment") in SEGMENTS else _guess_segment(edit_start_time.hour)
+    _edit_segment_key = f"{edit_key_ns}_segment"
+    st.session_state.setdefault(_edit_segment_key, _edit_segment_default)
+    edit_segment_name = tc2.selectbox("Time window", SEGMENTS, format_func=_segment_option_label, key=_edit_segment_key)
+
+    edit_at_time = datetime.combine(session_date, edit_start_time)
+    water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
+        cond_values, session_date, bundle, edit_at_time, edit_segment_name,
+    )
+    st.caption(f"Recomputed score for this entry: **{score_result.score}/10** ({season.replace('_', ' ').title()}, {water_clarity} water)")
 
     st.divider()
     st.markdown("#### Lure used")
-    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=f"log_lure_{spot['spot_id']}_{lure_seq}")
-    # No manual name/color/technique/depth entry here anymore - those were dropped
-    # in favor of just the picker plus the trailer selector below. lure_used/
-    # color_used still get derived from whichever inventory item was picked (blank
-    # if none was), since Trip History and the saved conditions still read them.
-    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else ""
-    color_used = selected_lure_item.get("description", "") if selected_lure_item else ""
-    technique_used = ""
+    inventory_items = get_inventory()
+    _edit_lure_prefix = f"editlure_{edit_trip_id}_{spot['spot_id']}"
+    _matched_lure = _find_inventory_item_by_label(editing_trip.get("lure_used"), inventory_items)
+    if _matched_lure:
+        st.session_state.setdefault(f"{_edit_lure_prefix}_selected_id", _matched_lure["item_id"])
+    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=_edit_lure_prefix)
+    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else (editing_trip.get("lure_used") or "")
+    color_used = selected_lure_item.get("description", "") if selected_lure_item else (editing_trip.get("color_used") or "")
 
     use_trailer = False
     if lure_can_take_trailer(selected_lure_item):
-        use_trailer = st.checkbox("Used a trailer", key=f"log_use_trailer_{spot['spot_id']}_{lure_seq}")
+        _use_trailer_key = f"edit_use_trailer_{edit_trip_id}_{spot['spot_id']}"
+        st.session_state.setdefault(_use_trailer_key, bool(editing_cond.get("trailer_used")))
+        use_trailer = st.checkbox("Used a trailer", key=_use_trailer_key)
 
-    trailer_name, trailer_color = "", ""
+    trailer_name, trailer_color, trailer_category = "", "", None
     selected_trailer_item = None
     if use_trailer:
         st.markdown("**Trailer**")
-        # Only real trailer-style baits (craw/creature, paddle-tail
-        # swimbait-style) - not the whole tackle box, and specifically not
-        # worms/senkos/TRDs, which aren't trailers even though they're soft
-        # plastics too. See core.lures.is_trailer_eligible/
-        # TRAILER_ELIGIBLE_CATEGORIES for exactly what qualifies and why.
         trailer_items = [it for it in inventory_items if is_trailer_eligible(it)]
+        _edit_trailer_prefix = f"edittrailer_{edit_trip_id}_{spot['spot_id']}"
+        _matched_trailer = _find_inventory_item_by_label(editing_cond.get("trailer_name"), inventory_items)
+        if _matched_trailer:
+            st.session_state.setdefault(f"{_edit_trailer_prefix}_selected_id", _matched_trailer["item_id"])
         selected_trailer_item = _visual_lure_picker(
-            trailer_items, key_prefix=f"log_trailer_{spot['spot_id']}_{lure_seq}",
-            empty_message=(
-                "No trailer-style baits (craw/creature or paddle-tail swimbait) found in your "
-                "tackle box - add one on the Lure Inventory page, or just type this one in below."
-            ),
+            trailer_items, key_prefix=_edit_trailer_prefix,
+            empty_message="No trailer-style baits found in your tackle box - add one on the Lure Inventory page, or type this one in below.",
         )
         if selected_trailer_item is None:
-            trailer_name = st.text_input(
-                "Trailer name", placeholder="e.g. Green pumpkin craw trailer",
-                key=f"log_trailer_name_{spot['spot_id']}_{lure_seq}",
-            )
+            _trailer_name_key = f"edit_trailer_name_{edit_trip_id}_{spot['spot_id']}"
+            st.session_state.setdefault(_trailer_name_key, editing_cond.get("trailer_name") or "")
+            trailer_name = st.text_input("Trailer name", key=_trailer_name_key)
         else:
             trailer_name = inventory_item_label(selected_trailer_item)
-        trailer_color = st.text_input(
-            "Trailer color",
-            value=(selected_trailer_item.get("description", "") if selected_trailer_item else ""),
-            key=f"log_trailer_color_{spot['spot_id']}_{lure_seq}_"
-                f"{selected_trailer_item.get('item_id') if selected_trailer_item else 'manual'}",
+            trailer_category = selected_trailer_item.get("category")
+        _trailer_color_key = f"edit_trailer_color_{edit_trip_id}_{spot['spot_id']}"
+        st.session_state.setdefault(
+            _trailer_color_key,
+            selected_trailer_item.get("description", "") if selected_trailer_item else (editing_cond.get("trailer_color") or ""),
         )
+        trailer_color = st.text_input("Trailer color", key=_trailer_color_key)
 
-    tc3, tc4 = st.columns(2)
-    lure_start_time = tc3.time_input(
-        "Started using this lure at (optional)", value=None, key=f"log_start_time_{spot['spot_id']}_{lure_seq}",
-    )
-    lure_end_time = tc4.time_input(
-        "Stopped using this lure at (optional)", value=None, key=f"log_end_time_{spot['spot_id']}_{lure_seq}",
-    )
-
-    log_notes = st.text_area(
-        "Notes for this time range", placeholder="Anything else worth remembering about this lure/time window",
-        key=f"log_notes_{spot['spot_id']}_{lure_seq}",
-    )
+    _notes_key = f"edit_notes_{edit_trip_id}_{spot['spot_id']}"
+    st.session_state.setdefault(_notes_key, editing_trip.get("notes") or "")
+    log_notes = st.text_area("Notes", key=_notes_key)
 
     st.divider()
     st.markdown("#### Fish caught")
+    _edit_fish_key = f"edit_fish_list_{edit_trip_id}_{spot['spot_id']}"
+    _edit_fish_list = editing_cond.get("fish")
+    st.session_state.setdefault(_edit_fish_key, list(_edit_fish_list) if isinstance(_edit_fish_list, list) else [])
+    edit_fish_records = st.session_state[_edit_fish_key]
 
-    pending_key = f"pending_fish_{spot['spot_id']}"
-    seq_key = f"fish_entry_seq_{spot['spot_id']}"
-    # None / "scoreable" / "small" - which of the two "Add fish" flows below
-    # (if either) is currently open. Per punch-list item #3: a scoreable fish
-    # (1 lb+) gets its own full entry (weight/length/depth/presentation/
-    # speed), while a non-scoreable one (<1 lb) is meant to be quick to log -
-    # just species and a running count, no other fields - via a separate
-    # button rather than a checkbox buried inside the full form.
-    adding_key = f"adding_fish_mode_{spot['spot_id']}"
-    st.session_state.setdefault(pending_key, [])
-    st.session_state.setdefault(seq_key, 0)
-    st.session_state.setdefault(adding_key, None)
-    fish_records = st.session_state[pending_key]
-
-    if fish_records:
-        for i, fish in enumerate(fish_records):
+    if edit_fish_records:
+        for i, fish in enumerate(edit_fish_records):
             frow1, frow2 = st.columns([5, 1])
-            count = fish.get("count") or 1
-            bits = [f"{count} x {fish['species']}" if count > 1 else fish["species"]]
-            if fish.get("weight_lb"):
-                weight_str = format_weight_lb_oz(fish["weight_lb"])
-                bits.append(f"~{weight_str} each" if count > 1 else weight_str)
-            if fish.get("length_in"):
-                bits.append(f"{fish['length_in']:g} in")
-            if fish.get("depth_ft"):
-                bits.append(f"{fish['depth_ft']:g} ft deep")
-            presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
-            if presentation:
-                bits.append(presentation)
-            frow1.write(f"🐟 Fish #{i + 1}: {', '.join(bits)}")
-            if frow2.button("Remove", key=f"remove_fish_{spot['spot_id']}_{i}"):
-                fish_records.pop(i)
-                st.session_state[pending_key] = fish_records
+            frow1.write(f"🐟 Fish #{i + 1}: {', '.join(str(b) for b in _fish_summary_bits(fish))}")
+            if frow2.button("Remove", key=f"edit_remove_fish_{edit_trip_id}_{spot['spot_id']}_{i}"):
+                edit_fish_records.pop(i)
+                st.session_state[_edit_fish_key] = edit_fish_records
                 st.rerun()
     else:
-        st.caption("No fish logged yet for this lure/time window.")
+        st.caption("No fish logged yet for this trip.")
 
-    adding_mode = st.session_state[adding_key]
-    seq = st.session_state[seq_key]
-
-    if adding_mode is None:
-        ac1, ac2 = st.columns(2)
-        if ac1.button("➕ Add fish (1 lb+)", key=f"open_add_fish_{spot['spot_id']}", width='stretch'):
-            st.session_state[adding_key] = "scoreable"
+    _edit_fish_seq_key = f"edit_fish_seq_{edit_trip_id}_{spot['spot_id']}"
+    st.session_state.setdefault(_edit_fish_seq_key, 0)
+    _efseq = st.session_state[_edit_fish_seq_key]
+    with st.container(border=True):
+        st.markdown("**Add a fish**")
+        species_idx = st.selectbox(
+            "Species", options=list(range(len(FISH_SPECIES_OPTIONS))), format_func=lambda j: FISH_SPECIES_OPTIONS[j],
+            key=f"edit_new_fish_species_{edit_trip_id}_{spot['spot_id']}_{_efseq}",
+        )
+        species_label = FISH_SPECIES_OPTIONS[species_idx]
+        species_other = ""
+        if species_label == "Other (type in species)":
+            species_other = st.text_input("Species (type it in)", key=f"edit_new_fish_species_other_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        weight_option = st.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=f"edit_new_fish_weight_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        length_option = st.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=f"edit_new_fish_length_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        hit_types = st.multiselect("Type of hit", HIT_TYPE_OPTIONS, key=f"edit_new_fish_hit_types_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        rc1, rc2 = st.columns(2)
+        retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"edit_new_fish_style_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        retrieve_speed = rc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"edit_new_fish_speed_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
+        if st.button("Add fish", key=f"edit_new_fish_add_{edit_trip_id}_{spot['spot_id']}_{_efseq}", type="primary", width='stretch'):
+            edit_fish_records.append(_new_fish_from_form(
+                species_label, species_other, weight_option, length_option, hit_types, retrieve_style, retrieve_speed,
+            ))
+            st.session_state[_edit_fish_key] = edit_fish_records
+            st.session_state[_edit_fish_seq_key] = _efseq + 1
             st.rerun()
-        if ac2.button(
-            "➕ Log small fish (under 1 lb)", key=f"open_add_small_fish_{spot['spot_id']}", width='stretch',
-            help='Quick entry for fish too small to bother scoring - just the species and a count.',
-        ):
-            st.session_state[adding_key] = "small"
-            st.rerun()
 
-    elif adding_mode == "small":
-        # Non-scoreable (<1 lb) fish: species + a running count, nothing else -
-        # no weight, length, depth, or presentation fields at all, per the
-        # punch-list ask.
-        with st.container(border=True):
-            st.markdown("**Small fish (under 1 lb) - count only**")
-            species_idx = st.selectbox(
-                "Fish type", options=list(range(len(FISH_SPECIES_OPTIONS))),
-                format_func=lambda j: FISH_SPECIES_OPTIONS[j],
-                key=f"log_new_small_fish_species_{spot['spot_id']}_{seq}",
-            )
-            species_label = FISH_SPECIES_OPTIONS[species_idx]
-            species_other = ""
-            if species_label == "Other (type in species)":
-                species_other = st.text_input(
-                    "Species (type it in)", key=f"log_new_small_fish_species_other_{spot['spot_id']}_{seq}",
-                )
-            new_count = st.number_input(
-                "Total number of this type caught", min_value=1, step=1, value=1,
-                key=f"log_new_small_fish_count_{spot['spot_id']}_{seq}",
-            )
-
-            sc1, sc2 = st.columns(2)
-            if sc1.button(
-                "Save", key=f"log_new_small_fish_save_{spot['spot_id']}_{seq}", type="primary", width='stretch',
-            ):
-                species_final = (
-                    species_other.strip()
-                    if (species_label == "Other (type in species)" and species_other.strip())
-                    else species_label
-                )
-                fish_records.append({
-                    "species": species_final,
-                    "species_other": species_other or None,
-                    "count": int(new_count),
-                    "weight_lb": None,
-                    "length_in": None,
-                    "depth_ft": None,
-                    "retrieve_speed": None,
-                    "retrieve_style": None,
-                })
-                st.session_state[pending_key] = fish_records
-                st.session_state[seq_key] = seq + 1
-                st.session_state[adding_key] = None
-                st.rerun()
-            if sc2.button("Cancel", key=f"log_new_small_fish_cancel_{spot['spot_id']}_{seq}", width='stretch'):
-                st.session_state[adding_key] = None
-                st.rerun()
-
-    else:  # adding_mode == "scoreable"
-        with st.container(border=True):
-            st.markdown("**New fish (1 lb+)**")
-            species_idx = st.selectbox(
-                "Fish type", options=list(range(len(FISH_SPECIES_OPTIONS))),
-                format_func=lambda j: FISH_SPECIES_OPTIONS[j],
-                key=f"log_new_fish_species_{spot['spot_id']}_{seq}",
-            )
-            species_label = FISH_SPECIES_OPTIONS[species_idx]
-            species_other = ""
-            if species_label == "Other (type in species)":
-                species_other = st.text_input(
-                    "Species (type it in)", key=f"log_new_fish_species_other_{spot['spot_id']}_{seq}",
-                )
-
-            fc1, fc2, fc3 = st.columns(3)
-            # Plain text field, not a number_input - punch-list item #2 asked
-            # for a manual "xx - xx" (lb - oz) field with no +/- steppers and
-            # the dash pre-filled; parse_weight_lb_oz() reads this same "3 - 8"
-            # shorthand back into decimal pounds on save (see core.activity_log).
-            # Streamlit has no built-in way to make typing into a sub-field
-            # overwrite it without selecting/backspacing first (that needs a
-            # real custom JS component) - this gets the single-field "3 - 8"
-            # format right without that extra machinery.
-            new_weight_text = fc1.text_input(
-                "Weight (lb - oz)", value="0 - 0",
-                key=f"log_new_fish_weight_{spot['spot_id']}_{seq}",
-                help='Type over the pre-filled "0 - 0", e.g. "3 - 8" for 3 lb 8 oz.',
-            )
-            new_length_in = fc2.number_input(
-                "Length (in)", min_value=0.0, step=0.25, value=0.0,
-                key=f"log_new_fish_length_{spot['spot_id']}_{seq}",
-            )
-            new_depth_ft = fc3.number_input(
-                "Depth caught at (ft)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
-                key=f"log_new_fish_depth_{spot['spot_id']}_{seq}",
-            )
-
-            fc4, fc5 = st.columns(2)
-            new_retrieve_style = fc4.selectbox(
-                "Presentation/technique", RETRIEVE_STYLE_OPTIONS, key=f"log_new_fish_style_{spot['spot_id']}_{seq}",
-            )
-            new_retrieve_speed = fc5.selectbox(
-                "Retrieval speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"log_new_fish_speed_{spot['spot_id']}_{seq}",
-            )
-
-            sc1, sc2 = st.columns(2)
-            if sc1.button(
-                "Save fish", key=f"log_new_fish_save_{spot['spot_id']}_{seq}", type="primary", width='stretch',
-            ):
-                species_final = (
-                    species_other.strip()
-                    if (species_label == "Other (type in species)" and species_other.strip())
-                    else species_label
-                )
-                fish_records.append({
-                    "species": species_final,
-                    "species_other": species_other or None,
-                    "count": 1,
-                    "weight_lb": parse_weight_lb_oz(new_weight_text) or None,
-                    "length_in": new_length_in or None,
-                    "depth_ft": new_depth_ft or None,
-                    "retrieve_speed": new_retrieve_speed,
-                    "retrieve_style": new_retrieve_style,
-                })
-                st.session_state[pending_key] = fish_records
-                st.session_state[seq_key] = seq + 1
-                st.session_state[adding_key] = None
-                st.rerun()
-            if sc2.button("Cancel", key=f"log_new_fish_cancel_{spot['spot_id']}_{seq}", width='stretch'):
-                st.session_state[adding_key] = None
-                st.rerun()
-
-    # Every key _save_current_lure_entry's cond-derived block below writes,
-    # used to carry the original snapshot forward when editing a trip and
-    # the angler didn't re-fill in "Conditions right now" this visit (see
-    # that function for why - otherwise a plain notes/fish-count correction
-    # would silently blow away the whole condition reading it was scored
-    # against).
-    _COND_DERIVED_KEYS = (
-        "pressure_trend_24h", "moon_near_new_full", "moon_phase", "avg_cloud_pct", "avg_wind_mph",
-        "wind_band", "water_temp_f", "secchi_ft", "stirred_up", "light_condition", "precipitation",
-        "start_time", "forage_seen", "fish_depth_ft",
-    )
-
-    def _save_current_lure_entry():
-        """Build a TripEntry from the current form state and save it - append
-        as a new row normally, or update the existing row in place when
-        editing (see editing_trip above). Pushes to GitHub if configured and
-        toasts a confirmation. Shared by "Log this lure"/"Log this session"
-        (always append) and "Save changes" (always update) so there's
-        exactly one place that assembles a TripEntry from these fields."""
-        fish_weights = [f["weight_lb"] for f in fish_records if f["weight_lb"]]
-
-        # Everything in this first block only exists if Conditions right now was
-        # filled in and scored (cond/rt/score_result/avg_cloud_pct/avg_wind_mph are
-        # all None otherwise, per the "cond may be empty" note above) - logging
-        # results doesn't require that, so these keys are simply left out of
-        # conditions_json when there's no live reading behind them, same treatment
-        # Trip History's FIELD_SPECS loop already gives any other missing key.
-        #
-        # When editing a trip and the angler didn't re-fill in "Conditions right
-        # now" this visit (e.g. left session start time blank), fall back to
-        # whatever condition snapshot the original entry already had instead
-        # of dropping it - a save should only ever change what was actually
-        # touched.
-        conditions = {}
-        if cond:
-            conditions.update({
-                "pressure_trend_24h": rt["pressure_trend_24h"],
-                "moon_near_new_full": score_result.moon.is_new_or_full_window,
-                "moon_phase": score_result.moon.name,
-                "avg_cloud_pct": avg_cloud_pct,
-                "avg_wind_mph": avg_wind_mph,
-                "wind_band": cond["wind_band"],
-                "water_temp_f": cond["water_temp_f"],
-                "secchi_ft": cond["secchi_ft"],
-                "stirred_up": cond.get("stirred_up", False),
-                "light_condition": cond["light_condition"],
-                "precipitation": cond["precipitation"],
-                "start_time": cond["start_time"],
-                "forage_seen": cond.get("forage_seen"),
-                "fish_depth_ft": cond.get("fish_depth_ft"),
-            })
-        elif editing_trip is not None:
-            conditions.update({k: editing_cond[k] for k in _COND_DERIVED_KEYS if k in editing_cond})
+    st.divider()
+    save_col, cancel_col = st.columns(2)
+    if save_col.button("💾 Save changes", key=f"save_edit_{spot['spot_id']}", type="primary", width='stretch'):
+        fish_weights = [f["weight_lb"] for f in edit_fish_records if f.get("weight_lb")]
+        conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, edit_start_time, edit_segment_name)
         conditions.update({
-            # lure_category is the raw core.lures.LURE_PROFILES key (e.g. "football_jig"),
-            # not the display name - only set when the lure was picked from inventory, so
-            # Trip History can offer a real "lure type" filter without guessing a
-            # category from free text for manually-entered lures.
             "lure_category": selected_lure_item.get("category") if selected_lure_item else None,
             "trailer_used": use_trailer,
             "trailer_name": trailer_name or None,
             "trailer_color": trailer_color or None,
-            "trailer_category": selected_trailer_item.get("category") if selected_trailer_item else None,
-            "lure_start_time": lure_start_time.isoformat() if lure_start_time else None,
-            "lure_end_time": lure_end_time.isoformat() if lure_end_time else None,
-            # wind_speed_mph (a raw mph number) is punch-list #12's old field
-            # name/shape - no longer written by this page, but deliberately
-            # not backfilled here either, so it stays a clean signal in
-            # trip_log.csv of "logged before #12" vs. "logged after" (Trip
-            # History still displays old rows' real historical mph value
-            # under its own column). wind_band_logged is the new field.
-            "wind_band_logged": wind_band_logged,
-            "wind_direction": wind_direction,
-            "fish_activity": fish_activity,
-            "forage_activity": forage_activity,
-            "forage_type_seen": forage_type_seen,
-            # Per-fish catch records - a separate entry for each fish caught on this
-            # lure during this time window, each with its own species/size/depth/
-            # presentation, added one at a time via the "Add fish" button above.
-            # fish_caught/biggest_fish_lb below are derived from this list so
-            # existing Trip History metrics and core.calibration's factor-flag
-            # logic (both keyed on those two top-level TripEntry fields) keep
-            # working unchanged.
-            "fish": fish_records,
+            "trailer_category": trailer_category,
+            "lure_start_time": edit_start_time.isoformat() if edit_start_time else None,
+            "lure_end_time": editing_cond.get("lure_end_time"),
+            "fish": edit_fish_records,
             "source": "spot_session",
         })
-        # Same fallback logic as the conditions block above: a fresh score
-        # only exists if "Conditions right now" has a session start time
-        # filled in this visit; otherwise, when editing, keep the original
-        # trip's score rather than blanking it out just because that section
-        # wasn't touched.
-        if score_result:
-            predicted_score = score_result.score
-        elif editing_trip is not None and editing_trip.get("predicted_score") not in (None, ""):
-            try:
-                predicted_score = float(editing_trip["predicted_score"])
-            except ValueError:
-                predicted_score = None
-        else:
-            predicted_score = None
-
-        # cond["segment_name"] reflects the time window picked in Conditions
-        # right now this visit. Without that: when editing and conditions
-        # weren't re-filled in, keep the original trip's segment rather than
-        # guessing from the CURRENT wall-clock hour (which is almost
-        # certainly not when the original session happened); otherwise (a
-        # brand new result with no conditions filled in) fall back to that
-        # same hour-of-day guess, so it still lands in a sensible time-of-day
-        # bucket for Trip History's filters.
-        if cond:
-            entry_segment = cond["segment_name"]
-        elif editing_trip is not None and editing_trip.get("segment") in SEGMENTS:
-            entry_segment = editing_trip["segment"]
-        else:
-            _entry_guess_now = lake_now_naive()
-            entry_segment = _guess_segment(_entry_guess_now.hour, _entry_guess_now)
-
-        # Same story as segment above: water_clarity is derived from cond
-        # too, so without "Conditions right now" refilled in this visit,
-        # an edit should keep the original trip's stored water_clarity
-        # rather than resetting it to "Unknown" just because that section
-        # wasn't touched this time.
-        if water_clarity:
-            entry_water_clarity = water_clarity
-        elif editing_trip is not None and editing_trip.get("water_clarity"):
-            entry_water_clarity = editing_trip["water_clarity"]
-        else:
-            entry_water_clarity = "Unknown"
-
-        entry_kwargs = dict(
+        entry = TripEntry(
+            trip_id=edit_trip_id,
+            logged_at=editing_trip.get("logged_at") or datetime.utcnow().isoformat(),
             trip_date=session_date.isoformat(),
-            segment=entry_segment,
+            segment=edit_segment_name,
             spot_id=spot["spot_id"],
             spot_name=spot["name"],
             structure_type=structure_type,
-            water_clarity=entry_water_clarity,
+            water_clarity=water_clarity,
             lure_used=lure_used,
             color_used=color_used,
-            technique_used=technique_used,
-            fish_caught=sum((f.get("count") or 1) for f in fish_records),
+            technique_used="",
+            fish_caught=sum((f.get("count") or 1) for f in edit_fish_records),
             biggest_fish_lb=max(fish_weights) if fish_weights else None,
-            predicted_score=predicted_score,
+            predicted_score=score_result.score,
             conditions=conditions,
             notes=log_notes,
         )
+        update_trip(entry)
+        _push_or_toast(
+            [TRIP_LOG_PATH], f"Update trip {entry.trip_id} from spot session edit ({spot['name']})",
+            "Trip updated locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+        )
+        _exit_edit_mode()
+        st.rerun()
+    if cancel_col.button("Cancel edit", key=f"cancel_edit_bottom_{spot['spot_id']}", width='stretch'):
+        _exit_edit_mode()
+        st.rerun()
 
-        if editing_trip is not None:
-            # Same trip_id, and the original logged_at (first-logged time) is
-            # preserved rather than reset to now - an edit corrects a trip,
-            # it doesn't create a new one.
-            entry = TripEntry(
-                trip_id=edit_trip_id,
-                logged_at=editing_trip.get("logged_at") or datetime.utcnow().isoformat(),
-                **entry_kwargs,
-            )
-            update_trip(entry)
-            commit_message = f"Update trip {entry.trip_id} from spot session edit ({spot['name']})"
-        else:
-            entry = TripEntry(**entry_kwargs)
-            append_trip(entry)
-            commit_message = f"Log trip {entry.trip_id} from spot session ({spot['name']})"
+    st.stop()
 
-        token = github_token()
-        if token:
-            ok, msg = commit_and_push([TRIP_LOG_PATH], token, repo_slug(), commit_message)
-            # st.toast rather than st.success/st.info - this confirmation needs to
-            # survive the st.rerun() below (an inline st.success would get wiped
-            # out by the rerun before the angler has a chance to read it; a toast
-            # keeps showing across it).
-            st.toast(msg, icon="✅" if ok else "⚠️")
-        else:
-            st.toast(
-                "Lure logged locally. No GITHUB_TOKEN configured in Streamlit secrets, so this "
-                "entry won't survive an app restart - see README for how to add it.",
-                icon="ℹ️",
-            )
 
-    def _reset_for_next_lure():
-        """Clear the per-fish list and bump lure_entry_seq_key so every lure/
-        trailer/time/notes widget above gets a fresh blank key next render -
-        called after EVERY save, whether from "Log this lure" or "Log this
-        session" (see the comment above lure_entry_seq_key for why the
-        "Conditions during this lure use" fields are deliberately NOT touched
-        here - that's "Log this session"'s job, via session_reset_pending_key,
-        since a plain "Log this lure" save should keep carrying them
-        forward). Setting results_expander_reopen_key means the "Add results"
-        section stays open through the rerun below instead of snapping shut -
-        without this the angler has to scroll back down and re-expand it by
-        hand before logging the next lure, which reads as "nothing happened."
-        """
-        st.session_state[pending_key] = []
-        st.session_state[seq_key] = 0
-        st.session_state[adding_key] = None
-        st.session_state[lure_entry_seq_key] = lure_seq + 1
-        st.session_state[results_expander_reopen_key] = True
+# ==============================================================================
+# NORMAL MODE - either a session is already in progress at this spot, or the
+# angler is setting one up (conditions -> lure selection -> Start Session).
+# ==============================================================================
+active_session_key = f"active_session_{spot['spot_id']}"
+active = st.session_state.get(active_session_key)
+
+if active is not None:
+    st.divider()
+    st.header("🎣 Session in progress")
+    score_bit = f" · predicted score {active['predicted_score']}/10" if active.get("predicted_score") is not None else ""
+    st.caption(
+        f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"
+    )
+    st.caption("Tap a lure below every time you land a fish on it.")
+
+    for i, lure in enumerate(active["lures"]):
+        fish_count = sum((f.get("count") or 1) for f in lure["fish"])
+        label = f"🎣 {lure['label']}" + (f" ({fish_count} caught)" if fish_count else "")
+        if st.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
+            _fish_entry_dialog(spot["spot_id"], i)
+        if lure["fish"]:
+            with st.expander(f"Fish caught on {lure['label']} ({fish_count})", expanded=False):
+                for fi, fish in enumerate(lure["fish"]):
+                    frow1, frow2 = st.columns([5, 1])
+                    frow1.write(f"- {', '.join(str(b) for b in _fish_summary_bits(fish))}")
+                    if frow2.button("Remove", key=f"remove_active_fish_{spot['spot_id']}_{i}_{fi}"):
+                        _remove_fish(spot["spot_id"], i, fi)
+                        st.rerun()
 
     st.divider()
+    if st.button("⏹ End Session", key=f"end_session_{spot['spot_id']}", type="primary", width='stretch'):
+        _end_session(spot["spot_id"])
+        st.rerun()
 
-    if editing_trip is not None:
-        # Editing one specific already-logged trip - there's no "next lure in
-        # this session" concept here, just this one row to correct, so a
-        # single Save/Cancel pair replaces the normal two-button flow.
-        save_col, cancel_col = st.columns(2)
-        save_changes_submitted = save_col.button(
-            "💾 Save changes", key=f"save_edit_{spot['spot_id']}", type="primary", width='stretch',
-            help="Updates this same trip in place - it stays one row in Trip History, not a duplicate.",
+else:
+    session_build_seq_key = f"session_build_seq_{spot['spot_id']}"
+    st.session_state.setdefault(session_build_seq_key, 0)
+    session_build_seq = st.session_state[session_build_seq_key]
+
+    st.divider()
+    st.header("Conditions")
+    st.caption(
+        "Enter what you're actually seeing at the water - weather-related fields below default from the "
+        "live forecast, override any of them if what you see is different. Once you've picked your "
+        "lure(s) below, Start Session locks in the exact time and this whole snapshot."
+    )
+    weather_defaults = _weather_defaults(bundle, session_date, lake_now_naive())
+    cond_key_ns = f"cond_{spot['spot_id']}_{session_build_seq}"
+    cond_values = render_conditions_block(cond_key_ns, weather_defaults)
+
+    _preview_now = lake_now_naive()
+    _preview_segment = _guess_segment(_preview_now.hour, _preview_now)
+    water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
+        cond_values, session_date, bundle, _preview_now, _preview_segment,
+    )
+
+    st.divider()
+    with st.expander("Suggestions for right now", expanded=True):
+        m1, m2 = st.columns([1, 2])
+        m1.metric(
+            f"{_preview_segment} activity score", f"{score_result.score}/10",
+            help=_score_breakdown_help(score_result.breakdown, score_result.score),
         )
-        cancel_edit_submitted = cancel_col.button(
-            "Cancel edit", key=f"cancel_edit_bottom_{spot['spot_id']}", width='stretch',
+        m2.write(
+            f"**Season:** {season.replace('_', ' ').title()}  \n"
+            f"**Structure:** {structure_type} (from this spot's saved type)  \n"
+            f"**Water clarity:** {water_clarity}"
         )
-        if save_changes_submitted:
-            _save_current_lure_entry()
-            _exit_edit_mode()
-            st.toast("Trip updated.", icon="✅")
-            st.rerun()
-        if cancel_edit_submitted:
-            _exit_edit_mode()
-            st.rerun()
+        if score_result.notes:
+            st.caption(" · ".join(score_result.notes))
+        for warn in score_result.warnings:
+            st.warning(warn)
+        if bundle is None:
+            st.caption("Pressure trend and solunar timing aren't factored into the score above - no weather forecast data was available just now.")
+
+        inventory_items = get_inventory()
+        rec = recommend(
+            season, cond_values["water_temp_f"], _preview_segment, rt["pressure_trend_24h"],
+            structure_type=structure_type, water_clarity=water_clarity,
+            fish_depth_ft=cond_values.get("fish_depth_ft"), forage=cond_values.get("forage_seen"),
+            inventory=inventory_items,
+        )
+        _render_recommendation_with_quick_add(rec, spot["spot_id"], session_build_seq, key_prefix=f"quickadd_{spot['spot_id']}_{session_build_seq}")
+
+    st.divider()
+    st.markdown("#### Lures for this session")
+    pending_lures = st.session_state.get(_pending_lures_key(spot["spot_id"], session_build_seq), [])
+    if pending_lures:
+        for i, lure in enumerate(pending_lures):
+            lcol1, lcol2 = st.columns([5, 1])
+            lcol1.write(f"🎣 {lure['label']}")
+            if lcol2.button("Remove", key=f"remove_pending_lure_{spot['spot_id']}_{session_build_seq}_{i}"):
+                _remove_lure_from_pending(spot["spot_id"], session_build_seq, i)
+                st.rerun()
     else:
-        lure_col, session_col = st.columns(2)
-        log_lure_submitted = lure_col.button(
-            "Log this lure", key=f"log_submit_{spot['spot_id']}", type="primary", width='stretch',
-            help="Save this lure's results and stay in this session - wind/fish activity/forage "
-                 "conditions carry over, ready to pick your next lure.",
-        )
-        log_session_submitted = session_col.button(
-            "Log this session", key=f"log_session_submit_{spot['spot_id']}", width='stretch',
-            help="Done fishing this spot for now: saves this lure too if you haven't yet, then clears "
-                 "conditions so the next thing you log starts as a brand-new session.",
-        )
+        st.caption("No lures selected yet - use the suggestions above or the tackle box below.")
 
-        if log_lure_submitted:
-            _save_current_lure_entry()
-            _reset_for_next_lure()
-            st.rerun()
+    with st.expander("➕ Add from tackle box"):
+        _multi_lure_picker(
+            inventory_items, key_prefix=f"session_lure_picker_{spot['spot_id']}_{session_build_seq}",
+            spot_id=spot["spot_id"], seq=session_build_seq,
+        )
+        st.markdown("**Not in your inventory?**")
+        manual_seq_key = f"manual_lure_seq_{spot['spot_id']}_{session_build_seq}"
+        st.session_state.setdefault(manual_seq_key, 0)
+        manual_seq = st.session_state[manual_seq_key]
+        manual_col1, manual_col2 = st.columns([4, 1])
+        manual_name = manual_col1.text_input(
+            "Lure name", key=f"manual_lure_name_{spot['spot_id']}_{session_build_seq}_{manual_seq}",
+            label_visibility="collapsed", placeholder="Type a lure name to add it manually",
+        )
+        if manual_col2.button("+ Add", key=f"manual_lure_add_{spot['spot_id']}_{session_build_seq}_{manual_seq}"):
+            if manual_name.strip():
+                _add_lure_to_pending(spot["spot_id"], session_build_seq, {
+                    "item_id": None, "label": manual_name.strip(), "category": None,
+                })
+                st.session_state[manual_seq_key] = manual_seq + 1
+                st.rerun()
 
-        if log_session_submitted:
-            # A lure counts as "pending" (worth saving before closing out) if
-            # anything about it was actually filled in - a lure was picked, a
-            # fish was logged, or a note was typed. Guards against writing a
-            # blank/junk trip_log row on the common case where the angler already
-            # clicked "Log this lure" for their last one and the form is sitting
-            # empty when they click "Log this session" right after.
-            has_pending_lure_data = selected_lure_item is not None or bool(fish_records) or bool(log_notes.strip())
-            if has_pending_lure_data:
-                _save_current_lure_entry()
-            else:
-                st.toast("Session closed - conditions cleared for a new session.", icon="✅")
-            _reset_for_next_lure()
-            # Consumed right before the "Conditions during this lure use" widgets
-            # are (re-)created next run (see where this key is read, above) -
-            # that's what actually clears wind/fish activity/forage activity/
-            # forage seen back to their own coded defaults, so the NEXT session
-            # starts from a genuinely blank slate instead of carrying over
-            # whatever this session's conditions happened to be.
-            st.session_state[session_reset_pending_key] = True
-            # Shown once, right at the top of "Add results" (see above) -
-            # backstops the st.toast() calls above/inside
-            # _save_current_lure_entry() with a confirmation that survives
-            # long enough to actually be seen and doesn't depend on the
-            # conditions fields having visibly changed.
-            st.session_state[f"session_closed_banner_{spot['spot_id']}"] = True
-            st.rerun()
+    st.divider()
+    if st.button(
+        "▶ Start Session", type="primary", width='stretch', disabled=not pending_lures,
+        key=f"start_session_{spot['spot_id']}_{session_build_seq}",
+    ):
+        start_time = lake_now_naive().time()
+        at_time = datetime.combine(session_date, start_time)
+        segment_name = _guess_segment(at_time.hour, at_time)
+        water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
+            cond_values, session_date, bundle, at_time, segment_name,
+        )
+        base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name)
+
+        active_lures = []
+        for lure in pending_lures:
+            lure_conditions = dict(base_conditions)
+            lure_conditions.update({
+                "lure_category": lure.get("category"),
+                "trailer_used": False,
+                "trailer_name": None,
+                "trailer_color": None,
+                "trailer_category": None,
+                "lure_start_time": start_time.isoformat(),
+                "lure_end_time": None,
+                "fish": [],
+                "source": "spot_session",
+            })
+            entry_kwargs = dict(
+                trip_date=session_date.isoformat(),
+                segment=segment_name,
+                spot_id=spot["spot_id"],
+                spot_name=spot["name"],
+                structure_type=structure_type,
+                water_clarity=water_clarity,
+                lure_used=lure["label"],
+                color_used="",
+                technique_used="",
+                fish_caught=0,
+                biggest_fish_lb=None,
+                predicted_score=score_result.score,
+                conditions=lure_conditions,
+                notes="",
+            )
+            entry = TripEntry(**entry_kwargs)
+            append_trip(entry)
+            active_lures.append({
+                "trip_id": entry.trip_id, "logged_at": entry.logged_at, "label": lure["label"],
+                "entry_kwargs": entry_kwargs, "fish": [],
+            })
+
+        st.session_state[active_session_key] = {
+            "spot_name": spot["name"],
+            "session_date": session_date.isoformat(),
+            "start_time": start_time.isoformat(),
+            "segment_name": segment_name,
+            "water_clarity": water_clarity,
+            "predicted_score": score_result.score,
+            "lures": active_lures,
+        }
+        st.session_state[session_build_seq_key] = session_build_seq + 1
+        _push_or_toast(
+            [TRIP_LOG_PATH], f"Start spot session ({spot['name']}, {len(active_lures)} lure(s))",
+            "Session started locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+        )
+        st.rerun()
+    if not pending_lures:
+        st.caption("Select at least one lure above before starting the session.")

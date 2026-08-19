@@ -1,9 +1,10 @@
 from core.lures import FORAGE_OPTIONS
 from core.activity_log import (
-    OTHER_LABEL, DEPTH_MODES, FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS,
-    RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
-    inventory_item_label, lure_can_take_trailer, lure_picker_options,
-    format_weight_lb_oz, parse_weight_lb_oz,
+    OTHER_LABEL, DEPTH_MODES, FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS,
+    HIT_TYPE_OPTIONS, LENGTH_SLIDER_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
+    WEIGHT_SLIDER_OPTIONS,
+    inventory_item_label, length_in_for_slider_option, lure_can_take_trailer, lure_picker_options,
+    format_weight_lb_oz, parse_weight_lb_oz, weight_lb_for_slider_option,
 )
 
 
@@ -68,6 +69,60 @@ def test_forage_options_still_importable_for_the_log_forms_forage_multiselect():
     # activity_log.py doesn't define its own forage vocabulary - it reuses
     # core.lures.FORAGE_OPTIONS for both the conditions form and the log form.
     assert len(FORAGE_OPTIONS) > 0
+
+
+# --- Spot Session redesign: per-fish species/hit-type/weight/length vocab ----
+
+def test_fish_species_options_matches_the_requested_six_species_plus_other():
+    assert FISH_SPECIES_OPTIONS == [
+        "Largemouth Bass", "White Bass", "Crappie", "Smallmouth Bass", "Walleye", "Catfish",
+        "Other (type in species)",
+    ]
+
+
+def test_hit_type_options_matches_the_requested_six_hit_types():
+    assert HIT_TYPE_OPTIONS == ["Hard hit", "Light hit", "Double tap", "Swallowed", "Fouled", "Surface hit"]
+
+
+def test_weight_and_length_slider_vocabulary_lists_are_nonempty_and_string_only():
+    for options in (FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, WEIGHT_SLIDER_OPTIONS, LENGTH_SLIDER_OPTIONS):
+        assert len(options) >= 2
+        assert all(isinstance(o, str) and o for o in options)
+        assert len(set(options)) == len(options)  # no duplicates
+
+
+def test_weight_lb_for_slider_option_under_one_lb_and_whole_pounds():
+    assert weight_lb_for_slider_option("<1 lb") == 0.5
+    assert weight_lb_for_slider_option("1 lb") == 1.0
+    assert weight_lb_for_slider_option("10 lb") == 10.0
+
+
+def test_weight_lb_for_slider_option_blank_or_unrecognized_returns_none():
+    assert weight_lb_for_slider_option(None) is None
+    assert weight_lb_for_slider_option("") is None
+    assert weight_lb_for_slider_option("not a weight") is None
+
+
+def test_weight_lb_for_slider_option_covers_every_option():
+    for option in WEIGHT_SLIDER_OPTIONS:
+        assert weight_lb_for_slider_option(option) is not None
+
+
+def test_length_in_for_slider_option_under_thirteen_and_whole_inches_and_plus():
+    assert length_in_for_slider_option("<13 in") == 12.0
+    assert length_in_for_slider_option("13 in") == 13.0
+    assert length_in_for_slider_option("26+ in") == 27.0
+
+
+def test_length_in_for_slider_option_blank_or_unrecognized_returns_none():
+    assert length_in_for_slider_option(None) is None
+    assert length_in_for_slider_option("") is None
+    assert length_in_for_slider_option("not a length") is None
+
+
+def test_length_in_for_slider_option_covers_every_option():
+    for option in LENGTH_SLIDER_OPTIONS:
+        assert length_in_for_slider_option(option) is not None
 
 
 # --- format_weight_lb_oz / parse_weight_lb_oz --------------------------------
