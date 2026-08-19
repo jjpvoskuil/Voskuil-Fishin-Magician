@@ -131,33 +131,51 @@ this repo that can override it on this hosting.
   moment as a rolling preview - no button to click, it just updates as you adjust
   conditions. Each recommended lure you already own shows a **"+ Add to session"**
   button right on its card - one click adds that exact item to a running "Lures for
-  this session" list shown below (with its own "Remove"). Don't want a suggested one,
-  or want more than one rod ready to switch between? An "➕ Add from tackle box"
-  section offers the same searchable photo-card grid as before, except every card
-  toggles "added" instead of picking just one, so you can queue up as many lures as
-  you're bringing to the spot; a plain text box below it covers anything not in your
-  inventory. Once at least one lure is queued, **"▶ Start Session"** locks everything
+  this session" list shown below (with its own "Remove", which also removes any
+  trailer attached to it). Don't want a suggested one, or want more than one rod
+  ready to switch between? An "➕ Add from tackle box" section offers the same
+  searchable photo-card grid as before, except every card toggles "added" instead of
+  picking just one, so you can queue up as many lures as you're bringing to the spot;
+  a plain text box below it covers anything not in your inventory. Only real lures
+  are selectable here - trailer-type baits (soft-plastic worms/creatures/TRDs) are
+  filtered out of both the recommendation quick-adds and the tackle-box grid, since
+  they're never fished on their own. Instead, adding any lure whose category can
+  actually carry a trailer (jigs, chatterbaits, spinnerbaits, buzzbaits, swim jigs -
+  crankbaits/jerkbaits/topwaters etc. skip this) pops up an "Add a trailer?" dialog:
+  check "used a trailer with this lure" and the same dialog switches to a
+  trailer-only picker (your tackle box's trailer-eligible items, or type one in by
+  hand), then "Add lure" queues the pair together; "Cancel" backs out with nothing
+  added. Once at least one lure is queued, **"▶ Start Session"** locks everything
   in: it stamps the real current time as the session's start time, re-derives the
   time-of-day window from that exact moment (e.g. "Dawn"), and writes one entry per
   selected lure to the trip log - your conditions snapshot, that start time, and an
   empty catch list on each. From there the page switches to an **active-session
-  view**: one button per lure you queued, each showing a running catch count. Land a
-  fish? Tap the lure you were using - a popup opens with a weight slider ("<1 lb"
-  through "10 lb"), a length slider ("<13 in" through "26+ in"), a species dropdown
-  (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or type in your own),
-  a multiple-choice "Type of hit" field (Hard hit/Light hit/Double tap/Swallowed/
-  Fouled/Surface hit - a strike can genuinely be more than one of these), and
-  retrieve style/speed. **"✅ Record"** saves that catch immediately (it's written and
-  pushed to that lure's trip-log row right away, not batched until the session ends)
-  and reopens a blank form so you're straight back to fishing; the button's catch
-  count updates, and an expander under each lure lists everything logged on it so far
-  (each with its own "Remove", in case of a mis-tap). When you're done at this spot,
-  **"⏹ End Session"** stamps the real end time on every lure's row and drops you back
-  at a fresh, blank Conditions setup - ready for the next spot or the next session
-  here later. Each lure still lands as its own row in the trip log (no combined/
-  bundled entry), so Trip History's per-trip filtering and detail view keep working
-  exactly as before; a "📋 Already logged for this spot" line above Conditions lists
-  everything already saved for the selected date. It all writes into the same shared
+  view**: one button per active lure (each showing a running catch count) alongside
+  its own **"🔄 Change"** button, plus a collapsed "Retired lures" section for
+  anything you've already swapped out. Land a fish? Tap the lure you were using - a
+  popup opens with a weight slider (1 oz increments from "<1 lb" up through "6 lb 15
+  oz", then an open-ended "+7 lb"), a length slider ("<13 in" through "26+ in"), a
+  species dropdown (Largemouth/White/Smallmouth Bass, Crappie, Walleye, Catfish, or
+  type in your own), a multiple-choice "Type of hit" field (Hard hit/Light hit/Double
+  tap/Swallowed/Fouled/Surface hit - a strike can genuinely be more than one of
+  these), and retrieve style/speed. **"✅ Record"** saves that catch immediately (it's
+  written and pushed to that lure's trip-log row right away, not batched until the
+  session ends) and reopens a blank form so you're straight back to fishing; the
+  button's catch count updates, and an expander under each lure lists everything
+  logged on it so far (each with its own "Remove", in case of a mis-tap). Switching
+  baits mid-session doesn't mean starting over: tap **"🔄 Change"** on the lure you're
+  putting down and it retires from active use, stamped with the real time you swapped
+  off it (its catches and time window stay exactly as logged); then use the "➕ Add a
+  lure to this session" section (the same trailer-gated tackle-box grid/manual entry
+  as session setup) to bring a new lure into the same ongoing session, with its own
+  fresh start time logged automatically. When you're done at this spot, **"⏹ End
+  Session"** stamps the real end time on every still-active lure's row (already-
+  retired lures keep the earlier time they were actually swapped out at) and drops
+  you back at a fresh, blank Conditions setup - ready for the next spot or the next
+  session here later. Each lure still lands as its own row in the trip log (no
+  combined/bundled entry), so Trip History's per-trip filtering and detail view keep
+  working exactly as before; a "📋 Already logged for this spot" line above Conditions
+  lists everything already saved for the selected date. It all writes into the same shared
   trip log the **Trip History** page reads from - Spot Session is the only way to log
   a trip; see "How the model works" below for the condition bands behind this page's
   inputs. Made a mistake on a past trip, or just want to fix it up? Click "✏️ Edit

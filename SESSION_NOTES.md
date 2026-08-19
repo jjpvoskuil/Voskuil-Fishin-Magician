@@ -4720,6 +4720,123 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     immediately after each). Logged this ask as punch-list item #23 and
     marked it "Done".
 
+86. **Punch-list #24/#25: trailer-attach dialog + gated trailer picker for
+    lure selection, mid-session lure-swap ("🔄 Change"), and 1-oz-granularity
+    fish weight slider.** Two follow-up asks sent in chat right after entry
+    85 shipped, both scoped to `pages/6_Spot_Session.py`.
+
+    Ask #1 (page: Spot Session, logged as punch-list #24): "I did forget
+    about the trailers. Let's do this... when I select lures, it should
+    only show lures from my tackle box and no trailers should be
+    selectable. Once I select a lure, [a] dialog box should open to add a
+    trailer. If I select yes, the trailer options only show. Once I select
+    a trailer for that lure, it should take me back to allow selecting
+    another lure or start the session (as is now). If I remove a lure, it
+    also should remove the trailer. Once I have all the lures selected and
+    start a session, I also want a button by each lure to allow me to
+    change. Clicking this button would remove that lure from active use in
+    that session and log the time that lure was retired. Then I should be
+    able to pick a new lure at anytime to add to the active list. If I
+    change a lure, the new lure start time should be automatically logged
+    within the same ongoing session." No clarifying questions needed - the
+    ask was fully specified.
+
+    **Trailer-gated lure pickers:** both `_multi_lure_picker()` (tackle-box
+    card grid) and the recommendation quick-add buttons now filter out
+    anything `core.lures.is_trailer_eligible()` flags as a trailer-only
+    category (`TRAILER_ELIGIBLE_CATEGORIES = {"texas_rig_creature",
+    "weightless_soft_plastic"}`) before rendering - a trailer can now only
+    enter a session attached to a real lure, never picked standalone.
+
+    **`_trailer_dialog` (`st.dialog`):** every lure "+Add" click now routes
+    through a new `_handle_lure_add_click()` gate - if
+    `core.lures.lure_can_take_trailer()` says the lure's category can carry
+    one (recommendation-block items pass a synthetic
+    `{"category": block.key}` since owned items in a rec card don't carry
+    their own `category` key), a dialog opens with a "used a trailer with
+    this lure" checkbox that, when checked, swaps in a trailer-only
+    selectbox (`is_trailer_eligible` items, plus a manual-entry fallback);
+    otherwise the lure is added directly, no dialog. "Add lure" attaches
+    `final_lure["trailer"]` and adds to the pending list (or straight into
+    the active session, for mid-session adds - see below); "Cancel"
+    discards. Removing a lure from the pending list (unchanged Remove
+    button) removes its whole dict, trailer included, for free.
+
+    **Mid-session lure swap:** the active-session view now splits lures
+    into active (each with its own catch-count button plus a new "🔄
+    Change" button) and retired (collapsed into a "Retired lures (N)"
+    expander showing fish count and start/end time). "🔄 Change" calls a
+    new `_retire_lure()` - stamps `conditions["lure_end_time"]` with the
+    real current time and `update_trip()`s that row, marks
+    `lure["retired"] = True` in session state. A new "➕ Add a lure to this
+    session" expander (same `_multi_lure_picker()`/manual-entry pair, now
+    parameterized with `mode="active"`) lets a fresh lure be added at any
+    point via a new `_add_lure_to_active_session()`, which reuses the
+    locked-in session's `base_conditions`/segment/date/spot (now stored on
+    `active_session_<spot_id>` alongside everything already there) and
+    stamps a fresh `lure_start_time` - a real new `TripEntry` row, same
+    session. `_end_session()` was fixed to skip already-retired lures
+    (`if lure.get("retired"): continue`) so it no longer overwrites a
+    retired lure's real (earlier) end time with the session's own later
+    one - caught during implementation via code review, not a live bug
+    report.
+
+    One implementation bug found and fixed before this was considered
+    done: the trailer dialog's widget keys were first built from a
+    monotonically-incrementing per-spot counter
+    (`_next_trailer_dialog_seq()`), bumped every time
+    `_handle_lure_add_click()` decided to open the dialog. That broke
+    `AppTest`'s required "re-click the same opening button on every
+    `.run()` to keep the simulated dialog alive" workaround (see entry 85)
+    - each keep-alive re-click re-triggered `_handle_lure_add_click()`,
+    which bumped the counter again and handed the dialog a fresh, blank set
+    of widget keys mid-interaction, discarding whatever had just been
+    entered (surfaced as a `StopIteration` on the now-vanished old
+    checkbox key). Fixed by replacing the counter with a stable
+    `_trailer_dialog_lure_key()` derived from the lure's own `item_id` (or
+    a hash of its label, for a manual entry) - repeated opens of the same
+    lure's dialog now reuse the same keys, with a deferred
+    `trailer_dialog_reset_pending_...` flag (consumed at the top of the
+    dialog function, set right before the closing `st.rerun()` on a
+    successful add) clearing stale values the next legitimate time that
+    lure's dialog opens, without violating Streamlit's rule against writing
+    to an already-instantiated widget's `session_state` key mid-run.
+
+    Ask #2 (page: Spot Session, logged as punch-list #25, sent mid-turn
+    while ask #1 was still being verified): "one other change... on the
+    fish weight slider, please make it slide in increments of 1 oz from
+    <1lb to +7lbs." `core.activity_log.WEIGHT_SLIDER_OPTIONS` (previously
+    11 hand-typed whole-pound options, "<1 lb" through "10 lb") is now
+    built programmatically - `["<1 lb"] + [_format_weight_option(oz) for oz
+    in range(16, 112)] + ["+7 lb"]`, 98 options spanning "1 lb" through "6
+    lb 15 oz" in exact 1-oz steps, generated rather than hand-typed to rule
+    out a spacing typo across that many values.
+    `weight_lb_for_slider_option()` was rewritten around three regex cases
+    ("<1 lb" -> 0.5, a leading "+" sentinel -> matched value + 0.5, and a
+    literal "X lb[ Y oz]" reading -> `round(lb + oz/16, 4)`) instead of a
+    fixed whole-pound lookup.
+
+    Verification: `python3 -m pytest -q` passes 297 (295 from entry 85 + 2
+    new weight-slider tests: one-ounce-increment parsing, and a spacing
+    check asserting every consecutive pair of the 96 real options is
+    exactly 1/16 lb apart). No committed test exercises the trailer dialog
+    or lure-swap flow end-to-end (both are `st.dialog`/session-state-heavy
+    UI flows, consistent with how entry 85's fish-entry dialog was
+    verified) - confirmed instead via scratch `AppTest` walkthroughs
+    covering: tackle-box/recommendation pickers no longer offering trailer-
+    only items; the dialog-gated vs. direct-add paths; trailer data landing
+    correctly in a new row's `conditions_json`; removing a pending lure
+    removing its trailer with it; "🔄 Change" stamping a retired lure's own
+    earlier end time and leaving it alone through End Session while still-
+    active lures get the later session-end timestamp; and a mid-session
+    add producing a real new `TripEntry` with the locked-in session's
+    conditions/segment/date carried over. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/water_quality_log.csv`/
+    `data/lure_inventory.csv` confirmed byte-identical (`md5sum`) before
+    and after every test run that touched them, `data/trip_log.csv`
+    reverted via `git checkout` immediately after each scratch `AppTest`
+    run. Logged as punch-list items #24 and #25 and marked both "Done".
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

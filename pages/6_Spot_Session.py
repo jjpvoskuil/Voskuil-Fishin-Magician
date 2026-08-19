@@ -21,7 +21,7 @@ from core.activity_log import (
     FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, WEIGHT_SLIDER_OPTIONS, LENGTH_SLIDER_OPTIONS,
     weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
 )
-from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
+from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES
 from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
@@ -506,11 +506,114 @@ def _remove_lure_from_pending(spot_id: str, seq: int, index: int):
         st.session_state[key] = pending
 
 
-def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq: int):
+def _added_lure_item_ids(spot_id: str, seq: int, mode: str) -> set:
+    """Item ids already queued for this session - the pre-session "pending"
+    list before Start Session, or the active session's currently-in-use
+    (not yet retired) lures once one's running. Used to disable/relabel a
+    picker card that's already been added."""
+    if mode == "pending":
+        return {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
+    active = st.session_state.get(f"active_session_{spot_id}")
+    if not active:
+        return set()
+    return {l.get("item_id") for l in active["lures"] if not l.get("retired")}
+
+
+def _trailer_dialog_lure_key(lure_stub: dict) -> str:
+    """Stable id for a lure_stub's trailer-dialog widget keys - the same
+    inventory item (or the same typed manual name) always maps to the same
+    keys, so the dialog's checkbox/selection reflects what's actually been
+    picked so far no matter how many times this exact "+ Add" click
+    re-renders it while it's open (each click re-runs the whole script,
+    and Streamlit only keeps a dialog open by re-satisfying the same
+    opening condition every run - a monotonically-incrementing id here
+    would hand the dialog a brand new, blank set of keys on every single
+    one of those re-renders instead of remembering what was just entered)."""
+    if lure_stub.get("item_id"):
+        return lure_stub["item_id"]
+    return f"manual_{abs(hash(lure_stub.get('label', '')))}"
+
+
+def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_trailer_check, mode: str):
+    """Common "+ Add" handler for a lure card, wherever it's clicked from
+    (a recommendation's quick-add, the tackle-box grid, or a manual
+    entry) - if that lure's category can take a trailer (or it's a manual
+    entry, whose category is unknown), a popup asks about a trailer before
+    it's actually added; otherwise it's added immediately, same as before.
+    `mode` ("pending" before a session starts, "active" to add a lure
+    mid-session) decides which list the lure - and its trailer pick, if
+    any - eventually lands in."""
+    if lure_can_take_trailer(item_for_trailer_check):
+        _trailer_dialog(spot_id, seq, lure_stub, mode)
+    else:
+        if mode == "pending":
+            _add_lure_to_pending(spot_id, seq, lure_stub)
+        else:
+            _add_lure_to_active_session(spot_id, lure_stub)
+        st.rerun()
+
+
+@st.dialog("Add a trailer?")
+def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str):
+    dkey = _trailer_dialog_lure_key(lure_stub)
+    if st.session_state.pop(f"trailer_dialog_reset_pending_{spot_id}_{dkey}", False):
+        for k in (
+            f"trailer_dialog_use_{spot_id}_{dkey}", f"trailer_dialog_pick_{spot_id}_{dkey}",
+            f"trailer_dialog_manual_{spot_id}_{dkey}",
+        ):
+            st.session_state.pop(k, None)
+    st.markdown(f"**{lure_stub['label']}**")
+    use_trailer = st.checkbox("Used a trailer with this lure", key=f"trailer_dialog_use_{spot_id}_{dkey}")
+    trailer = None
+    if use_trailer:
+        trailer_items = [it for it in get_inventory() if is_trailer_eligible(it)]
+        options = ["Type it in manually"] + [inventory_item_label(it) for it in trailer_items]
+        idx = st.selectbox(
+            "Trailer", options=list(range(len(options))), format_func=lambda i: options[i],
+            key=f"trailer_dialog_pick_{spot_id}_{dkey}",
+        )
+        if idx == 0:
+            manual_trailer_name = st.text_input("Trailer name", key=f"trailer_dialog_manual_{spot_id}_{dkey}")
+            if manual_trailer_name.strip():
+                trailer = {"item_id": None, "label": manual_trailer_name.strip(), "category": None, "color": None}
+        else:
+            picked = trailer_items[idx - 1]
+            trailer = {
+                "item_id": picked.get("item_id"), "label": inventory_item_label(picked),
+                "category": picked.get("category"), "color": picked.get("description", ""),
+            }
+
+    fc1, fc2 = st.columns(2)
+    if fc1.button("Add lure", type="primary", width='stretch', key=f"trailer_dialog_confirm_{spot_id}_{dkey}"):
+        final_lure = dict(lure_stub)
+        final_lure["trailer"] = trailer
+        if mode == "pending":
+            _add_lure_to_pending(spot_id, seq, final_lure)
+        else:
+            _add_lure_to_active_session(spot_id, final_lure)
+        # Clears the checkbox/selection back to blank for the NEXT time this
+        # exact lure's dialog is opened (e.g. re-adding it later in a future
+        # session) - can't just pop the keys here, since they're already
+        # instantiated widgets this run; deferred the same way every other
+        # "reset before re-instantiation" case on this page is (see
+        # session_build_seq_key's own comment for the general pattern).
+        st.session_state[f"trailer_dialog_reset_pending_{spot_id}_{dkey}"] = True
+        st.rerun()
+    if fc2.button("Cancel", width='stretch', key=f"trailer_dialog_cancel_{spot_id}_{dkey}"):
+        st.rerun()
+
+
+def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq: int, mode: str = "pending"):
     """Multi-select sibling of _visual_lure_picker - same searchable card
-    grid, but each card toggles membership in the running "lures for this
-    session" list (see _pending_lures_key) instead of picking exactly one."""
-    if not inventory_items:
+    grid, but each card adds to the running "lures for this session" list
+    (see _pending_lures_key, or the active session once one's started)
+    instead of picking exactly one. Only shows real standalone lures -
+    trailer-style baits (craw/creature, paddle-tail swimbait-style; see
+    core.lures.is_trailer_eligible) are filtered out entirely, since those
+    only ever get attached to another lure via the trailer popup below,
+    never picked here as their own rod."""
+    standalone_items = [it for it in inventory_items if not is_trailer_eligible(it)]
+    if not standalone_items:
         st.caption("No lures in your tackle box yet - add some on the Lure Inventory page.")
         return
     search = st.text_input(
@@ -518,7 +621,7 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
         placeholder="Search your tackle box by brand or description...",
         label_visibility="collapsed",
     )
-    filtered = inventory_items
+    filtered = standalone_items
     if search:
         s = search.lower()
         filtered = [
@@ -528,7 +631,7 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
     if not filtered:
         st.caption("No matches for that search.")
         return
-    pending_ids = {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
+    added_ids = _added_lure_item_ids(spot_id, seq, mode)
     for row_start in range(0, len(filtered), LURE_PICKER_COLS):
         row_items = filtered[row_start:row_start + LURE_PICKER_COLS]
         cols = st.columns(LURE_PICKER_COLS)
@@ -538,43 +641,47 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
                     if not render_square_thumbnail(item, size_px=LURE_PICKER_THUMBNAIL_PX):
                         st.caption("No photo")
                     st.caption(f"**{item.get('brand', '')}**  \n{item.get('description', '')}"[:90])
-                    is_added = item.get("item_id") in pending_ids
+                    is_added = item.get("item_id") in added_ids
                     if st.button(
                         "✓ Added" if is_added else "+ Add", key=f"{key_prefix}_toggle_{item['item_id']}",
                         disabled=is_added, width='stretch',
                     ):
-                        _add_lure_to_pending(spot_id, seq, {
+                        _handle_lure_add_click(spot_id, seq, {
                             "item_id": item["item_id"], "label": inventory_item_label(item),
                             "category": item.get("category"),
-                        })
-                        st.rerun()
+                        }, item, mode)
 
 
-def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str):
+def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str, mode: str = "pending"):
     """Displays the lure recommendation (reusing core.ui.render_lure_block
     unchanged, so this stays in sync with the 7-Day Forecast page's own
     display) with a "+ Add to session" button under each color-matched
     owned item, so a suggested lure can be added to this session with one
     click instead of having to go find it again in the tackle-box picker
-    below."""
-    pending_ids = {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
+    below. Blocks for a trailer-style category (see
+    core.lures.TRAILER_ELIGIBLE_CATEGORIES) skip the add button entirely -
+    same "not selectable as a standalone lure" rule _multi_lure_picker
+    applies - though the card itself still displays, since seeing what's
+    on hand is still useful even when it's not directly addable here."""
+    added_ids = _added_lure_item_ids(spot_id, seq, mode)
     for label, blocks in (("First choice", rec.first_choice), ("Second choice", rec.second_choice)):
         if not blocks:
             continue
         st.markdown(f"**{label}**")
         for block in blocks:
             render_lure_block(block)
+            if block.key in TRAILER_ELIGIBLE_CATEGORIES:
+                continue
             for item in block.owned_items:
                 item_id = item.get("item_id")
                 if not item_id:
                     continue
-                is_added = item_id in pending_ids
+                is_added = item_id in added_ids
                 btn_label = "✓ Added to session" if is_added else f"+ Add {item.get('brand', '')} - {item.get('description', '')}"[:60]
                 if st.button(btn_label, key=f"{key_prefix}_{block.key}_{item_id}", disabled=is_added):
-                    _add_lure_to_pending(spot_id, seq, {
+                    _handle_lure_add_click(spot_id, seq, {
                         "item_id": item_id, "label": inventory_item_label(item), "category": block.key,
-                    })
-                    st.rerun()
+                    }, {"category": block.key}, mode)
     if rec.rationale:
         st.caption(" · ".join(rec.rationale))
 
@@ -677,6 +784,99 @@ def _remove_fish(spot_id: str, lure_index: int, fish_index: int):
     )
 
 
+def _add_lure_to_active_session(spot_id: str, lure_stub: dict):
+    """Adds one more lure to an already-running session - the same "switch
+    rods any time" ability as picking lures before Start Session, just
+    writing a brand-new TripEntry row (its own lure_start_time = right
+    now) instead of queuing into the pre-session pending list, since this
+    session's start time/time window/conditions snapshot are already
+    locked in (see active["base_conditions"], captured once at Start
+    Session and reused unchanged for every lure added after)."""
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None:
+        return
+    if lure_stub.get("item_id") is not None:
+        # Dedupe against currently-ACTIVE (not retired) lures only - picking
+        # the same lure back up after retiring it earlier in this same
+        # session is allowed and expected (an angler genuinely does switch
+        # back and forth), so a past retirement shouldn't block re-adding it.
+        if any(not l.get("retired") and l.get("item_id") == lure_stub["item_id"] for l in active["lures"]):
+            return
+    start_time = lake_now_naive().time()
+    trailer = lure_stub.get("trailer")
+    lure_conditions = dict(active["base_conditions"])
+    lure_conditions.update({
+        "lure_category": lure_stub.get("category"),
+        "trailer_used": trailer is not None,
+        "trailer_name": trailer.get("label") if trailer else None,
+        "trailer_color": trailer.get("color") if trailer else None,
+        "trailer_category": trailer.get("category") if trailer else None,
+        "lure_start_time": start_time.isoformat(),
+        "lure_end_time": None,
+        "fish": [],
+        "source": "spot_session",
+    })
+    entry_kwargs = dict(
+        trip_date=active["session_date"],
+        segment=active["segment_name"],
+        spot_id=spot_id,
+        spot_name=active["spot_name"],
+        structure_type=active["structure_type"],
+        water_clarity=active["water_clarity"],
+        lure_used=lure_stub["label"],
+        color_used="",
+        technique_used="",
+        fish_caught=0,
+        biggest_fish_lb=None,
+        predicted_score=active.get("predicted_score"),
+        conditions=lure_conditions,
+        notes="",
+    )
+    entry = TripEntry(**entry_kwargs)
+    append_trip(entry)
+    active["lures"].append({
+        "trip_id": entry.trip_id, "logged_at": entry.logged_at, "label": lure_stub["label"],
+        "item_id": lure_stub.get("item_id"), "entry_kwargs": entry_kwargs, "fish": [], "retired": False,
+    })
+    st.session_state[active_key] = active
+    _push_or_toast(
+        [TRIP_LOG_PATH], f"Add {lure_stub['label']} to active session ({active.get('spot_name', spot_id)})",
+        "Lure added locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+
+
+def _retire_lure(spot_id: str, lure_index: int):
+    """"🔄 Change" - stops active use of one lure mid-session without
+    ending the whole session: stamps its own lure_end_time right now
+    (same field Start Session leaves blank and End Session would otherwise
+    fill in later) and marks it retired so it drops out of the active
+    button list, while the rest of the session (and any other lure still
+    in play) keeps going."""
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None or lure_index >= len(active["lures"]):
+        return
+    lure = active["lures"][lure_index]
+    if lure.get("retired"):
+        return
+    end_time = lake_now_naive().time()
+    entry_kwargs = dict(lure["entry_kwargs"])
+    conditions = dict(entry_kwargs["conditions"])
+    conditions["lure_end_time"] = end_time.isoformat()
+    entry_kwargs["conditions"] = conditions
+    entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **entry_kwargs)
+    update_trip(entry)
+    lure["entry_kwargs"] = entry_kwargs
+    lure["retired"] = True
+    active["lures"][lure_index] = lure
+    st.session_state[active_key] = active
+    _push_or_toast(
+        [TRIP_LOG_PATH], f"Retire {lure['label']} from active session ({active.get('spot_name', spot_id)})",
+        "Retired locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+
+
 @st.dialog("Log a fish")
 def _fish_entry_dialog(spot_id: str, lure_index: int):
     active = st.session_state.get(f"active_session_{spot_id}")
@@ -726,6 +926,11 @@ def _end_session(spot_id: str):
         return
     end_time = lake_now_naive().time()
     for lure in active["lures"]:
+        if lure.get("retired"):
+            # Already stamped its own (earlier, real) lure_end_time when it
+            # was retired via "🔄 Change" - don't overwrite that with the
+            # session's own end time now.
+            continue
         entry_kwargs = dict(lure["entry_kwargs"])
         conditions = dict(entry_kwargs["conditions"])
         conditions["lure_end_time"] = end_time.isoformat()
@@ -954,13 +1159,21 @@ if active is not None:
     st.caption(
         f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"
     )
-    st.caption("Tap a lure below every time you land a fish on it.")
+    st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
 
+    retired_lures = []
     for i, lure in enumerate(active["lures"]):
+        if lure.get("retired"):
+            retired_lures.append((i, lure))
+            continue
         fish_count = sum((f.get("count") or 1) for f in lure["fish"])
         label = f"🎣 {lure['label']}" + (f" ({fish_count} caught)" if fish_count else "")
-        if st.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
+        lcol1, lcol2 = st.columns([4, 1])
+        if lcol1.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
             _fish_entry_dialog(spot["spot_id"], i)
+        if lcol2.button("🔄 Change", key=f"retire_lure_{spot['spot_id']}_{i}", width='stretch'):
+            _retire_lure(spot["spot_id"], i)
+            st.rerun()
         if lure["fish"]:
             with st.expander(f"Fish caught on {lure['label']} ({fish_count})", expanded=False):
                 for fi, fish in enumerate(lure["fish"]):
@@ -969,6 +1182,38 @@ if active is not None:
                     if frow2.button("Remove", key=f"remove_active_fish_{spot['spot_id']}_{i}_{fi}"):
                         _remove_fish(spot["spot_id"], i, fi)
                         st.rerun()
+
+    if retired_lures:
+        with st.expander(f"Retired lures ({len(retired_lures)})", expanded=False):
+            for i, lure in retired_lures:
+                fish_count = sum((f.get("count") or 1) for f in lure["fish"])
+                start = lure["entry_kwargs"]["conditions"].get("lure_start_time") or "?"
+                end = lure["entry_kwargs"]["conditions"].get("lure_end_time") or "?"
+                st.caption(f"{lure['label']} - {fish_count} fish - {start} to {end}")
+
+    st.divider()
+    with st.expander("➕ Add a lure to this session"):
+        inventory_items = get_inventory()
+        _multi_lure_picker(
+            inventory_items, key_prefix=f"active_lure_picker_{spot['spot_id']}",
+            spot_id=spot["spot_id"], seq=0, mode="active",
+        )
+        st.markdown("**Not in your inventory?**")
+        active_manual_seq_key = f"active_manual_lure_seq_{spot['spot_id']}"
+        st.session_state.setdefault(active_manual_seq_key, 0)
+        active_manual_seq = st.session_state[active_manual_seq_key]
+        amc1, amc2 = st.columns([4, 1])
+        active_manual_name = amc1.text_input(
+            "Lure name", key=f"active_manual_lure_name_{spot['spot_id']}_{active_manual_seq}",
+            label_visibility="collapsed", placeholder="Type a lure name to add it manually",
+        )
+        if amc2.button("+ Add", key=f"active_manual_lure_add_{spot['spot_id']}_{active_manual_seq}"):
+            if active_manual_name.strip():
+                st.session_state[active_manual_seq_key] = active_manual_seq + 1
+                _handle_lure_add_click(
+                    spot["spot_id"], 0, {"item_id": None, "label": active_manual_name.strip(), "category": None},
+                    None, "active",
+                )
 
     st.divider()
     if st.button("⏹ End Session", key=f"end_session_{spot['spot_id']}", type="primary", width='stretch'):
@@ -1031,8 +1276,13 @@ else:
     if pending_lures:
         for i, lure in enumerate(pending_lures):
             lcol1, lcol2 = st.columns([5, 1])
-            lcol1.write(f"🎣 {lure['label']}")
+            trailer = lure.get("trailer")
+            trailer_bit = f" + {trailer['label']} trailer" if trailer else ""
+            lcol1.write(f"🎣 {lure['label']}{trailer_bit}")
             if lcol2.button("Remove", key=f"remove_pending_lure_{spot['spot_id']}_{session_build_seq}_{i}"):
+                # Removing a lure removes its trailer too, since the trailer
+                # is stored nested inside this same pending-list entry, not
+                # tracked separately.
                 _remove_lure_from_pending(spot["spot_id"], session_build_seq, i)
                 st.rerun()
     else:
@@ -1054,11 +1304,11 @@ else:
         )
         if manual_col2.button("+ Add", key=f"manual_lure_add_{spot['spot_id']}_{session_build_seq}_{manual_seq}"):
             if manual_name.strip():
-                _add_lure_to_pending(spot["spot_id"], session_build_seq, {
-                    "item_id": None, "label": manual_name.strip(), "category": None,
-                })
                 st.session_state[manual_seq_key] = manual_seq + 1
-                st.rerun()
+                _handle_lure_add_click(
+                    spot["spot_id"], session_build_seq,
+                    {"item_id": None, "label": manual_name.strip(), "category": None}, None, "pending",
+                )
 
     st.divider()
     if st.button(
@@ -1075,13 +1325,14 @@ else:
 
         active_lures = []
         for lure in pending_lures:
+            trailer = lure.get("trailer")
             lure_conditions = dict(base_conditions)
             lure_conditions.update({
                 "lure_category": lure.get("category"),
-                "trailer_used": False,
-                "trailer_name": None,
-                "trailer_color": None,
-                "trailer_category": None,
+                "trailer_used": trailer is not None,
+                "trailer_name": trailer.get("label") if trailer else None,
+                "trailer_color": trailer.get("color") if trailer else None,
+                "trailer_category": trailer.get("category") if trailer else None,
                 "lure_start_time": start_time.isoformat(),
                 "lure_end_time": None,
                 "fish": [],
@@ -1107,7 +1358,7 @@ else:
             append_trip(entry)
             active_lures.append({
                 "trip_id": entry.trip_id, "logged_at": entry.logged_at, "label": lure["label"],
-                "entry_kwargs": entry_kwargs, "fish": [],
+                "item_id": lure.get("item_id"), "entry_kwargs": entry_kwargs, "fish": [], "retired": False,
             })
 
         st.session_state[active_session_key] = {
@@ -1115,8 +1366,14 @@ else:
             "session_date": session_date.isoformat(),
             "start_time": start_time.isoformat(),
             "segment_name": segment_name,
+            "structure_type": structure_type,
             "water_clarity": water_clarity,
             "predicted_score": score_result.score,
+            # Reused unchanged by _add_lure_to_active_session() for every
+            # lure added after Start Session - this session's conditions
+            # snapshot/time window are locked in once, not re-captured per
+            # lure.
+            "base_conditions": base_conditions,
             "lures": active_lures,
         }
         st.session_state[session_build_seq_key] = session_build_seq + 1

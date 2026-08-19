@@ -94,7 +94,12 @@ def test_weight_and_length_slider_vocabulary_lists_are_nonempty_and_string_only(
 def test_weight_lb_for_slider_option_under_one_lb_and_whole_pounds():
     assert weight_lb_for_slider_option("<1 lb") == 0.5
     assert weight_lb_for_slider_option("1 lb") == 1.0
-    assert weight_lb_for_slider_option("10 lb") == 10.0
+    assert weight_lb_for_slider_option("+7 lb") == 7.5
+
+
+def test_weight_lb_for_slider_option_one_ounce_increments():
+    assert weight_lb_for_slider_option("1 lb 1 oz") == round(1 + 1 / 16, 4)
+    assert weight_lb_for_slider_option("6 lb 15 oz") == round(6 + 15 / 16, 4)
 
 
 def test_weight_lb_for_slider_option_blank_or_unrecognized_returns_none():
@@ -106,6 +111,20 @@ def test_weight_lb_for_slider_option_blank_or_unrecognized_returns_none():
 def test_weight_lb_for_slider_option_covers_every_option():
     for option in WEIGHT_SLIDER_OPTIONS:
         assert weight_lb_for_slider_option(option) is not None
+
+
+def test_weight_slider_options_span_under_1lb_to_1oz_increments_to_plus_7lb():
+    assert WEIGHT_SLIDER_OPTIONS[0] == "<1 lb"
+    assert WEIGHT_SLIDER_OPTIONS[1] == "1 lb"
+    assert WEIGHT_SLIDER_OPTIONS[2] == "1 lb 1 oz"
+    assert WEIGHT_SLIDER_OPTIONS[-2] == "6 lb 15 oz"
+    assert WEIGHT_SLIDER_OPTIONS[-1] == "+7 lb"
+    # Every consecutive pair of the real (non-sentinel) options should be
+    # exactly 1 oz apart.
+    real_options = WEIGHT_SLIDER_OPTIONS[1:-1]
+    weights = [weight_lb_for_slider_option(o) for o in real_options]
+    diffs = [round(b - a, 4) for a, b in zip(weights, weights[1:])]
+    assert all(d == round(1 / 16, 4) for d in diffs)
 
 
 def test_length_in_for_slider_option_under_thirteen_and_whole_inches_and_plus():
