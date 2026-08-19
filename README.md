@@ -765,13 +765,16 @@ app.py                  Entry point (streamlit run app.py) - wires up the sideba
                          page; holds no page content of its own
 home.py                  Landing page content - today at a glance ("Today" in the
                          sidebar)
-pages/
+pages/ (sidebar order set by app.py's st.navigation list, not these numeric
+        filename prefixes - the prefixes are left over from the old file-based
+        pages/ auto-discovery this app no longer uses, see app.py's own
+        docstring)
   1_7_Day_Forecast.py   Full week, drill into any day
   2_Lake_Map.py          Fish attractors + your own saved spots (click to add/edit)
+  6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
   4_Trip_History.py      Filterable log of every trip (Spot Session is now the only
                          way to log one) + per-trip details + calibration status
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
-  6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
   7_Development.py        Punch list of app adjustments/fixes to track between sessions
 core/
   astro.py               Moon phase + solunar rise/transit/set
