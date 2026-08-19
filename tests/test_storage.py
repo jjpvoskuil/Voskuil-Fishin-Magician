@@ -1,0 +1,222 @@
+"""Tests for core/storage.py, focused on commit_and_push()'s punch-list #26
+retry hardening (a rejected/non-fast-forward push should fetch+rebase+retry
+instead of silently failing when two devices save at nearly the same time).
+
+Most cases here use a real local bare git repo (not GitHub) so the actual
+git plumbing (fetch/rebase/push) is exercised end to end, not just mocked -
+this is the one part of this change where "does a real rebase actually
+resolve a real concurrent push" matters more than unit-testing branch logic
+in isolation. A few edge cases (auth failure, a genuine rebase conflict,
+retries exhausted) use a monkeypatched subprocess.run instead, since forcing
+those specific situations through real git is either not meaningfully
+different from mocking or (for a real conflict) flaky to engineer reliably.
+"""
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from core import storage
+
+
+def _run(args, cwd):
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    assert result.returncode == 0, f"{args} failed: {result.stderr}"
+    return result
+
+
+def _init_repo(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+    _run(["git", "init", "-b", "main"], cwd=path)
+    _run(["git", "config", "user.email", "test@example.com"], cwd=path)
+    _run(["git", "config", "user.name", "Test"], cwd=path)
+
+
+@pytest.fixture
+def bare_and_seed(tmp_path):
+    """A bare 'remote' repo plus one already-pushed commit (a small
+    trip_log-like CSV with a header and one row), so both clones below start
+    from a real shared history rather than an empty repo."""
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    _run(["git", "init", "--bare", "-b", "main"], cwd=bare)
+
+    seed = tmp_path / "seed"
+    _init_repo(seed)
+    data_dir = seed / "data"
+    data_dir.mkdir()
+    (data_dir / "trip_log.csv").write_text("trip_id,notes\n")
+    # Mirrors the real repo's root .gitattributes (data/*.csv merge=union) -
+    # it has to be present from this shared common ancestor, not added
+    # later, since git reads it from the commit(s) actually being merged.
+    (seed / ".gitattributes").write_text("data/*.csv merge=union\n")
+    _run(["git", "add", "data/trip_log.csv", ".gitattributes"], cwd=seed)
+    _run(["git", "commit", "-m", "seed"], cwd=seed)
+    _run(["git", "push", str(bare), "HEAD:main"], cwd=seed)
+    return bare
+
+
+def _clone(bare: Path, dest: Path):
+    _run(["git", "clone", str(bare), str(dest)], cwd=dest.parent)
+    _run(["git", "config", "user.email", "test@example.com"], cwd=dest)
+    _run(["git", "config", "user.name", "Test"], cwd=dest)
+    return dest
+
+
+def test_commit_and_push_no_token():
+    ok, msg = storage.commit_and_push(["data/x.csv"], github_token="", repo_slug="a/b", commit_message="m")
+    assert ok is False
+    assert "No GITHUB_TOKEN" in msg
+
+
+def test_commit_and_push_no_changes(tmp_path, bare_and_seed):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="no-op", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+    assert "No changes" in msg
+
+
+def test_commit_and_push_simple_success(tmp_path, bare_and_seed):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+    assert "Saved and pushed" in msg
+
+
+def test_commit_and_push_retries_and_succeeds_on_real_concurrent_push(tmp_path, bare_and_seed):
+    """The real punch-list #26 scenario: two anglers' devices (repoA, repoB)
+    both cloned the same starting point and both append a trip row before
+    either has pushed. repoA pushes first (trivially succeeds, advancing the
+    shared 'remote'); repoB's first push attempt should then be rejected as
+    non-fast-forward, and commit_and_push should recover on its own (fetch +
+    rebase + retry) rather than reporting failure."""
+    repo_a = _clone(bare_and_seed, tmp_path / "repoA")
+    repo_b = _clone(bare_and_seed, tmp_path / "repoB")
+
+    (repo_a / "data" / "trip_log.csv").write_text("trip_id,notes\n1,from A\n")
+    ok_a, msg_a = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="A's trip", repo_root=repo_a, remote_url=str(bare_and_seed),
+    )
+    assert ok_a is True and "Saved and pushed" in msg_a
+
+    # repoB never fetched A's push - its own push below will be rejected at
+    # least once before the retry logic catches it up and retries.
+    (repo_b / "data" / "trip_log.csv").write_text("trip_id,notes\n2,from B\n")
+    ok_b, msg_b = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="B's trip", repo_root=repo_b, remote_url=str(bare_and_seed),
+        max_push_retries=3,
+    )
+    assert ok_b is True, msg_b
+    assert "Saved and pushed" in msg_b
+
+    # The shared remote must now carry BOTH trips - the whole point of the
+    # retry is that B's save isn't silently dropped by A's earlier push.
+    show = _run(["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed)
+    assert "from A" in show.stdout
+    assert "from B" in show.stdout
+
+    # And repoB's own working tree (now rebased onto A's commit) reflects
+    # both rows too, not just its own.
+    local_content = (repo_b / "data" / "trip_log.csv").read_text()
+    assert "from A" in local_content
+    assert "from B" in local_content
+
+
+def test_commit_and_push_non_retryable_failure_does_not_retry(tmp_path, bare_and_seed, monkeypatch):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+
+    calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "push"]:
+            calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=128, stdout="", stderr="fatal: Authentication failed")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+        max_push_retries=3,
+    )
+    assert ok is False
+    assert "Authentication failed" in msg
+    assert len(calls) == 1  # never retried a non-rejection failure
+
+
+def test_commit_and_push_gives_up_after_max_retries(tmp_path, bare_and_seed, monkeypatch):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+
+    push_calls = []
+    fetch_calls = []
+    rebase_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "push"]:
+            push_calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr="! [rejected] main -> main (non-fast-forward)")
+        if args[:2] == ["git", "fetch"]:
+            fetch_calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")
+        if args[:2] == ["git", "rebase"] and args[2] != "--abort":
+            rebase_calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+        max_push_retries=3,
+    )
+    assert ok is False
+    assert "after 3 attempts" in msg
+    assert len(push_calls) == 3
+    assert len(fetch_calls) == 2  # fetched before each retry, not after the final failed attempt
+
+
+def test_commit_and_push_aborts_on_real_rebase_conflict(tmp_path, bare_and_seed):
+    """A genuine conflict should abort the rebase and report a clear
+    message, not loop or crash. Uses a plain .txt file (not one of the
+    data/*.csv files the repo's .gitattributes routes through the
+    union-merge driver, see that file's own comment) - both sides edit the
+    exact same line, which is a real, unavoidable conflict once rebased."""
+    repo_a = _clone(bare_and_seed, tmp_path / "repoA")
+    repo_b = _clone(bare_and_seed, tmp_path / "repoB")
+
+    (repo_a / "data" / "notes.txt").write_text("A's version\n")
+    ok_a, _ = storage.commit_and_push(
+        ["data/notes.txt"], github_token="x", repo_slug="unused/unused",
+        commit_message="A edits notes", repo_root=repo_a, remote_url=str(bare_and_seed),
+    )
+    assert ok_a is True
+
+    # repoB edits the SAME line differently, based on the original (pre-A)
+    # content - a real conflict once rebased onto A, since data/notes.txt
+    # isn't covered by the union-merge .gitattributes rule.
+    (repo_b / "data" / "notes.txt").write_text("B's version\n")
+    ok_b, msg_b = storage.commit_and_push(
+        ["data/notes.txt"], github_token="x", repo_slug="unused/unused",
+        commit_message="B edits notes", repo_root=repo_b, remote_url=str(bare_and_seed),
+        max_push_retries=3,
+    )
+    assert ok_b is False
+    assert "conflicted" in msg_b
+
+    # The rebase must have been aborted cleanly - repo left in a usable
+    # state, not stuck mid-rebase.
+    status = _run(["git", "status"], cwd=repo_b)
+    assert "rebase in progress" not in status.stdout.lower()

@@ -3,7 +3,8 @@ from datetime import date as ddate, datetime, time as dtime
 
 import streamlit as st
 
-from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, github_token, repo_slug
+from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, get_anglers, github_token, repo_slug
+from core.anglers import add_angler, ANGLERS_PATH, OTHER_LABEL as ANGLER_OTHER_LABEL
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
 from core.onwater import (
     LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, cloud_proxy_for_light_condition, light_condition_for_cloud_pct,
@@ -107,6 +108,13 @@ if edit_trip_id:
 
 
 def _exit_edit_mode():
+    # Punch-list #26: also clear this trip's one-time angler-prefill guard
+    # (see the "Who's fishing" picker below) so editing this same trip
+    # again later in the same browser session re-seeds it from the trip's
+    # own stored angler, rather than leaving a stale True flag around -
+    # same reasoning as entry 53's edit_prefill_done_<trip_id>_* sweep.
+    if edit_trip_id:
+        st.session_state.pop(f"angler_prefill_done_{edit_trip_id}", None)
     st.session_state.pop("spot_session_edit_trip_id", None)
     st.query_params.pop("edit_trip", None)
 
@@ -167,6 +175,71 @@ if editing_trip is not None:
 
 if st.button("← Back to Lake Map"):
     st.switch_page("pages/2_Lake_Map.py")
+
+# --- Angler picker (punch-list #26: lightweight multi-user support) --------
+# A plain "who's fishing" name picker, not real accounts/passwords - see
+# core/anglers.py's module docstring for why. Every trip this page logs
+# gets tagged with whichever name is picked here (baked into every lure's
+# conditions dict by _build_base_conditions() below), so Trip History can
+# filter by angler while every trip still lands in the same one shared log.
+# The picker's own widget key ("active_angler") is deliberately NOT scoped
+# by spot_id/trip_id - it's a page-wide "who's at the keyboard right now"
+# setting for this browser session, not something tied to any one trip or
+# spot, so it should keep whatever was last picked as the angler moves
+# between spots/sessions.
+angler_roster = get_anglers()
+angler_options = angler_roster + [ANGLER_OTHER_LABEL]
+angler_key = "active_angler"
+angler_other_key = "active_angler_other_name"
+
+# One-time prefill when a trip is first opened for editing, so correcting a
+# misattributed trip shows THAT trip's own logged angler rather than
+# whichever angler happens to be "active" in this browser session right
+# now. Guarded on edit_trip_id alone (not spot_id, unlike the conditions
+# block's own per-spot-scoped prefill) since this widget's key never
+# changes when the location picker switches spots mid-edit - without a
+# guard, this block re-running on every rerun would silently overwrite a
+# manual angler correction the instant anything else on the page changed,
+# the same class of bug already documented (and fixed) for other fields in
+# SESSION_NOTES.md's entry 51/53.
+_angler_prefill_guard = f"angler_prefill_done_{edit_trip_id}"
+if editing_trip is not None and not st.session_state.get(_angler_prefill_guard):
+    _edit_angler = (editing_cond.get("angler") or "").strip()
+    if _edit_angler:
+        if _edit_angler in angler_roster:
+            st.session_state[angler_key] = _edit_angler
+        else:
+            st.session_state[angler_key] = ANGLER_OTHER_LABEL
+            st.session_state[angler_other_key] = _edit_angler
+    st.session_state[_angler_prefill_guard] = True
+
+st.session_state.setdefault(angler_key, angler_options[0])
+angler_choice = st.selectbox(
+    "🎣 Who's fishing", angler_options, key=angler_key,
+    help='Tags every trip you log with your name - Trip History can filter by angler, but '
+         'everyone\'s trips stay combined in one shared log. Remembered for this browser '
+         'session; pick "Other" to add a new name to the list.',
+)
+angler_other_name = ""
+if angler_choice == ANGLER_OTHER_LABEL:
+    st.session_state.setdefault(angler_other_key, "")
+    angler_other_name = st.text_input(
+        "Name", key=angler_other_key,
+        help="Saved as a new dropdown choice the next time you log a trip.",
+    )
+resolved_angler = angler_other_name.strip() if angler_choice == ANGLER_OTHER_LABEL else angler_choice
+
+
+def _save_new_angler_if_needed() -> bool:
+    """Called right before a trip actually gets saved (Start Session / Save
+    changes) - not at picker-render time - so idly typing into "Other"
+    without ever logging anything doesn't itself trigger a git commit.
+    Returns True if a genuinely new name was just added to the roster, so
+    the caller knows to include data/anglers.csv in that same push."""
+    if angler_choice == ANGLER_OTHER_LABEL and resolved_angler:
+        return add_angler(resolved_angler)
+    return False
+
 
 # Computed from the spot alone, so it's always available regardless of mode.
 structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), "Main-lake point")
@@ -394,7 +467,7 @@ def _score_breakdown_help(breakdown: list, final_score: float) -> str:
     return "\n".join(lines)
 
 
-def _build_base_conditions(cond_values: dict, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name):
+def _build_base_conditions(cond_values: dict, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler: str = None):
     """Everything about the SESSION as a whole (not any one lure) that gets
     saved into every lure's TripEntry.conditions this session produces."""
     d = dict(cond_values)
@@ -411,6 +484,11 @@ def _build_base_conditions(cond_values: dict, avg_cloud_pct, avg_wind_mph, rt, s
         # show this same single reading, since the redesign merged what
         # used to be two separate Wind fields into one.
         "wind_band_logged": cond_values.get("wind_band"),
+        # Punch-list #26: whichever name the "Who's fishing" picker was set
+        # to when this session/edit was saved (core/anglers.py) - blank/None
+        # for anything logged before that feature existed, same as every
+        # other optional key in this dict.
+        "angler": angler or None,
     })
     return d
 
@@ -1101,7 +1179,7 @@ if editing_trip is not None:
     save_col, cancel_col = st.columns(2)
     if save_col.button("💾 Save changes", key=f"save_edit_{spot['spot_id']}", type="primary", width='stretch'):
         fish_weights = [f["weight_lb"] for f in edit_fish_records if f.get("weight_lb")]
-        conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, edit_start_time, edit_segment_name)
+        conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, edit_start_time, edit_segment_name, angler=resolved_angler)
         conditions.update({
             "lure_category": selected_lure_item.get("category") if selected_lure_item else None,
             "trailer_used": use_trailer,
@@ -1132,8 +1210,11 @@ if editing_trip is not None:
             notes=log_notes,
         )
         update_trip(entry)
+        _push_paths = [TRIP_LOG_PATH]
+        if _save_new_angler_if_needed():
+            _push_paths.append(ANGLERS_PATH)
         _push_or_toast(
-            [TRIP_LOG_PATH], f"Update trip {entry.trip_id} from spot session edit ({spot['name']})",
+            _push_paths, f"Update trip {entry.trip_id} from spot session edit ({spot['name']})",
             "Trip updated locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
         )
         _exit_edit_mode()
@@ -1321,7 +1402,7 @@ else:
         water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
             cond_values, session_date, bundle, at_time, segment_name,
         )
-        base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name)
+        base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler=resolved_angler)
 
         active_lures = []
         for lure in pending_lures:
@@ -1377,8 +1458,11 @@ else:
             "lures": active_lures,
         }
         st.session_state[session_build_seq_key] = session_build_seq + 1
+        _push_paths = [TRIP_LOG_PATH]
+        if _save_new_angler_if_needed():
+            _push_paths.append(ANGLERS_PATH)
         _push_or_toast(
-            [TRIP_LOG_PATH], f"Start spot session ({spot['name']}, {len(active_lures)} lure(s))",
+            _push_paths, f"Start spot session ({spot['name']}, {len(active_lures)} lure(s))",
             "Session started locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
         )
         st.rerun()

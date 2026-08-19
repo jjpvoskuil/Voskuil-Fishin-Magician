@@ -123,25 +123,98 @@ def delete_trip(trip_id: str) -> bool:
     return True
 
 
-def commit_and_push(paths: list, github_token: str, repo_slug: str, commit_message: str, branch: str = "main") -> tuple:
+def commit_and_push(
+    paths: list,
+    github_token: str,
+    repo_slug: str,
+    commit_message: str,
+    branch: str = "main",
+    repo_root: Path = REPO_ROOT,
+    max_push_retries: int = 3,
+    remote_url: Optional[str] = None,
+) -> tuple:
     """
     Commit the given paths (files or directories, repo-relative or absolute)
     and push using a fine-grained PAT. Returns (success: bool, message: str).
     Never raises - designed to be called from Streamlit and surface a
     friendly warning on failure.
+
+    Punch-list #26: if two anglers log a catch from separate devices at
+    nearly the same moment, the second process's push here can get rejected
+    as non-fast-forward - the first push already moved the remote branch
+    ahead of what this process last fetched. Rather than surface that as a
+    silently lost save, a rejected push is retried up to max_push_retries
+    times: fetch the remote branch, rebase this commit on top of it (a
+    same-file, append-only CSV change essentially never conflicts in
+    practice), and push again. Only a genuine non-fast-forward rejection is
+    retried this way - any other failure (auth, network, a real rebase
+    conflict) returns immediately with a message describing what happened,
+    same as before this retry loop existed.
+
+    repo_root defaults to the real repo checkout (REPO_ROOT) so every real
+    caller behaves exactly as before; tests point it at a throwaway git repo
+    instead of touching the real one - same "optional path parameter,
+    defaults to the real constant" pattern already used by
+    core/forecast_freeze.py/core/lure_inventory.py. remote_url similarly
+    defaults to None (the real github.com PAT URL, built from github_token/
+    repo_slug exactly as before); tests pass a local file:// bare-repo URL
+    instead, so the retry/rebase logic below can be exercised against real
+    git plumbing (a genuine concurrent-push race) rather than only mocked
+    subprocess calls.
     """
     if not github_token:
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
     try:
-        remote = f"https://x-access-token:{github_token}@github.com/{repo_slug}.git"
-        subprocess.run(["git", "config", "user.email", "fishin-magician@bot.local"], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "config", "user.name", "Fishin' Magician Bot"], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "add"] + [str(p) for p in paths], cwd=REPO_ROOT, check=True)
-        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=REPO_ROOT)
+        remote = remote_url or f"https://x-access-token:{github_token}@github.com/{repo_slug}.git"
+        subprocess.run(["git", "config", "user.email", "fishin-magician@bot.local"], cwd=repo_root, check=True)
+        subprocess.run(["git", "config", "user.name", "Fishin' Magician Bot"], cwd=repo_root, check=True)
+        subprocess.run(["git", "add"] + [str(p) for p in paths], cwd=repo_root, check=True)
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo_root)
         if diff.returncode == 0:
             return True, "No changes to commit."
-        subprocess.run(["git", "commit", "-m", commit_message], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "push", remote, f"HEAD:{branch}"], cwd=REPO_ROOT, check=True, capture_output=True)
-        return True, "Saved and pushed to GitHub."
+        subprocess.run(["git", "commit", "-m", commit_message], cwd=repo_root, check=True)
+
+        last_error = ""
+        for attempt in range(1, max_push_retries + 1):
+            push = subprocess.run(
+                ["git", "push", remote, f"HEAD:{branch}"],
+                cwd=repo_root, capture_output=True, text=True,
+            )
+            if push.returncode == 0:
+                return True, "Saved and pushed to GitHub."
+
+            stderr = push.stderr or ""
+            last_error = stderr.strip() or push.stdout.strip()
+            rejected = (
+                "[rejected]" in stderr
+                or "non-fast-forward" in stderr
+                or "fetch first" in stderr
+            )
+            if not rejected:
+                return False, f"Saved locally, but push failed: {last_error}"
+            if attempt == max_push_retries:
+                break
+
+            fetch = subprocess.run(
+                ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+            )
+            if fetch.returncode != 0:
+                return False, f"Saved locally, but push failed and the retry fetch also failed: {fetch.stderr.strip()}"
+
+            rebase = subprocess.run(
+                ["git", "rebase", "FETCH_HEAD"], cwd=repo_root, capture_output=True, text=True,
+            )
+            if rebase.returncode != 0:
+                subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+                return False, (
+                    "Saved locally, but another device's save conflicted with this one "
+                    "and couldn't be auto-merged - please retry the save."
+                )
+            # Rebased onto the latest remote branch - loop around and retry the push.
+
+        return False, (
+            f"Saved locally, but push failed after {max_push_retries} attempts "
+            f"(another device kept saving at the same time): {last_error}"
+        )
     except subprocess.CalledProcessError as e:
         return False, f"Saved locally, but push failed: {e}"

@@ -99,6 +99,10 @@ for row in rows:
     row["_forage_activity"] = row["_conditions"].get("forage_activity") or ""
     row["_wind_direction"] = row["_conditions"].get("wind_direction") or ""
     row["_trailer_used"] = bool(row["_conditions"].get("trailer_used"))
+    # Punch-list #26: whoever the "Who's fishing" picker was set to when
+    # this trip was logged (core/anglers.py) - blank for anything logged
+    # before that feature existed.
+    row["_angler"] = row["_conditions"].get("angler") or ""
 
 df = pd.DataFrame(rows)
 
@@ -110,6 +114,7 @@ df = pd.DataFrame(rows)
 # details" list further down call that same function.
 FIELD_SPECS = [
     ("source", "Logged from", lambda v: "🎯 Spot Session" if v == "spot_session" else "📝 Legacy (Log a Trip)"),
+    ("angler", "Angler", str),
     ("start_time", "Session start time", str),
     ("water_temp_f", "Water temp", lambda v: f"{v}°F"),
     ("secchi_ft", "Water clarity (secchi)", lambda v: f"{v} ft"),
@@ -417,7 +422,7 @@ st.subheader("Filters")
 valid_dates = [d for d in df["_date"] if d is not None]
 min_date, max_date = (min(valid_dates), max(valid_dates)) if valid_dates else (None, None)
 
-f1, f2, f3 = st.columns(3)
+f1, f2, f3, f13 = st.columns(4)
 date_range = f1.date_input(
     "Date range", value=(min_date, max_date) if min_date else None,
     min_value=min_date, max_value=max_date,
@@ -449,6 +454,12 @@ segments = f2.multiselect(
 )
 spot_options = sorted(df["_location"].dropna().unique().tolist())
 spots = f3.multiselect("Location", spot_options, default=[])
+# Punch-list #26: blank/unspecified anglers (anything logged before the
+# "Who's fishing" picker existed) are left out of the option list, same
+# convention as fish_activity/forage_activity/wind_direction below - there's
+# nothing meaningful to filter "blank" down to.
+angler_options = sorted(v for v in df["_angler"].unique().tolist() if v)
+anglers = f13.multiselect("Angler", angler_options, default=[])
 
 f4, f5, f6 = st.columns(3)
 lure_type_options = sorted(df["_lure_type"].dropna().unique().tolist())
@@ -484,6 +495,8 @@ if segments:
     filtered = filtered[filtered["segment"].isin(segments)]
 if spots:
     filtered = filtered[filtered["_location"].isin(spots)]
+if anglers:
+    filtered = filtered[filtered["_angler"].isin(anglers)]
 if lure_types:
     filtered = filtered[filtered["_lure_type"].isin(lure_types)]
 if clarities:
@@ -533,14 +546,14 @@ else:
         "Scroll right for every field (on a phone: swipe left within the grid itself, "
         "not the page). Date, time of day, structure, water "
         "clarity, lure, color, fish caught, biggest fish, and notes are "
-        "editable here - changes save automatically. Location, lure type, "
-        "fish/forage activity, and score are shown for reference only; use "
-        "\"✏️ Edit this trip\" (via the detail picker below) to change those."
+        "editable here - changes save automatically. Location, angler, lure "
+        "type, fish/forage activity, and score are shown for reference only; "
+        "use \"✏️ Edit this trip\" (via the detail picker below) to change those."
     )
 
     grid_sorted = filtered.sort_values("trip_date", ascending=False)
     grid_display = grid_sorted.set_index("trip_id")[[
-        "trip_date", "segment", "_location", "structure_type", "water_clarity",
+        "trip_date", "segment", "_location", "_angler", "structure_type", "water_clarity",
         "_lure_type", "lure_used", "color_used", "_fish_activity", "_forage_activity",
         "fish_caught", "biggest_fish_lb", "predicted_score", "notes",
     ]].copy()
@@ -588,7 +601,7 @@ else:
         width="stretch",
         hide_index=True,
         num_rows="fixed",
-        disabled=["_location", "_lure_type", "_fish_activity", "_forage_activity", "predicted_score"],
+        disabled=["_location", "_angler", "_lure_type", "_fish_activity", "_forage_activity", "predicted_score"],
         column_config={
             "trip_date": st.column_config.DateColumn("Date"),
             "segment": st.column_config.SelectboxColumn(
@@ -597,6 +610,7 @@ else:
                      "reference point - they shift a few minutes day to day.",
             ),
             "_location": st.column_config.TextColumn("Location"),
+            "_angler": st.column_config.TextColumn("Angler"),
             "structure_type": st.column_config.SelectboxColumn(
                 "Structure", options=_select_options(STRUCTURE_TYPES, grid_display["structure_type"]),
             ),
