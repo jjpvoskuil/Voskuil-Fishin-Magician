@@ -9,6 +9,13 @@ streamlit>=1.36
 # Verified working combo: streamlit==1.61.0 + starlette==1.3.1.
 starlette<1.4.0
 requests>=2.31
+# core/cabelas_lookup.py (punch-list #21/#22) uses curl_cffi instead of
+# plain requests for its two live Cabela's/Coveo calls specifically because
+# it can impersonate a real Chrome browser's TLS/JA3 fingerprint, not just
+# its HTTP headers - a plain requests call with a browser User-Agent still
+# came back empty from this app's own deployed server. Ships a compiled
+# libcurl-impersonate binding (manylinux wheel), not a pure-Python package.
+curl_cffi>=0.7
 # Ensures zoneinfo (core/weather.py's lake_today()) can resolve "America/Chicago"
 # even on minimal Linux images that don't ship a system tzdata database - some
 # Streamlit Community Cloud build images don't.

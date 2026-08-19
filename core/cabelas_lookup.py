@@ -27,12 +27,41 @@ endpoints. If Cabela's changes their search implementation or starts
 blocking non-browser traffic, these calls will start failing - every
 function here fails soft (returns [] rather than raising), so a lookup
 failure just means the "Scan a lure" flow falls back to the manual "Add a
-lure" form that already exists on that page.
+lure" form that already exists on that page (core.appstate.
+get_cabelas_suggestions layers a curated fallback cache on top of this for
+punch-list #8's lure-block suggestions specifically - see
+core/cabelas_picks_cache.py).
+
+Punch-list #21/#22: confirmed by calling these same two endpoints directly
+from a real browser that they still work exactly as this module expects -
+but this app's own deployed server-side calls were coming back empty in
+production. Since a plain `requests` call with a browser-like User-Agent
+still failed, the next-most-likely cause is TLS/network-level
+fingerprinting (bot-mitigation systems commonly check the actual TLS
+handshake, not just header content - a `requests`/urllib3 handshake looks
+nothing like a real Chrome one no matter what headers are set). This
+module now uses `curl_cffi` instead of the plain `requests` library
+specifically because it can impersonate a real browser's TLS/JA3
+fingerprint (`impersonate=IMPERSONATE_BROWSER` below), not just its
+headers - curl_cffi's `requests`-compatible API (get/post, headers, json,
+timeout, .raise_for_status(), .json()) is a near drop-in replacement, so
+the rest of this module's logic is unchanged. This is still a best-effort
+attempt, not a guarantee: if Cabela's/Coveo's blocking is actually IP- or
+network-reputation-based (e.g. blocking Streamlit Community Cloud's own
+IP ranges outright) rather than fingerprint-based, this change won't fix
+it - hence the curated fallback cache existing as a safety net regardless
+of whether this works.
 """
 from __future__ import annotations
 import time
 from urllib.parse import quote_plus
-import requests
+from curl_cffi import requests
+
+# A specific recent Chrome version curl_cffi knows how to impersonate the
+# TLS/JA3 fingerprint of - kept in sync with the Chrome version claimed in
+# _BROWSER_HEADERS' User-Agent below so the TLS handshake and the HTTP
+# headers tell a consistent story.
+IMPERSONATE_BROWSER = "chrome124"
 
 TOKEN_URL = "https://www.cabelas.com/api/v2/10651/prod/coveo/getCoveoToken"
 SEARCH_URL = "https://platform.cloud.coveo.com/rest/search/v2"
@@ -76,7 +105,10 @@ def _get_token() -> str | None:
     if cached and (now - _token_cache["fetched_at"]) < _TOKEN_TTL_S:
         return cached
     try:
-        resp = requests.get(TOKEN_URL, headers=_BROWSER_HEADERS, timeout=REQUEST_TIMEOUT_S)
+        resp = requests.get(
+            TOKEN_URL, headers=_BROWSER_HEADERS, timeout=REQUEST_TIMEOUT_S,
+            impersonate=IMPERSONATE_BROWSER,
+        )
         resp.raise_for_status()
         token = resp.json().get("token")
     except Exception:
@@ -137,6 +169,7 @@ def search_lures(query: str, num_results: int = 8) -> list:
             },
             json={"q": query, "numberOfResults": num_results, "firstResult": 0},
             timeout=REQUEST_TIMEOUT_S,
+            impersonate=IMPERSONATE_BROWSER,
         )
         resp.raise_for_status()
         data = resp.json()

@@ -226,13 +226,26 @@ def render_cabelas_suggestions(
     network restriction already seen with the USACE water-quality site) -
     search_page_url() is a pure link-building function with no network
     call, so it's always safe to show regardless of whether the live
-    product lookup itself succeeded."""
-    suggestions = get_cabelas_suggestions(query, num_results=num_results)
+    product lookup itself succeeded.
+
+    Punch-list #22: core.appstate.get_cabelas_suggestions now returns
+    `(suggestions, is_live)` - when the live lookup fails, it falls back to
+    a small curated cache (core.cabelas_picks_cache) instead of coming back
+    empty outright, so `suggestions` can be non-empty with `is_live=False`.
+    In that case this still renders real product cards (same shape either
+    way), but adds a caption making clear these are saved picks, not a
+    live price/availability check, so the angler isn't misled."""
+    suggestions, is_live = get_cabelas_suggestions(query, num_results=num_results)
     if not suggestions:
         st.caption(empty_caption)
         st.markdown(f"[Search Cabela's]({search_page_url(query)})")
         return
     st.caption(found_caption)
+    if not is_live:
+        st.caption(
+            "🛈 Cabela's live search couldn't be reached just now - showing picks saved "
+            "from a previous lookup (prices/availability may be out of date)."
+        )
     cols = st.columns(len(suggestions))
     for i, (col, item) in enumerate(zip(cols, suggestions), start=1):
         with col:

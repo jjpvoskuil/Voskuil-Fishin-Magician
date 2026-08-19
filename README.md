@@ -301,8 +301,13 @@ this repo that can override it on this hosting.
   just a URL (no network call needed) and Cabela's/Coveo's search API has been
   observed to work from a real browser while failing from this app's own
   server-side requests (the same kind of server-side-only network restriction seen
-  with the USACE water-quality integration) - see "How the Cabela's lookup works"
-  below.
+  with the USACE water-quality integration). Punch-list #22 added a second layer on
+  top of that link: a small curated cache of 2 real product picks per lure category
+  (`data/cabelas_picks_cache.csv`, captured via a real browser the same way the
+  live lookup itself was confirmed still working) that the suggestion cards fall
+  back to showing - with a note that they're saved picks, not a live check - whenever
+  the live lookup comes back empty, so the block still shows real photos/brand/price
+  instead of just a link. See "How the Cabela's lookup works" below.
 
 ## How the model works (and its limits)
 
@@ -623,6 +628,29 @@ is why the "not in your inventory" fallback (see above) now always shows a worki
 there's always something useful there even if this integration stays blocked
 indefinitely.
 
+**Punch-list #22 follow-up:** with the link-only fallback in place, essentially every
+lure block was hitting it - the live lookup was failing 100% of the time in
+production, not intermittently. Two changes: (1) `core/cabelas_lookup.py` switched
+from the plain `requests` library to `curl_cffi` (`impersonate="chrome124"` on both
+calls), which can spoof a real Chrome browser's actual TLS/JA3 handshake, not just its
+headers - a plausible explanation for why a browser-like User-Agent alone wasn't
+enough, since bot-mitigation systems commonly fingerprint the TLS layer itself. This
+is still not guaranteed to fix it (if Cabela's/Coveo is blocking by IP/network
+reputation instead, no amount of header or TLS spoofing helps), so (2) a safety net:
+`data/cabelas_picks_cache.csv` holds 2 real, curated Cabela's picks (SKU, brand,
+description, price, photo) for each of the 20 fixed lure category names
+`core.lures.LURE_PROFILES` can ever produce - captured via the same real-browser
+method that confirmed the live lookup itself works, since this app only ever
+recommends from that fixed vocabulary (not arbitrary free text, unlike the Lure
+Inventory page's "Scan a lure" flow below, which doesn't get this fallback).
+`core.appstate.get_cabelas_suggestions()` now tries the live lookup first and falls
+back to `core.cabelas_picks_cache.get_cached_picks()` when it comes back empty,
+returning `(suggestions, is_live)` so `core.ui.render_cabelas_suggestions()` can add
+an honest "showing picks saved from a previous lookup" note whenever the fallback -
+not a live check - is what's actually on screen. This cache isn't auto-refreshing;
+updating it means re-running the same browser-based capture and overwriting the CSV
+in a future session.
+
 The photo-identify step (`core/lure_vision.py`) is deliberately kept separate from the
 product lookup - it only reads whatever's legible on the package well enough to build
 a search query (e.g. "Strike King Thunder Cricket Swimjig"), and the Cabela's lookup
@@ -770,6 +798,8 @@ core/
                            for the Lure Inventory page's "Scan a lure" flow
   cabelas_lookup.py        Text query -> real Cabela's product data (SKU/price/photo),
                            via the same JSON endpoints Cabela's own site search calls
+  cabelas_picks_cache.py   Curated fallback picks (data/cabelas_picks_cache.csv) for
+                           when the live Cabela's lookup above fails - punch-list #22
   bathymetry.py            Modeled depth grid + historic-topo + real-data blending
                            (not currently rendered on the Lake Map page - see "Data sources")
   historic_bathymetry.py   Loads depth points read from pre-dam USGS historical topo maps

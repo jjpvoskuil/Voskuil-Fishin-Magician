@@ -94,11 +94,13 @@ def test_search_lures_maps_results_and_drops_unusable_ones(monkeypatch):
                 {"raw": {"sku": "222", "ec_brand": "No Name"}},  # no description -> dropped
             ]}
 
-    def _fake_get(url, headers=None, timeout=None):
+    def _fake_get(url, headers=None, timeout=None, **kwargs):
+        # **kwargs absorbs curl_cffi-specific args (e.g. impersonate=...,
+        # punch-list #22) this fake doesn't need to assert on.
         assert url == mod.TOKEN_URL
         return _FakeTokenResp()
 
-    def _fake_post(url, params=None, headers=None, json=None, timeout=None):
+    def _fake_post(url, params=None, headers=None, json=None, timeout=None, **kwargs):
         assert url == mod.SEARCH_URL
         assert params == {"organizationId": mod.COVEO_ORG_ID}
         assert "Authorization" in headers and headers["Authorization"] == "Bearer fake-token"
@@ -113,6 +115,48 @@ def test_search_lures_maps_results_and_drops_unusable_ones(monkeypatch):
     assert len(results) == 1
     assert results[0]["sku"] == "111"
     assert results[0]["description"] == "Real Product"
+
+
+def test_search_lures_impersonates_a_real_browser_tls_fingerprint(monkeypatch):
+    # Punch-list #22: the actual point of switching to curl_cffi - both the
+    # token GET and the search POST must pass impersonate=IMPERSONATE_BROWSER
+    # so curl_cffi spoofs a real Chrome TLS/JA3 handshake, not just headers
+    # (a plain `requests` call with a browser User-Agent was still coming
+    # back empty from this app's own deployed server).
+    import core.cabelas_lookup as mod
+
+    captured = {}
+
+    class _FakeTokenResp:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"token": "fake-token"}
+
+    class _FakeSearchResp:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": []}
+
+    def _fake_get(url, headers=None, timeout=None, **kwargs):
+        captured["get_impersonate"] = kwargs.get("impersonate")
+        return _FakeTokenResp()
+
+    def _fake_post(url, params=None, headers=None, json=None, timeout=None, **kwargs):
+        captured["post_impersonate"] = kwargs.get("impersonate")
+        return _FakeSearchResp()
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    monkeypatch.setattr(mod.requests, "post", _fake_post)
+    monkeypatch.setattr(mod, "_token_cache", {"token": None, "fetched_at": 0.0})
+
+    search_lures("strike king")
+    assert captured["get_impersonate"] == mod.IMPERSONATE_BROWSER
+    assert captured["post_impersonate"] == mod.IMPERSONATE_BROWSER
+    assert mod.IMPERSONATE_BROWSER  # non-empty - a real curl_cffi browser token
 
 
 def test_search_page_url_url_encodes_the_query():
