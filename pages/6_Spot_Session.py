@@ -1150,14 +1150,23 @@ def _end_session(spot_id: str):
         return
     end_time = lake_now_naive().time()
     for lure in active["lures"]:
-        if lure.get("retired"):
+        entry_kwargs = dict(lure["entry_kwargs"])
+        conditions = dict(entry_kwargs["conditions"])
+        # Punch-list #34: "session_end_time" is stamped on EVERY lure in the
+        # session (retired or not) - the one moment "⏹ End Session" was
+        # actually clicked, so Trip History can show a real session-level
+        # end time no matter which lure a trip row belongs to. This is
+        # deliberately separate from "lure_end_time", which stays whatever
+        # it already was for a retired lure (see below) - a lure retired
+        # early via "🔄 Change" mid-session has its own, earlier, real
+        # lure_end_time, while every lure's session_end_time is this same
+        # single "the whole session closed at X" value.
+        conditions["session_end_time"] = end_time.isoformat()
+        if not lure.get("retired"):
             # Already stamped its own (earlier, real) lure_end_time when it
             # was retired via "🔄 Change" - don't overwrite that with the
             # session's own end time now.
-            continue
-        entry_kwargs = dict(lure["entry_kwargs"])
-        conditions = dict(entry_kwargs["conditions"])
-        conditions["lure_end_time"] = end_time.isoformat()
+            conditions["lure_end_time"] = end_time.isoformat()
         entry_kwargs["conditions"] = conditions
         entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **entry_kwargs)
         update_trip(entry)
