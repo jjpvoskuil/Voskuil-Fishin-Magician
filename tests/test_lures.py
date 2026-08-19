@@ -1,7 +1,26 @@
+import json
+
 from core.lures import (
     recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES, guess_category_from_text,
     is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES, find_inventory_gaps,
 )
+
+
+def _history_trip(lure_category, structure_type="Main-lake point", water_clarity="Green stained",
+                   segment="Midday", spot_id="spot1", fish_caught=1, biggest_fish_lb=1.5, water_temp_f=45.0):
+    # Punch-list #37 test helper - matches core.storage's real row shape
+    # (dict with a conditions_json string), same as tests/test_lure_history.py's
+    # own helper, duplicated here to keep this file's recommend()-focused
+    # tests self-contained rather than reaching into another test module.
+    return {
+        "spot_id": spot_id,
+        "structure_type": structure_type,
+        "water_clarity": water_clarity,
+        "segment": segment,
+        "fish_caught": fish_caught,
+        "biggest_fish_lb": biggest_fish_lb,
+        "conditions_json": json.dumps({"lure_category": lure_category, "water_temp_f": water_temp_f}),
+    }
 
 
 def test_recommend_returns_valid_blocks():
@@ -211,20 +230,23 @@ def test_inventory_unrecognized_category_is_ignored():
 
 
 def test_owned_lures_sort_before_unowned_within_each_tier():
-    # winter first-choice keys (unsorted by depth since no fish_depth_ft given) are
-    # football_jig, suspending_jerkbait, blade_bait - own only blade_bait and confirm
-    # it moves to the front of the list once inventory is supplied. blade_bait's
-    # "Clear" water color suggestion is "Silver/natural shad", so the description
-    # needs to share one of those words to pass the color-match gate.
+    # Punch-list #37: winter first-choice keys (unsorted by depth since no
+    # fish_depth_ft given) are now suspending_jerkbait, medium_diving_crankbait,
+    # football_jig (Nolin-documented pattern - see core.lures.recommend()'s
+    # winter branch) - own only football_jig (last in the list) and confirm it
+    # moves to the front once inventory is supplied. football_jig's "Clear"
+    # water color suggestion is "Green pumpkin/Watermelon red", so the
+    # description needs to share one of those words to pass the color-match gate.
     inventory = [
-        {"brand": "Rapala", "description": "Rippin Rap - Silver", "category": "blade_bait",
+        {"brand": "Strike King", "description": "Hack Attack Jig - Green Pumpkin", "category": "football_jig",
          "quantity": "1", "sku": ""},
     ]
     rec_plain = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
-    assert [b.key for b in rec_plain.first_choice][0] == "football_jig"
+    assert [b.key for b in rec_plain.first_choice][0] == "suspending_jerkbait"
+    assert [b.key for b in rec_plain.first_choice][-1] == "football_jig"
 
     rec_owned = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
-    assert rec_owned.first_choice[0].key == "blade_bait"
+    assert rec_owned.first_choice[0].key == "football_jig"
     assert rec_owned.first_choice[0].owned is True
     # same set of lures either way - inventory only reorders, never adds/removes
     assert {b.key for b in rec_owned.first_choice} == {b.key for b in rec_plain.first_choice}
@@ -352,6 +374,12 @@ def test_guess_category_from_text_matches_known_product_names():
         ("Strike King Rage Tail Craw Soft Bait - Fire Craw", "texas_rig_creature"),
         ("Booyah Poppin' Pad Crasher Frog", "hollow_body_frog"),
         ("Some Unbranded Doohickey", ""),
+        # Punch-list #37: "swimbait" now routes to the new dedicated
+        # soft_swimbait category instead of weightless_soft_plastic (which
+        # stays fluke/soft-jerkbait-only, a genuinely different presentation).
+        ("Bass Pro Shops Paddle Tail Shad Swimbait - White Pearl", "soft_swimbait"),
+        ("Zoom Super Fluke - Pearl", "weightless_soft_plastic"),
+        ("VMC Spinshot Drop Shot Hook Rig", "drop_shot"),
     ]
     for text, expected in cases:
         assert guess_category_from_text(text) == expected, text
@@ -479,3 +507,59 @@ def test_find_inventory_gaps_preserves_lure_profiles_order():
     gaps = find_inventory_gaps(inventory)
     expected = [k for k in LURE_PROFILES if k != "suspending_jerkbait"]
     assert gaps == expected
+
+
+# --- Punch-list #37: personal trip-history nudge -----------------------------
+
+def test_recommend_without_trip_history_behaves_exactly_as_before():
+    # No trip_history/spot_id passed - every block's note should stay empty,
+    # confirming this is a purely additive, opt-in feature.
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
+    assert all(b.note == "" for b in rec.first_choice + rec.second_choice)
+
+
+def test_recommend_attaches_a_note_to_an_already_picked_lure_with_matching_history():
+    # football_jig is already a winter first-choice pick - give it a real,
+    # situation-matched track record and confirm the note lands on that
+    # exact block rather than changing which lures are picked.
+    history = [_history_trip("football_jig", structure_type="Creek channel / ledge", spot_id="spot1", fish_caught=1)] * 2
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    jig_block = next(b for b in rec.first_choice if b.key == "football_jig")
+    assert "Your own history" in jig_block.note
+    assert "2 of 2" in jig_block.note
+    # Didn't change which lures are recommended, just annotated one.
+    assert {b.key for b in rec.first_choice} == {"suspending_jerkbait", "medium_diving_crankbait", "football_jig"}
+
+
+def test_recommend_injects_a_fish_producing_lure_not_in_the_seasonal_pattern():
+    # carolina_rig isn't part of winter's picks at all - a real, matching,
+    # fish-producing history on it should surface it as an extra second-choice
+    # option (the "even if it's not in your tackle box" case), not silently
+    # get ignored just because the season/structure rules didn't pick it.
+    history = [_history_trip("carolina_rig", structure_type="Creek channel / ledge", spot_id="spot1", fish_caught=1)] * 2
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    injected = next((b for b in rec.second_choice if b.key == "carolina_rig"), None)
+    assert injected is not None
+    assert "Your own history" in injected.note
+    assert "tackle box" in injected.note.lower()
+
+
+def test_recommend_never_injects_a_lure_with_zero_matching_catches():
+    # Real matching history, but never actually caught anything on it - this
+    # should never get promoted as a "proven" suggestion just because it was
+    # tried enough times to clear the minimum-sample gate.
+    history = [_history_trip("chatterbait", structure_type="Creek channel / ledge", spot_id="spot1", fish_caught=0)] * 3
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert not any(b.key == "chatterbait" for b in rec.first_choice + rec.second_choice)
+
+
+def test_recommend_ignores_history_from_a_dissimilar_spot_and_structure():
+    # Same lure, but every trip was at a different spot/structure than the
+    # CURRENT situation - shouldn't be similar enough to inject or annotate.
+    history = [_history_trip("carolina_rig", structure_type="Flat", spot_id="some-other-spot", fish_caught=1)] * 3
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert not any(b.key == "carolina_rig" for b in rec.first_choice + rec.second_choice)

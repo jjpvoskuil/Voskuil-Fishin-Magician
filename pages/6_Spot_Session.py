@@ -3,7 +3,9 @@ from datetime import date as ddate, datetime, time as dtime
 
 import streamlit as st
 
-from core.appstate import get_lake_spots, get_inventory, get_weather_bundle, get_anglers, github_token, repo_slug
+from core.appstate import (
+    get_lake_spots, get_inventory, get_weather_bundle, get_anglers, get_trip_history, github_token, repo_slug,
+)
 from core.anglers import add_angler, ANGLERS_PATH, OTHER_LABEL as ANGLER_OTHER_LABEL
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
 from core.onwater import (
@@ -1710,11 +1712,14 @@ else:
             st.caption("Pressure trend and solunar timing aren't factored into the score above - no weather forecast data was available just now.")
 
         inventory_items = get_inventory()
+        # Punch-list #37: spot_id lets recommend()'s personal-history boost use
+        # the strongest possible match - "have I actually caught fish on this
+        # lure AT THIS SPOT before" - not just a general structure-type match.
         rec = recommend(
             season, cond_values["water_temp_f"], _preview_segment, rt["pressure_trend_24h"],
             structure_type=structure_type, water_clarity=water_clarity,
             fish_depth_ft=cond_values.get("fish_depth_ft"), forage=cond_values.get("forage_seen"),
-            inventory=inventory_items,
+            inventory=inventory_items, trip_history=get_trip_history(), spot_id=spot["spot_id"],
         )
         _render_recommendation_with_quick_add(rec, spot["spot_id"], session_build_seq, key_prefix=f"quickadd_{spot['spot_id']}_{session_build_seq}")
 

@@ -296,6 +296,15 @@ def render_cabelas_suggestions(
 def render_lure_block(block: LureBlock):
     with st.container(border=True):
         st.markdown(f"**{block.name}**")
+        if block.note:
+            # Punch-list #37: block.note carries the "why this pick, and how
+            # much to trust it" signal - core.lures.recommend()'s personal-
+            # history track record (core.lure_history.track_record_note())
+            # when your own trip log has enough situation-matched trips on
+            # this lure. Surfaced as its own line, not buried in a caption,
+            # since the angler specifically asked to see sourcing/confidence
+            # before deciding whether to buy something new.
+            st.info(block.note)
         if block.owned_items:
             # block.owned_items only ever contains items that both match this lure's
             # category AND match today's suggested color (core.lures._color_matched_

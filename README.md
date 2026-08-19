@@ -771,6 +771,53 @@ Because it's keyword-based against free text rather than a structured color fiel
 it can occasionally miss a real match (different wording) or flag a coincidental
 one - it's meant as a helpful signal, not a guarantee.
 
+### Where the lure recommendations actually come from
+
+Punch-list #37: the angler asked directly how a suggested lure gets picked, especially
+one not already in the tackle box, and said general bass-fishing knowledge alone
+"is really not all the helpful" - the recommendation needed to be grounded in real
+Nolin Lake experience and, where possible, the angler's own results. Two sources now
+feed `core.lures.recommend()`'s season/structure lure picks, on top of the general bass
+biology (upward strike bias, etc.) that was already there:
+
+1. **Documented real Nolin Lake fishing patterns.** Each season's first/second-choice
+   lure list (`recommend()`'s season branches) is now sourced from real, Nolin-specific
+   season-by-season structure/lure/color/depth data (Omnia Fishing's published Nolin
+   Lake fishing patterns), plus two corroborating real reports: a first-hand Nolin
+   angler forum post (bluff walls, ~45 ft dam points fished on drop shot, dawn/dusk
+   topwater "the jumps" with poppers and soft flukes) and KDFWR's own official 2026
+   Fishing Forecast, which calls out Nolin by name - "During late spring through summer,
+   best results are often at night" - surfaced as an explicit rationale note on the
+   Night segment in summer rather than silently folded into the lure list. Two lure
+   categories new to this app's taxonomy, **Drop Shot** and **Soft Swimbait (paddle
+   tail)**, were added specifically because this research surfaced them as real,
+   documented Nolin patterns with no existing home in the lure list. Every source is
+   cited inline in `core/lures.py`'s season-branch comments and in the rationale text
+   itself, not just in this README - previously-first-choice generic picks that aren't
+   contradicted by any of this stay on as second choices rather than being dropped, so
+   proven techniques aren't lost just because a given source didn't happen to mention them.
+
+2. **Your own catch history, in similar situations.** `core.lure_history.
+   lure_track_records()` (called from `recommend()` via a new `trip_history`/`spot_id`
+   argument) looks at your own logged trips (`data/trip_log.csv`) for ones that share
+   real **location** with the current situation - the same spot, or at least the same
+   structure type when no specific spot is known (the 7-Day Forecast page's "structure
+   type" is a general Lake Setup selection, not a spot) - and, only once at least 2 such
+   situation-matched trips exist for a lure category (deliberately cautious, mirroring
+   `core.calibration.py`'s "wait for a minimum sample before touching anything"
+   philosophy for the score weights), surfaces the real numbers: trips landed vs. tried,
+   biggest fish. This can (a) annotate an already-recommended lure with your own
+   real track record on it, or (b) surface up to 2 *additional* lures you've genuinely
+   caught fish on before in a similar spot/situation - even ones not part of the
+   season's default pattern, and even ones not currently in your tackle box - which is
+   exactly the "before I decide to go out and buy that lure" case the angler described.
+   This only ever adds a signal on top of the season/structure/pressure picks above; it
+   never removes or overrides them, and a lure you've tried without ever catching
+   anything on it in a similar spot never gets promoted just because it's been tried
+   enough times to clear the minimum-sample gate. The note shows up right on the lure's
+   own card (⬤ "Your own history: N of M similar trips landed fish...") rather than
+   being buried, so you can judge the strength of the signal yourself before trusting it.
+
 ## Development punch list
 
 The **Development** page is a running list of things to adjust or fix in the app

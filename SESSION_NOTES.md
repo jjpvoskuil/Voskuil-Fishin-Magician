@@ -5651,6 +5651,145 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     already exercised). No data files touched (`core/cabelas_lookup.py`
     and its test file only). Logged as punch-list #36 and marked "Done."
 
+98. **Punch-list #37: grounded lure recommendations in real, documented
+    Nolin Lake fishing experience, and added a personal catch-history
+    nudge.** The angler asked, in plain terms, how a suggested lure gets
+    picked - "Ideally the recommendation is based on the data in the app
+    plus known information about the lake and real bass fishing experience
+    on the lake." Answered honestly first: the lure engine was, until now,
+    entirely generic bass-biology/tackle-industry knowledge (upward strike
+    bias, standard seasonal patterns) with zero Nolin-specific grounding
+    except forage species and water color - trip history only fed the
+    numeric activity-*score* weights (`core.calibration.py`), never lure
+    choice. The angler's follow-up was direct: "influence the lure choice
+    by my actual experience... pull in any real experience data for nolin
+    lake... general information is really not all the helpful. Particularly
+    if it is a lure that I don't have in my tackle box." Two clarifying
+    questions (via AskUserQuestion) got answered: show the sourcing in the
+    UI (not hidden), and be cautious with personal-history promotion, with
+    the explicit added instruction to weight *where* a lure was used/is
+    planned to be used, not just whether it was ever used anywhere.
+
+    **Real Nolin Lake research, done before writing any code.** Used
+    WebSearch/WebFetch to find actual documented Nolin experience rather
+    than guessing: Omnia Fishing publishes a genuinely detailed,
+    season-by-season largemouth bass pattern breakdown SPECIFIC to Nolin
+    Lake (structure/lures/colors/depths/forage for pre-spawn through
+    winter) at omniafishing.com/w/nolin-lake-2-fishing-reports/fishing-
+    patterns - by far the best-structured real source found. Corroborated
+    with two more independent real sources: a first-hand Nolin angler's own
+    forum post (fishin.com "Nolin Lake Tips?" thread) describing bluff
+    walls with nearby channels, ~45 ft dam-face points fished on drop shot,
+    and dawn/dusk topwater ("the jumps") with poppers and white super
+    flukes; and KDFWR's own official 2026 Fishing Forecast PDF, which calls
+    out Nolin BY NAME with one specific tactical note - "During late spring
+    through summer, best results are often at night." Also checked (and
+    ruled out as too thin to use) fishbrain.com, lake-link.com, and
+    fishingstatus.com - genuinely searched, not cherry-picked for
+    convenient results. A real Nolin fishing guide's (Wyatt Pearman, via
+    fishtips.com) paid-tip-content TITLES ("Winter time cranking," "Nolin
+    Lake Summer Time Offshore Fishing") independently corroborated the
+    Omnia data's winter-cranking and summer-offshore patterns without
+    needing to buy the actual paid content.
+
+    **core/lures.py's season branches rewritten** to lead with this
+    Nolin-specific data instead of generic seasonal bass knowledge, with
+    every source cited inline in the code comments AND in the rationale
+    text a reader actually sees (not just buried in comments) - e.g.
+    winter's rationale now reads "Nolin's own documented winter pattern
+    (Omnia Fishing) targets rock piles/boulders near channel swings and
+    deep-access points with long-pause jerkbaits and 7-12 ft crankbaits; a
+    local Nolin guide's own paid tip content is literally titled 'Winter
+    time cranking.'" Generic picks that weren't contradicted by any of this
+    stayed on as second choices rather than being deleted outright, so a
+    real pattern a source didn't happen to mention doesn't just vanish.
+    Two lure categories new to this app's taxonomy - **Drop Shot** (15-45
+    ft, bottom-style, sourced from the forum's ~45 ft dam-point tip) and
+    **Soft Swimbait (paddle tail)** (2-12 ft, column-style, sourced from
+    Omnia's post-spawn/fall data) - were added because the research
+    surfaced them as real Nolin patterns with no existing home in the
+    20-category taxonomy. Real Cabela's product entries for both (found via
+    the same Coveo API call `core/cabelas_lookup.py` already uses, driven
+    directly through the Chrome browser tab's real internet access since
+    this sandbox has none) were added to `data/cabelas_picks_cache.csv` so
+    punch-list #22's "not in your tackle box" fallback suggestions cover
+    them too. `guess_category_from_text()`'s keyword map also got a real
+    fix while touching this: "swimbait" used to route to
+    `weightless_soft_plastic` (an honest workaround from before a real
+    swimbait category existed, its own comment openly admitted as much) -
+    now routes to the new `soft_swimbait`, while "fluke"/"soft jerkbait"
+    correctly stay on `weightless_soft_plastic` (a genuinely different,
+    darted-not-swum presentation); added a "drop shot" keyword too. Left
+    `TRAILER_ELIGIBLE_CATEGORIES` alone (still `weightless_soft_plastic`,
+    not swapped for the new `soft_swimbait`) - real existing tests lock in
+    that choice and swapping it would be an unrelated behavior change to
+    the trailer picker with no angler ask behind it.
+
+    **Personal history: new `core/lure_history.py`, deliberately
+    conservative.** `lure_track_records(trip_rows, situation)` scores each
+    past trip against the CURRENT situation and - this was the key design
+    fix after an early version's own test caught it - requires a real
+    LOCATION match (same spot, or same structure type when no spot is
+    known) as a hard gate, not just one contributor to a blended score;
+    water clarity/light-level/water-temp closeness are tracked but never
+    enough to qualify a trip on their own, matching the angler's explicit
+    "where the lure was used... and where it is planned to be used"
+    framing. A lure category only gets a track record once at least 2 such
+    location-matched trips exist (`MIN_SIMILAR_TRIPS`, mirroring
+    `core.calibration.py`'s "wait for a minimum sample" philosophy for
+    score-weight nudging) - one lucky fish never promotes anything.
+    `core.lures.recommend()` gained `trip_history`/`spot_id` parameters:
+    for a lure category already in the season's first/second-choice picks
+    with a matching track record, its `LureBlock.note` (an existing but
+    previously-always-empty field - dormant since whenever it was added,
+    never wired to anything) gets the real numbers ("📈 Your own history: 2
+    of 3 similar trips landed fish, best 2.1 lb..."); for a fish-producing
+    lure category NOT already in either tier, up to 2 get injected into
+    second-choice with the same note, explicitly flagging "not currently a
+    top seasonal pick... even if it's not in your tackle box yet" - the
+    exact "before I decide to go out and buy that lure" case from the
+    angler's own words. A lure tried enough times in a similar spot but
+    never actually caught anything on never gets promoted, even though it
+    clears the minimum-sample gate (a real unit test locks this in).
+    `core.ui.render_lure_block()` now renders `block.note` as its own
+    `st.info()` line at the top of each card, not buried in a caption -
+    per the angler's stated preference (via AskUserQuestion) to see
+    sourcing rather than have it silently blended in. Both real callers
+    updated: `pages/1_7_Day_Forecast.py` passes `trip_history` (no
+    `spot_id` - that page's "structure type" is a general Lake Setup
+    selection, not a specific spot); `pages/6_Spot_Session.py` passes both
+    `trip_history` AND `spot_id` (the actual spot being fished), for the
+    strongest possible match. New cached `core.appstate.get_trip_history()`
+    (5 min TTL, same reasoning as the existing `get_calibrated_weights()`)
+    feeds both.
+
+    Verification: added `tests/test_lure_history.py` (7 new tests covering
+    the minimum-sample gate, the hard location-match requirement including
+    the case that initially failed and drove the location-gate redesign,
+    biggest-fish tracking, and the note text itself) and 5 new
+    `recommend()`-level integration tests in `tests/test_lures.py`
+    (no-history-passed behaves identically to before; an already-picked
+    lure gets annotated; a fish-producing lure not in the season pattern
+    gets injected with the right note; a lure with real matching history
+    but zero catches never gets injected; history from a genuinely
+    different spot/structure is correctly ignored) plus 3 new
+    `guess_category_from_text()` cases for the swimbait/fluke/drop-shot
+    keyword changes. One pre-existing test
+    (`test_owned_lures_sort_before_unowned_within_each_tier`) had to be
+    updated - it hardcoded winter's OLD first-choice order (football_jig
+    first), which the Nolin-sourced rewrite legitimately changed. Full
+    suite: 329 passing (was 317; +12 net new tests). A scratch `AppTest`
+    run against the real `pages/1_7_Day_Forecast.py` (mocking
+    `get_weather_bundle`/`get_inventory`/`get_spots`/`get_trip_history`/
+    `github_token` and `apply_freeze`, with a synthetic 2-trip carolina_rig
+    track record) confirmed the actual rendered page shows real "Your own
+    history: 2 of 2 similar trips landed fish, best 2.5 lb..." info boxes
+    on lure cards, not just in isolated unit tests. `data/*.csv` md5s
+    confirmed identical before/after the scratch run except for the
+    deliberate, real `data/cabelas_picks_cache.csv` addition (4 new rows,
+    Drop Shot + Soft Swimbait picks). Logged as punch-list #37 and marked
+    "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
