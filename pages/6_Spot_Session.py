@@ -1023,6 +1023,138 @@ def _end_session(spot_id: str):
     st.session_state[f"session_closed_banner_{spot_id}"] = True
 
 
+# Punch-list #29: every lure/fish already lands in data/trip_log.csv the
+# instant it happens (see _record_fish()/_add_lure_to_active_session()/the
+# Start Session handler below - each calls append_trip()/update_trip() and
+# pushes immediately, not batched until End Session), but which lures were
+# still "active" and tappable to log a fish lived ONLY in st.session_state -
+# in-memory on the server, tied to one browser session. Spotty cell coverage
+# (a dropped WebSocket), a phone locking mid-session, or the server itself
+# restarting all wipe st.session_state, and the angler's own report was that
+# reconnecting after one of these made an in-progress session look like it
+# had never started - conditions/spot still there (those ride along via
+# query_params, entry 34), but the lure buttons were gone and it dropped
+# back to the pre-session builder. Nothing was actually lost on disk; the
+# fix is to rebuild the "session in progress" view from what's already
+# there instead of losing track of it. True offline operation isn't
+# achievable here - every interaction in this app is a live round trip to
+# the Python server, there's no offline-capable client code - so this is
+# the practical fix within that constraint: reconnecting picks up exactly
+# where the last successful save left off, rather than losing the session.
+_PER_LURE_CONDITION_KEYS = {
+    "lure_category", "trailer_used", "trailer_name", "trailer_color",
+    "trailer_category", "lure_start_time", "lure_end_time", "fish", "source",
+}
+
+
+def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list) -> list:
+    """Groups today's spot_session-sourced rows at this spot by their
+    shared session conditions["start_time"] (the same value every lure in
+    one session carries - captured once by Start Session, reused unchanged
+    by _add_lure_to_active_session() for every lure added after, so it's a
+    reliable session-grouping key even though no explicit "session id" is
+    stored anywhere), then returns the rows for whichever group still has
+    at least one lure without a lure_end_time yet (i.e. genuinely still in
+    progress - a properly "⏹ End Session"-ed group has every row's
+    lure_end_time stamped, retired or not). Returns [] if nothing's open -
+    either nothing's been logged here today, or every session logged here
+    today has already been ended. If, unusually, more than one group is
+    still open (this page has no flow that starts a second session before
+    ending the first, but a hand-edited CSV or an old bug could produce
+    one), the most recently started group wins - the others are simply
+    left alone rather than merged or discarded."""
+    groups = {}
+    for t in trips_today:
+        if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
+            continue
+        try:
+            cond = json.loads(t.get("conditions_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        if cond.get("source") != "spot_session":
+            continue
+        key = cond.get("start_time")
+        if not key:
+            continue
+        groups.setdefault(key, []).append((t, cond))
+    open_groups = {k: rows for k, rows in groups.items() if any(not c.get("lure_end_time") for _, c in rows)}
+    if not open_groups:
+        return []
+    latest_key = max(open_groups, key=lambda k: min(t.get("logged_at") or "" for t, _ in open_groups[k]))
+    return sorted(open_groups[latest_key], key=lambda tc: tc[0].get("logged_at") or "")
+
+
+def _reconstruct_active_session(spot: dict, structure_type: str, session_date_iso: str, trips_today: list):
+    """Rebuilds an active_session_{spot_id} dict (the same shape Start
+    Session/_add_lure_to_active_session build live) from already-saved
+    trip_log.csv rows, for the reconnect-after-a-session_state-loss case -
+    see the block comment above. Returns None if there's no still-open
+    session logged here today. One thing a persisted row can't give back:
+    `item_id` (which inventory item this lure is) was never itself written
+    to disk, only the lure's display label - so a reconstructed lure's
+    item_id is always None, which just means the "already added" dedup
+    check in _add_lure_to_active_session() won't catch re-adding the exact
+    same inventory item after a reconnect (picking it again would show up
+    as a second, separate row for the same lure - harmless, just tidy up
+    manually via Trip History if it happens, not silent data loss)."""
+    rows = _open_session_rows(spot["spot_id"], session_date_iso, trips_today)
+    if not rows:
+        return None
+    lures = []
+    base_conditions = None
+    predicted_score = None
+    segment_name = None
+    water_clarity = None
+    start_time_iso = None
+    for t, cond in rows:
+        entry_kwargs = dict(
+            trip_date=t.get("trip_date"),
+            segment=t.get("segment"),
+            spot_id=t.get("spot_id"),
+            spot_name=t.get("spot_name"),
+            structure_type=t.get("structure_type"),
+            water_clarity=t.get("water_clarity"),
+            lure_used=t.get("lure_used"),
+            color_used=t.get("color_used") or "",
+            technique_used=t.get("technique_used") or "",
+            fish_caught=int(t["fish_caught"]) if t.get("fish_caught") not in (None, "") else 0,
+            biggest_fish_lb=float(t["biggest_fish_lb"]) if t.get("biggest_fish_lb") not in (None, "") else None,
+            predicted_score=float(t["predicted_score"]) if t.get("predicted_score") not in (None, "") else None,
+            conditions=cond,
+            notes=t.get("notes") or "",
+        )
+        lures.append({
+            "trip_id": t.get("trip_id"), "logged_at": t.get("logged_at"), "label": t.get("lure_used"),
+            "item_id": None,
+            "entry_kwargs": entry_kwargs, "fish": cond.get("fish") or [],
+            "retired": bool(cond.get("lure_end_time")),
+        })
+        if base_conditions is None:
+            # Every lure's own conditions dict is this same shared snapshot
+            # plus the per-lure keys layered on top (see the Start Session
+            # handler / _add_lure_to_active_session() below) - strip those
+            # back off to recover the shared snapshot, so a lure added
+            # after reconnecting still reuses the real original session
+            # conditions instead of nothing.
+            base_conditions = {k: v for k, v in cond.items() if k not in _PER_LURE_CONDITION_KEYS}
+            predicted_score = entry_kwargs["predicted_score"]
+            segment_name = t.get("segment")
+            water_clarity = t.get("water_clarity")
+            start_time_iso = cond.get("start_time")
+    return {
+        "spot_name": spot["name"],
+        "session_date": session_date_iso,
+        "start_time": start_time_iso or lake_now_naive().time().isoformat(),
+        "segment_name": segment_name,
+        "structure_type": structure_type,
+        "water_clarity": water_clarity,
+        "predicted_score": predicted_score,
+        "base_conditions": base_conditions or {},
+        "lures": lures,
+        "reconstructed": True,
+    }
+
+
 # ==============================================================================
 # EDIT MODE - correcting one already-logged trip
 # ==============================================================================
@@ -1233,9 +1365,24 @@ if editing_trip is not None:
 active_session_key = f"active_session_{spot['spot_id']}"
 active = st.session_state.get(active_session_key)
 
+if active is None:
+    # Punch-list #29 - see the block comment above _reconstruct_active_session()
+    # for the full story. Reuses todays_entries (already read above for the
+    # "Already logged for this spot" caption) rather than a second
+    # read_all_trips() call.
+    active = _reconstruct_active_session(spot, structure_type, session_date.isoformat(), todays_entries)
+    if active is not None:
+        st.session_state[active_session_key] = active
+
 if active is not None:
     st.divider()
     st.header("🎣 Session in progress")
+    if active.pop("reconstructed", False):
+        st.info(
+            "Reconnected - picked this session back up from what was already saved "
+            "(nothing was lost, but double-check the fish list below matches what you've logged)."
+        )
+        st.session_state[active_session_key] = active
     score_bit = f" · predicted score {active['predicted_score']}/10" if active.get("predicted_score") is not None else ""
     st.caption(
         f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"

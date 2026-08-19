@@ -222,7 +222,14 @@ this repo that can override it on this hosting.
   in the recommendation.
 - **Trip logging** - the Spot Session page's log section records what actually happened
   (lures, catches, water conditions, forage seen) so the model can calibrate its
-  weights against your own results over time.
+  weights against your own results over time. Every lure and catch is saved the
+  instant it happens, not batched until the session ends - so if a dropped
+  connection (spotty cell coverage, phone locking mid-session) makes an
+  in-progress session look like it reset, nothing you already logged was lost,
+  and reopening the page at the same spot picks the session back up right
+  where it left off ("Reconnected - picked this session back up..."). This app
+  still needs a live connection to do anything - it can't work with zero
+  signal - but a dropped-and-restored connection won't cost you your place.
 - **Trip History** - every logged trip in one filterable, wide, scrollable grid:
   filter by date/date range, time of day, location, lure type, water clarity,
   structure type, fish activity, forage activity, wind direction, catches-only,
