@@ -62,6 +62,30 @@ def inject_mobile_css():
        page's own info + best-window pair) keep their original proportions
        instead of being forced to an even split - only the wide metric/card
        rows this was actually reported about are affected.
+    3. **Keep selectbox/multiselect dropdown popovers scrollable and on
+       screen** (punch-list #33). Streamlit's own dropdown already sets
+       `max-height`/`overflow-y: auto` on the option list (confirmed by
+       inspecting the live app's DOM directly, not just reasoning about
+       Streamlit's CSS from the outside - `[data-testid="stSelectboxVirtualDropdown"]`
+       for a selectbox, `[data-testid="stMultiSelectDropdown"]` for a
+       multiselect, both wrapping a `[role="listbox"]`), but the angler
+       still reported a multiselect's last option getting cut off with no
+       way to scroll to it on a phone - most likely the classic mobile-web
+       gap between the *layout* viewport a `position: fixed` popover is
+       placed against and the smaller *visual* viewport actually on screen
+       once the browser's own chrome/keyboard eats into it, which no
+       server-rendered pixel height can account for. `100dvh` (dynamic
+       viewport height) is the CSS unit built specifically to track the
+       real, current visual viewport, so capping the popover to a `dvh`-
+       based height is a safety net that keeps the whole thing (and a
+       working scrollbar to its last option) inside whatever's actually
+       visible, on top of `overscroll-behavior: contain` so a touch-drag
+       inside the list can't get grabbed by a page scroll instead. The
+       *specific* dropdown reported cut off - the "Type of hit" field in
+       "Log a fish" - was separately switched from `st.multiselect` to
+       `st.pills` (see pages/6_Spot_Session.py), which has no popover to
+       cut off at all; this CSS is general hardening for every other
+       selectbox/multiselect in the app, not a substitute for that fix.
     """
     st.markdown(
         f"""
@@ -76,6 +100,18 @@ def inject_mobile_css():
         button[data-testid="stExpandSidebarButton"] span[data-testid="stIconMaterial"] {{
             color: #ffffff !important;
             font-size: 26px !important;
+        }}
+
+        [data-testid="stSelectboxVirtualDropdown"],
+        [data-testid="stMultiSelectDropdown"] {{
+            max-height: min(324px, 90dvh) !important;
+        }}
+        [data-testid="stSelectboxVirtualDropdown"] [role="listbox"],
+        [data-testid="stMultiSelectDropdown"] [role="listbox"] {{
+            max-height: min(300px, 80dvh) !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
         }}
 
         @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
