@@ -52,3 +52,8 @@ def test_get_cabelas_suggestions_caps_cached_results_to_num_results(monkeypatch)
     suggestions, is_live = appstate.get_cabelas_suggestions("query four - cap test", num_results=2)
     assert len(suggestions) == 2
     assert is_live is False
+
+
+def test_get_anglers_passes_through_read_anglers(monkeypatch):
+    monkeypatch.setattr(appstate, "read_anglers", lambda: ["Test Angler One", "Test Angler Two"])
+    assert appstate.get_anglers() == ["Test Angler One", "Test Angler Two"]

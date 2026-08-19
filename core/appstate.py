@@ -14,6 +14,7 @@ from .calibration import calibrate_weights
 from .lure_inventory import read_all_items
 from .lake_spots import read_all_spots
 from .dev_tasks import read_all_tasks as read_all_dev_tasks
+from .anglers import read_anglers
 
 
 @st.cache_data(ttl=60 * 60, show_spinner="Fetching weather forecast...")
@@ -107,6 +108,15 @@ def get_lake_spots():
 @st.cache_data(ttl=60)
 def get_dev_tasks():
     return read_all_dev_tasks()
+
+
+# Punch-list #26: the "Who's fishing" dropdown's roster (core/anglers.py) -
+# short TTL, same reasoning as get_inventory()/get_lake_spots()/
+# get_dev_tasks() above (a cheap local CSV read, just enough caching to
+# avoid re-reading the file on every single rerun).
+@st.cache_data(ttl=60)
+def get_anglers():
+    return read_anglers()
 
 
 def github_token() -> str:

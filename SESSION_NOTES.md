@@ -4837,6 +4837,134 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     reverted via `git checkout` immediately after each scratch `AppTest`
     run. Logged as punch-list items #24 and #25 and marked both "Done".
 
+87. **Punch-list #26: lightweight multi-user support ("who's fishing") plus
+    hardening the auto-push against two anglers saving at once.** Ask
+    (verbatim, logged when #26 was filed): "do you think it is possible to
+    have multiple users for this app? I fish with my son and it would be
+    great if we each could log in and do our selections under our user
+    names. It would still be nice for the data to be combined for trip
+    history and future analytics, but would like the flexibility to log
+    our own activity and have it stamped with our user ID." Two options
+    were on the table: real OIDC logins via `st.login()`, or a simple
+    non-password "who's fishing" name picker. Went with the picker (option
+    1) - no accounts, no OAuth app to stand up, and this is a private
+    deployment shared by a small number of known anglers. Names: seeded
+    with John/Matthew/Alex plus a growable "Other" - pick "Other," type a
+    name, and it's saved as a real dropdown choice from then on.
+
+    Also flagged as a related hardening item regardless of which option:
+    the deployed app auto-commits/pushes on every single log action
+    (`core.storage.commit_and_push()`), and two anglers logging from
+    separate devices at nearly the same moment could hit a non-fast-forward
+    push rejection the way a manual push once did. Worked this half first,
+    since it didn't depend on the angler names. `commit_and_push()` now
+    retries a rejected push (matched on `[rejected]`/`non-fast-forward`/
+    `fetch first` in stderr - anything else, e.g. a real auth failure,
+    fails immediately without retrying) up to 3 attempts: fetch the remote
+    branch, `git rebase FETCH_HEAD` onto it, and try the push again. A
+    rebase conflict aborts the rebase and reports back "please retry the
+    save" rather than leaving the local repo mid-rebase. Wrote real
+    integration tests for this against actual bare-git-repo fixtures
+    (`git init --bare`), not just mocked subprocess calls, specifically to
+    catch what mocking would have missed: a genuine concurrent two-device
+    push, replayed with real git plumbing in `tests/test_storage.py`.
+
+    That test surfaced a real discovery along the way, not just a
+    passing/failing assertion: a plain `git rebase` on two independent
+    *appends* to the *end* of the same CSV file conflicts every time,
+    regardless of how many unrelated rows already exist above the appended
+    ones - git's default 3-way merge treats "new last line" as an edit to
+    the old last line's context on both sides and can't tell the two
+    appends apart. Reproduced this by hand in scratch repos before trusting
+    it. The fix: `.gitattributes` now marks every `data/*.csv` file
+    `merge=union` (git's built-in union merge driver, no extra `git config`
+    needed - it just has to be present in a commit both sides share), which
+    keeps both sides' differing lines instead of blocking on this specific
+    shape of conflict. Verified the known tradeoff by hand too: `merge=union`
+    does NOT catch a genuine same-row edit from two devices at once - it
+    silently produces two duplicate rows rather than blocking, which is
+    still much better than losing one save outright, but is worth knowing
+    about if a duplicate-looking row ever turns up in Trip History.
+    Documented this tradeoff in both `.gitattributes`'s own comments and
+    `commit_and_push()`'s docstring, and in this README's Trip logging
+    section. `tests/test_storage.py` (7 tests) covers: no-token/no-op
+    short-circuits, a simple success, the real concurrent-push-then-rebase-
+    retry scenario end to end, a non-retryable failure not retrying, giving
+    up after `max_push_retries`, and a genuine rebase conflict aborting
+    cleanly (using `data/notes.txt`, not a CSV, so union merge doesn't mask
+    it and the conflict test still exercises a real conflict).
+
+    With that landed, moved to the angler names. `core/anglers.py` is a new
+    small module, same shape as `core/dev_tasks.py`/`core/lake_spots.py`:
+    `data/anglers.csv` (single `name` column) seeded with
+    `DEFAULT_ANGLERS = ["John", "Matthew", "Alex"]` on first read if the
+    file doesn't exist yet, `read_anglers()` (case-insensitive de-duped,
+    first spelling wins), and `add_angler()` (rejects blank/whitespace-only
+    and case-insensitive duplicates, silently no-ops rather than raising).
+    `core/appstate.get_anglers()` wraps `read_anglers()` with the same
+    60s-TTL `st.cache_data` pattern as `get_inventory()`/`get_lake_spots()`/
+    `get_dev_tasks()`. Deliberately did NOT add `angler` as a new top-level
+    column to `data/trip_log.csv`/`core.storage.FIELDNAMES` - the real,
+    already-committed file has an old header without it, and
+    `append_trip()` is a pure append with no header rewrite, so a new
+    trailing column would misalign `csv.DictReader` for every future read.
+    Followed this codebase's existing convention instead (same as
+    `lure_category`/`trailer_used`/etc.): `angler` lives inside
+    `TripEntry.conditions` (serialized as `conditions_json`), no CSV schema
+    migration needed.
+
+    Spot Session (`pages/6_Spot_Session.py`) gained a "🎣 Who's fishing"
+    selectbox right under the spot picker - roster options plus "Other,"
+    which reveals a text input when picked. The widget's own key
+    (`active_angler`) is deliberately page-wide, not scoped to a spot, so
+    it keeps whatever was last picked as you move between spots in the same
+    browser session rather than resetting - but that meant the edit-mode
+    prefill (loading a *specific* past trip's own stored angler) needed its
+    own one-time guard scoped to `edit_trip_id` alone (`
+    angler_prefill_done_{edit_trip_id}`), not to the widget's key, so
+    opening a different trip to edit re-prefills correctly instead of
+    leaving whatever angler happened to be "active." `_build_base_conditions()`
+    took a new `angler` parameter threaded through both the new-session
+    "Start Session" and edit-mode "Save changes" paths. A new
+    `_save_new_angler_if_needed()` helper calls `add_angler()` right before
+    a trip is actually saved when "Other" was picked with a typed name, and
+    both save paths conditionally add `ANGLERS_PATH` to that save's git
+    push alongside `TRIP_LOG_PATH` only when a genuinely new name was added
+    - an existing-roster pick never touches `data/anglers.csv` at all.
+    Trip History (`pages/4_Trip_History.py`) got a fourth filter column
+    ("Angler," multiselect) and a read-only "Angler" grid column, reading
+    the same `conditions["angler"]` field back out per row (blank/missing
+    for any trip logged before this round, same graceful-degradation
+    pattern as every other optional condition field on this page).
+
+    Verification: `core/anglers.py` covered by 7 new unit tests
+    (`tests/test_anglers.py` - seeding, dedup, add/reject cases) plus one
+    new `core/appstate.get_anglers()` passthrough test; full suite now 312
+    passing (was 304 before this round). No committed test drives the Spot
+    Session page's angler UI end-to-end (same reasoning as every other
+    `st.dialog`/session-state-heavy flow on this page) - confirmed instead
+    via a scratch `AppTest` walkthrough against the real spot/data files:
+    the picker renders with the right options; picking "Other" reveals the
+    text input; starting a session with a brand-new typed name lands that
+    exact name in the new trip row's `conditions_json["angler"]` AND
+    persists it to `data/anglers.csv`; opening that same trip in edit mode
+    correctly prefills the picker from the trip's own stored angler even
+    with a *different* angler "active" in session state at the time
+    (proving the prefill reads the trip, not the stale active pick); and
+    the newly-typed name shows up as a real dropdown option on a fresh page
+    load afterward. Also ran the full `AppTest` smoke pass across the app
+    entry point and all 7 pages (per standing practice), including a
+    specific check that Trip History's new Angler filter widget renders
+    without error against the real, mostly angler-less legacy trip log.
+    `data/trip_log.csv`/`data/lure_inventory.csv`/`data/lake_spots.csv`/
+    `data/dev_tasks.csv`/`data/water_quality_log.csv` confirmed
+    byte-identical (`md5sum`) before and after every scratch run that
+    touched them; `data/trip_log.csv` reverted via `git checkout` and the
+    fresh `data/anglers.csv` the scratch run created deleted immediately
+    after, before committing the real, clean, defaults-only
+    `data/anglers.csv` this feature actually ships with. Logged as
+    punch-list #26 and marked "Done".
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -5051,6 +5179,17 @@ trip-log entries back to the repo (see `secrets.toml.example`).
   since it's the top-level document. Would need a different hosting model
   (self-hosted, or a host that serves the app directly with no wrapper
   iframe) to customize.
+- (entry 87) The `.gitattributes` `merge=union` fix for concurrent CSV
+  appends does NOT catch a genuine same-row edit made from two devices at
+  once during a rebase retry - it silently keeps both differing versions as
+  two separate rows rather than blocking the push. Better than silently
+  losing one save (the previous behavior), but if a duplicate-looking row
+  ever turns up in Trip History, this is why - not a new bug.
+- (entry 87) The "who's fishing" angler picker (punch-list #26) is a name
+  tag, not authentication - nothing stops picking someone else's name, and
+  there's no password. Fine for this app's private, small-shared-group
+  deployment; would need real logins (`st.login()`/OIDC, the option
+  declined this round) if that ever stops being true.
 
 ## Operating notes
 

@@ -1,0 +1,29 @@
+# Punch-list #26: every data/*.csv file here is git-committed on every save
+# (core.storage.commit_and_push) and is, in normal use, only ever appended
+# to (a new trip/lure/spot/task row) or has one existing row's cells
+# rewritten in place - never restructured. Two devices saving at nearly the
+# same moment (e.g. two anglers each logging a catch) both branch off the
+# same commit, so a plain three-way git merge sees "a line added at the
+# same position by both sides" and reports it as a content conflict, even
+# though the two saves are actually unrelated and both deserve to be kept -
+# confirmed empirically while building the commit_and_push() retry logic
+# this file supports (see core/storage.py's docstring).
+#
+# `merge=union` is git's built-in driver for exactly this shape of file:
+# on a conflict it keeps BOTH sides' differing lines instead of blocking,
+# which is exactly "combine two independent new rows" for the common case
+# this punch-list item is about. The one known tradeoff, worth remembering
+# if a duplicate-looking row ever shows up: if two devices ever edit the
+# very SAME existing row at the same moment (rather than each appending a
+# new one), union merge doesn't conflict there either - it silently keeps
+# BOTH edited versions as two rows sharing the same trip_id/item_id, rather
+# than raising a conflict for a human to resolve. That's a data-quality
+# gap (a duplicate to notice and delete via the existing Trip
+# History/Lure Inventory/Development delete flows), not data loss - still
+# strictly better than the pre-#26 behavior, where the second device's
+# entire save could get silently rejected and lost. This is why
+# core.storage.commit_and_push()'s retry loop still has a real
+# conflict-abort path too: it's the fallback for anything NOT covered by
+# this file (e.g. a binary lure photo under data/lure_images/, or
+# data/dev_tasks_counter.txt).
+data/*.csv merge=union

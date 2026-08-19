@@ -491,6 +491,28 @@ entry is also committed and pushed back to this repo, so it survives Streamlit C
 restarts/redeploys. Without a token, entries still work but only persist for that
 session.
 
+Every push (trip log, inventory, saved spots, punch-list, water-quality log, angler
+roster) goes through `core.storage.commit_and_push()`, which now retries on a rejected
+push: if it comes back non-fast-forward (another device saved in the moment between this
+one's own last fetch and its push), it fetches, rebases onto the latest remote commit,
+and tries again, up to a few attempts before giving up and telling you to retry the save
+yourself. `.gitattributes` marks every `data/*.csv` file `merge=union`, so two
+independent appends to the same file (the common case - two people logging separate
+trips) rebase cleanly without a real conflict; a genuine same-row edit from two devices
+at once isn't caught by that rule and will silently produce two rows rather than
+blocking, so if that ever happens, check Trip History for a duplicate rather than
+assuming one save quietly overwrote the other.
+
+**Who's fishing.** The Spot Session page opens with a "🎣 Who's fishing" picker -
+John, Matthew, Alex, or "Other" (type in a name, which is then remembered as a real
+dropdown choice from then on - see `data/anglers.csv`/`core/anglers.py`). This is a
+lightweight name tag, not a login - no password, nothing prevents picking someone else's
+name - and it's remembered for the rest of your browser session so you don't have to
+re-pick it every time you log something. Every trip you log is tagged with whoever was
+picked, and Trip History has an **Angler** filter/column so you can see your own trips,
+someone else's, or everyone's combined - all trips still land in the same shared log for
+calibration and analytics either way.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
@@ -799,6 +821,9 @@ core/
   dev_tasks.py              Development punch-list read/write/edit/delete (auto-
                            numbered, numbers never reused) + git commit-back, for
                            the Development page
+  anglers.py                "Who's fishing" roster read/add + git commit-back
+                           (data/anglers.csv) - punch-list #26's lightweight
+                           multi-user support, used by the Spot Session picker
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)
@@ -815,6 +840,8 @@ data/
   dev_tasks_counter.txt    Next punch-list number to hand out (survives item deletes)
   water_quality_log.csv    Locally-recorded USACE survey history (grows ~every 1-2
                            weeks; starts empty, see core/water_quality_log.py)
+  anglers.csv               "Who's fishing" roster (seeded John/Matthew/Alex; grows
+                           any time someone picks "Other" and types a new name)
 tests/                    pytest unit tests for astro/scoring/lures/inventory/lake_spots/onwater/activity_log/dev_tasks
 ```
 
