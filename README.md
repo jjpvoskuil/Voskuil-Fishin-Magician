@@ -169,7 +169,10 @@ this repo that can override it on this hosting.
   written and pushed to that lure's trip-log row right away, not batched until the
   session ends) and reopens a blank form so you're straight back to fishing; the
   button's catch count updates, and an expander under each lure lists everything
-  logged on it so far (each with its own "Remove", in case of a mis-tap). Switching
+  logged on it so far (each with its own "Remove", in case of a mis-tap). Every
+  catch is stamped with the real clock time it was recorded, shown alongside it
+  both here and on Trip History's per-trip detail (e.g. "Largemouth Bass, 11:01 AM,
+  3 lb 4 oz..."). Switching
   baits mid-session doesn't mean starting over: tap **"🔄 Change"** on the lure you're
   putting down and it retires from active use, stamped with the real time you swapped
   off it (its catches and time window stay exactly as logged); then use the "➕ Add a
@@ -179,7 +182,12 @@ this repo that can override it on this hosting.
   Session"** stamps the real end time on every still-active lure's row (already-
   retired lures keep the earlier time they were actually swapped out at) and drops
   you back at a fresh, blank Conditions setup - ready for the next spot or the next
-  session here later. Each lure still lands as its own row in the trip log (no
+  session here later. Next to it, **"❌ Cancel Session"** does the opposite: it
+  discards everything logged so far this session - every lure and fish it created -
+  entirely, rather than keeping it, for testing sessions or just wanting a clean
+  restart without any of it saved. It asks you to confirm first ("Cancel this
+  session? ... can't be undone") since there's no way to get a canceled session's
+  data back. Each lure still lands as its own row in the trip log (no
   combined/bundled entry), so Trip History's per-trip filtering and detail view keep
   working exactly as before; a "📋 Already logged for this spot" line above Conditions
   lists everything already saved for the selected date. It all writes into the same shared

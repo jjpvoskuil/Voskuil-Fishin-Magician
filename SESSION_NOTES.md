@@ -5270,6 +5270,88 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     byte-identical (`md5sum`) before and after every scratch run. Logged as
     punch-list #31 and marked "Done."
 
+93. **Punch-list #32: added a "❌ Cancel Session" button (discards an
+    in-progress session's rows entirely) and a per-fish catch timestamp
+    surfaced in Trip History.** Verbatim ask, delivered mid-turn while #31
+    was still in progress: "Once you are done with the last request, lets
+    add a cancel session button for once a session starts, in case I want
+    to test sessions or simply just want to start a session over without
+    recording any of it. Separately, when I log a caught fish, this should
+    be time stamped and show up in the trip history detail for that fish."
+    Two independent changes to `pages/6_Spot_Session.py` (and one small
+    addition to `pages/4_Trip_History.py`):
+
+    - **Cancel Session.** New `_cancel_session(spot_id)`, placed right
+      next to `_end_session()` for the contrast: where `_end_session()`
+      stamps a real end time on every still-active lure and KEEPS
+      everything logged, `_cancel_session()` calls `core.storage.
+      delete_trip()` (the same row-removal primitive Trip History's own
+      "🗑️ Delete this trip" already uses) on every `trip_id` the active
+      session created, then drops `active_session_{spot_id}` from
+      `session_state` - restoring the exact same clean "no session"
+      state as a fresh page load, with nothing from that session left in
+      `trip_log.csv`. The trip_ids to delete come from the in-memory
+      `active["lures"]` list (not a fresh disk scan), so this can only
+      ever reach the rows THIS session itself created, never anything
+      else logged at this spot earlier. Wired up as a second button next
+      to "⏹ End Session," gated behind the same two-step "are you sure"
+      confirm pattern Trip History's own delete flow established
+      (`cancel_session_confirm_{spot_id}` pending flag -> a warning
+      showing exactly how many lures/fish would be discarded -> "Yes,
+      cancel it" / "Keep session") since this permanently destroys data
+      with no undo, same reasoning as every other irreversible action in
+      this app. A new `session_canceled_banner_{spot_id}` flag (popped
+      and shown once, same pattern as the existing
+      `session_closed_banner_{spot_id}`) tells the angler what happened
+      on the next render: "❌ Session canceled - nothing from that session
+      was saved."
+    - **Fish catch timestamp.** `_new_fish_from_form()` now stamps every
+      fish record with `"caught_at": lake_now_naive().time().isoformat()`
+      at the moment it's built - the same convention `lure_start_time`/
+      `lure_end_time` already use, so it round-trips through
+      `conditions_json` with zero schema changes. New
+      `_format_fish_time()` (Spot Session) /
+      `_format_fish_caught_at()` (Trip History) - genuinely identical one-
+      liners kept as two separate functions rather than a shared import,
+      since each page already has its own small set of private per-fish
+      display helpers and this is consistent with that - render it as
+      "8:15 AM" (Python's `%-I:%M %p`, the same format this page's own
+      time-window labels use) and slot it into `_fish_summary_bits()`
+      (Spot Session's active-session fish list and edit-mode fish list)
+      and Trip History's own separate per-fish bits builder in
+      `_render_trip_detail_body()`, both right after the species name.
+      Both are fail-soft: a fish record logged before this existed simply
+      has no `caught_at` key, and the formatter returns `None` for a
+      missing/unparseable value, which both call sites already treat as
+      "skip this bit" like every other optional per-fish field.
+
+    Verification: full suite still 316 passing (both changes are
+    page-level UI/display logic, no core/ changes, consistent with this
+    page's existing test-coverage pattern). A scratch `AppTest` script
+    (uncommitted) covered both features against real trip-log rows: (1)
+    seeded an active session with two lures/rows, clicked "❌ Cancel
+    Session" then "Yes, cancel it," and confirmed both rows were actually
+    gone from `trip_log.csv`, the active session was cleared from
+    `session_state`, and the page fell back to the pre-session builder (no
+    "⏹ End Session" button present, i.e. genuinely back to a clean slate,
+    not just visually reset); (2) separately confirmed the confirm step's
+    "Keep session" path backs out cleanly with the row still intact and
+    the session still active; (3) recorded a fish via the real "✅ Record"
+    button/`_record_fish()` path and confirmed the saved row's
+    `conditions_json["fish"]` entry carries a real `caught_at` value; (4)
+    loaded Trip History against that same data and confirmed the EXACT
+    formatted time label (not just any "AM"/"PM" substring on the page)
+    appears in its rendered per-trip detail markdown. Also re-ran the
+    standing full-page smoke pass across the entry point and all 7 pages,
+    clean. `data/trip_log.csv` and every other data file confirmed
+    byte-identical (`md5sum`) before and after every scratch run - one
+    early `md5sum` comparison briefly looked like a mismatch on
+    `data/dev_tasks.csv` until double-checked against `git show HEAD:...`,
+    which confirmed it actually matched the just-pushed #31 commit exactly
+    and the "before" snapshot being compared against was simply stale
+    (captured earlier in the same session, before #31's own commit).
+    Logged as punch-list #32 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

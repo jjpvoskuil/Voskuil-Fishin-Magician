@@ -25,7 +25,7 @@ from core.activity_log import (
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES
 from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
-from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip
+from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip, delete_trip
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
@@ -247,6 +247,8 @@ structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(spot.get("location_type"), 
 
 if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
     st.success("✅ Session closed - pick lures below whenever you're ready to start a new one.")
+if st.session_state.pop(f"session_canceled_banner_{spot['spot_id']}", False):
+    st.info("❌ Session canceled - nothing from that session was saved. Pick lures below to start a new one.")
 
 st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
 if editing_trip is not None:
@@ -886,12 +888,35 @@ def _new_fish_from_form(species_label, species_other, weight_lb, length_in, hit_
         "hit_types": hit_types,
         "retrieve_speed": retrieve_speed,
         "retrieve_style": retrieve_style,
+        # Punch-list #32: the real moment this catch record was saved (same
+        # lake_now_naive().time().isoformat() convention as
+        # lure_start_time/lure_end_time above), so Trip History's per-fish
+        # detail can show when each fish in a session was actually caught,
+        # not just the session's own overall start/end time. Older rows
+        # logged before this existed simply have no "caught_at" key -
+        # display code below treats that the same as every other optional
+        # per-fish field.
+        "caught_at": lake_now_naive().time().isoformat(),
     }
+
+
+def _format_fish_time(iso_time_str) -> str:
+    """"08:15:32.123456" -> "8:15 AM" - same %-I:%M %p convention this page
+    already uses for time-window ranges (_segment_option_label). Returns
+    None (not shown) for a blank/unparseable value, e.g. a fish record
+    logged before punch-list #32 added "caught_at"."""
+    try:
+        return dtime.fromisoformat(iso_time_str).strftime("%-I:%M %p")
+    except (TypeError, ValueError):
+        return None
 
 
 def _fish_summary_bits(fish: dict) -> list:
     count = fish.get("count") or 1
     bits = [f"{count} x {fish['species']}" if count > 1 else (fish.get("species") or "Unknown species")]
+    caught_at_label = _format_fish_time(fish.get("caught_at"))
+    if caught_at_label:
+        bits.append(caught_at_label)
     if fish.get("weight_lb"):
         bits.append(format_weight_lb_oz(fish["weight_lb"]))
     if fish.get("length_in"):
@@ -1128,6 +1153,33 @@ def _end_session(spot_id: str):
     )
     st.session_state.pop(active_key, None)
     st.session_state[f"session_closed_banner_{spot_id}"] = True
+
+
+def _cancel_session(spot_id: str):
+    """"❌ Cancel Session" (punch-list #32) - discards an in-progress session
+    entirely, rather than finalizing it like "⏹ End Session" does: deletes
+    every trip_log.csv row this session created (delete_trip(), the same
+    row-removal primitive Trip History's own "🗑️ Delete this trip" uses)
+    and drops active_session_{spot_id} from session_state, leaving no
+    trace of the session behind. For testing sessions, or wanting a clean
+    restart at this spot without keeping anything logged so far. Every row
+    to delete comes from active["lures"] (in-memory, not a fresh disk
+    read), so this only ever touches rows THIS session itself created -
+    it can't reach into some other, unrelated session's data."""
+    active_key = f"active_session_{spot_id}"
+    active = st.session_state.get(active_key)
+    if active is None:
+        return
+    trip_ids = [lure["trip_id"] for lure in active["lures"]]
+    for trip_id in trip_ids:
+        delete_trip(trip_id)
+    _push_or_toast(
+        [TRIP_LOG_PATH],
+        f"Cancel spot session ({active.get('spot_name', spot_id)}) - discard {len(trip_ids)} row(s)",
+        "Session canceled locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+    st.session_state.pop(active_key, None)
+    st.session_state[f"session_canceled_banner_{spot_id}"] = True
 
 
 # Punch-list #29: every lure/fish already lands in data/trip_log.csv the
@@ -1551,9 +1603,38 @@ if active is not None:
                 )
 
     st.divider()
-    if st.button("⏹ End Session", key=f"end_session_{spot['spot_id']}", type="primary", width='stretch'):
+    escol1, escol2 = st.columns(2)
+    if escol1.button("⏹ End Session", key=f"end_session_{spot['spot_id']}", type="primary", width='stretch'):
         _end_session(spot["spot_id"])
         st.rerun()
+
+    # "❌ Cancel Session" (punch-list #32) - discards the whole in-progress
+    # session instead of finalizing it, for testing sessions or wanting a
+    # clean restart without keeping anything logged. This permanently
+    # deletes every trip_log.csv row the session created with no undo, so
+    # it gets the same two-step "are you sure" confirm Trip History's own
+    # "🗑️ Delete this trip" uses, rather than acting on the first click.
+    cancel_pending_key = f"cancel_session_confirm_{spot['spot_id']}"
+    if not st.session_state.get(cancel_pending_key):
+        if escol2.button("❌ Cancel Session", key=f"cancel_session_{spot['spot_id']}", width='stretch'):
+            st.session_state[cancel_pending_key] = True
+            st.rerun()
+    else:
+        _cancel_fish_count = sum(
+            (f.get("count") or 1) for lure in active["lures"] for f in lure["fish"]
+        )
+        st.warning(
+            f"Cancel this session? This permanently discards everything logged so far - "
+            f"{len(active['lures'])} lure(s) and {_cancel_fish_count} fish - and can't be undone."
+        )
+        ccol1, ccol2 = st.columns(2)
+        if ccol1.button("Yes, cancel it", key=f"confirm_cancel_session_{spot['spot_id']}", type="primary", width='stretch'):
+            st.session_state.pop(cancel_pending_key, None)
+            _cancel_session(spot["spot_id"])
+            st.rerun()
+        if ccol2.button("Keep session", key=f"keep_session_{spot['spot_id']}", width='stretch'):
+            st.session_state.pop(cancel_pending_key, None)
+            st.rerun()
 
 else:
     session_build_seq_key = f"session_build_seq_{spot['spot_id']}"
