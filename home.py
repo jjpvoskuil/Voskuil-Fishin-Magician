@@ -12,7 +12,7 @@ from core.weather import lake_today, HOME_TREND_CHART_PAST_DAYS
 from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
-from core.ui import inject_mobile_css
+from core.ui import inject_mobile_css, inject_compact_metric_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
@@ -88,18 +88,45 @@ if water_quality is not None:
     except Exception:
         pass
 
+# Punch-list #16: today's weather-derived score (activity score/est. water
+# temp/moon phase/pressure trend) genuinely does need `bundle` - but lake
+# level and the USACE reading are each fetched independently above and
+# shouldn't disappear just because Open-Meteo happened to be rate-limited
+# or briefly unreachable at the same moment. Computing `today` here, and
+# rendering the metrics row below keyed off whichever of the three sources
+# actually came back, means a weather-only outage (e.g. the 429s Open-Meteo
+# free tier gives when its shared-IP rate limit is hit) still leaves lake
+# level and the USACE reading visible instead of hiding all six behind one
+# gate.
+today = None
 if bundle is not None:
     try:
         today = score_day(bundle, lake_today(), weights=weights)
+    except ValueError as e:
+        # Weather fetched fine, but today's date fell outside the returned window -
+        # e.g. a briefly stale cached bundle right at the lake's local day rollover.
+        st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
 
-        st.subheader("Today at a glance")
-        cols = st.columns(5 if lake_level else 4)
-        cols[0].metric("Activity score", f"{today.overall_score} / 10")
-        cols[1].metric("Est. water temp", f"{today.water_temp_f}°F")
-        cols[2].metric("Moon phase", today.moon.name)
-        cols[3].metric("Pressure trend (24h)", f"{today.pressure_trend_24h:+.1f} hPa")
+if today or lake_level or water_quality:
+    st.subheader("Today at a glance")
+    # Punch-list #16: put the current USACE reading on this same metrics
+    # line (it used to be a separate caption below, cut off entirely
+    # whenever `today` wasn't available even though it's an independent
+    # fetch) and shrink this row's font so up to 6 tiles still fit across
+    # a normal page width instead of wrapping/cramping - see
+    # inject_compact_metric_css()'s own docstring for how the scoping works.
+    with st.container(key="today_at_a_glance_metrics"):
+        inject_compact_metric_css("today_at_a_glance_metrics")
+        n_cols = (4 if today else 0) + (1 if lake_level else 0) + (1 if water_quality else 0)
+        cols = st.columns(n_cols)
+        i = 0
+        if today:
+            cols[i].metric("Activity score", f"{today.overall_score} / 10"); i += 1
+            cols[i].metric("Est. water temp", f"{today.water_temp_f}°F"); i += 1
+            cols[i].metric("Moon phase", today.moon.name); i += 1
+            cols[i].metric("Pressure trend (24h)", f"{today.pressure_trend_24h:+.1f} hPa"); i += 1
         if lake_level:
-            cols[4].metric(
+            cols[i].metric(
                 "Lake level",
                 f"{lake_level.elevation_ft:g} ft",
                 delta=f"{lake_level.elevation_ft - NORMAL_SUMMER_POOL_FT:+.1f} ft vs. normal pool",
@@ -107,34 +134,34 @@ if bundle is not None:
                 help=f"Live reading from USGS site 03310900 ({lake_level.site_name}), "
                      f"as of {lake_level.observed_at.strftime('%-I:%M %p %m/%d')}.",
             )
-
+            i += 1
         if water_quality:
-            st.caption(
-                f"🌡️ Most recent real surface reading (USACE Dam Site survey, "
-                f"{water_quality.observed_at.strftime('%-m/%d')}): "
-                f"{water_quality.water_temp_f}°F, dissolved oxygen "
-                f"{water_quality.do_mg_l:g} mg/l (~{water_quality.do_saturation_pct:.0f}% saturation). "
-                "This is a periodic manual survey, not a live/daily feed - "
-                "the \"Est. water temp\" above is today's model-based estimate."
+            cols[i].metric(
+                "USACE water temp",
+                f"{water_quality.water_temp_f}°F",
+                help=(
+                    f"Most recent real surface reading (USACE Dam Site survey, "
+                    f"{water_quality.observed_at.strftime('%-m/%d')}): dissolved oxygen "
+                    f"{water_quality.do_mg_l:g} mg/l (~{water_quality.do_saturation_pct:.0f}% saturation). "
+                    "This is a periodic manual survey, not a live/daily feed - the \"Est. water temp\" "
+                    "tile (when shown) is today's model-based estimate instead."
+                ),
             )
+            i += 1
 
-        best_segment = max(today.segments, key=lambda s: s.score)
-        st.info(f"Best window today: **{best_segment.name}** ({best_segment.start.strftime('%-I:%M %p')} - "
-                f"{best_segment.end.strftime('%-I:%M %p')}), score {best_segment.score}/10")
+if today:
+    best_segment = max(today.segments, key=lambda s: s.score)
+    st.info(f"Best window today: **{best_segment.name}** ({best_segment.start.strftime('%-I:%M %p')} - "
+            f"{best_segment.end.strftime('%-I:%M %p')}), score {best_segment.score}/10")
 
-        if today.warnings:
-            for w in today.warnings:
-                st.warning(w)
+    if today.warnings:
+        for w in today.warnings:
+            st.warning(w)
 
-        if n_trips > 0:
-            st.caption(f"Model calibration: using {n_trips} logged trip(s) to nudge the default weights.")
-        else:
-            st.caption("Model calibration: no trips logged yet - using default weights. Log a trip to start improving it!")
-
-    except ValueError as e:
-        # Weather fetched fine, but today's date fell outside the returned window -
-        # e.g. a briefly stale cached bundle right at the lake's local day rollover.
-        st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
+    if n_trips > 0:
+        st.caption(f"Model calibration: using {n_trips} logged trip(s) to nudge the default weights.")
+    else:
+        st.caption("Model calibration: no trips logged yet - using default weights. Log a trip to start improving it!")
 
 # Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,
 # now going back HOME_TREND_CHART_PAST_DAYS (14) days rather than 3.

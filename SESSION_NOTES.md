@@ -3947,6 +3947,89 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     follow-up request rather than through the Development page UI) and
     marked it "Done."
 
+78. **Punch-list #16: put the USACE reading on the same metrics line as
+    water temp/lake level, and shrink the font so it fits.** Ask (page:
+    Today/Home): after seeing a live screenshot of the deployed Home page
+    showing a red "Couldn't fetch live weather data right now: 429 Client
+    Error: Too Many Requests" error from Open-Meteo, the angler said "there
+    is no USACE data either. If the data was there, I want the latest
+    reading to be up on the same line as the water temp, lake level, etc.
+    Also note that the font on these readings needs to be smaller so it
+    fits across the page."
+
+    First, explained the 429 itself (not a bug from #15's changes): Open-
+    Meteo's free tier is IP-rate-limited (600 calls/min, 5,000/hour,
+    10,000/day - confirmed via their own pricing page), Streamlit Community
+    Cloud apps commonly share outbound IPs with many other hosted apps, and
+    this app's own weather fetch is cached for an hour so it alone comes
+    nowhere close to those thresholds - most likely either shared-IP
+    congestion from unrelated apps, or a burst right after the redeploy
+    that shipped #15 (a restart clears Streamlit's in-memory cache).
+
+    But investigating "there is no USACE data either" found a real bug, not
+    just a transient 429: the entire "Today at a glance" block - all 4
+    weather-derived metrics AND the lake-level tile AND the USACE caption -
+    lived inside `if bundle is not None: try: ...`, even though `lake_level`
+    and `water_quality` are both fetched independently, several lines
+    earlier, in their own separate try/excepts. So a weather-only failure
+    (like the 429 just seen) hid lake level and the USACE reading too, even
+    on a rerun where both of those fetched perfectly fine on their own -
+    exactly what the angler was seeing.
+
+    Fixed by decoupling: `today = score_day(...)` is still only computed
+    when `bundle` is available, but the metrics-row rendering now triggers
+    on `if today or lake_level or water_quality:` and builds a
+    `st.columns(n_cols)` row sized to however many of the (up to 6) tiles
+    actually have data - each source contributes its own tile(s)
+    independently instead of the whole row living or dying with the
+    weather fetch. The "Best window today" info box, warnings, and
+    calibration caption stay gated on `today` specifically (those
+    genuinely do need the scored forecast). The USACE reading moved from a
+    separate `st.caption()` below the row into its own `st.metric("USACE
+    water temp", ...)` tile inside that same row, with dissolved-oxygen
+    mg/l, saturation %, and the survey date moved into the tile's `help=`
+    tooltip (hover/tap) rather than a full sentence of caption text below -
+    both because that's what "same line" means literally, and because a
+    6-tile row has no room left for a paragraph underneath each one.
+
+    For the font-size ask, added `core.ui.inject_compact_metric_css
+    (container_key, value_rem, label_rem)` - wraps `st.metric()`'s
+    `stMetricValue`/`stMetricLabel`/`stMetricDelta` CSS testids in a
+    font-size override, scoped to one `st.container(key=...)` wrapper
+    (Streamlit renders that as a `st-key-<key>` class - confirmed against
+    the installed Streamlit 1.61.1's own `elements/layouts.py` docstrings)
+    rather than `inject_mobile_css()`'s existing site-wide `:nth-child(3)`
+    column-count selector, which would have also shrunk unrelated wide rows
+    on other pages (e.g. the 7-Day Forecast's per-day and time-of-day
+    rows). home.py's "Today at a glance" row is now wrapped in
+    `st.container(key="today_at_a_glance_metrics")` with
+    `inject_compact_metric_css("today_at_a_glance_metrics")` called inside
+    it, so only this one row's metric font shrinks (value ~1.15rem, label/
+    delta ~0.72rem, down from Streamlit's default ~2.25rem/~0.875rem) -
+    six tiles now fit across a normal desktop width without wrapping.
+
+    No new pytest-level tests needed (this is page-layout/CSS, not new
+    core logic), but ran a scratch `AppTest` script (not committed) against
+    `home.py` covering exactly the bug and the fix: (1) everything
+    succeeds - confirms all 6 metric tiles render in the expected order
+    (`Activity score, Est. water temp, Moon phase, Pressure trend (24h),
+    Lake level, USACE water temp`); (2) weather fetch raises (simulating
+    the 429) but lake level and USACE both succeed - confirms "Today at a
+    glance" STILL renders, with exactly `[Lake level, USACE water temp]`
+    as its only two tiles, alongside the existing weather `st.error()` -
+    this is the actual regression case, and it now passes; (3) everything
+    fails - confirms no exception and no "Today at a glance" subheader at
+    all (the `if today or lake_level or water_quality:` guard correctly
+    suppresses an empty section rather than rendering an empty row).
+    `python3 -m pytest tests/ -q` still passes at 261 (unchanged - no test
+    file touched this entry). Also ran the standard `AppTest` smoke pass
+    across the app entry point and every page reachable in this sandbox
+    (same set as entries 73-77) - all rendered with no exception.
+    `data/trip_log.csv`/`data/segment_score_freeze.csv`/
+    `data/water_quality_log.csv`/`data/lure_inventory.csv` confirmed
+    byte-identical (`md5sum`) before and after every run. Logged this ask
+    as punch-list item #16 and marked it "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
