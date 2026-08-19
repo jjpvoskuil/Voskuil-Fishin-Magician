@@ -54,7 +54,7 @@ of whether this works.
 """
 from __future__ import annotations
 import time
-from urllib.parse import quote_plus
+from urllib.parse import quote
 from curl_cffi import requests
 
 # A specific recent Chrome version curl_cffi knows how to impersonate the
@@ -188,5 +188,20 @@ def search_page_url(query: str) -> str:
     description/price/image/categories), so rather than fabricate one, this
     links to Cabela's own live search results for the same query text a
     result was found with - the product should be at or near the top of
-    that search."""
-    return f"https://www.cabelas.com/search?q={quote_plus((query or '').strip())}"
+    that search.
+
+    Punch-list #36: this used to build a `/search?q=...` URL (a real-
+    looking, but wrong, guess at Cabela's search route) with `quote_plus()`
+    (spaces encoded as literal `+`), which 404'd on Cabela's own site no
+    matter how the query was encoded - confirmed live: `/search?q=Gambler`
+    alone 404s, `+`-vs-`%20`-vs-raw `/` in "5/16 oz." made no difference.
+    Cabela's real site search, confirmed by actually driving their live
+    search box and watching where it navigates to, is a single-page-app
+    route: `/SearchDisplay#q=<query>` - a URL FRAGMENT (`#...`), not a
+    query string (`?...`), which is also why `+` was never going to be
+    read as a space here even with correct encoding (fragments aren't
+    form-urlencoded the way `application/x-www-form-urlencoded` query
+    strings are - only `%20` reliably means space in one). `quote()`
+    (percent-encodes spaces as `%20`, matching what a real click through
+    their own search box produces) replaces `quote_plus()` accordingly."""
+    return f"https://www.cabelas.com/SearchDisplay#q={quote((query or '').strip())}"

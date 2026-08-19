@@ -160,14 +160,24 @@ def test_search_lures_impersonates_a_real_browser_tls_fingerprint(monkeypatch):
 
 
 def test_search_page_url_url_encodes_the_query():
+    # Punch-list #36: real route is Cabela's SPA search
+    # (/SearchDisplay#q=...), confirmed by actually driving their live
+    # search box - the previous /search?q=... guess 404'd unconditionally,
+    # even for a single bare word with no special characters at all.
+    # Spaces must be %20 (quote()), not literal + (quote_plus()) - a URL
+    # FRAGMENT isn't form-urlencoded the way a query string is, so a raw
+    # "+" would show up as a literal plus sign in Cabela's own search box
+    # instead of being read as a space (reproduced live, see
+    # SESSION_NOTES.md).
     url = search_page_url("Strike King 3XD Chartreuse/Black")
-    assert url.startswith("https://www.cabelas.com/search?q=")
-    assert "Strike+King+3XD" in url or "Strike%20King%203XD" in url
+    assert url.startswith("https://www.cabelas.com/SearchDisplay#q=")
+    assert "Strike%20King%203XD" in url
+    assert "+" not in url
     assert " " not in url
 
 
 def test_search_page_url_handles_blank_query():
     # Shouldn't raise on None/empty - a degenerate but harmless search link
     # rather than an error, matching search_lures()'s own fail-soft contract.
-    assert search_page_url("") == "https://www.cabelas.com/search?q="
-    assert search_page_url(None) == "https://www.cabelas.com/search?q="
+    assert search_page_url("") == "https://www.cabelas.com/SearchDisplay#q="
+    assert search_page_url(None) == "https://www.cabelas.com/SearchDisplay#q="

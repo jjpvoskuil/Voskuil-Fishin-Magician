@@ -720,7 +720,15 @@ top so the 7-Day Forecast page's many recommendation calls don't each trigger a 
 lookup). The mapped product data doesn't include a stable per-product page URL (Coveo's
 `raw` fields don't have one that's been found), so each suggestion links to Cabela's own
 live site search for that product's brand + name instead of a direct product page
-(`core.cabelas_lookup.search_page_url()`).
+(`core.cabelas_lookup.search_page_url()`). That link points at Cabela's real search
+route, `https://www.cabelas.com/SearchDisplay#q=<query>` (a URL fragment, since their
+search is a single-page-app view, not a separate page) with spaces percent-encoded as
+`%20` - confirmed by actually driving Cabela's own search box and watching where it
+navigated to, after a plausible-looking `/search?q=...` guess with `+`-for-space
+encoding turned out to 404 unconditionally (even for a single bare word), and to leak
+literal `+` characters into Cabela's own search box once there, since a URL fragment
+isn't form-urlencoded the way a query string is - only `%20` reliably means space in
+one.
 
 ### How inventory feeds the forecast
 
