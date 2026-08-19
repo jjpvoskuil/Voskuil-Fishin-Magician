@@ -4522,6 +4522,204 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     deploy, since this sandbox can't reach Cabela's at all to verify it
     directly.
 
+85. **Punch-list #23: redesign the Spot Session page's whole logging flow -
+    one consolidated conditions block (weather-defaulted), pick lures
+    before starting, a locked-in Start/End Session, and a per-catch popup
+    with weight/length sliders and a multi-select "type of hit" field.**
+    Ask (page: Spot Session): "Lets work on Spot session page again. This
+    is the way I want it to flow. I want to log all current conditions at
+    once, including the conditions when I start to use a lure. So the top
+    of the page will have all the current condition fields and all the
+    fields from conditions while using lure in one block in the
+    beginning... Also, for all the weather related conditions default the
+    field to current weather grabbed from the weather website you are
+    using (with the ability to override). After that is entered, I want to
+    then be able to get lure suggestions that I can select. If I don't
+    select any of the recommendations, I want to then go to my lure
+    inventory and pick the lures I want to use. I also want to be able to
+    select multiple lures... Once all that is selected, I want to click a
+    button that starts the session. This will lock in the start time and
+    the time window... Once the session starts, as I catch fish, I want to
+    be able to click on a lure I am using button... that will pop up a
+    fish entry window to enter lbs and inches these should be sliders...
+    type of fish drop down... and type of hit... multiple choice... Once I
+    log a fish, I hit a button to record that fish and go back to fishing
+    ... There should then be a button that ends the session. This will
+    lock in the time the session ended and open up a new session start
+    page." Four clarifying questions were asked up front (fish-entry
+    fields, species-list flexibility, save timing, start-time-capture
+    semantics); only the first was answered directly ("lets also keep the
+    retrieve style but remove the depth" - interpreted as keep both
+    `retrieve_style` and `retrieve_speed`, drop `depth_ft`), so the other
+    three were carried forward as explicit stated assumptions (allow an
+    "Other" species option; save each fish immediately on Record rather
+    than batching; auto-capture the real start time when Start Session is
+    clicked rather than a pre-session manual field) and confirmed by the
+    angler afterward ("all the assumptions look good").
+
+    This was the single largest change of the session - effectively a
+    full rewrite of `pages/6_Spot_Session.py` (previously 1434 lines) plus
+    new shared vocabulary in `core/onwater.py`, `core/activity_log.py`,
+    and `core/lures.py`. Broken into two rounds: first the small,
+    independently-testable building blocks, then the page rewrite itself.
+
+    **Weather-default reverse mappings (`core/onwater.py`):** the module
+    already had forward mappings (band label -> representative mph/cloud%/
+    precip proxy, for driving the scoring formula from a hand-picked
+    dropdown) but nothing going the other direction (a live forecast
+    reading -> which dropdown option to default to). Added
+    `light_condition_for_cloud_pct(pct)` (bucketed at the midpoints between
+    each band's own existing proxy value, so a cloud% that exactly matches
+    a band's proxy round-trips back to that same band), `precipitation_
+    option_for_forecast(precip_in, precip_prob_pct)` (same midpoint
+    approach across both the amount and probability proxies - either
+    signal alone crossing its threshold is enough to bump the bucket, so a
+    confident probability with a low modeled amount still warns the
+    angler), and `wind_direction_for_degrees(deg)` (standard 8-point
+    45-degree-sector compass bucketing; deliberately can't return "Calm"
+    from direction alone, callers should check the paired wind-speed
+    reading for that). 26 new/updated tests in `tests/test_onwater.py`,
+    including explicit round-trip-through-each-band-own-proxy cases for
+    both reverse mappings.
+
+    **New fish-entry vocabulary (`core/activity_log.py`):**
+    `FISH_SPECIES_OPTIONS` replaced with the angler's exact 6-species list
+    (Largemouth/White/Crappie/Smallmouth/Walleye/Catfish) plus a trailing
+    "Other" catch-all (confirmed via `grep` this constant is only ever
+    read by this one page, so the swap was safe); new `HIT_TYPE_OPTIONS`
+    (Hard hit/Light hit/Double tap/Swallowed/Fouled/Surface hit, used as a
+    multiselect since a strike can legitimately match more than one); new
+    `WEIGHT_SLIDER_OPTIONS` ("<1 lb" through "10 lb") and
+    `LENGTH_SLIDER_OPTIONS` ("<13 in" through "26+ in") for the two
+    `st.select_slider` fields the angler asked for, each with a
+    `..._for_slider_option()` reverse-conversion helper back to the
+    decimal lb/in this app stores everywhere else - same representative-
+    value-per-band approach `core.onwater`'s `wind_mph_for_band()`/
+    `precipitation_proxy()` already established (e.g. "<1 lb" stores as
+    0.5 lb, "26+ in" stores as 27.0 in). New tests in
+    `tests/test_activity_log.py` cover every option's round-trip plus
+    blank/unrecognized-input handling.
+
+    **`item_id` added to `LureBlock.owned_items` (`core/lures.py`):** the
+    old edit-mode code matched a saved lure back to an inventory row by
+    re-parsing its display label (`_find_inventory_item_by_label()`,
+    fragile against renames), because `_group_owned_by_category()` never
+    carried the row's real `item_id` through. Added it (confirmed safe via
+    `grep` of `tests/test_lures.py` - no test asserts the full owned-item
+    key set, only individual keys) so the new "+ Add to session" quick-add
+    buttons on a lure recommendation card can add the exact inventory row
+    directly, no label-matching needed.
+
+    **The page rewrite itself.** Old architecture: a single "Conditions
+    right now" section gated the whole score/recommendation panel behind
+    a required "session start time" field, entered manually before
+    fishing (an awkward fit for "I'm already standing at the water"); a
+    separate, largely-duplicate "Conditions during this lure use"
+    sub-section (a second Wind field, a near-duplicate forage-seen field);
+    one lure logged at a time via an "Add results" expander with "Log
+    this lure"/"Log this session" buttons; two separate, mutually
+    exclusive "Add fish" flows (a full scoreable form vs. a species+count-
+    only "small fish" shortcut) with a manual dash-separated "lb - oz"
+    text field for weight and no way to record how a fish hit.
+
+    New architecture: one `render_conditions_block()` merges both old
+    sections into a single set of fields (Water temp, Secchi depth, stain
+    color, stirred up, one Wind field, wind direction, Sky conditions,
+    Precipitation, one Forage-seen field, Fish activity, Forage activity,
+    Fish-holding depth), with every weather-related field's *first-ever*
+    default coming from `_weather_defaults()` (nearest-hour row from
+    `core.weather.hourly_rows_for_date()`, converted via the new
+    `core.onwater` reverse mappings above, water temp from the existing
+    `estimate_water_temp_f()`) rather than a hardcoded literal - always
+    still a normal, freely overridable widget from then on (same
+    `st.session_state.setdefault()`-then-bare-`key=` pattern the old page
+    already used, just seeded from a live reading instead of a constant).
+    A live "Suggestions for right now" panel (score + `core.lures.recommend()`
+    output) is always shown once conditions are entered, computed against
+    the current wall-clock time/segment as a rolling preview - no more
+    "fill in a start time first" gate, since there's no separate
+    conditions step anymore.
+
+    Lure selection is new: recommendation cards (still rendered via the
+    unmodified `core.ui.render_lure_block()`, so this stays in sync with
+    the 7-Day Forecast page) get a "+ Add to session" button per owned
+    item; a new `_multi_lure_picker()` (multi-select sibling of the
+    existing single-select `_visual_lure_picker()`) offers the whole
+    tackle box as a searchable card grid where each card toggles
+    membership instead of picking exactly one; a manual "not in my
+    inventory" text entry rounds it out. All three write into the same
+    running "lures for this session" list (removable, shown above the
+    picker), which `▶ Start Session` requires to be non-empty.
+
+    `▶ Start Session` captures `lake_now_naive().time()` as the real start
+    time, re-derives the time window from it via the existing
+    `_guess_segment()`, appends one `TripEntry` per selected lure (empty
+    fish list, `lure_end_time=None`), and stores an `active_session_<spot_id>`
+    dict in `session_state` (trip_id/label/entry_kwargs/fish per lure) -
+    committed and pushed once as a single batch. While a session is
+    active, the page shows one button per lure (with a running catch
+    count) instead of the setup form; clicking one opens a fish-entry
+    `st.dialog` (weight/length `st.select_slider`s, species dropdown,
+    `HIT_TYPE_OPTIONS` multiselect, kept `retrieve_style`+`retrieve_speed`,
+    no `depth_ft`) - `st.dialog` was the correct primitive for exactly
+    this "tap a lure, get a popup, keep fishing" interaction Streamlit
+    offers. Recording a catch immediately rebuilds and `update_trip()`s
+    that one lure's row (fish list, `fish_caught`, `biggest_fish_lb`) and
+    pushes - per the angler's confirmed assumption, no batching until
+    session end. Already-recorded fish are listed under each lure button
+    (with their own Remove, for correcting a mis-tap without leaving the
+    page). `⏹ End Session` stamps `lure_end_time` on every lure's row in
+    one more batched push, clears the active-session state, and shows a
+    one-shot "session closed" banner on the fresh setup view that follows.
+
+    Trip History's "Edit this trip" link still works (simplified, not
+    dropped) - editing reuses the exact same `render_conditions_block()`
+    (seeded from the trip's own saved values, with backward-compatible
+    fallbacks for both the old separate `wind_band`/`wind_band_logged`
+    fields), a single-lure `_visual_lure_picker()`, a kept (edit-only)
+    trailer sub-flow for correcting older trips' trailer data, and an
+    inline (non-dialog) fish-list editor using the same new per-fish
+    fields - `Save changes` calls `update_trip()` once, same as before.
+    Old two-mode (scoreable vs. "small fish" count-only) fish entry is
+    gone everywhere, including edit mode, in favor of one consistent
+    per-fish form. Trailers were deliberately dropped from the *new*
+    multi-lure session-setup flow specifically (the angler's redesign ask
+    never mentioned them) - edit mode still supports them for legacy data,
+    and they're straightforward to add back to session setup later if
+    wanted. `pages/4_Trip_History.py`'s per-fish renderer got one small
+    additive change - it now shows a fish's `hit_types` list when present,
+    alongside the presentation info it already showed.
+
+    Verification: `python3 -m pytest -q` passes 295 (276 + 10 onwater + 9
+    activity_log). Full scratch `AppTest` walkthroughs against this page
+    specifically (not committed) confirmed both paths end-to-end against
+    real saved data: (1) new session - selected a spot, entered
+    conditions, quick-added a recommended owned lure, Start Session
+    (verified the new `TripEntry` row and its `conditions_json`), opened
+    the fish dialog, filled every field, Record (verified `fish_caught`/
+    `biggest_fish_lb`/the fish list all updated on that exact row), End
+    Session (verified `lure_end_time` got stamped); (2) edit mode against
+    a real *legacy*-schema logged trip (old separate `wind_band`/
+    `wind_band_logged` fields) - confirmed every field prefilled
+    correctly (including re-matching the previously-logged lure by label)
+    and Save changes updated that row in place. One real `AppTest`-only
+    quirk surfaced and worked around during this verification, worth
+    recording: `st.dialog`'s "stay open across an interaction inside it"
+    behavior isn't fully simulated by `AppTest` bare mode - the SAME
+    opening button has to be re-clicked (from a freshly-fetched widget
+    reference, not a stale one) on every single subsequent `.run()` for
+    the simulated dialog to keep rendering, unlike real browser sessions
+    where Streamlit tracks that internally. Confirmed this is a test-
+    harness-only quirk (the documented, standard `st.dialog` pattern this
+    page uses is unchanged from Streamlit's own official example) and not
+    a bug in the shipped code. `data/trip_log.csv`/
+    `data/segment_score_freeze.csv`/`data/water_quality_log.csv`/
+    `data/lure_inventory.csv` confirmed byte-identical (`md5sum`) before
+    and after every test run that touched them (the `AppTest` walkthroughs
+    above did write real rows while running - reverted via `git checkout`
+    immediately after each). Logged this ask as punch-list item #23 and
+    marked it "Done".
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

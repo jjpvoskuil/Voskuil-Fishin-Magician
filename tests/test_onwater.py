@@ -1,8 +1,10 @@
 from core.lures import WATER_CLARITY_OPTIONS
 from core.onwater import (
     LIGHT_CONDITIONS, PRECIPITATION_OPTIONS, STAIN_COLOR_OPTIONS, WIND_BAND_LABELS, WIND_BANDS,
-    cloud_proxy_for_light_condition, precipitation_proxy, resolve_water_clarity,
-    visibility_band, water_temp_band, wind_band, wind_mph_for_band,
+    WIND_DIRECTIONS,
+    cloud_proxy_for_light_condition, light_condition_for_cloud_pct, precipitation_option_for_forecast,
+    precipitation_proxy, resolve_water_clarity, visibility_band, water_temp_band, wind_band,
+    wind_direction_for_degrees, wind_mph_for_band,
 )
 
 
@@ -123,3 +125,75 @@ def test_precipitation_proxy_covers_every_option():
 def test_stain_color_options_are_valid_lure_engine_clarities():
     for s in STAIN_COLOR_OPTIONS:
         assert s in WATER_CLARITY_OPTIONS
+
+
+# --- Spot Session weather auto-fill reverse mappings -------------------------
+
+def test_light_condition_for_cloud_pct_round_trips_each_bands_own_proxy():
+    # Each band's own proxy value (see _LIGHT_CONDITION_CLOUD_PROXY) should
+    # bucket back to that same band.
+    for label in LIGHT_CONDITIONS:
+        proxy = cloud_proxy_for_light_condition(label)
+        assert light_condition_for_cloud_pct(proxy) == label
+
+
+def test_light_condition_for_cloud_pct_boundaries():
+    assert light_condition_for_cloud_pct(0) == "Clear / Sunny"
+    assert light_condition_for_cloud_pct(12.5) == "Clear / Sunny"
+    assert light_condition_for_cloud_pct(12.6) == "Mostly Clear"
+    assert light_condition_for_cloud_pct(32.5) == "Mostly Clear"
+    assert light_condition_for_cloud_pct(32.6) == "Partly Cloudy"
+    assert light_condition_for_cloud_pct(60.0) == "Partly Cloudy"
+    assert light_condition_for_cloud_pct(60.1) == "Mostly Cloudy"
+    assert light_condition_for_cloud_pct(85.0) == "Mostly Cloudy"
+    assert light_condition_for_cloud_pct(85.1) == "Overcast"
+    assert light_condition_for_cloud_pct(100) == "Overcast"
+
+
+def test_light_condition_for_cloud_pct_handles_missing_reading():
+    assert light_condition_for_cloud_pct(None) in LIGHT_CONDITIONS
+
+
+def test_precipitation_option_for_forecast_round_trips_each_options_own_proxy():
+    for label in PRECIPITATION_OPTIONS:
+        precip_in, precip_prob_pct = precipitation_proxy(label)
+        assert precipitation_option_for_forecast(precip_in, precip_prob_pct) == label
+
+
+def test_precipitation_option_for_forecast_either_signal_can_trigger_a_bucket():
+    # A confident probability with a near-zero modeled amount should still
+    # bump the bucket, and vice versa.
+    assert precipitation_option_for_forecast(0.0, 90.0) == "Heavy rain / storm"
+    assert precipitation_option_for_forecast(1.5, 0.0) == "Heavy rain / storm"
+    assert precipitation_option_for_forecast(0.0, 0.0) == "None"
+
+
+def test_precipitation_option_for_forecast_handles_missing_readings():
+    assert precipitation_option_for_forecast(None, None) == "None"
+
+
+def test_wind_direction_for_degrees_compass_points():
+    assert wind_direction_for_degrees(0) == "N"
+    assert wind_direction_for_degrees(360) == "N"
+    assert wind_direction_for_degrees(45) == "NE"
+    assert wind_direction_for_degrees(90) == "E"
+    assert wind_direction_for_degrees(135) == "SE"
+    assert wind_direction_for_degrees(180) == "S"
+    assert wind_direction_for_degrees(225) == "SW"
+    assert wind_direction_for_degrees(270) == "W"
+    assert wind_direction_for_degrees(315) == "NW"
+
+
+def test_wind_direction_for_degrees_boundary_wraps_correctly():
+    assert wind_direction_for_degrees(22.4) == "N"
+    assert wind_direction_for_degrees(22.6) == "NE"
+    assert wind_direction_for_degrees(348.0) == "N"
+
+
+def test_wind_direction_for_degrees_handles_missing_reading():
+    assert wind_direction_for_degrees(None) == "Variable"
+
+
+def test_wind_direction_for_degrees_only_returns_documented_compass_points():
+    for deg in range(0, 360, 5):
+        assert wind_direction_for_degrees(deg) in WIND_DIRECTIONS

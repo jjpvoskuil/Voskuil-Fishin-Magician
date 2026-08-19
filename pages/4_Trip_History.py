@@ -281,6 +281,13 @@ def _render_trip_detail_body(row, key_prefix):
                 bits.append(f"{fish['length_in']:g} in")
             if fish.get("depth_ft"):
                 bits.append(f"{fish['depth_ft']:g} ft deep")
+            if fish.get("hit_types"):
+                # New per-fish field from the Spot Session redesign - a
+                # multiple-choice "how did the fish take it" record (a
+                # strike can legitimately be more than one of these, e.g.
+                # "light hit" that turned out "fouled"). Only present on
+                # trips logged after that redesign shipped.
+                bits.append(", ".join(fish["hit_types"]))
             presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
             if presentation:
                 bits.append(presentation)

@@ -77,11 +77,77 @@ RETRIEVE_STYLE_OPTIONS = [
 ]
 
 # Per-fish species picker for individual catch records - the angler's own
-# on-the-water categorization, not a strict biological survey list (Nolin's
-# real KDFWR-regulated species are largemouth/smallmouth/white bass, but this
-# vocabulary matches what was specifically asked for, and "Other" makes it
-# free-text-extensible for anything not listed).
-FISH_SPECIES_OPTIONS = ["Largemouth Bass", "Spotted Bass", "Striped Bass", "Other (type in species)"]
+# on-the-water categorization, not a strict biological survey list. Replaced
+# (Spot Session redesign) with the exact 6-species list the angler asked
+# for; "Other" is kept as a trailing catch-all so anything not on the list
+# is still free-text-extensible rather than unrepresentable.
+FISH_SPECIES_OPTIONS = [
+    "Largemouth Bass", "White Bass", "Crappie", "Smallmouth Bass", "Walleye", "Catfish",
+    "Other (type in species)",
+]
+
+# Multiple-choice "how did the fish take it" picker for individual catch
+# records (Spot Session redesign) - a fish can legitimately match more than
+# one of these in the same strike (e.g. a "light hit" that turned out
+# "fouled"), so the Spot Session page presents this as a multiselect rather
+# than a single dropdown.
+HIT_TYPE_OPTIONS = ["Hard hit", "Light hit", "Double tap", "Swallowed", "Fouled", "Surface hit"]
+
+# Weight/length pickers for individual catch records (Spot Session
+# redesign) - presented as st.select_slider bands rather than raw number
+# inputs, since a rod-side fish entry is faster/easier to do by eye/feel
+# against a short labeled scale than by typing a precise decimal. Same
+# representative-value-per-band approach core.onwater's wind_mph_for_band()/
+# precipitation_proxy() already use for their own hand-picked pickers - see
+# weight_lb_for_slider_option()/length_in_for_slider_option() below for the
+# reverse mapping back to the decimal lb/in this app stores everywhere else.
+WEIGHT_SLIDER_OPTIONS = ["<1 lb", "1 lb", "2 lb", "3 lb", "4 lb", "5 lb", "6 lb", "7 lb", "8 lb", "9 lb", "10 lb"]
+
+LENGTH_SLIDER_OPTIONS = [
+    "<13 in", "13 in", "14 in", "15 in", "16 in", "17 in", "18 in", "19 in", "20 in",
+    "21 in", "22 in", "23 in", "24 in", "25 in", "26+ in",
+]
+
+
+def weight_lb_for_slider_option(option) -> Optional[float]:
+    """Converts one of WEIGHT_SLIDER_OPTIONS to a decimal-pound value for
+    storage (core.storage.TripEntry / Trip History's existing decimal-lb
+    schema, same as the old "Weight (lb)" number input used). "<1 lb" stores
+    as 0.5 lb (that open-low-end band's representative value) - every other
+    option is already a literal whole-pound reading. Returns None for a
+    blank/unrecognized option."""
+    if not option:
+        return None
+    s = str(option).strip().lower().replace("lb", "").strip()
+    if s == "<1":
+        return 0.5
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def length_in_for_slider_option(option) -> Optional[float]:
+    """Converts one of LENGTH_SLIDER_OPTIONS to a decimal-inch value for
+    storage, same representative-value approach as
+    weight_lb_for_slider_option() above. "<13 in" stores as 12.0 in and
+    "26+ in" stores as 27.0 in (each band's representative value); every
+    other option is already a literal whole-inch reading. Returns None for a
+    blank/unrecognized option."""
+    if not option:
+        return None
+    s = str(option).strip().lower().replace("in", "").strip()
+    if s == "<13":
+        return 12.0
+    if s.endswith("+"):
+        try:
+            return float(s[:-1].strip()) + 1.0
+        except ValueError:
+            return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 # --- Weight display: decimal lb (how it's entered/stored) <-> lb-oz (how it's
