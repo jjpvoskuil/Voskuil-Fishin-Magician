@@ -142,7 +142,7 @@ if today or lake_level or water_quality_display:
     # inject_compact_metric_css()'s own docstring for how the scoping works.
     with st.container(key="today_at_a_glance_metrics"):
         inject_compact_metric_css("today_at_a_glance_metrics")
-        n_cols = (4 if today else 0) + (1 if lake_level else 0) + (1 if water_quality_display else 0)
+        n_cols = (4 if today else 0) + (1 if lake_level else 0) + (2 if water_quality_display else 0)
         cols = st.columns(n_cols)
         i = 0
         if today:
@@ -161,22 +161,38 @@ if today or lake_level or water_quality_display:
             )
             i += 1
         if water_quality_display:
+            # Punch-list #18: dissolved-oxygen saturation gets its own tile
+            # too now (it used to only be reachable via the water-temp
+            # tile's hover text) - both tiles share the same underlying
+            # reading and the same "is this fresh or a fallback" framing,
+            # so build that shared help text once.
             live_note = (
                 "USACE's own site couldn't be reached just now, so this is the last reading logged locally - "
                 if not is_live_reading else ""
+            )
+            survey_note = (
+                f"Most recent real surface reading (USACE Dam Site survey, "
+                f"{water_quality_display.observed_at.strftime('%-m/%d')}). {live_note}"
+                "This is a periodic manual survey, not a live/daily feed."
             )
             cols[i].metric(
                 "USACE water temp",
                 f"{water_quality_display.water_temp_f}°F",
                 help=(
-                    f"Most recent real surface reading (USACE Dam Site survey, "
-                    f"{water_quality_display.observed_at.strftime('%-m/%d')}): dissolved oxygen "
-                    f"{water_quality_display.do_mg_l:g} mg/l "
-                    f"(~{water_quality_display.do_saturation_pct:.0f}% saturation). "
-                    f"{live_note}"
-                    "This is a periodic manual survey, not a live/daily feed - the \"Est. water temp\" "
-                    "tile (when shown) is today's model-based estimate instead."
+                    f"{survey_note} Dissolved oxygen {water_quality_display.do_mg_l:g} mg/l "
+                    f"(~{water_quality_display.do_saturation_pct:.0f}% saturation) - see the \"USACE DO "
+                    "saturation\" tile. The \"Est. water temp\" tile (when shown) is today's separate "
+                    "model-based estimate."
                 ),
+            )
+            i += 1
+            cols[i].metric(
+                "USACE DO saturation",
+                f"{water_quality_display.do_saturation_pct:.0f}%",
+                help=f"{survey_note} Dissolved oxygen {water_quality_display.do_mg_l:g} mg/l, "
+                     f"{water_quality_display.do_saturation_pct:.0f}% of full saturation at this "
+                     "temperature/elevation - a summer reservoir often runs well over 100% during the "
+                     "day from photosynthetic supersaturation.",
             )
             i += 1
 
@@ -263,18 +279,30 @@ except Exception:
 if wq_log:
     with st.expander("🌡️ USACE surface reading history", expanded=False):
         if len(wq_log) == 1:
+            # Punch-list #18: with only one point there's nothing to chart
+            # a real trend from yet, but that's no reason to show nothing
+            # AT ALL - the one real reading on hand is worth displaying,
+            # just as tiles instead of a line chart (a "chart" of a single
+            # point is meaningless/misleading anyway).
+            only = wq_log[0]
+            wq_c1, wq_c2, wq_c3 = st.columns(3)
+            wq_c1.metric("Surface water temp", f"{only['water_temp_f']:g}°F")
+            wq_c2.metric("Dissolved oxygen", f"{only['do_mg_l']:g} mg/l")
+            wq_c3.metric("DO saturation", f"{only['do_saturation_pct']:.0f}%")
             st.caption(
-                f"Only one USACE survey logged so far ({wq_log[0]['observed_at'].strftime('%-m/%d/%Y')}) - "
+                f"Only one USACE survey logged so far ({only['observed_at'].strftime('%-m/%d/%Y')}) - "
                 "this trend fills in as more surveys are published, roughly every 1-2 weeks. Real recorded "
                 "history only, never backfilled with guessed past readings."
             )
         else:
             wq_idx = [r["observed_at"].strftime("%-m/%d/%y") for r in wq_log]
-            wq_c1, wq_c2 = st.columns(2)
+            wq_c1, wq_c2, wq_c3 = st.columns(3)
             wq_c1.caption("Surface water temp (°F)")
             wq_c1.line_chart(pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx))
             wq_c2.caption("Dissolved oxygen (mg/l)")
             wq_c2.line_chart(pd.Series([r["do_mg_l"] for r in wq_log], index=wq_idx))
+            wq_c3.caption("DO saturation (%)")
+            wq_c3.line_chart(pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx))
             st.caption(
                 f"{len(wq_log)} USACE surveys logged since this trend started tracking - grows by roughly "
                 "one point every 1-2 weeks as new surveys are published. Real recorded history only, never "
