@@ -12,6 +12,7 @@ from core.weather import lake_today, HOME_TREND_CHART_PAST_DAYS
 from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
+from core.lake_water_quality import SurfaceWaterQuality
 from core.ui import inject_mobile_css, inject_compact_metric_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
@@ -88,6 +89,30 @@ if water_quality is not None:
     except Exception:
         pass
 
+# Punch-list #16 (revised): the live USACE fetch above has been failing on
+# the deployed app the same way it fails from this dev sandbox (no network
+# path to lrl-wc.usace.army.mil at all - see core/lake_water_quality.py's
+# docstring), so `water_quality` is None on effectively every real page
+# load even though a real reading (from Aug 6) is already sitting in
+# data/water_quality_log.csv. Rather than require a fresh successful fetch
+# on THIS run just to show a periodic, dated survey - which USACE only
+# republishes every 1-2 weeks anyway, so "fresh this run" was never really
+# the point - fall back to the most recent logged reading whenever the
+# live fetch didn't come back with anything. The tile's own help text
+# always shows the real survey date either way, so this never claims to be
+# more current than it is; `is_live_reading` just lets the tile say
+# clearly when it's showing a cached fallback vs. a fetch that succeeded
+# just now.
+water_quality_display = water_quality
+is_live_reading = water_quality is not None
+if water_quality_display is None:
+    try:
+        logged = get_water_quality_log()
+        if logged:
+            water_quality_display = SurfaceWaterQuality(**logged[-1])
+    except Exception:
+        pass
+
 # Punch-list #16: today's weather-derived score (activity score/est. water
 # temp/moon phase/pressure trend) genuinely does need `bundle` - but lake
 # level and the USACE reading are each fetched independently above and
@@ -107,7 +132,7 @@ if bundle is not None:
         # e.g. a briefly stale cached bundle right at the lake's local day rollover.
         st.warning(f"Today's forecast isn't available yet: {e}. Try refreshing in a moment.")
 
-if today or lake_level or water_quality:
+if today or lake_level or water_quality_display:
     st.subheader("Today at a glance")
     # Punch-list #16: put the current USACE reading on this same metrics
     # line (it used to be a separate caption below, cut off entirely
@@ -117,7 +142,7 @@ if today or lake_level or water_quality:
     # inject_compact_metric_css()'s own docstring for how the scoping works.
     with st.container(key="today_at_a_glance_metrics"):
         inject_compact_metric_css("today_at_a_glance_metrics")
-        n_cols = (4 if today else 0) + (1 if lake_level else 0) + (1 if water_quality else 0)
+        n_cols = (4 if today else 0) + (1 if lake_level else 0) + (1 if water_quality_display else 0)
         cols = st.columns(n_cols)
         i = 0
         if today:
@@ -135,14 +160,20 @@ if today or lake_level or water_quality:
                      f"as of {lake_level.observed_at.strftime('%-I:%M %p %m/%d')}.",
             )
             i += 1
-        if water_quality:
+        if water_quality_display:
+            live_note = (
+                "USACE's own site couldn't be reached just now, so this is the last reading logged locally - "
+                if not is_live_reading else ""
+            )
             cols[i].metric(
                 "USACE water temp",
-                f"{water_quality.water_temp_f}°F",
+                f"{water_quality_display.water_temp_f}°F",
                 help=(
                     f"Most recent real surface reading (USACE Dam Site survey, "
-                    f"{water_quality.observed_at.strftime('%-m/%d')}): dissolved oxygen "
-                    f"{water_quality.do_mg_l:g} mg/l (~{water_quality.do_saturation_pct:.0f}% saturation). "
+                    f"{water_quality_display.observed_at.strftime('%-m/%d')}): dissolved oxygen "
+                    f"{water_quality_display.do_mg_l:g} mg/l "
+                    f"(~{water_quality_display.do_saturation_pct:.0f}% saturation). "
+                    f"{live_note}"
                     "This is a periodic manual survey, not a live/daily feed - the \"Est. water temp\" "
                     "tile (when shown) is today's model-based estimate instead."
                 ),
