@@ -174,6 +174,7 @@ class SegmentForecast:
     solunar_overlap: Optional[str]  # "major" | "minor" | None
     notes: list
     breakdown: list = field(default_factory=list)  # [(label, delta, detail), ...] - see _segment_score()
+    pressure_trend_24h: float = 0.0  # this segment's own 24h trend - see score_day()
 
 
 @dataclass
@@ -183,7 +184,9 @@ class DayForecast:
     water_temp_f: float
     season: str
     moon: astro.MoonPhase
-    pressure_trend_24h: float
+    pressure_trend_24h: float  # day-level, noon-anchored "at a glance" number - see
+    # each segment's OWN pressure_trend_24h (SegmentForecast) for the value
+    # actually driving that segment's score/lure pick.
     sunrise: Optional[datetime]
     sunset: Optional[datetime]
     segments: list  # list[SegmentForecast]
@@ -404,6 +407,23 @@ def score_day(
     water_temp = estimate_water_temp_f(bundle, d, day_of_year)
     season = season_stage(day_of_year, water_temp)
 
+    # Pressure trend used to be computed ONCE per day, anchored at noon, and
+    # that single value got reused for every one of the day's six segments -
+    # so a front sliding through overnight (falling pressure at Dawn/Night)
+    # or in the afternoon never showed up as a falling-pressure bonus for
+    # those segments unless it also happened to be falling at noon. Real
+    # Open-Meteo hourly pressure data for Nolin Lake confirms a genuine
+    # ~12h semidiurnal atmospheric "pressure tide" is layered under the real
+    # frontal signal (see SESSION_NOTES.md) - which is exactly why the
+    # underlying comparison stays a same-hour-24h-ago window (that cancels
+    # the tide) rather than a shorter one; what changes here is only WHICH
+    # hour each segment anchors that 24h-ago comparison to, so a segment
+    # happening well before/after noon reflects the trend at ITS own time of
+    # day instead of borrowing noon's. `noon`/day-level `p_trend` stay in
+    # DayForecast.pressure_trend_24h below as the at-a-glance "today" headline
+    # number (what's shown on Home/7-Day Forecast's summary line), unchanged
+    # from before - only the per-segment scoring/lure-recommendation inputs
+    # now use their own segment's anchor.
     noon = datetime.combine(d, dtime(12, 0))
     p_trend = pressure_trend_hpa_per_24h(bundle, noon)
 
@@ -432,15 +452,20 @@ def score_day(
                 if _overlaps(start, end, ms, me):
                     overlap = "minor"
 
+        # Anchor this segment's own 24h pressure trend at its midpoint, not
+        # the day's shared noon value - see the comment above `noon` for why.
+        segment_midpoint = start + (end - start) / 2
+        segment_p_trend = pressure_trend_hpa_per_24h(bundle, segment_midpoint)
+
         score, notes, breakdown = _segment_score(
-            name, p_trend, moon, overlap, avg_cloud, avg_wind, season,
+            name, segment_p_trend, moon, overlap, avg_cloud, avg_wind, season,
             total_precip, max_precip_prob, w, water_temp_f=water_temp,
         )
 
         segments.append(
             SegmentForecast(
                 name=name, start=start, end=end, score=score, solunar_overlap=overlap,
-                notes=notes, breakdown=breakdown,
+                notes=notes, breakdown=breakdown, pressure_trend_24h=round(segment_p_trend, 2),
             )
         )
 
