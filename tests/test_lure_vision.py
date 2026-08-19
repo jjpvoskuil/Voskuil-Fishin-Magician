@@ -12,7 +12,7 @@ def test_identify_lure_photo_requires_api_key():
 def test_identify_lure_photo_reports_missing_package(monkeypatch):
     # The 'anthropic' package isn't in this project's requirements yet in a
     # dev environment that hasn't installed it - identify_lure_photo() must
-    # fail soft with a clear message, not raise, so the Lure Inventory page
+    # fail soft with a clear message, not raise, so the Tackle Box page
     # can show it and fall back to manual entry.
     monkeypatch.setitem(sys.modules, "anthropic", None)  # forces ImportError on `import anthropic`
     result = identify_lure_photo(b"fake-bytes", "jpg", api_key="sk-fake")

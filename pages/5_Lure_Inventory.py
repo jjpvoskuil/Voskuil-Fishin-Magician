@@ -15,9 +15,9 @@ from core.ui import render_cabelas_suggestions, render_square_thumbnail, inject_
 CARD_THUMBNAIL_PX = 160
 SCAN_THUMBNAIL_PX = 110
 
-st.set_page_config(page_title="Lure Inventory - Nolin Lake", page_icon="🧰", layout="wide")
+st.set_page_config(page_title="Tackle Box - Nolin Lake", page_icon="🧰", layout="wide")
 inject_mobile_css()
-st.title("🧰 Lure Inventory")
+st.title("🧰 Tackle Box")
 st.caption(
     "Your tackle box, tracked: brand, full description, a photo, the last price you paid, and "
     "how many you currently have on hand. Seeded from a Cabela's order, and grows as you add "

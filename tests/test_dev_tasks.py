@@ -55,7 +55,7 @@ def test_update_task_missing_task_no_returns_false(tmp_path):
 
 def test_update_task_accepts_int_or_str_task_no(tmp_path):
     path = tmp_path / "dev_tasks.csv"
-    task = append_task("Some issue", "Lure Inventory", path)
+    task = append_task("Some issue", "Tackle Box", path)
     assert update_task(str(task.task_no), path, description="edited via string id") is True
     row = read_all_tasks(path)[0]
     assert row["description"] == "edited via string id"
@@ -144,7 +144,7 @@ def test_page_options_include_every_real_page():
     # would mean the dropdown can't tag an item against a page that exists.
     for title in [
         "Today (Home)", "7 Day Forecast", "Lake Map", "Trip History",
-        "Lure Inventory", "Spot Session", "Development",
+        "Tackle Box", "Spot Session", "Development",
     ]:
         assert title in PAGE_OPTIONS
 

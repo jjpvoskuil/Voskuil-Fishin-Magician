@@ -1,6 +1,6 @@
 """
 Looks up real product data on Cabela's, by text query. Originally built for
-the Lure Inventory page's "Scan a lure" flow (see pages/5_Lure_Inventory.py
+the Tackle Box page's "Scan a lure" flow (see pages/5_Lure_Inventory.py
 and core/lure_vision.py); also used by core.ui.render_lure_block (via
 core.appstate.get_cabelas_suggestions, which adds caching) to suggest up to
 2 real products worth buying whenever a recommended lure category has
