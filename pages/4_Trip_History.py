@@ -126,6 +126,14 @@ FIELD_SPECS = [
     ("source", "Logged from", lambda v: "🎯 Spot Session" if v == "spot_session" else "📝 Legacy (Log a Trip)"),
     ("angler", "Angler", str),
     ("start_time", "Session start time", str),
+    # Punch-list #34: stamped once by "⏹ End Session" (pages/6_Spot_Session.py's
+    # _end_session()) on EVERY lure in the session, retired or not - the one
+    # real moment the whole session was actually closed, distinct from
+    # "Lure end time" below (which, for a lure retired early via "🔄 Change,"
+    # is that lure's own earlier swap-out time, not the session's). Blank on
+    # a still-open session (nothing has ended it yet) and on any row logged
+    # before this field existed.
+    ("session_end_time", "Session end time", str),
     ("water_temp_f", "Water temp", lambda v: f"{v}°F"),
     ("secchi_ft", "Water clarity (secchi)", lambda v: f"{v} ft"),
     ("stirred_up", "Muddy / stirred up", lambda v: "Yes" if v else None),

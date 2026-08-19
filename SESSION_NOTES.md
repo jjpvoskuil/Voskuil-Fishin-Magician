@@ -5435,6 +5435,80 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     against `git show HEAD:...` per entry 93's earlier note) before and
     after every scratch run. Logged as punch-list #33 and marked "Done."
 
+95. **Punch-list #34: added a session-level "Session end time" to Trip
+    History, and re-verified (didn't just reason about) that "⏹ End
+    Session" reliably ends the session and stamps the real time.**
+    Verbatim ask: "in trip history, lets add a session end time that is
+    stamped when I end a session in spot session. Also, can you confirm
+    that ending a session with the button actually ends it and time
+    stamps? I thought I had ended my sessions this morning, but it shows a
+    lure end time of around 11am and I think I ended my last session at
+    about 9am and the others were ended before that." Two parts:
+
+    - **The confirm.** Pulled the angler's own real trip data (his live
+      testing since #33 shipped had already pushed real commits to
+      `main`, which this session's local clone picked up via the
+      standing `git fetch` + `git rebase` step before its own next push)
+      and found the actual rows: three lures from a session started at
+      `07:01:36`, all three sharing the identical `lure_end_time`
+      `11:13:04.996201` - the exact "one single End Session click stamps
+      the same 'now' on every still-active lure" signature the code is
+      supposed to produce, not a bug pattern (e.g. not three different
+      times, not a stale/reconstructed value). Re-verified the button
+      itself with a fresh scratch `AppTest` driving the REAL flow (Start
+      Session with 2 lures -> retire one early via "🔄 Change" -> End
+      Session) and confirmed: the button genuinely clears the active
+      session and falls back to the builder (not just visually - no "⏹
+      End Session"/lure buttons left); the stamped time provably falls
+      within the actual `[before-click, after-click]` wall-clock window,
+      not some earlier or later value; and a lure retired early keeps its
+      own real, earlier `lure_end_time` rather than getting overwritten
+      by the later End Session stamp. The mechanism checks out as working
+      correctly. The most likely explanation for the 11:13am timestamp
+      not matching the angler's own "~9am" recollection: punch-list #29's
+      reconnect-resilience design means an End Session click that never
+      reaches the server (a dropped connection - his own reported spotty
+      lake coverage) simply never happens; the session stays genuinely
+      "open" on disk until whichever click actually lands. If he tried at
+      ~9am on a dead spot and it didn't take, the still-open session
+      would have been sitting there (silently, with no error to see)
+      until reconnecting and successfully clicking again later - which
+      would read exactly like this data. Told him this finding rather
+      than asserting a fix, since there's no code bug to point to here.
+    - **The actual ask.** `_end_session()` (`pages/6_Spot_Session.py`) now
+      stamps a `"session_end_time"` key into EVERY lure's conditions dict
+      when "⏹ End Session" is clicked - retired lures included, not just
+      the still-active ones `lure_end_time` already covers. Deliberately
+      a separate field from `lure_end_time`, not a rename/reuse of it:
+      for a lure retired early via "🔄 Change," `lure_end_time` is
+      correctly that lure's own earlier real swap-out time, while
+      `session_end_time` is the one shared "the whole session actually
+      closed at X" moment - conflating the two would have silently
+      overwritten the more precise per-lure timestamp #29's original
+      design already preserves. `pages/4_Trip_History.py`'s `FIELD_SPECS`
+      gained a `("session_end_time", "Session end time", str)` entry,
+      placed right next to the existing `"start_time"` ("Session start
+      time") for the same session-level grouping, rather than down by
+      the existing lure-level `"Lure end time"` entry.
+
+    Verification: full suite still 316 passing (page-level change only,
+    no core/ changes). The same scratch `AppTest` script that re-verified
+    End Session's own reliability (above) also confirmed both rows a
+    2-lure session produces carry a real `session_end_time` within the
+    correct click window; that the lure retired early keeps its distinct,
+    earlier `lure_end_time` while still getting the later
+    `session_end_time`; that the lure still active at End Session time
+    gets `lure_end_time == session_end_time` (both stamped together, as
+    expected); and that Trip History actually renders the new "Session
+    end time" label. Also re-ran the standing full-page smoke pass across
+    the entry point and all 7 pages, clean. `data/trip_log.csv` confirmed
+    matching `git show HEAD:...` exactly before and after the scratch run
+    (the file's own md5 had shifted since entry 93/94's baseline simply
+    because the angler's own live testing had genuinely added new
+    committed rows in between - checked against the current HEAD, not a
+    stale earlier-session snapshot, per the now-standing practice from
+    entry 93). Logged as punch-list #34 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

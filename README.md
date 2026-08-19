@@ -185,7 +185,10 @@ this repo that can override it on this hosting.
   Session"** stamps the real end time on every still-active lure's row (already-
   retired lures keep the earlier time they were actually swapped out at) and drops
   you back at a fresh, blank Conditions setup - ready for the next spot or the next
-  session here later. Next to it, **"❌ Cancel Session"** does the opposite: it
+  session here later. It also stamps a session-level end time on every lure in the
+  session (retired or not) - shown on Trip History as "Session end time," separate
+  from each lure's own "Lure end time" - so there's a real record of exactly when
+  the whole session was actually closed. Next to it, **"❌ Cancel Session"** does the opposite: it
   discards everything logged so far this session - every lure and fish it created -
   entirely, rather than keeping it, for testing sessions or just wanting a clean
   restart without any of it saved. It asks you to confirm first ("Cancel this
