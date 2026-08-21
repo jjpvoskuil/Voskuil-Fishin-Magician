@@ -658,6 +658,28 @@ current quantity on hand. Two ways items get in:
   added were automatically migrated to `package_qty=1` the first time the app
   ran after this update (same one-time-rewrite approach used when the
   **Category** column was added) - nothing else about those rows changed.
+- **In-app camera default is the front (selfie) camera (punch-list #45)** - after
+  a report that photo quality was still poor even with `resolution="1080p"`
+  requested (punch-list #39), digging into Streamlit's own bundled front-end code
+  (`streamlit/static/static/js/CameraInput.*.js`) turned up the real cause:
+  `st.camera_input()` opens with `facingMode: "user"` (the front/selfie camera)
+  by default, and there's no parameter in this Streamlit version's Python API to
+  change that default - the only way to get the back camera is the small
+  flip/switch-camera icon inside the widget itself, which is easy to miss. A
+  phone's front camera is meaningfully lower-resolution and has weaker
+  autofocus than its back camera on virtually every phone, which fully explains
+  why requesting a higher capture resolution alone didn't fix soft/blurry
+  photos - a higher-resolution capture from the *wrong, lower-quality* camera
+  is still a low-quality photo. (Confirmed the resolution request itself is
+  working as intended: the same front-end code forces the screenshot to use
+  the camera's full native capture size, rather than the widget's on-page
+  display size, whenever a `resolution` is set - so this needed a UX fix, not
+  a resolution fix.) Since there's no way to default the widget to the back
+  camera from Python, both "Take a photo" camera widgets (the "Scan a lure"
+  flow and manual entry's own photo field) now carry an explicit caption
+  telling you to tap the flip/switch-camera icon before shooting, and the
+  existing "still looks soft? try Upload a photo" guidance now also explains
+  *why* - not just that it can happen.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill

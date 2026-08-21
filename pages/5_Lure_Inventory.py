@@ -202,13 +202,19 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                 st.rerun()
             st.caption(
                 "On some phones, this in-browser camera can come out blurrier than a normal "
-                "photo. If a shot looks soft, try 'Upload a photo' instead and choose 'Take "
-                "Photo' from your phone's own camera app - that uses the phone's full camera, "
-                "not the browser's."
+                "photo - it also opens your front-facing (selfie) camera by default, which is "
+                "lower-resolution than your back camera on almost every phone. If a shot looks "
+                "soft, try 'Upload a photo' instead and choose 'Take Photo' from your phone's "
+                "own camera app - that uses your phone's full rear camera, not the browser's."
             )
         else:
             cam_photo = st.camera_input(
                 "Take a picture of the lure/package", key="scan_camera", resolution="1080p",
+            )
+            st.caption(
+                "📷 This opens your front (selfie) camera by default - tap the flip/"
+                "switch-camera icon in the camera view above to switch to your back camera "
+                "before shooting. It's much sharper for reading small print on packaging."
             )
             if cam_photo is not None:
                 st.session_state["scan_photo_bytes"] = cam_photo.getvalue()
@@ -352,6 +358,11 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
         if photo_mode == "Upload a photo" else None
     camera_file = st.camera_input("Take a picture", resolution="1080p", key="add_lure_camera") \
         if photo_mode == "Take a photo" else None
+    if photo_mode == "Take a photo":
+        st.caption(
+            "📷 This opens your front (selfie) camera by default - tap the flip/switch-camera "
+            "icon above to use your back camera for a sharper photo."
+        )
 
     with st.form("add_lure_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
