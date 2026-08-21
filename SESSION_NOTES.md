@@ -6119,6 +6119,77 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     Logged as punch-list #44 and marked "Done" (root-caused and resolved
     live; no commit needed).
 
+106. **Punch-list #45: "The picture quality that imports is still pretty bad"
+    - punch-list #39's `resolution="1080p"` fix didn't fully solve it.**
+    Investigated by first ruling out the backend: `core/lure_vision.py`'s
+    `identify_lure_photo()` does no resizing/recompression - it base64-encodes
+    whatever `image_bytes` it's handed and sends them straight to Claude's
+    vision API. So any quality loss had to be happening on the capture side,
+    inside Streamlit's `camera_input` widget itself.
+
+    Read the widget's actual bundled front-end code
+    (`streamlit/static/static/js/CameraInput.*.js` inside the installed
+    `streamlit` package - a minified `react-webcam`-based component) to
+    understand what `resolution="1080p"` actually does versus what it
+    doesn't. Two findings:
+
+    - The resolution request *is* working as designed. Without a
+      `resolution` set, the widget takes its screenshot at the *displayed*
+      size of the `<video>` element on the page (`video.clientWidth`) -
+      easy to end up small/soft on a narrow mobile column. Setting
+      `resolution="1080p"` sets `forceScreenshotSourceSize: true`, which
+      makes the widget instead crop the screenshot from the camera stream's
+      actual native `videoWidth`/`videoHeight` - so punch-list #39 already
+      fixed the "screenshot smaller than the actual camera feed" problem.
+      JPEG encoding is also already lossless-as-it-gets: `screenshotFormat:
+      "image/jpeg", screenshotQuality: 1` (max quality, no compression loss
+      applied by Streamlit).
+    - The real remaining culprit: the widget's video stream itself defaults
+      to `facingMode: "user"` - i.e. it opens the **front-facing (selfie)
+      camera** every time, not the back camera. There is no parameter on
+      `st.camera_input()` in this Streamlit version (`1.61.1`) to change
+      that default - `resolution`, `width`, `label`, `key`, `help`,
+      `on_change`/`args`/`kwargs`, `disabled`, `label_visibility` is the
+      complete parameter list; facing mode is only switchable at runtime via
+      a small flip/switch-camera icon inside the widget, easy to miss. On
+      virtually every phone, the front camera has meaningfully lower
+      resolution and noticeably weaker autofocus than the back camera -
+      exactly the kind of soft/blurry result that would persist no matter
+      how high a resolution you request, since a sharper *capture size* from
+      the *wrong camera* is still a low-quality photo. This is the most
+      likely explanation for why the picture quality "was still pretty bad"
+      after #39: the requested-resolution fix was real and working, but it
+      was maximizing resolution from the selfie camera, not fixing the
+      underlying blur.
+
+    **Fix**: since there's no Python-side way to default this widget to the
+    back camera, added explicit on-page guidance instead of a silent code
+    change users wouldn't know to look for: both "Take a photo" camera call
+    sites (`pages/5_Lure_Inventory.py` - the "Scan a lure" flow at line
+    ~210, and manual "Add a lure"'s own camera field at line ~353) now show
+    a caption right under the camera widget itself telling the user to tap
+    the flip/switch-camera icon before shooting. The pre-camera-on caption
+    (shown before "Turn on camera" is clicked, in the "Scan a lure" flow)
+    was also expanded to explain *why* a shot can look soft (front camera by
+    default) rather than just noting that it can happen.
+
+    Verification: `python3 -m py_compile` on the edited file, plus a scratch
+    `AppTest` load of the full page confirming it still renders with no
+    exception; grepped the file to confirm the three new caption strings
+    landed exactly where intended. This is a captions/guidance-only change
+    - no new logic branches, no data-file involvement - so didn't warrant
+    new unit tests. Full suite still 335 passing, unchanged. No data files
+    touched. Logged as punch-list #45 and marked "Done."
+
+    **Takeaway**: when a user reports something is "still bad" after a
+    prior fix, don't assume the prior fix was wrong or incomplete on its own
+    terms - verify what it actually does (here, #39's resolution request
+    genuinely does what it says) before looking for what it *doesn't*
+    cover. Reading a dependency's actual shipped source (even minified JS
+    bundled inside a pip package) was the only way to find the real, more
+    specific root cause here; the public Python API docs alone don't
+    mention the front-camera default at all.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
