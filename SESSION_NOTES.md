@@ -5889,6 +5889,51 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     new unit-testable logic of its own). No data files touched. Logged as
     punch-list #39 and marked "Done."
 
+101. **Punch-list #40: fixed manual "Add a lure"'s "Take a photo" radio
+    doing nothing.** Immediately after punch-list #39, the angler reported
+    that selecting "Take a photo" in the manual add-a-lure form's Photo
+    radio didn't reveal a camera to actually take a picture with.
+
+    **Root cause.** The `photo_mode` radio, and the `file_uploader`/
+    `camera_input` widgets conditional on it, all lived *inside*
+    `st.form("add_lure_form", ...)`. Streamlit forms only trigger a script
+    rerun when their submit button is clicked - any other widget inside a
+    form (a radio button included) just buffers its new value in the
+    background without causing the page to redraw. So clicking "Take a
+    photo" silently updated `photo_mode` but the page never rendered the
+    `st.camera_input(...)` that depends on it - nothing visibly happened,
+    exactly as reported - and by the time the form *was* submitted, the
+    camera had never had a chance to appear or capture anything.
+
+    **The fix.** Moved the `photo_mode` radio and the `file_uploader`/
+    `camera_input` widgets out of the form entirely, placing them above
+    `st.form(...)` inside the same "➕ Add a lure" expander - the same
+    pattern the "📷 Scan a lure" section above it already uses successfully.
+    As ordinary (non-form) widgets, selecting "Take a photo" now reruns
+    the page immediately and the camera appears right away, still
+    requesting `resolution="1080p"` (punch-list #39). `uploaded_file`/
+    `camera_file` remain in scope as plain Python variables when the form
+    below is submitted, so the actual "attach the photo to the new
+    LureItem" logic is unchanged - only where the widgets live moved. A
+    caption inside the form now confirms when a photo captured/selected
+    above will be attached on submit, since it's no longer visually
+    inside the same box as the rest of the fields. Because
+    `clear_on_submit=True` only resets the form's own widgets, added an
+    explicit reset of the photo radio/upload/camera session-state keys
+    right after a successful add, so the next "Add a lure" starts clean
+    instead of carrying over the previous photo or mode.
+
+    Verification: a scratch `AppTest` (mocking `get_inventory`/
+    `anthropic_api_key`) confirmed the `photo_mode` radio now lives
+    outside any form, that selecting "Take a photo" and rerunning renders
+    a `camera_input` widget with `id` ending in `add_lure_camera` and
+    `resolution_height: 1080` (proving it's this widget, correctly wired,
+    reacting immediately to the radio - not the separate "Scan a lure"
+    camera), and that no exception is raised. Full suite: 330 passing
+    (unchanged - this is a widget-placement fix, no new unit-testable
+    logic). No data files touched. Logged as punch-list #40 and marked
+    "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

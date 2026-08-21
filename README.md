@@ -621,6 +621,15 @@ current quantity on hand. Two ways items get in:
   resolution it actually supports) - if a capture still looks soft, try "Upload a
   photo" instead and use your phone's own "Take Photo" option, which does use the
   native camera/sensor.
+- **Manual entry's photo picker lives outside its form (punch-list #40)** - the
+  Photo radio and the upload/camera widgets it controls sit above the
+  `st.form(...)` in the "➕ Add a lure" section, not inside it. Streamlit forms
+  only rerun the page when their submit button is clicked, so a radio button
+  changed inside a form doesn't redraw anything until submit - selecting "Take a
+  photo" there used to silently do nothing visible. Moving those widgets outside
+  the form (same pattern as "Scan a lure" above) makes the camera appear the
+  instant you select "Take a photo," the same way it does everywhere else in the
+  app.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill

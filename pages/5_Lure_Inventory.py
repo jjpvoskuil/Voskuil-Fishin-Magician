@@ -264,6 +264,28 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                 st.rerun()
 
 with st.expander("➕ Add a lure", expanded=len(items) == 0):
+    # Punch-list #40: the photo controls used to live INSIDE the st.form
+    # below. Streamlit forms only rerun the script when their submit button
+    # is clicked - a radio button changed inside a form doesn't trigger a
+    # rerun the way it normally would, so picking "Take a photo" never
+    # actually revealed the camera widget (it silently took effect only on
+    # submit, by which point the lure had already been added with no
+    # photo). Moving the photo radio + the upload/camera widgets outside
+    # the form fixes this the same way the "Scan a lure" section above
+    # already works: these are ordinary reactive widgets now, so selecting
+    # "Take a photo" reruns the page immediately and the camera turns on
+    # right away. `uploaded_file`/`camera_file` are still plain Python
+    # variables in scope when the form below is submitted, so the rest of
+    # the add-lure logic is unchanged.
+    photo_mode = st.radio(
+        "Photo", ["Upload a photo", "Take a photo", "No photo"], horizontal=True,
+        key="add_lure_photo_mode",
+    )
+    uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"], key="add_lure_upload") \
+        if photo_mode == "Upload a photo" else None
+    camera_file = st.camera_input("Take a picture", resolution="1080p", key="add_lure_camera") \
+        if photo_mode == "Take a photo" else None
+
     with st.form("add_lure_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         brand = c1.text_input("Brand", placeholder="e.g. Strike King")
@@ -279,12 +301,10 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
             help="Which of the forecast engine's lure types this is/works as - lets the 7-Day "
                  "Forecast and Lake Map pages flag this as something you already have.",
         )
-
-        photo_mode = st.radio("Photo", ["Upload a photo", "Take a photo", "No photo"], horizontal=True)
-        uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"]) \
-            if photo_mode == "Upload a photo" else None
-        camera_file = st.camera_input("Take a picture", resolution="1080p") \
-            if photo_mode == "Take a photo" else None
+        if photo_mode == "Take a photo" and camera_file is not None:
+            st.caption("📷 Photo captured above - will attach when you submit.")
+        elif photo_mode == "Upload a photo" and uploaded_file is not None:
+            st.caption("🖼️ Photo selected above - will attach when you submit.")
 
         submitted = st.form_submit_button("Add to inventory", width='stretch')
 
@@ -307,6 +327,14 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
 
             append_item(item)
             get_inventory.clear()
+
+            # The photo controls live outside add_lure_form now (see comment
+            # above), so clear_on_submit=True doesn't reset them - do it
+            # explicitly so the next "Add a lure" doesn't start with a stale
+            # photo/mode left over from this one.
+            st.session_state.pop("add_lure_upload", None)
+            st.session_state.pop("add_lure_camera", None)
+            st.session_state["add_lure_photo_mode"] = "Upload a photo"
 
             token = github_token()
             paths = [INVENTORY_PATH, IMAGES_DIR] if photo_file is not None else [INVENTORY_PATH]
