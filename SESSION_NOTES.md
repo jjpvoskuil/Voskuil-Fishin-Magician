@@ -6027,6 +6027,57 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     unit-testable logic). No data files touched. Logged as punch-list #42
     and marked "Done."
 
+104. **Punch-list #43: added a "Package qty" field to every add-a-lure
+    entry point.** The angler wanted a way to note how many individual
+    lures come in one retail package (e.g. an "8-pack") when adding a
+    lure, defaulting to 1 so single-lure items don't need any extra input,
+    but able to be set to any number for multi-packs.
+
+    **Design.** Added `package_qty: int = 1` to `LureItem`
+    (`core/lure_inventory.py`) and `"package_qty"` to `FIELDNAMES`
+    (positioned right after `quantity`). Deliberately kept separate from,
+    and never multiplied into, `quantity` - `quantity` keeps meaning
+    exactly what it always has (however many units of this row are on
+    hand), and `package_qty` is purely a descriptive note about what size
+    package that count came in. Wired into all three ways a lure gets
+    added: the manual "➕ Add a lure" form, the shared `_render_confirm_
+    form()` used by both the photo-scan and (punch-list #41's) type-a-
+    description search flows, and each inventory card's "Edit" expander -
+    all as a `number_input(min_value=1, step=1, value=1)`. Cards now show
+    a "(N-pack)" note next to Qty when `package_qty > 1` (nothing extra
+    shown for the default of 1, to keep the common case uncluttered).
+
+    **Data migration.** `data/lure_inventory.csv` already had 51 real
+    rows written before this column existed, with no flexible/JSON column
+    to tuck a new field into the way `core.storage.TripEntry.
+    conditions_json` allows (see `core/anglers.py`'s docstring on why that
+    design was chosen there) - so, same approach as when the `category`
+    column was added, `ensure_inventory_exists()` now calls a new
+    `_migrate_add_package_qty_column()` that rewrites the file's header
+    and back-fills `package_qty=1` on every existing row (a no-op if the
+    column's already there). Ran it against the real
+    `data/lure_inventory.csv`: still 51 data rows afterward, every one
+    back-filled to `package_qty=1`, and a full diff confirmed nothing else
+    about any row changed - just the one new column inserted after
+    `quantity`. This is itself a "1" default, matching how those rows
+    were always effectively treated (as individual-unit counts) before
+    this field existed.
+
+    Verification: 5 new unit tests in `tests/test_lure_inventory.py`
+    covering the default-to-1 behavior, an explicit `package_qty` on
+    append, `update_item()` changing it, the migration rewriting an
+    old-schema fixture file correctly (fieldnames match, row count/other
+    fields unchanged, `package_qty` back-filled), and the migration being
+    a no-op on an already-migrated file. Three scratch `AppTest` runs
+    (manual form, the shared Cabela's-search confirm form, and the Edit
+    expander) confirmed the "Package qty" widget renders in each, submits
+    the value through to `append_item()`/`update_item()` correctly with
+    no exception, and (for the confirm-form path) doesn't touch
+    `package_qty` on an existing matching-SKU row when just bumping its
+    quantity. Full suite: 335 passing (was 330; +5). No data files
+    touched beyond the intentional, verified `lure_inventory.csv`
+    migration itself. Logged as punch-list #43 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

@@ -1,6 +1,8 @@
+import csv
+
 from core.lure_inventory import (
-    LureItem, append_item, delete_item, image_data_uri_or_url, read_all_items,
-    resolve_image_source, save_image, update_item,
+    FIELDNAMES, LureItem, append_item, delete_item, ensure_inventory_exists,
+    image_data_uri_or_url, read_all_items, resolve_image_source, save_image, update_item,
 )
 
 
@@ -37,6 +39,84 @@ def test_item_defaults_to_uncategorized(tmp_path):
     append_item(item, path)
     rows = read_all_items(path)
     assert rows[0]["category"] == ""
+
+
+def test_item_package_qty_defaults_to_one(tmp_path):
+    # Punch-list #43: a lure with no package_qty specified is assumed to be
+    # sold individually, same reasoning as the pre-#43 data (see the
+    # migration test below).
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Zoom", description="Trick Worm", price=4.99, quantity=3)
+    append_item(item, path)
+    rows = read_all_items(path)
+    assert rows[0]["package_qty"] == "1"
+
+
+def test_item_package_qty_can_be_set_explicitly(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(
+        brand="Strike King", description="KVD Perfect Plastics - 8-pack", price=6.99,
+        quantity=1, package_qty=8,
+    )
+    append_item(item, path)
+    rows = read_all_items(path)
+    assert rows[0]["package_qty"] == "8"
+
+
+def test_update_item_changes_package_qty(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Zoom", description="Trick Worm", price=4.99, quantity=1)
+    append_item(item, path)
+
+    found = update_item(item.item_id, path, package_qty=6)
+    assert found is True
+    rows = read_all_items(path)
+    assert rows[0]["package_qty"] == "6"
+
+
+def test_ensure_inventory_exists_migrates_a_csv_written_before_package_qty(tmp_path):
+    # Punch-list #43: data/lure_inventory.csv already had real rows (from
+    # the Cabela's order-history import and manual adds) written before
+    # this column existed - ensure_inventory_exists() has to rewrite that
+    # header and back-fill package_qty=1 on every existing row, the same
+    # approach used when the `category` column was added, rather than
+    # silently dropping/misaligning those rows.
+    path = tmp_path / "inv.csv"
+    old_fieldnames = [f for f in FIELDNAMES if f != "package_qty"]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=old_fieldnames)
+        writer.writeheader()
+        writer.writerow({
+            "item_id": "abc123", "added_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+            "brand": "Strike King", "description": "Old row from before package_qty existed",
+            "category": "squarebill_crankbait", "sku": "9999", "price": "5.99", "quantity": "2",
+            "image_url": "", "image_filename": "", "source": "Manual",
+        })
+
+    ensure_inventory_exists(path)
+
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        assert reader.fieldnames == FIELDNAMES
+        rows = list(reader)
+    assert len(rows) == 1
+    assert rows[0]["package_qty"] == "1"
+    # Nothing else about the pre-existing row should have changed.
+    assert rows[0]["brand"] == "Strike King"
+    assert rows[0]["quantity"] == "2"
+    assert rows[0]["sku"] == "9999"
+
+
+def test_ensure_inventory_exists_is_a_no_op_on_an_already_migrated_file(tmp_path):
+    path = tmp_path / "inv.csv"
+    item = LureItem(brand="Zoom", description="Trick Worm", price=4.99, quantity=1, package_qty=4)
+    append_item(item, path)
+
+    ensure_inventory_exists(path)  # should not touch the file a second time
+
+    rows = read_all_items(path)
+    assert len(rows) == 1
+    assert rows[0]["package_qty"] == "4"
 
 
 def test_update_item_changes_category(tmp_path):
