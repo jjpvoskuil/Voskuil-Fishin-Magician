@@ -609,6 +609,18 @@ current quantity on hand. Two ways items get in:
   without one, this section just explains that and stays otherwise out of the way;
   manual entry above still works regardless. See "How the Cabela's lookup works"
   below for how the product search itself works and its limitations.
+- **In-app camera photo quality (punch-list #39)** - both "Take a photo" camera
+  widgets on this page (the "Scan a lure" flow above, and manual entry's own photo
+  field) now explicitly request `resolution="1080p"` from the browser. Streamlit's
+  in-browser camera is a live-video-stream widget (`getUserMedia`), not your
+  phone's native camera app, and without a requested resolution the browser picks
+  one on its own - often lower/less sharp on mobile Safari than what a phone's own
+  camera app would capture, which is why a photo that looked crisp when it was
+  taken could still come out too blurry for label-text recognition. Requesting
+  `"1080p"` is best-effort, not a guarantee (the browser uses the closest
+  resolution it actually supports) - if a capture still looks soft, try "Upload a
+  photo" instead and use your phone's own "Take Photo" option, which does use the
+  native camera/sensor.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
