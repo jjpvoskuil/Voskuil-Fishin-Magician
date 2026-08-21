@@ -96,6 +96,12 @@ def _render_confirm_form(selected: dict, form_key: str, source_label: str, clean
             index=_category_index(guessed_category),
             key=f"{form_key}_category",
         )
+        confirm_package_qty = st.number_input(
+            "Package qty (lures per package)", min_value=1, step=1, value=1,
+            help="How many individual lures come in one package - e.g. 8 for an 8-pack, "
+                 "or 1 if it's sold individually.",
+            key=f"{form_key}_package_qty",
+        )
         confirm_submitted = st.form_submit_button("✅ Add to inventory", width='stretch')
 
     if confirm_submitted:
@@ -119,6 +125,7 @@ def _render_confirm_form(selected: dict, form_key: str, source_label: str, clean
                 price=float(confirm_price) if confirm_price else None,
                 quantity=int(confirm_qty),
                 category=category_key,
+                package_qty=int(confirm_package_qty),
                 sku=selected["sku"],
                 image_url=selected["image_url"],
                 source=source_label,
@@ -361,6 +368,11 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
             help="Which of the forecast engine's lure types this is/works as - lets the 7-Day "
                  "Forecast and Lake Map pages flag this as something you already have.",
         )
+        package_qty = st.number_input(
+            "Package qty (lures per package)", min_value=1, step=1, value=1,
+            help="How many individual lures come in one package - e.g. 8 for an 8-pack, or 1 "
+                 "if it's sold individually.",
+        )
         if photo_mode == "Take a photo" and camera_file is not None:
             st.caption("📷 Photo captured above - will attach when you submit.")
         elif photo_mode == "Upload a photo" and uploaded_file is not None:
@@ -378,6 +390,7 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
                 price=float(price) if price else None,
                 quantity=int(quantity),
                 category=CATEGORY_KEYS[CATEGORY_LABELS.index(category_choice)],
+                package_qty=int(package_qty),
                 source="Manual",
             )
             photo_file = uploaded_file or camera_file
@@ -485,7 +498,9 @@ else:
                     st.markdown(f"**{row['brand']}**")
                     st.write(row["description"])
                     price_val = float(row["price"]) if row["price"] else 0.0
-                    st.caption(f"Last price: ${price_val:,.2f}  ·  Qty: {row['quantity']}")
+                    package_qty_val = int(row.get("package_qty") or 1)
+                    package_note = f" ({package_qty_val}-pack)" if package_qty_val > 1 else ""
+                    st.caption(f"Last price: ${price_val:,.2f}  ·  Qty: {row['quantity']}{package_note}")
                     st.caption(f"Category: {CATEGORY_NAME_BY_KEY.get(row.get('category', ''), 'Not categorized / other')}")
 
                     with st.expander("Edit"):
@@ -501,10 +516,17 @@ else:
                             "Category", CATEGORY_LABELS,
                             index=_category_index(row.get("category", "")), key=f"cat_{row['item_id']}",
                         )
+                        new_package_qty = st.number_input(
+                            "Package qty (lures per package)", min_value=1, step=1,
+                            value=package_qty_val, key=f"pkgqty_{row['item_id']}",
+                        )
                         ec1, ec2 = st.columns(2)
                         if ec1.button("Save", key=f"save_{row['item_id']}", width='stretch'):
                             new_category = CATEGORY_KEYS[CATEGORY_LABELS.index(new_category_choice)]
-                            update_item(row["item_id"], quantity=new_qty, price=new_price, category=new_category)
+                            update_item(
+                                row["item_id"], quantity=new_qty, price=new_price, category=new_category,
+                                package_qty=new_package_qty,
+                            )
                             get_inventory.clear()
                             token = github_token()
                             if token:

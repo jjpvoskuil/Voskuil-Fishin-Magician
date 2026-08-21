@@ -587,10 +587,10 @@ current quantity on hand. Two ways items get in:
   SKU that matches an *existing* inventory row no longer creates a duplicate row at
   all - its quantity is bumped instead (two items from that batch, SKU 2585737 and
   3227747, landed this way).
-- **Manual entry** - add a lure any time with brand, description, price, quantity, and
-  category, and optionally attach a photo you upload or take right there with your
-  camera. These photos are yours, so they're stored under `data/lure_images/` and
-  committed to the repo like any other user data.
+- **Manual entry** - add a lure any time with brand, description, price, quantity,
+  category, and package qty (see below), and optionally attach a photo you upload or
+  take right there with your camera. These photos are yours, so they're stored under
+  `data/lure_images/` and committed to the repo like any other user data.
 - **Scan a lure (photo -> Cabela's lookup)** - take or upload a photo of a lure's
   package in the "📷 Scan a lure" section at the top of the page. The webcam only
   turns on when you explicitly click "📷 Turn on camera" after choosing "Take a
@@ -647,6 +647,17 @@ current quantity on hand. Two ways items get in:
   - every manual add crashed with `StreamlitAPIException` as a result. Fixed by
   popping (deleting) that key instead of assigning to it, so the radio falls
   back to its own default on the next render with no forbidden assignment.
+- **Package qty (punch-list #43)** - every way a lure gets added (manual entry,
+  "Scan a lure," "Search Cabela's by description") and each card's Edit expander
+  now has a "Package qty (lures per package)" field, defaulting to 1. It's
+  purely a note of how many individual lures came in one retail package (e.g. 8
+  for an "8-pack") - it's never multiplied into **Quantity**, which still means
+  exactly what it always has (how many units of this row you have on hand).
+  Cards show a "(N-pack)" note next to Qty whenever `package_qty > 1`. The 51
+  rows that already existed in `data/lure_inventory.csv` before this field was
+  added were automatically migrated to `package_qty=1` the first time the app
+  ran after this update (same one-time-rewrite approach used when the
+  **Category** column was added) - nothing else about those rows changed.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill

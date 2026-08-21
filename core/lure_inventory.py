@@ -29,6 +29,18 @@ an enum/foreign key) so this module stays independent of core.lures - the
 matching happens on the lures.py side via
 core.lures._group_owned_by_category(). Blank/unrecognized values just mean
 "not matched to a forecast category," not an error.
+
+The `package_qty` field (punch-list #43) is a purely informational count of
+how many individual lures come in one retail package (e.g. 8 for an
+"8-pack", 1 - the default - for something sold as a single lure). It's
+intentionally NOT multiplied into `quantity` anywhere in this app -
+`quantity` keeps meaning exactly what it always has (however many units
+this row represents on hand), and `package_qty` just lets an angler note
+what size package that came in, so a single "6-pack" bought once can be
+told apart from six lures bought individually. Every existing row was
+backfilled to `package_qty=1` (see `_migrate_add_package_qty_column()`)
+since prior to this field existing, `quantity` was always tracked as
+individual-unit counts, not package counts.
 """
 from __future__ import annotations
 import base64
@@ -45,7 +57,7 @@ IMAGES_DIR = REPO_ROOT / "data" / "lure_images"
 
 FIELDNAMES = [
     "item_id", "added_at", "updated_at", "brand", "description", "category", "sku",
-    "price", "quantity", "image_url", "image_filename", "source",
+    "price", "quantity", "package_qty", "image_url", "image_filename", "source",
 ]
 
 
@@ -56,6 +68,7 @@ class LureItem:
     price: Optional[float]
     quantity: int
     category: str = ""  # one of core.lures.LURE_PROFILES' keys, or "" if not (yet) categorized
+    package_qty: int = 1  # how many individual lures come in one package - see module docstring
     sku: str = ""
     image_url: str = ""
     image_filename: str = ""
@@ -69,12 +82,38 @@ class LureItem:
         return {k: d.get(k, "") for k in FIELDNAMES}
 
 
+def _migrate_add_package_qty_column(path: Path):
+    """One-time migration (punch-list #43): back-fills `package_qty=1` on
+    every row of an inventory CSV written before that column existed, and
+    rewrites the header to match. Same approach used when the `category`
+    column was added - a plain rewrite, since this file has no flexible/
+    JSON column (unlike core.storage.TripEntry's conditions_json) to tuck
+    a new field into without a header change. Safe to call on a file that
+    already has the column (no-op) or doesn't exist yet (no-op - callers
+    only invoke this after confirming the file exists)."""
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        existing_fieldnames = reader.fieldnames or []
+        rows = list(reader)
+    if "package_qty" in existing_fieldnames:
+        return
+    for row in rows:
+        row["package_qty"] = 1
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in FIELDNAMES})
+
+
 def ensure_inventory_exists(path: Path = INVENTORY_PATH, images_dir: Path = IMAGES_DIR):
     path.parent.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         with open(path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=FIELDNAMES).writeheader()
+    else:
+        _migrate_add_package_qty_column(path)
 
 
 def read_all_items(path: Path = INVENTORY_PATH) -> list:
