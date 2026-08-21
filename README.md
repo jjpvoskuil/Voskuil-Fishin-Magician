@@ -665,6 +665,13 @@ just falls back to "no matches found" in the UI and the manual "Add a lure" form
 works - it never breaks the page. If scanning stops finding matches, that module is
 the first place to check.
 
+**Punch-list #38:** `search_lures()` also dedupes its results by SKU now - confirmed
+live that Coveo can genuinely return the same product twice for one query (a real
+crash report: the Tackle Box page's "Scan a lure" results grid keys each "Use this"
+button by SKU, so a duplicate SKU crashed the whole page with `StreamlitDuplicate
+ElementKey`). Fixed once at the source so every caller is covered, with the affected
+page's own key also made index-safe as cheap defense-in-depth.
+
 **Punch-list #21 finding:** confirmed by calling both endpoints directly from a real
 browser that Cabela's/Coveo's search API itself still works exactly as this module
 expects (same token shape, same request/response shape, real product data back) - but

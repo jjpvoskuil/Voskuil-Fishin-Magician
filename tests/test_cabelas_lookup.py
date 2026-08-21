@@ -117,6 +117,49 @@ def test_search_lures_maps_results_and_drops_unusable_ones(monkeypatch):
     assert results[0]["description"] == "Real Product"
 
 
+def test_search_lures_dedupes_results_that_share_a_sku(monkeypatch):
+    # Punch-list #38: a real crash report - Coveo genuinely can return the
+    # same SKU more than once for one query (confirmed live), which crashed
+    # pages/5_Lure_Inventory.py's "Scan a lure" results grid with
+    # StreamlitDuplicateElementKey since it keys each "Use this" button by
+    # SKU. Fixed at the source here so every caller is covered, not just
+    # that one page.
+    import core.cabelas_lookup as mod
+
+    class _FakeTokenResp:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"token": "fake-token"}
+
+    class _FakeSearchResp:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": [
+                {"raw": {"sku": "111", "ec_brand": "Strike King", "ec_name": "First Listing", "ec_price": 9.99}},
+                {"raw": {"sku": "111", "ec_brand": "Strike King", "ec_name": "Duplicate SKU Listing", "ec_price": 9.99}},
+                {"raw": {"sku": "222", "ec_brand": "Strike King", "ec_name": "Different Product", "ec_price": 4.99}},
+            ]}
+
+    def _fake_get(url, headers=None, timeout=None, **kwargs):
+        return _FakeTokenResp()
+
+    def _fake_post(url, params=None, headers=None, json=None, timeout=None, **kwargs):
+        return _FakeSearchResp()
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    monkeypatch.setattr(mod.requests, "post", _fake_post)
+    monkeypatch.setattr(mod, "_token_cache", {"token": None, "fetched_at": 0.0})
+
+    results = search_lures("strike king")
+    skus = [r["sku"] for r in results]
+    assert skus == ["111", "222"], "expected the duplicate SKU dropped, first occurrence kept, order preserved"
+    assert results[0]["description"] == "First Listing"
+
+
 def test_search_lures_impersonates_a_real_browser_tls_fingerprint(monkeypatch):
     # Punch-list #22: the actual point of switching to curl_cffi - both the
     # token GET and the search POST must pass impersonate=IMPERSONATE_BROWSER
