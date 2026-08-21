@@ -391,10 +391,17 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
             # The photo controls live outside add_lure_form now (see comment
             # above), so clear_on_submit=True doesn't reset them - do it
             # explicitly so the next "Add a lure" doesn't start with a stale
-            # photo/mode left over from this one.
+            # photo/mode left over from this one. This has to be a pop(), not
+            # an assignment - Streamlit raises StreamlitAPIException if you
+            # assign to a widget's session_state key after that widget has
+            # already been instantiated in the current script run (which the
+            # radio/uploader/camera above always have been by this point).
+            # Popping the key removes it entirely, so on the rerun below the
+            # widget falls back to its own default (the radio's first option,
+            # "Upload a photo") with no forbidden assignment involved.
             st.session_state.pop("add_lure_upload", None)
             st.session_state.pop("add_lure_camera", None)
-            st.session_state["add_lure_photo_mode"] = "Upload a photo"
+            st.session_state.pop("add_lure_photo_mode", None)
 
             token = github_token()
             paths = [INVENTORY_PATH, IMAGES_DIR] if photo_file is not None else [INVENTORY_PATH]

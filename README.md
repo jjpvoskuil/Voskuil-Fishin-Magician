@@ -640,6 +640,13 @@ current quantity on hand. Two ways items get in:
   the form (same pattern as "Scan a lure" above) makes the camera appear the
   instant you select "Take a photo," the same way it does everywhere else in the
   app.
+- **Fixed a manual-add submit crash (punch-list #42)** - the punch-list #40 fix
+  above tried to reset the Photo radio back to "Upload a photo" after a
+  successful add by directly assigning to its `session_state` key, which
+  Streamlit forbids once that widget has already rendered in the current run
+  - every manual add crashed with `StreamlitAPIException` as a result. Fixed by
+  popping (deleting) that key instead of assigning to it, so the radio falls
+  back to its own default on the next render with no forbidden assignment.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill

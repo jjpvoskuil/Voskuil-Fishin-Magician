@@ -5986,6 +5986,47 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     pure logic of its own to unit test). No data files touched. Logged as
     punch-list #41 and marked "Done."
 
+103. **Punch-list #42: fixed a crash submitting the manual "Add a lure"
+    form.** The angler sent a screenshot: `streamlit.errors.
+    StreamlitAPIException` on the Tackle Box page adding a lure manually
+    with a picture, traceback pointing at `pages/5_Lure_Inventory.py`
+    line 397 - `st.session_state["add_lure_photo_mode"] = "Upload a
+    photo"`.
+
+    **Root cause.** This line was the punch-list #40 fix's own cleanup
+    code, added right after moving the photo radio/upload/camera widgets
+    outside `st.form(...)` so "Take a photo" would actually work - it
+    tried to reset the mode back to "Upload a photo" after a successful
+    add by directly assigning to that key. Streamlit forbids assigning to
+    a widget's `session_state` key after that widget has already been
+    instantiated in the current script run (raises
+    `StreamlitAPIException` exactly like this) - and by the time this
+    line ran, the `add_lure_photo_mode` radio had of course already
+    rendered earlier in the same run. So every single manual-add submit
+    was crashing, regardless of which photo mode was selected or whether
+    a photo was actually attached - not a hidden edge case, a straight-up
+    always-fires bug shipped in punch-list #40 alongside its own fix.
+
+    **The fix.** Changed the direct assignment to `st.session_state.pop
+    ("add_lure_photo_mode", None)` - popping (deleting) a widget's key is
+    allowed even after that widget has rendered this run, and removing it
+    entirely means the *next* rerun's radio has no stored value to read,
+    so it falls back to its own default (`"Upload a photo"`, the first
+    option) with no forbidden assignment involved. Same pop-based cleanup
+    already applied to `add_lure_upload`/`add_lure_camera` was unaffected
+    - only the `photo_mode` line was a real assignment.
+
+    Verification: a scratch `AppTest` (mocking `get_inventory`/
+    `anthropic_api_key`/`append_item`/`github_token`) submitted the
+    manual form twice - once with "No photo" selected, once with "Take a
+    photo" selected (camera left uncaptured, since AppTest can't simulate
+    an actual `getUserMedia` capture) - confirming no exception in either
+    case, the item is actually appended, and the radio correctly reverts
+    to "Upload a photo" on the next render. Full suite: 330 passing
+    (unchanged - the crash was in UI-only session-state cleanup code, not
+    unit-testable logic). No data files touched. Logged as punch-list #42
+    and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
