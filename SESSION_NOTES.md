@@ -6078,6 +6078,47 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     touched beyond the intentional, verified `lure_inventory.csv`
     migration itself. Logged as punch-list #43 and marked "Done."
 
+105. **Punch-list #44: "Scan a lure"/"Search Cabela's" crashed right after
+    punch-list #43 shipped - `TypeError: LureItem.__init__() got an
+    unexpected keyword argument 'package_qty'` - even though the code on
+    GitHub (confirmed via `raw.githubusercontent.com`, byte-for-byte
+    identical to the local working copy) plainly had `package_qty` on
+    `LureItem`. Root cause: **not a code bug** - Streamlit Community
+    Cloud's redeploy after the punch-list #43 push updated the files on
+    disk but the already-running Python process kept its OLD in-memory
+    `core.lure_inventory` module (and therefore the old, pre-#43
+    `LureItem` class with no `package_qty` field) cached in `sys.modules`,
+    while `pages/5_Lure_Inventory.py` itself got re-executed fresh each
+    rerun (Streamlit's own script-rerun behavior) - so the page's new code
+    calling `LureItem(..., package_qty=...)` was running against the
+    stale class definition. Confirmed by reproducing the crash live via
+    the Chrome browser tools against `https://voskuil-fishin-
+    magician.streamlit.app` (search flow, "Zoom Trick Worm green
+    pumpkin"), then reading the full (non-redacted) traceback from the
+    "Manage app" log panel - the UI's own redacted in-app traceback
+    truncates before the actual exception message, so the real fix
+    required the log panel, not just the on-page error box. **Fix: no
+    code change** - used "Manage app" -> "⋮" -> "Reboot app" (a full
+    process restart, not just a script rerun) to force every module,
+    including `core.lure_inventory`, to reimport fresh. Re-ran the exact
+    failing flow live post-reboot (search "Zoom Trick Worm green
+    pumpkin" -> pick a result -> set Package qty to 8 -> Add to
+    inventory) and confirmed success: 52 -> 53 lures, the new row reading
+    "Zoom Trick Worm - 6-1/2" - Green Pumpkin ... Qty: 1 (8-pack)" exactly
+    as designed, no error.
+
+    **Takeaway for future schema changes**: adding a new dataclass field
+    used across a git-backed-persistence module (`LureItem`,
+    `TripEntry`, etc.) can trigger this same stale-module symptom on
+    Streamlit Cloud immediately after a push, even though the push itself
+    and the migration both worked correctly - if a similar "unexpected
+    keyword argument" `TypeError` shows up right after a schema-adding
+    push, check "Manage app" -> reboot before assuming the code itself is
+    wrong. No test suite can catch this - it's specific to Streamlit
+    Cloud's redeploy/module-caching behavior, not the app's own logic.
+    Logged as punch-list #44 and marked "Done" (root-caused and resolved
+    live; no commit needed).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
