@@ -156,9 +156,9 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                     st.write(f"Found {len(candidates)} possible match(es) on Cabela's - pick one:")
                     cols_per_row = 4
                     for row_start in range(0, len(candidates), cols_per_row):
-                        row_candidates = candidates[row_start:row_start + cols_per_row]
+                        row_candidates = list(enumerate(candidates[row_start:row_start + cols_per_row], start=row_start))
                         cand_cols = st.columns(cols_per_row)
-                        for col, cand in zip(cand_cols, row_candidates):
+                        for col, (idx, cand) in zip(cand_cols, row_candidates):
                             with col:
                                 with st.container(border=True):
                                     if not render_square_thumbnail(cand, size_px=SCAN_THUMBNAIL_PX):
@@ -166,7 +166,11 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                                     st.caption(f"**{cand['brand']}**  \n{cand['description']}"[:110])
                                     price_txt = f"${cand['price']:,.2f}" if cand["price"] is not None else "price n/a"
                                     st.caption(f"SKU {cand['sku']} · {price_txt}")
-                                    if st.button("Use this", key=f"scan_pick_{cand['sku']}", width='stretch'):
+                                    # Punch-list #38: core.cabelas_lookup.search_lures() now dedupes by
+                                    # SKU at the source (the real cause of the crash this fixed), but this
+                                    # index in the key is still worth keeping as cheap defense-in-depth -
+                                    # a key collision here means a full-page crash, not just a cosmetic bug.
+                                    if st.button("Use this", key=f"scan_pick_{idx}_{cand['sku']}", width='stretch'):
                                         st.session_state["scan_selected"] = cand
                                         st.rerun()
 

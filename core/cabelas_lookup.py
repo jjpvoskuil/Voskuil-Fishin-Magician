@@ -178,7 +178,24 @@ def search_lures(query: str, num_results: int = 8) -> list:
     results = data.get("results") or []
     mapped = [map_result(r.get("raw") or {}) for r in results]
     # A result with no SKU or no name isn't a usable product match.
-    return [m for m in mapped if m["sku"] and m["description"]]
+    usable = [m for m in mapped if m["sku"] and m["description"]]
+    # Punch-list #38: Coveo can genuinely return the same SKU twice for one
+    # query (confirmed live - not a caller bug) - e.g. the same product
+    # showing up under more than one matched facet/variant grouping. A
+    # caller that keys UI elements by SKU (Lure Inventory's "Scan a lure"
+    # results grid, pages/5_Lure_Inventory.py) would otherwise crash with
+    # Streamlit's StreamlitDuplicateElementKey the moment that happened, so
+    # this dedupes by SKU here, once, for every caller - not just the one
+    # that happened to surface it - keeping first-occurrence order (best
+    # match first, per this function's own docstring).
+    seen_skus = set()
+    deduped = []
+    for m in usable:
+        if m["sku"] in seen_skus:
+            continue
+        seen_skus.add(m["sku"])
+        deduped.append(m)
+    return deduped
 
 
 def search_page_url(query: str) -> str:

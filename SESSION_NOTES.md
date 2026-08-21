@@ -5790,6 +5790,47 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     Drop Shot + Soft Swimbait picks). Logged as punch-list #37 and marked
     "Done."
 
+99. **Punch-list #38: fixed a real crash in Tackle Box's "Scan a lure"
+    flow.** The angler sent a screenshot: `streamlit.errors.
+    StreamlitDuplicateElementKey` on the Tackle Box page when trying to add
+    a lure, traceback pointing at `pages/5_Lure_Inventory.py` line 169 -
+    `st.button("Use this", key=f"scan_pick_{cand['sku']}", ...)` inside the
+    "Scan a lure" results grid. Root cause: `core.cabelas_lookup.
+    search_lures()` can genuinely return the same SKU more than once for a
+    single query - confirmed as a real Coveo behavior, not a caller bug (a
+    product can apparently surface under more than one matched facet/
+    variant grouping) - and the page keyed each result card's button
+    directly by SKU with no de-duplication or index fallback, so two
+    candidates sharing a SKU produced two Streamlit elements with the
+    identical key, crashing the whole page render (not just that button).
+
+    **The fix, at the source.** `search_lures()` (`core/cabelas_lookup.py`)
+    now dedupes its mapped/filtered results by SKU before returning,
+    keeping first-occurrence order (still "best match first," per the
+    function's own docstring) - fixed once so every current and future
+    caller of this function is covered, not just the one page that
+    happened to surface the crash. `pages/5_Lure_Inventory.py`'s own
+    button key also got `enumerate()`'d index added
+    (`scan_pick_{idx}_{cand['sku']}`) as cheap defense-in-depth on top of
+    the real fix - a key collision there is a full-page crash, not a
+    cosmetic bug, so it's worth the extra safety margin even though the
+    root cause is now fixed upstream.
+
+    Verification: added `test_search_lures_dedupes_results_that_share_a_
+    sku` to `tests/test_cabelas_lookup.py` (same monkeypatched-network
+    pattern as the existing `search_lures()` tests in that file) -
+    confirms a duplicate-SKU Coveo response comes back with the dupe
+    dropped, first occurrence kept, order preserved. Full suite: 330
+    passing (was 329; +1). A scratch `AppTest` run against the real
+    `pages/5_Lure_Inventory.py` (mocking `get_inventory`/
+    `anthropic_api_key`, with `scan_candidates` seeded directly in session
+    state as two entries sharing a SKU - the exact pre-dedupe shape that
+    crashed the real page, to prove the PAGE itself is robust regardless
+    of where a candidate list comes from, not just that `search_lures()`
+    happens to dedupe now) confirmed the page renders with no exception
+    and both result cards' "Use this" buttons render distinctly. No data
+    files touched. Logged as punch-list #38 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
