@@ -86,8 +86,16 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
             if st.button("📷 Turn on camera", key="scan_camera_on_btn"):
                 st.session_state["scan_camera_active"] = True
                 st.rerun()
+            st.caption(
+                "On some phones, this in-browser camera can come out blurrier than a normal "
+                "photo. If a shot looks soft, try 'Upload a photo' instead and choose 'Take "
+                "Photo' from your phone's own camera app - that uses the phone's full camera, "
+                "not the browser's."
+            )
         else:
-            cam_photo = st.camera_input("Take a picture of the lure/package", key="scan_camera")
+            cam_photo = st.camera_input(
+                "Take a picture of the lure/package", key="scan_camera", resolution="1080p",
+            )
             if cam_photo is not None:
                 st.session_state["scan_photo_bytes"] = cam_photo.getvalue()
                 st.session_state["scan_photo_ext"] = (
@@ -275,7 +283,8 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
         photo_mode = st.radio("Photo", ["Upload a photo", "Take a photo", "No photo"], horizontal=True)
         uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"]) \
             if photo_mode == "Upload a photo" else None
-        camera_file = st.camera_input("Take a picture") if photo_mode == "Take a photo" else None
+        camera_file = st.camera_input("Take a picture", resolution="1080p") \
+            if photo_mode == "Take a photo" else None
 
         submitted = st.form_submit_button("Add to inventory", width='stretch')
 

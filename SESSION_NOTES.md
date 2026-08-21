@@ -5831,6 +5831,64 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     and both result cards' "Use this" buttons render distinctly. No data
     files touched. Logged as punch-list #38 and marked "Done."
 
+100. **Punch-list #39: requested a fix for blurry iPhone camera captures
+    in Tackle Box's "Scan a lure" flow.** The angler reported that photos
+    taken with a computer's webcam were sharp enough for Claude to read
+    the label text off, but the same "Take a photo" flow on an iPhone
+    came out blurry - despite looking crisp in the moment the photo was
+    snapped on the phone's own screen.
+
+    **Root cause.** `st.camera_input()` (used by both the AI-scan flow at
+    `pages/5_Lure_Inventory.py`'s "Take a photo" mode, and the manual
+    "Add a lure" form's own photo field) is a browser `getUserMedia()`
+    live-video-stream widget, not the phone's native camera app - it's
+    fundamentally different from what `st.file_uploader`'s "Take Photo"
+    option would use. On mobile Safari/iOS in particular, `getUserMedia()`
+    is well known to often default to a lower or inconsistent resolution
+    and to grab a frame from a continuous-autofocus video stream rather
+    than triggering a discrete, full-resolution still-photo capture the
+    way the native camera app does - a very plausible explanation for
+    "looked crisp when I took it, came out blurry in the app." Confirmed
+    via `inspect.signature(st.camera_input)` (Streamlit 1.61.1, the
+    version this app runs) that the widget accepts a previously-unused
+    `resolution: "480p" | "720p" | "1080p" | None` parameter, defaulting
+    to `None` - which the widget's own docstring says lets the browser
+    pick "a resolution determined by the browser," i.e. exactly the
+    unpredictable/often-low-resolution behavior being reported. Reading
+    the installed library's source (`streamlit/elements/widgets/
+    camera_input.py`) confirmed `"1080p"` maps to a requested capture
+    height of 1080px (`_RESOLUTION_TO_HEIGHT = {"480p": 480, "720p": 720,
+    "1080p": 1080}`) and is sent to the browser as a "best-effort" request
+    - the browser selects the closest resolution it actually supports,
+    so this isn't a hard guarantee, but it's a real, low-risk request for
+    a sharper capture instead of leaving it entirely up to the browser's
+    own default.
+
+    **The fix.** Added `resolution="1080p"` to both `st.camera_input(...)`
+    call sites in `pages/5_Lure_Inventory.py` - the AI-scan flow's camera
+    (`key="scan_camera"`) and the manual "Add a lure" form's own camera
+    field - so both request the sharpest resolution the widget supports,
+    on every device, not just iPhones. Also added a caption under the
+    AI-scan flow's "Turn on camera" button noting that on some phones
+    this in-browser camera can still come out softer than a normal photo,
+    and suggesting "Upload a photo" → the phone's own "Take Photo" option
+    (which does use the native camera app/sensor) as a fallback if a
+    capture still looks soft after this change - since `resolution` is
+    only a request, not a guarantee, and a full visual before/after
+    comparison isn't something this sandboxed, camera-less dev
+    environment could actually confirm.
+
+    Verification: a scratch `AppTest` (mocking `get_inventory`/
+    `anthropic_api_key`, driving the "Take a photo" radio option and the
+    "Turn on camera" button for the AI-scan flow, and the manual form's
+    own "Take a photo" radio option) confirmed both `st.camera_input`
+    widgets render with no exception and their underlying proto now
+    carries `resolution_height: 1080`, i.e. the parameter is correctly
+    wired through to what the browser is actually asked for. Full test
+    suite: 330 passing (unchanged - this is a UI parameter change with no
+    new unit-testable logic of its own). No data files touched. Logged as
+    punch-list #39 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
