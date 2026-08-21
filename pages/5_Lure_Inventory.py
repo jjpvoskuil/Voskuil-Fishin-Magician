@@ -38,6 +38,113 @@ def _category_index(category_key: str) -> int:
     return CATEGORY_KEYS.index(category_key) if category_key in CATEGORY_KEYS else 0
 
 
+def _render_candidate_grid(candidates: list, session_key: str, key_prefix: str) -> None:
+    """Shared Cabela's-results grid, used by both the photo-scan flow above
+    and the type-a-description search flow below (punch-list #41) - picking
+    a card stores that candidate dict at `st.session_state[session_key]`
+    and reruns so a confirm form can render underneath."""
+    st.write(f"Found {len(candidates)} possible match(es) on Cabela's - pick one:")
+    cols_per_row = 4
+    for row_start in range(0, len(candidates), cols_per_row):
+        row_candidates = list(enumerate(candidates[row_start:row_start + cols_per_row], start=row_start))
+        cand_cols = st.columns(cols_per_row)
+        for col, (idx, cand) in zip(cand_cols, row_candidates):
+            with col:
+                with st.container(border=True):
+                    if not render_square_thumbnail(cand, size_px=SCAN_THUMBNAIL_PX):
+                        st.caption("No photo")
+                    st.caption(f"**{cand['brand']}**  \n{cand['description']}"[:110])
+                    price_txt = f"${cand['price']:,.2f}" if cand["price"] is not None else "price n/a"
+                    st.caption(f"SKU {cand['sku']} · {price_txt}")
+                    # Punch-list #38: core.cabelas_lookup.search_lures() now dedupes by
+                    # SKU at the source (the real cause of the crash this fixed), but this
+                    # index in the key is still worth keeping as cheap defense-in-depth -
+                    # a key collision here means a full-page crash, not just a cosmetic bug.
+                    if st.button("Use this", key=f"{key_prefix}_{idx}_{cand['sku']}", width='stretch'):
+                        st.session_state[session_key] = cand
+                        st.rerun()
+
+
+def _render_confirm_form(selected: dict, form_key: str, source_label: str, cleanup_keys: tuple) -> None:
+    """Shared 'confirm before saving' form, used by both the photo-scan
+    flow above and the type-a-description search flow below (punch-list
+    #41) - editable brand/price/description/qty/category, bumps an
+    existing matching-SKU row's quantity instead of duplicating it,
+    otherwise appends a new LureItem sourced from the Cabela's lookup."""
+    st.divider()
+    st.markdown("#### Confirm details")
+    existing_match = next((r for r in items if r.get("sku") and r["sku"] == selected["sku"]), None)
+    if existing_match:
+        st.info(
+            f"You already have this in inventory (qty {existing_match['quantity']}) - "
+            "confirming below adds to that quantity instead of creating a duplicate entry."
+        )
+    guessed_category = guess_category_from_text(selected["brand"], selected["description"]) or (
+        existing_match.get("category", "") if existing_match else ""
+    )
+    with st.form(form_key):
+        sc1, sc2 = st.columns(2)
+        confirm_brand = sc1.text_input("Brand", value=selected["brand"])
+        confirm_price = sc2.number_input(
+            "Price ($)", min_value=0.0, step=0.01, value=float(selected["price"] or 0.0),
+        )
+        confirm_description = st.text_area("Full description", value=selected["description"])
+        sc3, sc4 = st.columns(2)
+        confirm_qty = sc3.number_input("Quantity to add", min_value=1, step=1, value=1)
+        confirm_category_choice = sc4.selectbox(
+            "Category (matches it to forecast lure suggestions)", CATEGORY_LABELS,
+            index=_category_index(guessed_category),
+            key=f"{form_key}_category",
+        )
+        confirm_submitted = st.form_submit_button("✅ Add to inventory", width='stretch')
+
+    if confirm_submitted:
+        category_key = CATEGORY_KEYS[CATEGORY_LABELS.index(confirm_category_choice)]
+        if existing_match:
+            new_qty = int(existing_match["quantity"] or 0) + int(confirm_qty)
+            update_item(
+                existing_match["item_id"],
+                quantity=new_qty,
+                price=float(confirm_price) if confirm_price else existing_match.get("price"),
+                category=category_key or existing_match.get("category", ""),
+            )
+            saved_desc = (
+                f"{confirm_brand} - {confirm_description[:50]} "
+                f"(qty {existing_match['quantity']} -> {new_qty})"
+            )
+        else:
+            new_item = LureItem(
+                brand=confirm_brand.strip(),
+                description=confirm_description.strip(),
+                price=float(confirm_price) if confirm_price else None,
+                quantity=int(confirm_qty),
+                category=category_key,
+                sku=selected["sku"],
+                image_url=selected["image_url"],
+                source=source_label,
+            )
+            append_item(new_item)
+            saved_desc = f"{new_item.brand} - {new_item.description[:50]}"
+
+        get_inventory.clear()
+        token = github_token()
+        if token:
+            ok, msg = commit_and_push(
+                [INVENTORY_PATH], token, repo_slug(),
+                f"Add lure to inventory: {saved_desc}",
+            )
+            (st.success if ok else st.warning)(msg)
+        else:
+            st.success("Added locally.")
+            st.info(
+                "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
+                "to GitHub and won't survive an app restart. See README for how to add it."
+            )
+        for key in cleanup_keys:
+            st.session_state.pop(key, None)
+        st.rerun()
+
+
 items = get_inventory()
 
 with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_change="rerun"):
@@ -161,107 +268,60 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                             st.session_state["scan_candidates"] = search_lures(manual_query)
                         st.rerun()
                 else:
-                    st.write(f"Found {len(candidates)} possible match(es) on Cabela's - pick one:")
-                    cols_per_row = 4
-                    for row_start in range(0, len(candidates), cols_per_row):
-                        row_candidates = list(enumerate(candidates[row_start:row_start + cols_per_row], start=row_start))
-                        cand_cols = st.columns(cols_per_row)
-                        for col, (idx, cand) in zip(cand_cols, row_candidates):
-                            with col:
-                                with st.container(border=True):
-                                    if not render_square_thumbnail(cand, size_px=SCAN_THUMBNAIL_PX):
-                                        st.caption("No photo")
-                                    st.caption(f"**{cand['brand']}**  \n{cand['description']}"[:110])
-                                    price_txt = f"${cand['price']:,.2f}" if cand["price"] is not None else "price n/a"
-                                    st.caption(f"SKU {cand['sku']} · {price_txt}")
-                                    # Punch-list #38: core.cabelas_lookup.search_lures() now dedupes by
-                                    # SKU at the source (the real cause of the crash this fixed), but this
-                                    # index in the key is still worth keeping as cheap defense-in-depth -
-                                    # a key collision here means a full-page crash, not just a cosmetic bug.
-                                    if st.button("Use this", key=f"scan_pick_{idx}_{cand['sku']}", width='stretch'):
-                                        st.session_state["scan_selected"] = cand
-                                        st.rerun()
+                    _render_candidate_grid(candidates, "scan_selected", "scan_pick")
 
         selected = st.session_state.get("scan_selected")
         if selected:
-            st.divider()
-            st.markdown("#### Confirm details")
-            existing_match = next((r for r in items if r.get("sku") and r["sku"] == selected["sku"]), None)
-            if existing_match:
-                st.info(
-                    f"You already have this in inventory (qty {existing_match['quantity']}) - "
-                    "confirming below adds to that quantity instead of creating a duplicate entry."
-                )
-            guessed_category = guess_category_from_text(selected["brand"], selected["description"]) or (
-                existing_match.get("category", "") if existing_match else ""
+            _render_confirm_form(
+                selected, "scan_confirm_form", "Scanned photo -> Cabela's lookup",
+                ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"),
             )
-            with st.form("scan_confirm_form"):
-                sc1, sc2 = st.columns(2)
-                confirm_brand = sc1.text_input("Brand", value=selected["brand"])
-                confirm_price = sc2.number_input(
-                    "Price ($)", min_value=0.0, step=0.01, value=float(selected["price"] or 0.0),
-                )
-                confirm_description = st.text_area("Full description", value=selected["description"])
-                sc3, sc4 = st.columns(2)
-                confirm_qty = sc3.number_input("Quantity to add", min_value=1, step=1, value=1)
-                confirm_category_choice = sc4.selectbox(
-                    "Category (matches it to forecast lure suggestions)", CATEGORY_LABELS,
-                    index=_category_index(guessed_category),
-                    key="scan_confirm_category",
-                )
-                confirm_submitted = st.form_submit_button("✅ Add to inventory", width='stretch')
-
-            if confirm_submitted:
-                category_key = CATEGORY_KEYS[CATEGORY_LABELS.index(confirm_category_choice)]
-                if existing_match:
-                    new_qty = int(existing_match["quantity"] or 0) + int(confirm_qty)
-                    update_item(
-                        existing_match["item_id"],
-                        quantity=new_qty,
-                        price=float(confirm_price) if confirm_price else existing_match.get("price"),
-                        category=category_key or existing_match.get("category", ""),
-                    )
-                    saved_desc = (
-                        f"{confirm_brand} - {confirm_description[:50]} "
-                        f"(qty {existing_match['quantity']} -> {new_qty})"
-                    )
-                else:
-                    new_item = LureItem(
-                        brand=confirm_brand.strip(),
-                        description=confirm_description.strip(),
-                        price=float(confirm_price) if confirm_price else None,
-                        quantity=int(confirm_qty),
-                        category=category_key,
-                        sku=selected["sku"],
-                        image_url=selected["image_url"],
-                        source="Scanned photo -> Cabela's lookup",
-                    )
-                    append_item(new_item)
-                    saved_desc = f"{new_item.brand} - {new_item.description[:50]}"
-
-                get_inventory.clear()
-                token = github_token()
-                if token:
-                    ok, msg = commit_and_push(
-                        [INVENTORY_PATH], token, repo_slug(),
-                        f"Add scanned lure to inventory: {saved_desc}",
-                    )
-                    (st.success if ok else st.warning)(msg)
-                else:
-                    st.success("Added locally.")
-                    st.info(
-                        "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
-                        "to GitHub and won't survive an app restart. See README for how to add it."
-                    )
-                for key in ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"):
-                    st.session_state.pop(key, None)
-                st.rerun()
 
         if st.session_state.get("scan_result"):
             if st.button("Start over", key="scan_reset_btn"):
                 for key in ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"):
                     st.session_state.pop(key, None)
                 st.rerun()
+
+with st.expander("🔍 Search Cabela's by description", expanded=False, key="text_search_expander"):
+    # Punch-list #41: no photo needed - type what you know about the lure
+    # (brand, name, color, size) and search Cabela's directly, reusing the
+    # exact same "pick a match -> confirm details" flow as the photo-scan
+    # section above (_render_candidate_grid/_render_confirm_form), just
+    # skipping the photo + Claude-vision step entirely.
+    st.caption(
+        "Type a description of the lure - brand, name, color, size, whatever you know - and "
+        "search Cabela's directly. Pick a match below to confirm details before it's added to "
+        "your tackle box."
+    )
+    ts1, ts2 = st.columns([4, 1])
+    text_query = ts1.text_input(
+        "Search Cabela's", placeholder='e.g. Strike King KVD 1.5 crankbait chartreuse',
+        key="text_search_query", label_visibility="collapsed",
+    )
+    search_clicked = ts2.button("🔍 Search", key="text_search_btn", width='stretch')
+    if search_clicked and text_query.strip():
+        with st.spinner("Searching Cabela's..."):
+            st.session_state["text_search_candidates"] = search_lures(text_query)
+        st.session_state["text_search_selected"] = None
+        st.rerun()
+
+    text_candidates = st.session_state.get("text_search_candidates")
+    if text_candidates is not None:
+        if not text_candidates:
+            st.warning(
+                "No matches found on Cabela's for that search. Try different wording, or add it "
+                "manually below."
+            )
+        else:
+            _render_candidate_grid(text_candidates, "text_search_selected", "text_search_pick")
+
+    text_selected = st.session_state.get("text_search_selected")
+    if text_selected:
+        _render_confirm_form(
+            text_selected, "text_search_confirm_form", "Cabela's search",
+            ("text_search_candidates", "text_search_selected", "text_search_query"),
+        )
 
 with st.expander("➕ Add a lure", expanded=len(items) == 0):
     # Punch-list #40: the photo controls used to live INSIDE the st.form

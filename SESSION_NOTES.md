@@ -5934,6 +5934,58 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     logic). No data files touched. Logged as punch-list #40 and marked
     "Done."
 
+102. **Punch-list #41: added a "🔍 Search Cabela's by description" flow -
+    no photo needed.** The angler asked for a way to add a lure by just
+    typing in a description and having the app search Cabela's directly,
+    rather than needing a photo for the AI-scan flow or hand-typing every
+    field in the manual form.
+
+    **Design.** Rather than build a third, separate pick-a-match/confirm
+    UI, the existing "📷 Scan a lure" flow's candidate-grid rendering and
+    confirm-form logic were extracted into two shared helper functions -
+    `_render_candidate_grid()` (the "Found N possible match(es) - pick
+    one" card grid with "Use this" buttons) and `_render_confirm_form()`
+    (the editable brand/price/description/qty/category form that either
+    bumps an existing matching-SKU inventory row's quantity or appends a
+    new `LureItem`, with the git-commit/local-save outcome messaging) -
+    both parameterized by session-state keys, a widget-key prefix, a form
+    key, and a `source` label, so behavior is identical between the two
+    entry points and any future fix only needs to happen once. The
+    photo-scan section now calls these same two helpers instead of having
+    its own copy of that logic inline.
+
+    **The new section**, added between "📷 Scan a lure" and "➕ Add a
+    lure": a single text input (placeholder `"e.g. Strike King KVD 1.5
+    crankbait chartreuse"`) plus a "🔍 Search" button that calls
+    `core.cabelas_lookup.search_lures()` directly with whatever was typed
+    - brand, product name, color, size, any mix - no Claude vision call
+    involved, so it works even without an `ANTHROPIC_API_KEY` configured
+    (unlike the photo-scan flow). Results render through the same
+    candidate grid; picking one shows the same confirm-before-saving form
+    (`source="Cabela's search"` on the saved item, distinct from
+    `"Scanned photo -> Cabela's lookup"` and `"Manual"`, so Trip History/
+    inventory provenance stays honest about how each row was actually
+    added).
+
+    Verification: two scratch `AppTest` runs (mocking `get_inventory`/
+    `anthropic_api_key`/`core.cabelas_lookup.search_lures` with a fixture
+    result list, and separately mocking `append_item`/`github_token` to
+    capture what would actually be saved without hitting git). Confirmed:
+    typing a query and clicking Search populates
+    `st.session_state["text_search_candidates"]` from the (mocked)
+    Cabela's response; the candidate grid renders "Use this" buttons keyed
+    `text_search_pick_*`; clicking one renders the
+    `text_search_confirm_form`; submitting that form actually calls
+    `append_item()` with the right brand/description/SKU/
+    `source="Cabela's search"`, and clears `text_search_candidates`/
+    `text_search_selected`/`text_search_query` from session state
+    afterward so the section resets for the next search - all with no
+    exception at any step. Full suite: 330 passing (unchanged - this is
+    UI wiring reusing already-unit-tested `search_lures()`/
+    `guess_category_from_text()`/`append_item()`/`update_item()`, no new
+    pure logic of its own to unit test). No data files touched. Logged as
+    punch-list #41 and marked "Done."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

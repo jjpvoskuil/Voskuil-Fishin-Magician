@@ -609,6 +609,16 @@ current quantity on hand. Two ways items get in:
   without one, this section just explains that and stays otherwise out of the way;
   manual entry above still works regardless. See "How the Cabela's lookup works"
   below for how the product search itself works and its limitations.
+- **Search Cabela's by description (punch-list #41)** - no photo needed: the
+  "🔍 Search Cabela's by description" section (between "Scan a lure" and "Add a
+  lure") takes a typed description - brand, name, color, size, whatever you know -
+  and searches Cabela's own catalog directly with it (`core/cabelas_lookup.py`,
+  the same lookup the photo-scan flow uses), then shows the same pick-a-match ->
+  confirm-details flow as scanning a photo does. Since there's no photo or
+  Claude-vision step involved, this works even without an `ANTHROPIC_API_KEY`
+  configured. Items added this way are tagged `source="Cabela's search"` in your
+  inventory, distinct from `"Scanned photo -> Cabela's lookup"` and `"Manual"`, so
+  it's still clear later how each lure was actually added.
 - **In-app camera photo quality (punch-list #39)** - both "Take a photo" camera
   widgets on this page (the "Scan a lure" flow above, and manual entry's own photo
   field) now explicitly request `resolution="1080p"` from the browser. Streamlit's
