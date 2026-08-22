@@ -137,16 +137,19 @@ this repo that can override it on this hosting.
   ready to switch between? An "➕ Add from tackle box" section offers the same
   searchable photo-card grid as before, except every card toggles "added" instead of
   picking just one, so you can queue up as many lures as you're bringing to the spot;
-  a plain text box below it covers anything not in your inventory. Only real lures
-  are selectable here - trailer-type baits (soft-plastic worms/creatures/TRDs) are
-  filtered out of both the recommendation quick-adds and the tackle-box grid, since
-  they're never fished on their own. Instead, adding any lure whose category can
-  actually carry a trailer (jigs, chatterbaits, spinnerbaits, buzzbaits, swim jigs -
-  crankbaits/jerkbaits/topwaters etc. skip this) pops up an "Add a trailer?" dialog:
-  check "used a trailer with this lure" and the same dialog switches to a
-  trailer-only picker (your tackle box's trailer-eligible items, or type one in by
-  hand), then "Add lure" queues the pair together; "Cancel" backs out with nothing
-  added. Once at least one lure is queued, **"▶ Start Session"** locks everything
+  a plain text box below it covers anything not in your inventory. Every tackle-box
+  item is selectable here (punch-list #46) - including craw/creature baits and
+  weightless soft plastics that can also ride as a trailer on another lure, since
+  those are commonly fished on their own too (a Texas-rigged creature bait, a
+  weightless fluke). Separately, adding any lure whose category can actually carry a
+  trailer (jigs, chatterbaits, spinnerbaits, buzzbaits, swim jigs - crankbaits/
+  jerkbaits/topwaters etc. skip this) still pops up an "Add a trailer?" dialog: check
+  "used a trailer with this lure" and the same dialog switches to a trailer-only
+  picker (your tackle box's trailer-eligible items only, or type one in by hand),
+  then "Add lure" queues the pair together; "Cancel" backs out with nothing added.
+  So a craw bait can end up in your session either as its own standalone lure pick,
+  or nested as another lure's trailer, or (if you like) both at once as two separate
+  queued entries - whichever matches how you're actually fishing it that trip. Once at least one lure is queued, **"▶ Start Session"** locks everything
   in: it stamps the real current time as the session's start time, re-derives the
   time-of-day window from that exact moment (e.g. "Dawn"), and writes one entry per
   selected lure to the trip log - your conditions snapshot, that start time, and an

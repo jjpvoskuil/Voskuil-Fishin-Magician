@@ -6190,6 +6190,64 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     specific root cause here; the public Python API docs alone don't
     mention the front-camera default at all.
 
+107. **Punch-list #46: "show all the lures and trailers" in Spot Session's
+    lure picker, since some trailer-eligible baits (craw/creature, weightless
+    soft plastics) can also be fished standalone - but keep the separate
+    "Add a trailer?" dialog's own picker trailer-only.** This reverses one
+    specific piece of entry 86's (punch-list #24/25) original design: back
+    then the angler asked for trailer-style baits to be unselectable as a
+    standalone lure at all ("no trailers should be selectable" as the main
+    lure), which `_multi_lure_picker()`
+    (`standalone_items = [it for it in inventory_items if not
+    is_trailer_eligible(it)]`) and `_render_recommendation_with_quick_add()`
+    (`if block.key in TRAILER_ELIGIBLE_CATEGORIES: continue`) both
+    implemented in `pages/6_Spot_Session.py`. That's no longer the whole
+    picture - `TRAILER_ELIGIBLE_CATEGORIES` (`core/lures.py`) is only
+    `texas_rig_creature` and `weightless_soft_plastic`, and both are
+    genuinely common *standalone* presentations too (a Texas-rigged creature
+    bait punched into cover, a weightless fluke/soft jerkbait), not baits
+    that only ever ride on another lure's hook. Fix: removed both filters -
+    `_multi_lure_picker()` now shows the whole tackle box (matching what its
+    sibling `_visual_lure_picker()`, used for edit mode's "Lure used" picker,
+    already did all along - that picker was never filtered, an inconsistency
+    this fix also resolves), and the recommendation quick-add button now
+    renders for every category, trailer-eligible or not. The dedicated
+    trailer-attach flow (`_trailer_dialog()`, opened via
+    `_handle_lure_add_click()` -> `lure_can_take_trailer()` whenever a
+    trailer-*capable* lure like a jig/chatterbait/spinnerbait/swim jig/
+    buzzbait is added) is **untouched** - its own `trailer_items = [it for it
+    in get_inventory() if is_trailer_eligible(it)]` picker still shows only
+    the `TRAILER_ELIGIBLE_CATEGORIES` items, exactly as the angler asked to
+    keep it. Net effect: a craw bait can now be added to a session as its
+    own standalone lure entry, nested as another lure's trailer, or both (two
+    separate queued entries) - whichever matches how it was actually fished
+    that trip. `core.lures.is_trailer_eligible()`/`TRAILER_ELIGIBLE_CATEGORIES`
+    themselves are unchanged - still the single source of truth for "is this
+    a trailer," just no longer also used to gate the main lure list.
+    `TRAILER_ELIGIBLE_CATEGORIES` dropped from `pages/6_Spot_Session.py`'s
+    imports since removing the recommendation-block skip left it unused
+    there.
+
+    Verification: `python3 -m py_compile` on both edited files; full suite
+    335 passing, unchanged (no unit tests exercised these page-level
+    picker functions before or after - `core.lures.is_trailer_eligible()`/
+    `TRAILER_ELIGIBLE_CATEGORIES` themselves are still covered by their
+    existing tests in `tests/test_lures.py`, untouched by this change). Two
+    scratch `AppTest` walkthroughs (not committed) against a real spot
+    (`f574f116`, real saved inventory) confirmed the actual behavior change
+    end-to-end: (1) a `weightless_soft_plastic` item ("KVD Perfect Plastics
+    Blade Minnow") that was previously invisible in "➕ Add from tackle box"
+    now renders there and can be added with no exception; (2) the "Add a
+    trailer?" dialog opened for a chatterbait still offers exactly the
+    trailer-eligible count (9 = 1 "Type it in manually" + the 8
+    trailer-eligible rows currently in `data/lure_inventory.csv`) - verified
+    by counting the live selectbox's options against a fresh
+    `is_trailer_eligible()` filter over the same CSV, confirming the trailer
+    picker itself picked up zero extra options from this change. No data
+    files touched by any of this (confirmed via `git status`/checksums
+    before and after - the scratch runs only interacted with in-memory
+    `session_state`, never clicked "Start Session").
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

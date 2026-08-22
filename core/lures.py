@@ -1120,11 +1120,19 @@ def guess_category_from_text(*texts: str) -> str:
 
 
 # --- Trailer eligibility (Spot Session's "Used a trailer" picker) ------------
-# A "trailer" is a soft plastic added onto another bait's hook (a jig,
-# chatterbait, spinnerbait, swim jig, or buzzbait - see each profile's own
-# "trailer" dict above, e.g. "Craw trailer"/"Paddle-tail swimbait trailer") -
-# not a standalone rigged bait like a Texas-rigged worm or a wacky-rigged
-# senko. Deliberately narrow: only the two LURE_PROFILES categories that
+# A "trailer" is a soft plastic that CAN be added onto another bait's hook (a
+# jig, chatterbait, spinnerbait, swim jig, or buzzbait - see each profile's
+# own "trailer" dict above, e.g. "Craw trailer"/"Paddle-tail swimbait
+# trailer"). This is used to build the trailer-only picker inside the "Add a
+# trailer?" dialog (core.lures.is_trailer_eligible) - it is NOT used to
+# exclude these baits from the main lure picker (punch-list #46): a
+# Texas-rigged creature bait or a weightless soft plastic is very often
+# fished on its own too, not just attached to another lure, so both are
+# fully pickable as a standalone lure everywhere else in the app. Worm-style
+# baits (Texas-rigged worm, wacky-rigged senko, etc.) never belong in the
+# trailer picker at all - see the keyword safety net below - but they were
+# always standalone-pickable regardless. Deliberately narrow: only the two
+# LURE_PROFILES categories that
 # actually match a documented trailer TYPE. texas_rig_creature covers craw/
 # creature-style trailers (the classic jig trailer); weightless_soft_plastic
 # covers fluke/soft-jerkbait-style trailers - an established convention from

@@ -25,7 +25,7 @@ from core.activity_log import (
     weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
     nearest_weight_slider_option, nearest_length_slider_option,
 )
-from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES
+from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
 from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip, delete_trip
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
@@ -690,13 +690,16 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
     """Multi-select sibling of _visual_lure_picker - same searchable card
     grid, but each card adds to the running "lures for this session" list
     (see _pending_lures_key, or the active session once one's started)
-    instead of picking exactly one. Only shows real standalone lures -
-    trailer-style baits (craw/creature, paddle-tail swimbait-style; see
-    core.lures.is_trailer_eligible) are filtered out entirely, since those
-    only ever get attached to another lure via the trailer popup below,
-    never picked here as their own rod."""
-    standalone_items = [it for it in inventory_items if not is_trailer_eligible(it)]
-    if not standalone_items:
+    instead of picking exactly one. Shows the whole tackle box, including
+    trailer-eligible baits (craw/creature, paddle-tail swimbait-style; see
+    core.lures.is_trailer_eligible) - punch-list #46: those baits are often
+    fished on their own too (e.g. a Texas-rigged creature bait or a
+    weightless soft plastic), not just attached to another lure via the
+    trailer popup below, so they belong here as regular pickable lures.
+    The trailer popup's own picker (_trailer_dialog) stays filtered to
+    is_trailer_eligible() only - that's the "attach this to another lure"
+    list, a separate concern from "what can I fish on its own"."""
+    if not inventory_items:
         st.caption("No lures in your tackle box yet - add some on the Tackle Box page.")
         return
     search = st.text_input(
@@ -704,7 +707,7 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
         placeholder="Search your tackle box by brand or description...",
         label_visibility="collapsed",
     )
-    filtered = standalone_items
+    filtered = inventory_items
     if search:
         s = search.lower()
         filtered = [
@@ -741,11 +744,10 @@ def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefi
     display) with a "+ Add to session" button under each color-matched
     owned item, so a suggested lure can be added to this session with one
     click instead of having to go find it again in the tackle-box picker
-    below. Blocks for a trailer-style category (see
-    core.lures.TRAILER_ELIGIBLE_CATEGORIES) skip the add button entirely -
-    same "not selectable as a standalone lure" rule _multi_lure_picker
-    applies - though the card itself still displays, since seeing what's
-    on hand is still useful even when it's not directly addable here."""
+    below. Punch-list #46: blocks for a trailer-eligible category (see
+    core.lures.TRAILER_ELIGIBLE_CATEGORIES) get a quick-add button too, same
+    as any other category - those baits can be fished standalone, matching
+    _multi_lure_picker below no longer excluding them either."""
     added_ids = _added_lure_item_ids(spot_id, seq, mode)
     for label, blocks in (("First choice", rec.first_choice), ("Second choice", rec.second_choice)):
         if not blocks:
@@ -753,8 +755,6 @@ def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefi
         st.markdown(f"**{label}**")
         for block in blocks:
             render_lure_block(block)
-            if block.key in TRAILER_ELIGIBLE_CATEGORIES:
-                continue
             for item in block.owned_items:
                 item_id = item.get("item_id")
                 if not item_id:
