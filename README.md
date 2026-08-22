@@ -559,6 +559,18 @@ picked, and Trip History has an **Angler** filter/column so you can see your own
 someone else's, or everyone's combined - all trips still land in the same shared log for
 calibration and analytics either way.
 
+**Independent sessions per angler (punch-list #47).** If more than one of you is
+fishing the same spot at the same time (each on your own phone), each name picked in
+"Who's fishing" gets its own completely independent session: its own Start Session,
+its own lure buttons/fish logging, its own "⏹ End Session" and "❌ Cancel Session." One
+angler ending or canceling their session never touches anyone else's still-in-progress
+one at that same spot - if someone else has one open, a caption says so right on the
+page. This also fixed a real bug: reconnecting after a dropped connection or a locked
+phone used to reload "the" one active session for a spot regardless of whose it was
+(picking up whichever one had started more recently), so one angler's own reconnect
+could land them on a different angler's session, and ending it from there really did end
+the wrong one. Reconnecting now always restores *your own* named session specifically.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip

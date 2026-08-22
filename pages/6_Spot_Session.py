@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date as ddate, datetime, time as dtime
 
 import streamlit as st
@@ -242,6 +243,38 @@ def _save_new_angler_if_needed() -> bool:
     if angler_choice == ANGLER_OTHER_LABEL and resolved_angler:
         return add_angler(resolved_angler)
     return False
+
+
+# --- Per-angler active session scoping (punch-list #47) ---------------------
+# Before this, "the active session" for a spot lived at st.session_state
+# key active_session_{spot_id} - shared by whoever was looking at that spot,
+# angler-blind. Two anglers fishing the same spot at the same time (each on
+# their own phone) collided into what the code treated as ONE session: on
+# reconnect (punch-list #29's _reconstruct_active_session, below)
+# _open_session_rows picked whichever one of them had started more
+# recently and silently dropped the other's, so one angler's "⏹ End
+# Session" could end up stamping lure_end_time on rows that were actually
+# the OTHER angler's still-in-progress lures the instant their own browser
+# lost track of its own session (a dropped connection, a locked phone, a
+# server restart) and reconstructed - landing on the wrong angler's open
+# group. Scoping both the in-memory key and the on-disk lookup by angler
+# fixes this: each angler gets their own independent start/add-lure/log-
+# fish/end lifecycle at a spot, so ending your own session never touches
+# anyone else's.
+def _angler_session_slug(angler: str) -> str:
+    """Stable, session_state-key-safe token for an angler name, so it can
+    be embedded in _active_session_key() below. Falls back to a fixed
+    sentinel for a blank/unset angler rather than "" - keeps the key
+    readable in a stale session_state dump and avoids a blank name and a
+    literally-blank-string name colliding by coincidence."""
+    name = (angler or "").strip()
+    if not name:
+        return "unassigned"
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "unassigned"
+
+
+def _active_session_key(spot_id: str, angler: str) -> str:
+    return f"active_session_{spot_id}_{_angler_session_slug(angler)}"
 
 
 # Computed from the spot alone, so it's always available regardless of mode.
@@ -589,14 +622,16 @@ def _remove_lure_from_pending(spot_id: str, seq: int, index: int):
         st.session_state[key] = pending
 
 
-def _added_lure_item_ids(spot_id: str, seq: int, mode: str) -> set:
+def _added_lure_item_ids(spot_id: str, seq: int, mode: str, angler: str = "") -> set:
     """Item ids already queued for this session - the pre-session "pending"
     list before Start Session, or the active session's currently-in-use
     (not yet retired) lures once one's running. Used to disable/relabel a
-    picker card that's already been added."""
+    picker card that's already been added. `angler` only matters for the
+    "active" branch - the active session it looks up is scoped per angler
+    (see _active_session_key() above)."""
     if mode == "pending":
         return {p.get("item_id") for p in st.session_state.get(_pending_lures_key(spot_id, seq), [])}
-    active = st.session_state.get(f"active_session_{spot_id}")
+    active = st.session_state.get(_active_session_key(spot_id, angler))
     if not active:
         return set()
     return {l.get("item_id") for l in active["lures"] if not l.get("retired")}
@@ -617,7 +652,7 @@ def _trailer_dialog_lure_key(lure_stub: dict) -> str:
     return f"manual_{abs(hash(lure_stub.get('label', '')))}"
 
 
-def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_trailer_check, mode: str):
+def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_trailer_check, mode: str, angler: str = ""):
     """Common "+ Add" handler for a lure card, wherever it's clicked from
     (a recommendation's quick-add, the tackle-box grid, or a manual
     entry) - if that lure's category can take a trailer (or it's a manual
@@ -625,19 +660,20 @@ def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_tra
     it's actually added; otherwise it's added immediately, same as before.
     `mode` ("pending" before a session starts, "active" to add a lure
     mid-session) decides which list the lure - and its trailer pick, if
-    any - eventually lands in."""
+    any - eventually lands in. `angler` is only actually used for "active"
+    mode (see _add_lure_to_active_session's own angler-scoping)."""
     if lure_can_take_trailer(item_for_trailer_check):
-        _trailer_dialog(spot_id, seq, lure_stub, mode)
+        _trailer_dialog(spot_id, seq, lure_stub, mode, angler)
     else:
         if mode == "pending":
             _add_lure_to_pending(spot_id, seq, lure_stub)
         else:
-            _add_lure_to_active_session(spot_id, lure_stub)
+            _add_lure_to_active_session(spot_id, lure_stub, angler)
         st.rerun()
 
 
 @st.dialog("Add a trailer?")
-def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str):
+def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str, angler: str = ""):
     dkey = _trailer_dialog_lure_key(lure_stub)
     if st.session_state.pop(f"trailer_dialog_reset_pending_{spot_id}_{dkey}", False):
         for k in (
@@ -673,7 +709,7 @@ def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str):
         if mode == "pending":
             _add_lure_to_pending(spot_id, seq, final_lure)
         else:
-            _add_lure_to_active_session(spot_id, final_lure)
+            _add_lure_to_active_session(spot_id, final_lure, angler)
         # Clears the checkbox/selection back to blank for the NEXT time this
         # exact lure's dialog is opened (e.g. re-adding it later in a future
         # session) - can't just pop the keys here, since they're already
@@ -686,7 +722,7 @@ def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str):
         st.rerun()
 
 
-def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq: int, mode: str = "pending"):
+def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq: int, mode: str = "pending", angler: str = ""):
     """Multi-select sibling of _visual_lure_picker - same searchable card
     grid, but each card adds to the running "lures for this session" list
     (see _pending_lures_key, or the active session once one's started)
@@ -717,7 +753,7 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
     if not filtered:
         st.caption("No matches for that search.")
         return
-    added_ids = _added_lure_item_ids(spot_id, seq, mode)
+    added_ids = _added_lure_item_ids(spot_id, seq, mode, angler)
     for row_start in range(0, len(filtered), LURE_PICKER_COLS):
         row_items = filtered[row_start:row_start + LURE_PICKER_COLS]
         cols = st.columns(LURE_PICKER_COLS)
@@ -735,10 +771,10 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
                         _handle_lure_add_click(spot_id, seq, {
                             "item_id": item["item_id"], "label": inventory_item_label(item),
                             "category": item.get("category"),
-                        }, item, mode)
+                        }, item, mode, angler)
 
 
-def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str, mode: str = "pending"):
+def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str, mode: str = "pending", angler: str = ""):
     """Displays the lure recommendation (reusing core.ui.render_lure_block
     unchanged, so this stays in sync with the 7-Day Forecast page's own
     display) with a "+ Add to session" button under each color-matched
@@ -748,7 +784,7 @@ def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefi
     core.lures.TRAILER_ELIGIBLE_CATEGORIES) get a quick-add button too, same
     as any other category - those baits can be fished standalone, matching
     _multi_lure_picker below no longer excluding them either."""
-    added_ids = _added_lure_item_ids(spot_id, seq, mode)
+    added_ids = _added_lure_item_ids(spot_id, seq, mode, angler)
     for label, blocks in (("First choice", rec.first_choice), ("Second choice", rec.second_choice)):
         if not blocks:
             continue
@@ -764,7 +800,7 @@ def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefi
                 if st.button(btn_label, key=f"{key_prefix}_{block.key}_{item_id}", disabled=is_added):
                     _handle_lure_add_click(spot_id, seq, {
                         "item_id": item_id, "label": inventory_item_label(item), "category": block.key,
-                    }, {"category": block.key}, mode)
+                    }, {"category": block.key}, mode, angler)
     if rec.rationale:
         st.caption(" · ".join(rec.rationale))
 
@@ -940,12 +976,12 @@ def _push_or_toast(paths, commit_message, local_message):
         st.toast(local_message, icon="ℹ️")
 
 
-def _record_fish(spot_id: str, lure_index: int, fish_record: dict):
+def _record_fish(spot_id: str, lure_index: int, fish_record: dict, angler: str = ""):
     """Appends one fish to the given lure's running catch list, immediately
     saving that lure's TripEntry (via update_trip) and pushing - per the
     angler's own ask, each catch is saved right away rather than batched
     until the session ends."""
-    active_key = f"active_session_{spot_id}"
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None or lure_index >= len(active["lures"]):
         return
@@ -969,8 +1005,8 @@ def _record_fish(spot_id: str, lure_index: int, fish_record: dict):
     )
 
 
-def _remove_fish(spot_id: str, lure_index: int, fish_index: int):
-    active_key = f"active_session_{spot_id}"
+def _remove_fish(spot_id: str, lure_index: int, fish_index: int, angler: str = ""):
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None or lure_index >= len(active["lures"]):
         return
@@ -996,7 +1032,7 @@ def _remove_fish(spot_id: str, lure_index: int, fish_index: int):
     )
 
 
-def _add_lure_to_active_session(spot_id: str, lure_stub: dict):
+def _add_lure_to_active_session(spot_id: str, lure_stub: dict, angler: str = ""):
     """Adds one more lure to an already-running session - the same "switch
     rods any time" ability as picking lures before Start Session, just
     writing a brand-new TripEntry row (its own lure_start_time = right
@@ -1004,7 +1040,7 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict):
     session's start time/time window/conditions snapshot are already
     locked in (see active["base_conditions"], captured once at Start
     Session and reused unchanged for every lure added after)."""
-    active_key = f"active_session_{spot_id}"
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
         return
@@ -1058,14 +1094,14 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict):
     )
 
 
-def _retire_lure(spot_id: str, lure_index: int):
+def _retire_lure(spot_id: str, lure_index: int, angler: str = ""):
     """"🔄 Change" - stops active use of one lure mid-session without
     ending the whole session: stamps its own lure_end_time right now
     (same field Start Session leaves blank and End Session would otherwise
     fill in later) and marks it retired so it drops out of the active
     button list, while the rest of the session (and any other lure still
     in play) keeps going."""
-    active_key = f"active_session_{spot_id}"
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None or lure_index >= len(active["lures"]):
         return
@@ -1090,8 +1126,8 @@ def _retire_lure(spot_id: str, lure_index: int):
 
 
 @st.dialog("Log a fish")
-def _fish_entry_dialog(spot_id: str, lure_index: int):
-    active = st.session_state.get(f"active_session_{spot_id}")
+def _fish_entry_dialog(spot_id: str, lure_index: int, angler: str = ""):
+    active = st.session_state.get(_active_session_key(spot_id, angler))
     if active is None or lure_index >= len(active["lures"]):
         st.error("This session has ended.")
         return
@@ -1138,15 +1174,15 @@ def _fish_entry_dialog(spot_id: str, lure_index: int):
         fish_record = _new_fish_from_form(
             species_label, species_other, weight_lb_value, length_in_value, hit_types, retrieve_style, retrieve_speed,
         )
-        _record_fish(spot_id, lure_index, fish_record)
+        _record_fish(spot_id, lure_index, fish_record, angler)
         st.session_state[dseq_key] = dseq + 1
         st.rerun()
     if fc2.button("Cancel", width='stretch', key=f"fish_cancel_{spot_id}_{lure_index}_{dseq}"):
         st.rerun()
 
 
-def _end_session(spot_id: str):
-    active_key = f"active_session_{spot_id}"
+def _end_session(spot_id: str, angler: str = ""):
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
         return
@@ -1180,18 +1216,19 @@ def _end_session(spot_id: str):
     st.session_state[f"session_closed_banner_{spot_id}"] = True
 
 
-def _cancel_session(spot_id: str):
+def _cancel_session(spot_id: str, angler: str = ""):
     """"❌ Cancel Session" (punch-list #32) - discards an in-progress session
     entirely, rather than finalizing it like "⏹ End Session" does: deletes
     every trip_log.csv row this session created (delete_trip(), the same
     row-removal primitive Trip History's own "🗑️ Delete this trip" uses)
-    and drops active_session_{spot_id} from session_state, leaving no
+    and drops this angler's own active session key (see
+    _active_session_key(), punch-list #47) from session_state, leaving no
     trace of the session behind. For testing sessions, or wanting a clean
     restart at this spot without keeping anything logged so far. Every row
     to delete comes from active["lures"] (in-memory, not a fresh disk
     read), so this only ever touches rows THIS session itself created -
-    it can't reach into some other, unrelated session's data."""
-    active_key = f"active_session_{spot_id}"
+    it can't reach into some other, unrelated angler's session data."""
+    active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
         return
@@ -1231,7 +1268,7 @@ _PER_LURE_CONDITION_KEYS = {
 }
 
 
-def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list) -> list:
+def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list, angler: str) -> list:
     """Groups today's spot_session-sourced rows at this spot by their
     shared session conditions["start_time"] (the same value every lure in
     one session carries - captured once by Start Session, reused unchanged
@@ -1240,13 +1277,17 @@ def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list) -
     stored anywhere), then returns the rows for whichever group still has
     at least one lure without a lure_end_time yet (i.e. genuinely still in
     progress - a properly "⏹ End Session"-ed group has every row's
-    lure_end_time stamped, retired or not). Returns [] if nothing's open -
-    either nothing's been logged here today, or every session logged here
-    today has already been ended. If, unusually, more than one group is
-    still open (this page has no flow that starts a second session before
-    ending the first, but a hand-edited CSV or an old bug could produce
-    one), the most recently started group wins - the others are simply
-    left alone rather than merged or discarded."""
+    lure_end_time stamped, retired or not) AND whose own conditions["angler"]
+    matches `angler` (punch-list #47) - so reconnecting always picks back up
+    THIS angler's own open session, never someone else's still-in-progress
+    one, even if theirs started more recently. Returns [] if nothing's open
+    for this angler - either nothing's been logged here today under this
+    name, or their own session logged here today has already been ended.
+    If, unusually, this angler has more than one group open at once (this
+    page has no flow that starts a second session before ending the first
+    under the same name, but a hand-edited CSV or an old bug could produce
+    one), the most recently started of THEIR groups wins - the others are
+    simply left alone rather than merged or discarded."""
     groups = {}
     for t in trips_today:
         if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
@@ -1261,19 +1302,63 @@ def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list) -
         if not key:
             continue
         groups.setdefault(key, []).append((t, cond))
-    open_groups = {k: rows for k, rows in groups.items() if any(not c.get("lure_end_time") for _, c in rows)}
+    my_slug = _angler_session_slug(angler)
+    open_groups = {
+        k: rows for k, rows in groups.items()
+        if any(not c.get("lure_end_time") for _, c in rows)
+        and _angler_session_slug(rows[0][1].get("angler")) == my_slug
+    }
     if not open_groups:
         return []
     latest_key = max(open_groups, key=lambda k: min(t.get("logged_at") or "" for t, _ in open_groups[k]))
     return sorted(open_groups[latest_key], key=lambda tc: tc[0].get("logged_at") or "")
 
 
-def _reconstruct_active_session(spot: dict, structure_type: str, session_date_iso: str, trips_today: list):
-    """Rebuilds an active_session_{spot_id} dict (the same shape Start
+def _other_anglers_with_open_session(spot_id: str, session_date_iso: str, trips_today: list, my_angler: str) -> list:
+    """Distinct angler names (first-seen order) who have their OWN
+    still-open spot_session at this spot today, other than `my_angler` -
+    punch-list #47, used purely to reassure whoever's looking at this page
+    that starting/ending/canceling their own session never touches anyone
+    else's (each angler's session is independently tracked - see
+    _active_session_key()/_open_session_rows() above)."""
+    my_slug = _angler_session_slug(my_angler)
+    groups = {}
+    for t in trips_today:
+        if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
+            continue
+        try:
+            cond = json.loads(t.get("conditions_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        if cond.get("source") != "spot_session":
+            continue
+        key = cond.get("start_time")
+        if not key:
+            continue
+        groups.setdefault(key, []).append(cond)
+    others = []
+    seen_slugs = {my_slug}
+    for conds in groups.values():
+        if not any(not c.get("lure_end_time") for c in conds):
+            continue
+        angler = (conds[0].get("angler") or "").strip()
+        slug = _angler_session_slug(angler)
+        if slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        others.append(angler or "an unnamed angler")
+    return others
+
+
+def _reconstruct_active_session(spot: dict, structure_type: str, session_date_iso: str, trips_today: list, angler: str):
+    """Rebuilds this angler's own active_session_{spot_id}_{angler} dict
+    (see _active_session_key(), punch-list #47 - the same shape Start
     Session/_add_lure_to_active_session build live) from already-saved
     trip_log.csv rows, for the reconnect-after-a-session_state-loss case -
     see the block comment above. Returns None if there's no still-open
-    session logged here today. One thing a persisted row can't give back:
+    session for THIS angler logged here today (a different angler's own
+    still-open session at this same spot is left completely alone - see
+    _open_session_rows()). One thing a persisted row can't give back:
     `item_id` (which inventory item this lure is) was never itself written
     to disk, only the lure's display label - so a reconstructed lure's
     item_id is always None, which just means the "already added" dedup
@@ -1281,7 +1366,7 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
     same inventory item after a reconnect (picking it again would show up
     as a second, separate row for the same lure - harmless, just tidy up
     manually via Trip History if it happens, not silent data loss)."""
-    rows = _open_session_rows(spot["spot_id"], session_date_iso, trips_today)
+    rows = _open_session_rows(spot["spot_id"], session_date_iso, trips_today, angler)
     if not rows:
         return None
     lures = []
@@ -1551,21 +1636,38 @@ if editing_trip is not None:
 # NORMAL MODE - either a session is already in progress at this spot, or the
 # angler is setting one up (conditions -> lure selection -> Start Session).
 # ==============================================================================
-active_session_key = f"active_session_{spot['spot_id']}"
+active_session_key = _active_session_key(spot["spot_id"], resolved_angler)
 active = st.session_state.get(active_session_key)
 
 if active is None:
     # Punch-list #29 - see the block comment above _reconstruct_active_session()
     # for the full story. Reuses todays_entries (already read above for the
     # "Already logged for this spot" caption) rather than a second
-    # read_all_trips() call.
-    active = _reconstruct_active_session(spot, structure_type, session_date.isoformat(), todays_entries)
+    # read_all_trips() call. Punch-list #47: scoped to resolved_angler, so
+    # this only ever reconnects THIS angler's own still-open session at this
+    # spot, never someone else's - see _open_session_rows()'s own docstring.
+    active = _reconstruct_active_session(spot, structure_type, session_date.isoformat(), todays_entries, resolved_angler)
     if active is not None:
         st.session_state[active_session_key] = active
 
+# Punch-list #47: surfaced whether building a new session or already inside
+# one, so it's never a surprise that someone else is independently fishing
+# this same spot right now - each angler's own session (start/add-lure/log
+# fish/end/cancel) is fully independent of everyone else's.
+_other_open_anglers = _other_anglers_with_open_session(
+    spot["spot_id"], session_date.isoformat(), todays_entries, resolved_angler,
+)
+if _other_open_anglers:
+    st.caption(
+        f"🎣 {', '.join(_other_open_anglers)} also "
+        f"{'has' if len(_other_open_anglers) == 1 else 'have'} an active session here today - "
+        "starting, ending, or canceling your own session never affects theirs."
+    )
+
 if active is not None:
     st.divider()
-    st.header("🎣 Session in progress")
+    _session_angler = (active.get("base_conditions") or {}).get("angler") or resolved_angler
+    st.header(f"🎣 Session in progress{f' - {_session_angler}' if _session_angler else ''}")
     if active.pop("reconstructed", False):
         st.info(
             "Reconnected - picked this session back up from what was already saved "
@@ -1587,9 +1689,9 @@ if active is not None:
         label = f"🎣 {lure['label']}" + (f" ({fish_count} caught)" if fish_count else "")
         lcol1, lcol2 = st.columns([4, 1])
         if lcol1.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
-            _fish_entry_dialog(spot["spot_id"], i)
+            _fish_entry_dialog(spot["spot_id"], i, resolved_angler)
         if lcol2.button("🔄 Change", key=f"retire_lure_{spot['spot_id']}_{i}", width='stretch'):
-            _retire_lure(spot["spot_id"], i)
+            _retire_lure(spot["spot_id"], i, resolved_angler)
             st.rerun()
         if lure["fish"]:
             with st.expander(f"Fish caught on {lure['label']} ({fish_count})", expanded=False):
@@ -1597,7 +1699,7 @@ if active is not None:
                     frow1, frow2 = st.columns([5, 1])
                     frow1.write(f"- {', '.join(str(b) for b in _fish_summary_bits(fish))}")
                     if frow2.button("Remove", key=f"remove_active_fish_{spot['spot_id']}_{i}_{fi}"):
-                        _remove_fish(spot["spot_id"], i, fi)
+                        _remove_fish(spot["spot_id"], i, fi, resolved_angler)
                         st.rerun()
 
     if retired_lures:
@@ -1613,7 +1715,7 @@ if active is not None:
         inventory_items = get_inventory()
         _multi_lure_picker(
             inventory_items, key_prefix=f"active_lure_picker_{spot['spot_id']}",
-            spot_id=spot["spot_id"], seq=0, mode="active",
+            spot_id=spot["spot_id"], seq=0, mode="active", angler=resolved_angler,
         )
         st.markdown("**Not in your inventory?**")
         active_manual_seq_key = f"active_manual_lure_seq_{spot['spot_id']}"
@@ -1629,13 +1731,13 @@ if active is not None:
                 st.session_state[active_manual_seq_key] = active_manual_seq + 1
                 _handle_lure_add_click(
                     spot["spot_id"], 0, {"item_id": None, "label": active_manual_name.strip(), "category": None},
-                    None, "active",
+                    None, "active", resolved_angler,
                 )
 
     st.divider()
     escol1, escol2 = st.columns(2)
     if escol1.button("⏹ End Session", key=f"end_session_{spot['spot_id']}", type="primary", width='stretch'):
-        _end_session(spot["spot_id"])
+        _end_session(spot["spot_id"], resolved_angler)
         st.rerun()
 
     # "❌ Cancel Session" (punch-list #32) - discards the whole in-progress
@@ -1660,7 +1762,7 @@ if active is not None:
         ccol1, ccol2 = st.columns(2)
         if ccol1.button("Yes, cancel it", key=f"confirm_cancel_session_{spot['spot_id']}", type="primary", width='stretch'):
             st.session_state.pop(cancel_pending_key, None)
-            _cancel_session(spot["spot_id"])
+            _cancel_session(spot["spot_id"], resolved_angler)
             st.rerun()
         if ccol2.button("Keep session", key=f"keep_session_{spot['spot_id']}", width='stretch'):
             st.session_state.pop(cancel_pending_key, None)
