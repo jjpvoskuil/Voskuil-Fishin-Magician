@@ -6248,6 +6248,98 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     before and after - the scratch runs only interacted with in-memory
     `session_state`, never clicked "Start Session").
 
+108. **Punch-list #47: "if multiple users are fishing and one ends the
+    session earlier than the other it seems like it ends the session for
+    all users" - angler asked directly for a per-name end-session option.**
+    Root cause (found by tracing the full data model, not guessing): "the
+    active session" for a spot lived at one shared `st.session_state` key,
+    `active_session_{spot_id}` - angler-blind. Two anglers fishing the same
+    spot concurrently (each on their own phone) each got their own
+    in-memory copy of that key in their own browser's `session_state`
+    (Streamlit sessions are per-browser-connection), so simply clicking "⏹
+    End Session" was ALREADY scoped to the trip_ids that browser's own
+    `active["lures"]` knew about - not a bug on its own. The actual bug was
+    one level up, in punch-list #29's reconnect logic
+    (`_open_session_rows`/`_reconstruct_active_session`): after a dropped
+    connection, a locked phone, or a server restart wipes `session_state`,
+    reconnecting rebuilds "the active session" from `data/trip_log.csv` by
+    grouping still-open `source="spot_session"` rows and picking whichever
+    group started most recently - completely ignoring which angler it
+    belonged to. So if Angler A started a session, then Angler B started
+    their own separate session at the same spot, and A's browser then lost
+    its state and reconnected, A's page would silently reconstruct **B's**
+    session instead of A's own (B's was the more-recently-started group) -
+    at that point A's "End Session" really was ending the wrong angler's
+    session, exactly as reported.
+
+    Fix: every piece of the active-session lifecycle is now scoped by
+    angler, not just spot. New `_angler_session_slug()`/
+    `_active_session_key(spot_id, angler)` (`pages/6_Spot_Session.py`)
+    build a session_state key like `active_session_{spot_id}_{angler_slug}`
+    instead of `active_session_{spot_id}` - threaded through every function
+    that used to build its own bare `active_session_{spot_id}` key inline:
+    `_added_lure_item_ids`, `_record_fish`, `_remove_fish`,
+    `_add_lure_to_active_session`, `_retire_lure`, `_fish_entry_dialog`,
+    `_end_session`, `_cancel_session`, `_multi_lure_picker`,
+    `_render_recommendation_with_quick_add`, `_handle_lure_add_click`,
+    `_trailer_dialog`, and the module-level "is there already an active
+    session for this spot" lookup - all now take (or thread through) the
+    resolved angler name and use `_active_session_key()` consistently.
+    `_open_session_rows()` (the actual root-cause function) now also takes
+    `angler` and filters candidate groups to `_angler_session_slug(row's
+    own conditions["angler"]) == _angler_session_slug(angler)` before
+    picking "most recently started" - so it now picks the most recent open
+    group *for that specific angler*, and a different angler's own open
+    session at the same spot is left completely alone, never even
+    considered. `_reconstruct_active_session()` passes `angler` straight
+    through. Since `conditions["angler"]` was already faithfully copied
+    onto every lure's own row at Start Session (confirmed via research
+    before writing any code - `core.storage.TripEntry` has no dedicated
+    angler column; it lives inside `conditions_json`, copied fresh into
+    each lure's row from the session's `base_conditions` snapshot), no data
+    migration was needed - the angler information the fix needed was
+    already on disk for every past `spot_session` row.
+
+    Two small UX additions beyond the strict bug fix, both aimed at making
+    the new per-angler independence visible rather than just correct under
+    the hood: the "🎣 Session in progress" header now includes the angler's
+    name (`🎣 Session in progress - John`), and a new
+    `_other_anglers_with_open_session()` helper surfaces a caption ("🎣
+    Matthew also has an active session here today - starting, ending, or
+    canceling your own session never affects theirs") whenever someone
+    else has their own concurrent open session at the same spot - shown
+    both while building a new session and once one's already running, so
+    it's never a surprise mid-session that someone else is independently
+    fishing the same spot right now.
+
+    Verification: `python3 -m py_compile` on the edited file; full suite
+    still 335 passing (no existing test exercised this page's session
+    lifecycle at the unit level - it's all page-internal `st.session_state`
+    logic, consistent with how this page has always been verified). A
+    thorough scratch `AppTest` walkthrough (not committed) simulated the
+    exact real-world scenario end-to-end with THREE separate `AppTest`
+    instances (each one a fresh, independent simulated browser) against a
+    real spot (`f574f116`) with zero existing trips logged there today: (1)
+    "John" started a session and added a lure; (2) a second, completely
+    independent `AppTest` instance started "Matthew"'s own session at the
+    *same* spot - confirmed Matthew's page showed the new "John also has an
+    active session here" caption; (3) Matthew ended HIS session - verified
+    on disk that Matthew's own trip_log row got `lure_end_time` stamped
+    while John's row was left completely untouched (still open) - the
+    literal bug scenario reported by the angler, confirmed fixed; (4) a
+    THIRD, brand-new `AppTest` instance simulated John's browser
+    reconnecting from scratch (empty `session_state`, same as a dropped
+    connection/locked phone/server restart) - confirmed the page correctly
+    reconstructed **John's own** still-open session (not Matthew's, which
+    was both more-recently-started AND already closed by then) - this is
+    the exact reconnect-picks-the-wrong-angler's-session bug, confirmed
+    fixed; (5) John then ended his own session cleanly via the same UI
+    flow. Every trip_log row the scratch test created was tracked by
+    `trip_id` and deleted again in a `finally` block (so cleanup still runs
+    even if an assertion fails mid-test) - confirmed via an MD5 checksum of
+    `data/trip_log.csv` matching exactly before and after the whole test
+    run. No other data files touched.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
