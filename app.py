@@ -49,6 +49,7 @@ pg = st.navigation([
     st.Page("pages/2_Lake_Map.py", title="Lake Map", icon="🗺️"),
     st.Page("pages/6_Spot_Session.py", title="Spot Session", icon="🎯"),
     st.Page("pages/4_Trip_History.py", title="Trip History", icon="📊"),
+    st.Page("pages/8_Leaderboard.py", title="Leaderboard", icon="🏆"),
     st.Page("pages/5_Lure_Inventory.py", title="Tackle Box", icon="🧰"),
     st.Page("pages/7_Development.py", title="Development", icon="🛠️"),
 ])

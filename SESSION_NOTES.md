@@ -6939,6 +6939,97 @@ every real save.
     effect was ever the local file write, never a push to the real repo's
     `data` branch.
 
+115. **Punch-list #54: "lets create a new app page for Leader Board... list
+    different things in a sort... top 10 of that category... pick the things
+    we want to see, i.e. most fish/lure, most fish/day, biggest fish, biggest
+    fish by type, etc. This can be done in total or by user, etc. Feel free to
+    suggest and deploy other items that make sense."** New page,
+    `pages/8_Leaderboard.py` (🏆, added to `app.py`'s nav right after Trip
+    History), read-only against the same `data/trip_log.csv` Trip History
+    already reads.
+
+    **Data model:** one pass over `get_trip_history()` builds two pandas
+    frames - `fish_df` (one row per INDIVIDUAL fish catch record, flattened
+    out of every trip's `conditions_json["fish"]` list - the only place
+    species/weight/length actually live) and `trips_df` (one row per
+    trip_log.csv row - one lure USE in this app's own vocabulary, since a
+    single Spot Session produces one "trip" row per lure fished). A trip's
+    fish count sums its own fish list's `count` field (matching Trip
+    History's existing "group of small fish" convention) when it has one;
+    trips logged before the Spot Session redesign have no fish list at all,
+    so those fall back to the trip_log.csv `fish_caught` column instead -
+    which is also why the Species filter only applies to the three fish-level
+    categories (filtering aggregates by species would silently make every
+    pre-redesign trip vanish from a "most fish by lure" ranking with no
+    indication why - documented in the page's own docstring and in a tooltip
+    on the disabled filter, rather than silently done).
+
+    **Fourteen categories**, one flat control panel (Category / Angler /
+    Species / Show-N / Sort direction) rather than fifteen bespoke pages -
+    each category is just a `(key, label, builder_fn, supports_angler,
+    supports_species)` tuple in a `CATEGORIES` list, so adding a new ranking
+    later is one new list entry, not a new page: biggest fish (weight),
+    longest fish (length), biggest fish by species (one row per species, NOT
+    a top-N ranking - `is_species_view` disables the Sort/Show-N controls for
+    it specifically), most-fish/best-rate/biggest-fish by lure, the same
+    three by spot, the same three by angler (Angler filter disabled here -
+    filtering to one angler while ranking BY angler would be a no-op), most
+    fish in a single day (with an extra "who caught them" column when more
+    than one angler contributed that day), and most fish on a single lure
+    use. The "best fish-per-use rate" categories (lure/spot/angler) show a
+    "Uses" column alongside the rate rather than hiding it, plus a caption
+    warning that a high rate from very few uses isn't necessarily reliable -
+    the angler's own judgment call, not a hardcoded minimum-uses cutoff.
+
+    Suggested and built beyond the angler's literal list (per "feel free to
+    suggest and deploy other items that make sense"): fish-per-use rate by
+    lure/spot/angler (an "efficiency" view a raw total-fish count can't show
+    - a lure fished once that caught one fish looks identical to a lure
+    fished fifty times that caught one, under a total-count-only view),
+    biggest fish by lure/spot/angler (not just total count), and longest
+    fish by length (not just weight).
+
+    **Verification (scratch AppTest, not committed):** ran EVERY category at
+    its defaults from a fresh AppTest each time (broadest possible smoke
+    test - a bug in any one builder raises inside the page); confirmed
+    angler filter, species filter, sort direction, and Show-N all compose
+    correctly together on a representative category; confirmed the "by
+    angler" categories actually disable (not just default) the Angler
+    filter, and confirmed "biggest by species" actually disables Sort/
+    Show-N; confirmed a filter combination with zero matching rows shows the
+    empty-state caption instead of erroring. Then went further than "does it
+    run" - printed the ACTUAL rendered tables for several categories against
+    real production trip history and eyeballed correctness: biggest fish
+    correctly topped by a 4 lb 6 oz largemouth from Midnight Point, "most
+    fish by lure" correctly topped by the KVD Jerkbait's 29 fish, "most fish
+    by angler" correctly showing John 84 / Matthew 42 / Unspecified 1,
+    fish-per-use rate correctly showing a lure used once with 8 fish ranked
+    above one used 5 times with 29 (8.0 vs 5.8 - the rate metric doing
+    exactly what it's for), and "biggest by species" correctly surfacing
+    species beyond the picker's own 6-option list (Striped Bass, Catfish) -
+    confirming free-text "Other (type in species)" entries from real history
+    flow through the aggregation correctly too. Full suite unaffected (this
+    codebase's own established convention - confirmed again here - is
+    scratch-only `AppTest` verification for `pages/*.py`, never a permanent
+    pytest file; no `pages/*.py` module has one anywhere in `tests/`, unlike
+    every `core/*.py` module, and this page doesn't change that). Confirmed
+    via the page's own read-only construction (no `append_trip`/
+    `commit_and_push_data` import at all) plus an MD5 checksum of every real
+    data file before/after the whole scratch run (byte-identical) that this
+    is genuinely a read-only page - it can't touch trip history no matter
+    what's clicked on it.
+
+    One thing noticed while eyeballing the real output, not fixed (out of
+    scope - a data-entry/curation matter, not a bug): the same physical lure
+    shows up under two slightly different `lure_used` label strings in a
+    couple of places (e.g. a manually-typed entry vs. the matching tackle-box
+    item's own label), which splits that lure's fish across two separate
+    leaderboard rows instead of one. The leaderboard is correctly reporting
+    what's actually stored - not something to silently "fix" by fuzzy-
+    matching lure names - but worth knowing about if a "by lure" ranking
+    ever looks lower than expected for a lure that's actually logged under
+    two names.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
