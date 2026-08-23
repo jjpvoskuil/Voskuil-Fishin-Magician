@@ -641,7 +641,7 @@ def _split_owned_by_color(owned_items: list, suggested_colors: list) -> tuple:
 
 
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
-                  owned_items: list = None) -> "LureBlock":
+                  owned_items: list = None, why: list = None) -> "LureBlock":
     profile = LURE_PROFILES[key]
     colors = profile["colors"].get(water_clarity, profile["colors"][DEFAULT_BASE_STAIN])
     trailer = None
@@ -655,6 +655,12 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
     # LureBlock.owned_off_color_items below for why the split matters.
     matched, off_color = _split_owned_by_color(owned_items, colors) if owned_items else ([], [])
     matched.sort(key=lambda it: -(it.get("quantity") or 0))
+    # Punch-list #49: `why` (recommend()'s key_why.get(key), the lure-
+    # selection reason(s)) plus a color reason always appended here, since
+    # this is the one place that actually knows which colors got picked for
+    # today's water_clarity - see LureBlock.why for what reads this.
+    block_why = list(why or [])
+    block_why.append(f"Colors shown are Nolin's documented picks for {water_clarity.lower()} water.")
     return LureBlock(
         key=key,
         name=profile["name"],
@@ -666,6 +672,7 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         note=note,
         owned_items=matched[:MAX_OWNED_ITEMS_PER_BLOCK],
         owned_off_color_items=off_color,
+        why=block_why,
     )
 
 
@@ -752,6 +759,16 @@ class LureBlock:
     # say "you own one, wrong color" instead of the misleading "not in your
     # inventory yet" it used to show for this exact case.
     owned_off_color_items: list = field(default_factory=list)
+    # Punch-list #49: short, self-contained sentences explaining why THIS
+    # specific lure (and, via the last entry, its suggested color) made the
+    # card - as opposed to `rationale` on LureRecommendation below, which is
+    # one shared caption for the whole situation (season/structure/pressure)
+    # not attributed to any one lure. Built up in recommend() as each key
+    # enters first_keys/second_choice (see key_why there), plus one color
+    # reason always appended by _build_block(). Empty only if recommend()
+    # genuinely had nothing to attribute (shouldn't happen in practice,
+    # since every key always gets at least its season-pattern reason).
+    why: list = field(default_factory=list)
 
     @property
     def owned(self) -> bool:
@@ -763,6 +780,63 @@ class LureRecommendation:
     first_choice: list       # list[LureBlock]
     second_choice: list      # list[LureBlock]
     rationale: list = field(default_factory=list)
+
+
+# Punch-list #49: "reaction/moving" and "finesse/slow" lure clusters shared
+# by the fish/forage-activity and wind nudges below (_promote_reaction_bait/
+# _promote_finesse_bait) - the same style of small, named bait cluster the
+# engine already leans on elsewhere (crank_keys/topwater_keys locals inside
+# recommend()), just promoted to module level since two separate nudges
+# (activity and wind) both need to reuse the exact same clusters.
+REACTION_BAIT_KEYS = [
+    "walking_topwater", "buzzbait", "chatterbait", "swim_jig", "lipless_crankbait", "spinnerbait",
+]
+FINESSE_BAIT_KEYS = ["finesse_shaky_head", "drop_shot", "wacky_rig_senko", "football_jig"]
+
+# 10 mph matches core.onwater.WIND_BANDS' own "Moderate Chop / Action
+# Trigger" band's lower bound - reused here as a plain number instead of
+# importing core.onwater (which itself imports from this module for
+# WATER_CLARITY_OPTIONS, so the reverse import would be circular).
+WIND_REACTION_THRESHOLD_MPH = 10.0
+
+
+def _promote_reaction_bait(first_keys: list, second_keys: list, key_why: dict, reason: str, low_light: bool):
+    """Punch-list #49: makes sure a reaction/moving bait (REACTION_BAIT_KEYS)
+    is in FIRST choice, tagged with `reason` - promoting one already in the
+    plan (first choice if already there, else promoted up from second
+    choice) rather than piling on a duplicate, and only inserting a brand
+    new pick if the plan has no reaction bait anywhere yet. Mirrors the
+    existing falling-pressure rationale's spirit ("reaction baits can
+    shine") but actually changes which lure leads, and says why on that
+    lure's own card instead of only in the shared caption."""
+    existing_first = next((k for k in REACTION_BAIT_KEYS if k in first_keys), None)
+    if existing_first:
+        key_why.setdefault(existing_first, []).append(reason)
+        return
+    existing_second = next((k for k in REACTION_BAIT_KEYS if k in second_keys), None)
+    if existing_second:
+        second_keys.remove(existing_second)
+        first_keys.insert(0, existing_second)
+        key_why.setdefault(existing_second, []).append(reason)
+        return
+    pick = "walking_topwater" if low_light else "chatterbait"
+    first_keys.insert(0, pick)
+    key_why.setdefault(pick, []).append(reason)
+
+
+def _promote_finesse_bait(first_keys: list, second_keys: list, key_why: dict, reason: str):
+    """Punch-list #49: the slow/finesse-presentation mirror of
+    _promote_reaction_bait() above - used when reported activity is
+    sluggish rather than active. Reuses the same insert-a-finesse-bait
+    pattern the existing high-pressure nudge already uses
+    (second_keys.insert(0, "finesse_shaky_head")), just also tagging the
+    reason on whichever finesse bait ends up in the plan."""
+    existing = next((k for k in FINESSE_BAIT_KEYS if k in first_keys or k in second_keys), None)
+    if existing:
+        key_why.setdefault(existing, []).append(reason)
+        return
+    second_keys.insert(0, "finesse_shaky_head")
+    key_why.setdefault("finesse_shaky_head", []).append(reason)
 
 
 def recommend(
@@ -778,9 +852,20 @@ def recommend(
     inventory: list = None,
     trip_history: list = None,
     spot_id: str = None,
+    fish_activity: str = None,
+    forage_activity: str = None,
+    wind_mph: float = None,
 ) -> LureRecommendation:
     low_light = segment_name in LIGHT_LOW
     rationale = []
+    # Punch-list #49: reason(s) a given lure key made the plan, keyed by lure
+    # key, surfaced per-card via LureBlock.why (see _build_block()) - as
+    # opposed to `rationale` above/below, which is one shared caption for
+    # the whole situation, not attributed to any one lure. Every key that
+    # ends up in first_keys/second_keys gets at least its season-pattern
+    # reason tagged on right after the season if/elif chain below; nudges
+    # further down each tag their own key(s) as they touch them.
+    key_why: dict = {}
     if fish_depth_ft is not None:
         rationale.append(
             f"You're marking fish around {fish_depth_ft:.0f} ft - bass have upward-biased vision and an "
@@ -825,6 +910,7 @@ def recommend(
         # the crankbait emphasis specifically for this lake.
         first_keys = ["suspending_jerkbait", "medium_diving_crankbait", "football_jig"]
         second_keys = ["soft_swimbait", "blade_bait", "deep_diving_crankbait"]
+        season_reason = "Part of Nolin's documented winter pattern (rock/channel-swing structure, long-pause jerkbaits, 7-12 ft cranks)."
         rationale.append(
             "Cold water (<50F) - Nolin's own documented winter pattern (Omnia Fishing) targets rock piles/"
             "boulders near channel swings and deep-access points with long-pause jerkbaits and 7-12 ft "
@@ -835,6 +921,7 @@ def recommend(
         # rock; medium diving cranks (7-12ft), Texas rigs, shallow divers (0-6ft).
         first_keys = ["medium_diving_crankbait", "texas_rig_worm", "lipless_crankbait"]
         second_keys = ["squarebill_crankbait", "chatterbait", "football_jig"]
+        season_reason = "Part of Nolin's documented pre-spawn pattern (rip-rap/creek mouths, 7-12 ft cranks, Texas rigs)."
         rationale.append(
             "Pre-spawn (50-60F) - Nolin's documented pattern (Omnia Fishing) is rip-rap with stumps/laydowns "
             "and creek mouths with chunk rock, worked with 7-12 ft crankbaits and Texas rigs as fish stage "
@@ -845,6 +932,7 @@ def recommend(
         # rip-rap; Texas rigs (pitch/flip), shakey heads, shallow divers.
         first_keys = ["texas_rig_creature", "finesse_shaky_head", "squarebill_crankbait"]
         second_keys = ["wacky_rig_senko", "weightless_soft_plastic"]
+        season_reason = "Part of Nolin's documented spawn-window pattern (shallow bays/coves near rip-rap, Texas rigs pitched/flipped to cover)."
         rationale.append(
             "Spawn window (60-75F) - Nolin's documented pattern (Omnia Fishing) is protected shallow bays/"
             "coves with hard bottom near rip-rap, pitched/flipped with Texas rigs and shakey heads."
@@ -854,6 +942,7 @@ def recommend(
         # shakey heads, walking topwater, small/medium soft swimbaits.
         first_keys = ["finesse_shaky_head", "walking_topwater", "soft_swimbait"]
         second_keys = ["spinnerbait", "swim_jig", "texas_rig_worm"]
+        season_reason = "Part of Nolin's documented post-spawn pattern (stumps/rip-rap near bridges, shakey heads/topwater/swimbaits as fish move toward summer haunts)."
         rationale.append(
             "Post-spawn recovery - Nolin's documented pattern (Omnia Fishing) is stumps/woody cover and "
             "rip-rap near bridges, worked with shakey heads, walking topwater, and small/medium swimbaits as "
@@ -866,6 +955,10 @@ def recommend(
             # ("the jumps") - flukes map to weightless_soft_plastic here.
             first_keys = ["walking_topwater", "buzzbait", "weightless_soft_plastic"]
             second_keys = ["popper", "swim_jig", "squarebill_crankbait"]
+            season_reason = (
+                "Low-light dawn/dusk window in summer - a real Nolin angler report specifically describes "
+                "topwater 'jumps' with poppers and flukes at this time."
+            )
             if segment_name == "Night":
                 rationale.append(
                     "KDFWR's own 2026 official Fishing Forecast calls out Nolin by name: 'During late spring "
@@ -881,6 +974,7 @@ def recommend(
             # bite summer fish that won't commit to anything moving fast.
             first_keys = ["football_jig", "deep_diving_crankbait", "carolina_rig"]
             second_keys = ["drop_shot", "suspending_jerkbait", "lipless_crankbait"]
+            season_reason = "Part of Nolin's documented summer pattern (deep points/rock structure, deep cranks/football jigs/Carolina rigs)."
         rationale.append(
             "Summer heat - Nolin's documented pattern (Omnia Fishing) is main-lake points with deep-water "
             "access and rock structure, worked with 13 ft+ crankbaits, football jigs, and Carolina rigs "
@@ -891,6 +985,7 @@ def recommend(
         # woody cover; popping topwater, Texas rigs, drop shot, buzzbaits.
         first_keys = ["popper", "texas_rig_worm", "buzzbait"]
         second_keys = ["drop_shot", "squarebill_crankbait", "spinnerbait"]
+        season_reason = "Part of Nolin's documented fall feed-up pattern (laydowns/bluff walls, popping topwater/Texas rigs/drop shot as bass chase shad shallow)."
         rationale.append(
             "Fall feed-up - Nolin's documented pattern (Omnia Fishing) is laydowns/timber in pockets and "
             "bluff walls with woody cover, worked with popping topwater, Texas rigs, and drop shot as shad "
@@ -899,11 +994,22 @@ def recommend(
     else:  # fall_turnover
         first_keys = ["football_jig", "suspending_jerkbait", "blade_bait"]
         second_keys = ["drop_shot", "lipless_crankbait", "deep_diving_crankbait"]
+        season_reason = (
+            "Fall turnover - oxygen/temp mixing makes bass location and mood unpredictable, so this leans on "
+            "a spread of dependable options rather than one documented pattern."
+        )
         rationale.append(
             "Fall turnover - oxygen/temp mixing makes bass location and mood unpredictable; added drop shot "
             "as a second choice for scattered, suspended fish (same deep-structure pattern that works Nolin's "
             "bluff walls/dam points per real angler reports, not turnover-specific on its own)."
         )
+
+    # Punch-list #49: tag every key the season pattern just picked with its
+    # short season_reason (set in every branch above) before any of the
+    # nudges below start touching first_keys/second_keys - so a key nudges
+    # later move/re-tag still keeps this original reason too.
+    for k in dict.fromkeys(first_keys + second_keys):
+        key_why.setdefault(k, []).append(season_reason)
 
     # --- Structure-specific nudge (context note, not a lure swap) ---------------
     structure_notes = {
@@ -931,6 +1037,9 @@ def recommend(
     ) and season != "winter":
         pick = "squarebill_crankbait" if water_temp_f >= 60 else "lipless_crankbait"
         second_keys.append(pick)
+        key_why.setdefault(pick, []).append(
+            f"Added - crankbaits are broadly effective on {structure_type.lower()} structure regardless of season."
+        )
 
     # Topwater is worth a mention on any low-light segment in warmer seasons even if not first choice.
     topwater_keys = {"buzzbait", "walking_topwater", "popper", "hollow_body_frog"}
@@ -938,11 +1047,17 @@ def recommend(
         "post_spawn_summer", "summer_peak", "fall_feed_up", "spawn"
     ):
         second_keys.append("walking_topwater")
+        key_why.setdefault("walking_topwater", []).append(
+            "Added - worth a look in this low-light dawn/dusk window even outside its primary season."
+        )
 
     # Jerkbaits shine in clearer, cooler water - flag as a second choice outside their primary seasons too.
     if "suspending_jerkbait" not in first_keys and "suspending_jerkbait" not in second_keys:
         if water_temp_f <= 68 and water_clarity in ("Clear", "Green stained", "Brown stained"):
             second_keys.append("suspending_jerkbait")
+            key_why.setdefault("suspending_jerkbait", []).append(
+                f"Added - jerkbaits shine in {water_clarity.lower()} water under 68°F."
+            )
 
     # --- Pressure trend nudge ---------------------------------------------------
     if pressure_trend_24h <= -1.5:
@@ -950,6 +1065,9 @@ def recommend(
     elif pressure_trend_24h >= 2.0:
         if "finesse_shaky_head" not in second_keys and "finesse_shaky_head" not in first_keys:
             second_keys.insert(0, "finesse_shaky_head")
+        key_why.setdefault("finesse_shaky_head", []).append(
+            "Added - high, stable pressure after a front usually means a tougher, slower bite."
+        )
         rationale.append("High, stable pressure after a front - added a finesse bait for a tougher bite.")
 
     # --- Forage nudge: make sure at least one forage-matched lure shows up ------
@@ -963,6 +1081,7 @@ def recommend(
         for k in forage_boost_keys:
             if k not in already_covered:
                 second_keys.insert(0, k)
+                key_why.setdefault(k, []).append(f"Added to match forage you reported seeing ({', '.join(forage)}).")
                 break
         forage_notes = [FORAGE_NOTES[f] for f in forage if f in FORAGE_NOTES]
         if forage_notes:
@@ -982,6 +1101,9 @@ def recommend(
                              if k in ("squarebill_crankbait", "deep_diving_crankbait")), None)
             if swap_at is not None:
                 keys_list[swap_at] = "medium_diving_crankbait"
+                key_why.setdefault("medium_diving_crankbait", []).append(
+                    f"Swapped in - matches your {fish_depth_ft:.0f} ft sonar reading better than the season's default crank depth."
+                )
                 break
 
     # De-dupe while preserving order, never let a key appear in both lists.
@@ -1003,6 +1125,55 @@ def recommend(
     if fish_depth_ft is not None:
         first_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
         second_keys_unique.sort(key=lambda k: _depth_match_score(LURE_PROFILES[k], fish_depth_ft))
+
+    # --- Fish/forage activity + wind nudge (punch-list #49) ---------------------
+    # Deliberately placed AFTER the depth-based reorder just above, not
+    # before - the depth reorder sorts by depth-match score, which would
+    # otherwise silently undo an activity/wind promotion to the front of the
+    # list (this is exactly the bug an early version of this feature had:
+    # the promotion ran, then the depth sort immediately re-ordered past it).
+    # Operates on first_keys_unique/second_keys_unique (post-dedup) instead
+    # of first_keys/second_keys for the same reason - this is the list
+    # whose order actually reaches the angler.
+    #
+    # Only meaningful when the caller passes a live, on-the-water read - Spot
+    # Session does (its "Fish activity"/"Forage activity" sliders and wind
+    # reading, see core.activity_log.FISH_ACTIVITY_OPTIONS/
+    # FORAGE_ACTIVITY_OPTIONS and core.onwater.WIND_BANDS), the 7-Day
+    # Forecast page never does (it can't know what fish will be doing three
+    # days out), so these three params default to None there and this whole
+    # block is a no-op. "Very active"/"Active" fish or "Active / schooling"/
+    # "Frenzied (busting bait)" forage promote a reaction/moving bait to the
+    # front of first choice; a stiff wind (>=10 mph - core.onwater's own
+    # "Moderate Chop / Action Trigger" band) gets the same treatment
+    # independent of activity, since wind-chopped water and wind-blown banks
+    # are a well-established reaction-bite trigger on their own. Reported
+    # "Sluggish"/"Inactive / shut down" fish or "None seen" forage nudge the
+    # other way, toward a slower finesse presentation - mirrors the existing
+    # falling-pressure / high-pressure nudges above, just driven by what you
+    # actually see on the water right now instead of a barometer reading.
+    reaction_reasons = []
+    if fish_activity in ("Very active", "Active"):
+        reaction_reasons.append(f"fish activity was reported as {fish_activity.lower()}")
+    if forage_activity in ("Active / schooling", "Frenzied (busting bait)"):
+        reaction_reasons.append(f"forage activity was reported as {forage_activity.lower()}")
+    if wind_mph is not None and wind_mph >= WIND_REACTION_THRESHOLD_MPH:
+        reaction_reasons.append(f"wind is up around {wind_mph:.0f} mph")
+    if reaction_reasons:
+        reason = (
+            "Moved to first choice - " + " and ".join(reaction_reasons)
+            + "; active fish and wind-chopped water both favor a fast, reaction bite."
+        )
+        _promote_reaction_bait(first_keys_unique, second_keys_unique, key_why, reason, low_light)
+
+    sluggish_reasons = []
+    if fish_activity in ("Sluggish", "Inactive / shut down"):
+        sluggish_reasons.append(f"fish activity was reported as {fish_activity.lower()}")
+    if forage_activity == "None seen":
+        sluggish_reasons.append("no forage activity was seen")
+    if sluggish_reasons:
+        reason = "Added - " + " and ".join(sluggish_reasons) + "; a slower, subtler presentation is worth a look."
+        _promote_finesse_bait(first_keys_unique, second_keys_unique, key_why, reason)
 
     # --- Personal history: your own catch record in similar situations ----------
     # Punch-list #37, the angler's own direct ask: "influence the lure choice by
@@ -1054,11 +1225,13 @@ def recommend(
     owned_by_category = _group_owned_by_category(inventory)
 
     first_choice = [
-        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""), owned_items=owned_by_category.get(k))
+        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""),
+                     owned_items=owned_by_category.get(k), why=key_why.get(k))
         for k in first_keys_unique
     ]
     second_choice = [
-        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""), owned_items=owned_by_category.get(k))
+        _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""),
+                     owned_items=owned_by_category.get(k), why=key_why.get(k))
         for k in second_keys_unique
     ]
 

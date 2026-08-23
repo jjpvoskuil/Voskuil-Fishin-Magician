@@ -627,3 +627,90 @@ def test_recommend_ignores_history_from_a_dissimilar_spot_and_structure():
     rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
                      trip_history=history, spot_id="spot1")
     assert not any(b.key == "carolina_rig" for b in rec.first_choice + rec.second_choice)
+
+
+# --- Punch-list #49: per-lure "why" reasoning ---------------------------------
+
+def test_every_block_has_a_why_ending_in_a_color_reason():
+    rec = recommend("spawn", 65, "Midday", 0.0, "Main-lake point", "Green stained")
+    for block in rec.first_choice + rec.second_choice:
+        assert block.why, f"{block.key} has no why at all"
+        assert "green stained" in block.why[-1].lower()
+        assert "colors shown" in block.why[-1].lower()
+
+
+def test_season_pick_why_mentions_the_documented_pattern():
+    rec = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear")
+    block = next(b for b in rec.first_choice if b.key == "suspending_jerkbait")
+    assert any("winter pattern" in reason.lower() for reason in block.why)
+
+
+def test_structure_crank_nudge_why_names_the_structure():
+    # post_spawn_summer's own picks (finesse_shaky_head/walking_topwater/
+    # soft_swimbait first, spinnerbait/swim_jig/texas_rig_worm second) have
+    # no crankbait at all - "Creek channel / ledge" is on the crank-ensure
+    # nudge's structure list, so a squarebill crank (water temp >= 60)
+    # should get added by the nudge alone, tagged with why it's there.
+    rec = recommend("post_spawn_summer", 65, "Midday", 0.0, "Creek channel / ledge", "Clear")
+    block = next(b for b in rec.second_choice if b.key == "squarebill_crankbait")
+    assert any("creek channel / ledge" in reason.lower() for reason in block.why)
+
+
+def test_fish_activity_very_active_promotes_a_reaction_bait_to_first_choice():
+    # Winter's default picks (suspending_jerkbait/medium_diving_crankbait/
+    # football_jig first, soft_swimbait/blade_bait/deep_diving_crankbait
+    # second) have no REACTION_BAIT_KEYS member anywhere - a clean case to
+    # confirm the nudge inserts a brand-new pick at the very front.
+    rec = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear", fish_activity="Very active")
+    assert rec.first_choice[0].key in ("walking_topwater", "chatterbait")
+    assert any("very active" in reason.lower() for reason in rec.first_choice[0].why)
+
+
+def test_fish_activity_promotion_survives_a_fish_depth_reorder():
+    # Regression test: an earlier version of this nudge ran BEFORE the
+    # depth-based reorder step, which silently re-sorted the promoted pick
+    # right back out of first position. Passing both fish_activity and
+    # fish_depth_ft together must still leave the promoted reaction bait at
+    # the front.
+    rec = recommend("summer_peak", 80, "Midday", 0.0, "Main-lake point", "Green stained",
+                     fish_depth_ft=15, fish_activity="Very active")
+    assert rec.first_choice[0].key == "lipless_crankbait"
+
+
+def test_forage_activity_frenzied_also_promotes_a_reaction_bait():
+    rec = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear",
+                     forage_activity="Frenzied (busting bait)")
+    assert any("forage activity" in reason.lower() and "frenzied" in reason.lower()
+               for reason in rec.first_choice[0].why)
+
+
+def test_windy_conditions_promote_a_reaction_bait_independent_of_activity():
+    rec = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear", wind_mph=14)
+    assert any("wind" in reason.lower() for reason in rec.first_choice[0].why)
+    # Below the 10 mph threshold, no promotion should happen.
+    rec_calm = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear", wind_mph=4)
+    assert not any("wind is up" in reason.lower() for reason in rec_calm.first_choice[0].why)
+
+
+def test_sluggish_fish_activity_promotes_a_finesse_bait_with_reason():
+    # summer_peak's non-low-light picks (football_jig/deep_diving_crankbait/
+    # carolina_rig first, drop_shot/suspending_jerkbait/lipless_crankbait
+    # second) already have finesse baits present (football_jig, drop_shot) -
+    # the nudge should tag the existing one rather than adding a duplicate.
+    rec = recommend("summer_peak", 80, "Midday", 0.0, "Main-lake point", "Green stained",
+                     fish_activity="Inactive / shut down")
+    tagged = [b for b in rec.first_choice + rec.second_choice
+              if any("inactive / shut down" in reason.lower() for reason in b.why)]
+    assert len(tagged) == 1
+    assert tagged[0].key in ("football_jig", "drop_shot")
+
+
+def test_no_activity_or_wind_params_leaves_picks_unchanged():
+    # The 7-Day Forecast page never passes fish_activity/forage_activity/
+    # wind_mph - confirms the whole nudge is a true no-op without them,
+    # same picks/order as before this feature existed.
+    baseline = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear")
+    explicit_none = recommend("winter", 45, "Midday", 0.0, "Main-lake point", "Clear",
+                               fish_activity=None, forage_activity=None, wind_mph=None)
+    assert [b.key for b in baseline.first_choice] == [b.key for b in explicit_none.first_choice]
+    assert [b.key for b in baseline.second_choice] == [b.key for b in explicit_none.second_choice]
