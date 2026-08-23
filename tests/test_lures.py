@@ -360,6 +360,70 @@ def test_owned_items_tie_on_quantity_keeps_original_order():
     assert [it["sku"] for it in block.owned_items] == ["a", "b"]
 
 
+def test_owned_off_color_item_populates_off_color_list_not_owned_items():
+    # Punch-list #48: reproduces the exact user-reported case - a Heddon
+    # Super Spook Jr. in "Blue Chrome" is correctly categorized as
+    # walking_topwater, but "Chrome/blue" is only a suggested color under
+    # "Clear" water clarity (see LURE_PROFILES["walking_topwater"]["colors"]).
+    # Under Nolin's more typical "Green stained" water, it should NOT show
+    # as a color-matched owned_items pick, but SHOULD show up in the new
+    # owned_off_color_items list so the UI can say "you own one, wrong
+    # color" instead of the misleading "not in your inventory yet."
+    from core.lures import _build_block
+    owned = [
+        {"item_id": "82ac5107", "brand": "Heddon",
+         "description": "Heddon Super Spook Jr. - Blue Chrome",
+         "quantity": 1, "sku": "", "image_url": "", "image_filename": ""},
+    ]
+    block = _build_block("walking_topwater", "Green stained", owned_items=owned)
+    assert block.owned is False
+    assert block.owned_items == []
+    assert len(block.owned_off_color_items) == 1
+    assert block.owned_off_color_items[0]["item_id"] == "82ac5107"
+
+    # Under "Clear" water, the very same item DOES match ("Chrome/blue" is
+    # a suggested color there), so it should show as owned and NOT appear
+    # in the off-color list.
+    clear_block = _build_block("walking_topwater", "Clear", owned_items=owned)
+    assert clear_block.owned is True
+    assert clear_block.owned_items[0]["item_id"] == "82ac5107"
+    assert clear_block.owned_off_color_items == []
+
+
+def test_owned_off_color_items_empty_when_nothing_owned_in_category():
+    # No owned_items at all (the true "you don't own this lure type yet"
+    # case) should leave BOTH lists empty, not just owned_items.
+    from core.lures import _build_block
+    block = _build_block("walking_topwater", "Green stained", owned_items=None)
+    assert block.owned is False
+    assert block.owned_items == []
+    assert block.owned_off_color_items == []
+
+    empty_block = _build_block("walking_topwater", "Green stained", owned_items=[])
+    assert empty_block.owned is False
+    assert empty_block.owned_items == []
+    assert empty_block.owned_off_color_items == []
+
+
+def test_owned_off_color_items_excludes_color_matched_items():
+    # A mix of one color-matched and one off-color item in the same
+    # category: the matched one should appear only in owned_items, and the
+    # off-color one should appear only in owned_off_color_items - no
+    # duplication across the two lists.
+    from core.lures import _build_block
+    owned = [
+        {"item_id": "matched-1", "brand": "Heddon",
+         "description": "Heddon Super Spook - Bone/white",
+         "quantity": 1, "sku": "", "image_url": "", "image_filename": ""},
+        {"item_id": "off-color-1", "brand": "Heddon",
+         "description": "Heddon Super Spook Jr. - Blue Chrome",
+         "quantity": 1, "sku": "", "image_url": "", "image_filename": ""},
+    ]
+    block = _build_block("walking_topwater", "Green stained", owned_items=owned)
+    assert [it["item_id"] for it in block.owned_items] == ["matched-1"]
+    assert [it["item_id"] for it in block.owned_off_color_items] == ["off-color-1"]
+
+
 def test_guess_category_from_text_matches_known_product_names():
     cases = [
         ("Strike King Rattling Thunder Cricket Swim Jig - White", "chatterbait"),

@@ -43,8 +43,9 @@ WATER_CLARITY_OPTIONS = ["Clear", "Green stained", "Brown stained", "Muddy"]
 # Punch-list #8: "if you show options from my inventory, only show the top 2
 # recommendations in each category... with a #1 and a #2 choice" - caps how
 # many color-matched owned items a single LureBlock ever carries, regardless
-# of how many actually match. See _color_matched_owned_items() below for the
-# ranking (most on-hand stock first) used to pick which ones are "top."
+# of how many actually match. See _build_block()/_split_owned_by_color()
+# below for the ranking (most on-hand stock first) used to pick which ones
+# are "top."
 MAX_OWNED_ITEMS_PER_BLOCK = 2
 
 STRUCTURE_TYPES = [
@@ -603,35 +604,40 @@ def _color_tokens(text: str) -> set:
     return {w for w in words if len(w) >= 3 and w not in _COLOR_MATCH_STOPWORDS}
 
 
-def _color_matched_owned_items(owned_items: list, suggested_colors: list) -> list:
-    """Keep only the owned items whose description shares color/pattern
-    language with this lure block's suggested colors for today's water
-    clarity - owned items in the same lure category but a different color
-    are dropped entirely rather than shown alongside the match.
+def _split_owned_by_color(owned_items: list, suggested_colors: list) -> tuple:
+    """Splits owned_items (already known to be the right lure *category*,
+    via _group_owned_by_category) into (matched, unmatched) against this
+    block's suggested colors for today's water clarity, by simple
+    word-token overlap between each item's description and the suggested
+    color names.
 
-    Earlier version of this showed every owned item in the category
-    regardless of color (a Chili Craw crankbait shown next to a
-    "Chartreuse/black back" suggestion with nothing telling you they don't
-    match), then a version that showed all of them split into matched/
-    unmatched groups. Per follow-up feedback, only the color-matched
-    item(s) are surfaced now - if none of your on-hand items are actually
-    the suggested color, this comes back empty and the block falls back to
-    the normal "not in your inventory" treatment, since owning the right
-    lure type in the wrong color isn't the same as being ready to go.
+    Used by _build_block() below to build both halves of what a LureBlock
+    needs: `matched` becomes owned_items (ranked and capped to
+    MAX_OWNED_ITEMS_PER_BLOCK - the top #1/#2 "ready to go" picks, punch-
+    list #8) and `unmatched` becomes owned_off_color_items (punch-list #48)
+    - kept so the fallback UI can tell "you own zero of this lure type"
+    apart from "you own this lure type, just not in today's suggested
+    color," instead of collapsing both into the same "not in your
+    inventory yet" message.
 
-    Per punch-list #8, even among color-matched items only the top
-    MAX_OWNED_ITEMS_PER_BLOCK are kept (ranked #1/#2 in the UI - see
-    core.ui.render_lure_block) rather than listing every match, so a
-    category with a dozen color-matched items on hand doesn't dominate the
-    card. "Best" is ranked by quantity on hand (more in reserve = more
-    ready to go), ties keeping their original relative order since Python's
-    sort is stable."""
+    Earlier version of this (before the split existed) showed every owned
+    item in the category regardless of color (a Chili Craw crankbait shown
+    next to a "Chartreuse/black back" suggestion with nothing telling you
+    they don't match), then a version that showed all of them split into
+    matched/unmatched *photo* groups. Per follow-up feedback, only the
+    color-matched item(s) are shown as "ready to go" - owning the right
+    lure type in the wrong color isn't the same as being ready to go - but
+    unlike that intermediate version, the unmatched ones are no longer
+    shown as photo cards at all; they're used only for a one-line "you
+    already own one, just not this color" text note (core.ui.render_lure_
+    block), not treated as a second tier of matches."""
     suggested_tokens = set()
     for c in suggested_colors:
         suggested_tokens |= _color_tokens(c)
-    matched = [it for it in owned_items if _color_tokens(it.get("description", "")) & suggested_tokens]
-    matched.sort(key=lambda it: -(it.get("quantity") or 0))
-    return matched[:MAX_OWNED_ITEMS_PER_BLOCK]
+    matched, unmatched = [], []
+    for it in owned_items:
+        (matched if _color_tokens(it.get("description", "")) & suggested_tokens else unmatched).append(it)
+    return matched, unmatched
 
 
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
@@ -642,6 +648,13 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
     if profile["trailer"]:
         t_colors = profile["trailer"]["colors"].get(water_clarity, profile["trailer"]["colors"][DEFAULT_BASE_STAIN])
         trailer = TrailerInfo(type=profile["trailer"]["type"], colors=t_colors)
+    # Punch-list #48: owned_items (the caller-passed category match, from
+    # _group_owned_by_category) is split into color-matched (what actually
+    # renders as "in your tackle box, ready to go") and off-color (same
+    # lure type on hand, just not today's suggested color) - see
+    # LureBlock.owned_off_color_items below for why the split matters.
+    matched, off_color = _split_owned_by_color(owned_items, colors) if owned_items else ([], [])
+    matched.sort(key=lambda it: -(it.get("quantity") or 0))
     return LureBlock(
         key=key,
         name=profile["name"],
@@ -651,7 +664,8 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         presentation=profile["presentation"],
         videos=get_videos_by_key(profile["video_key"], profile["name"]),
         note=note,
-        owned_items=_color_matched_owned_items(owned_items, colors) if owned_items else [],
+        owned_items=matched[:MAX_OWNED_ITEMS_PER_BLOCK],
+        owned_off_color_items=off_color,
     )
 
 
@@ -728,9 +742,16 @@ class LureBlock:
     trailer: TrailerInfo = None
     note: str = ""
     # list[dict]: brand/description/quantity/sku for on-hand items that both match this
-    # lure's category AND match today's suggested color (see _color_matched_owned_items) -
+    # lure's category AND match today's suggested color (see _split_owned_by_color) -
     # an item you own in the wrong color for today's water clarity won't appear here.
     owned_items: list = field(default_factory=list)
+    # Punch-list #48: on-hand items that match this lure's *category* but not
+    # today's suggested color (e.g. you own a Spook, but in Blue Chrome, and
+    # today's suggestion is Bone/white) - never rendered as photo "matches"
+    # (see core.ui.render_lure_block), used only so the fallback message can
+    # say "you own one, wrong color" instead of the misleading "not in your
+    # inventory yet" it used to show for this exact case.
+    owned_off_color_items: list = field(default_factory=list)
 
     @property
     def owned(self) -> bool:
