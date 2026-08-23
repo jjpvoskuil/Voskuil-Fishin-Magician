@@ -7,7 +7,7 @@ from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import render_lure_recommendation, render_lake_setup_sidebar, inject_mobile_css
 from core.weather import lake_today
-from core.storage import commit_and_push
+from core.storage import commit_and_push_data
 from core.forecast_freeze import apply_freeze, FREEZE_PATH
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
@@ -39,7 +39,7 @@ for day in week:
 if newly_frozen:
     token = github_token()
     if token:
-        commit_and_push(
+        commit_and_push_data(
             [FREEZE_PATH], token, repo_slug(),
             f"Freeze forecast score(s) for {', '.join(newly_frozen)}",
         )

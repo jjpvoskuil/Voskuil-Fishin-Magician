@@ -220,3 +220,89 @@ def test_commit_and_push_aborts_on_real_rebase_conflict(tmp_path, bare_and_seed)
     # state, not stuck mid-rebase.
     status = _run(["git", "status"], cwd=repo_b)
     assert "rebase in progress" not in status.stdout.lower()
+
+
+# --- Punch-list #52: data/main branch split ----------------------------------
+# commit_and_push_data() and sync_data_from_data_branch() together are what
+# keep routine angler saves from triggering a Streamlit Cloud redeploy (which
+# used to wipe every connected user's session_state at once - see
+# SESSION_NOTES.md punch-list #51/#52 and core/storage.py's module docstring
+# for the full investigation). These tests use the same real-bare-repo
+# pattern as the rest of this file, specifically so a genuine "push lands on
+# the right branch" / "sync pulls from the right branch without moving HEAD"
+# claim is verified against real git plumbing, not just mocked calls.
+
+def test_commit_and_push_data_lands_on_data_branch_not_main(tmp_path, bare_and_seed):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,angler save\n")
+    ok, msg = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="angler save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+    assert "Saved and pushed" in msg
+
+    on_data = _run(["git", "show", f"{storage.DATA_BRANCH}:data/trip_log.csv"], cwd=bare_and_seed)
+    assert "angler save" in on_data.stdout
+
+    on_main = _run(["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed)
+    assert "angler save" not in on_main.stdout, (
+        "a data save must never land on main - main is the branch Streamlit "
+        "Cloud watches for redeploys"
+    )
+
+
+def test_sync_data_from_data_branch_no_data_branch_yet_is_a_soft_noop(tmp_path, bare_and_seed):
+    """Before the one-time cutover (or on a brand new repo), the data branch
+    doesn't exist at all - the sync must not crash or touch anything."""
+    repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    before = (repo / "data" / "trip_log.csv").read_text()
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is False
+    assert "may not exist yet" in msg
+    assert (repo / "data" / "trip_log.csv").read_text() == before
+
+
+def test_sync_data_from_data_branch_pulls_latest_without_switching_branch(tmp_path, bare_and_seed):
+    """The core of punch-list #52's fix for a fresh boot: a repo checked out
+    on main, with stale data/, should pick up the data branch's latest
+    content - without its HEAD moving off main."""
+    # Cut the data branch over from main's current state.
+    cutover = _clone(bare_and_seed, tmp_path / "cutover")
+    _run(["git", "checkout", "-b", storage.DATA_BRANCH], cwd=cutover)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=cutover)
+
+    # A save lands on the data branch, same as a real angler action would.
+    saver = _clone(bare_and_seed, tmp_path / "saver")
+    (saver / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,new catch\n")
+    ok, _ = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="new catch", repo_root=saver, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+
+    # A freshly booted "app" repo, still on main with main's now-stale data/,
+    # syncs and should pick up the new catch, while staying on main.
+    app_repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    assert "new catch" not in (app_repo / "data" / "trip_log.csv").read_text()
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=app_repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+    assert "new catch" in (app_repo / "data" / "trip_log.csv").read_text()
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=app_repo).stdout.strip()
+    assert branch == "main"
+
+    # main itself must remain untouched by the sync (it only touches the
+    # working tree/index, never commits or pushes anything).
+    on_main = _run(["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed)
+    assert "new catch" not in on_main.stdout
+
+
+def test_sync_data_from_data_branch_no_token(tmp_path, bare_and_seed):
+    repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    ok, msg = storage.sync_data_from_data_branch(github_token="", repo_slug="a/b", repo_root=repo)
+    assert ok is False
+    assert "No GITHUB_TOKEN" in msg

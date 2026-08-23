@@ -28,7 +28,7 @@ from core.dev_tasks import (
     DEV_TASKS_COUNTER_PATH, DEV_TASKS_PATH, PAGE_OPTIONS, STATUS_DONE,
     append_task, delete_task, mark_done, reopen_task, update_task,
 )
-from core.storage import commit_and_push
+from core.storage import commit_and_push_data
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Development - Nolin Lake", page_icon="🛠️", layout="wide")
@@ -46,7 +46,7 @@ COMMIT_PATHS = [DEV_TASKS_PATH, DEV_TASKS_COUNTER_PATH]
 def _push(message: str):
     token = github_token()
     if token:
-        return commit_and_push(COMMIT_PATHS, token, repo_slug(), message)
+        return commit_and_push_data(COMMIT_PATHS, token, repo_slug(), message)
     return True, None
 
 

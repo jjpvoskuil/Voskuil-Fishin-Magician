@@ -609,14 +609,25 @@ fixed which *data* a reconnect picks up; it didn't fix what could feed it the wr
 angler in the first place. The "Who's fishing" picker used to live only in
 `st.session_state`, which is wiped by anything that resets your browser's connection to
 the app - most notably, Streamlit Community Cloud auto-redeploying (see "Deploying on
-Streamlit Community Cloud" below: it redeploys on *every* push to `main`, and every
-save in this app - anyone's, not just yours - pushes to `main`). When that reset hit,
-the picker silently fell back to `angler_options[0]`, which is always "John" (the first
-row in `data/anglers.csv`) - so a reconnecting angler could briefly *be* John as far as
-the app was concerned, and see John's active session/lures instead of their own, until
-they noticed and re-picked their own name. The picker now also carries its value in the
-page's URL (the same pattern the spot picker and "edit this trip" already used), so a
-reconnect restores *you*, automatically, regardless of what reset the connection.
+Streamlit Community Cloud" below). At the time, every save in this app - anyone's, not
+just yours - pushed to `main` (the branch that triggers a redeploy); punch-list #52
+right below changed that. When a reset hit, the picker silently fell back to
+`angler_options[0]`, which is always "John" (the first row in `data/anglers.csv`) - so a
+reconnecting angler could briefly *be* John as far as the app was concerned, and see
+John's active session/lures instead of their own, until they noticed and re-picked their
+own name. The picker now also carries its value in the page's URL (the same pattern the
+spot picker and "edit this trip" already used), so a reconnect restores *you*,
+automatically, regardless of what reset the connection.
+
+**Sessions dropping less often (punch-list #52).** The other half of the fix above: every
+data save now pushes to a separate `data` branch instead of `main`, so a routine save
+(logging a fish, adding a lure) no longer restarts the app for every connected angler -
+see "Deploying on Streamlit Community Cloud" below for how that's wired up. A real code
+deploy (or a platform-level restart outside this app's control) can still reset
+connected sessions, same as before - punch-list #47/#51 mean an already-started session
+recovers correctly when that happens, but a session you were still setting up (hadn't
+hit "Start Session" yet) can still be lost in that rarer case. Making that survive too is
+an open idea for a future punch-list item.
 
 **Conditions can change mid-session (punch-list #49).** Fish/forage activity and wind
 can shift fast once you're actually out there, so an active session now has its own
@@ -1057,6 +1068,16 @@ streamlit run app.py
    with your own fine-grained GitHub PAT (Contents: Read and write, scoped to just this
    repo) so trip logs can be committed back automatically.
 5. Deploy. Streamlit Cloud auto-redeploys whenever you push new commits to `main`.
+
+**Data lives on a separate `data` branch (punch-list #52).** Every real data save
+the app makes (trip logs, tackle inventory, lure spots, anglers, the punch list,
+forecast freezes) pushes to a `data` branch, not `main` - Streamlit Cloud only
+watches `main` for auto-redeploy, so a routine save no longer restarts the app for
+everyone connected (that used to be the leading cause of "my session dropped" -
+see SESSION_NOTES.md punch-list #51/#52). `app.py` pulls the latest `data/`
+content from that branch once per boot, so a real redeploy (from an actual code
+push) still shows current data. Nothing to configure for this in the Streamlit
+Cloud dashboard - it's entirely handled by `core/storage.py`.
 
 ## Project layout
 

@@ -8,7 +8,7 @@ from core.lake_spots import (
     append_spot, update_spot, delete_spot, nearest_spot_within, split_bottom_structure,
 )
 from core.fish_attractors import fish_attractor_count
-from core.storage import commit_and_push
+from core.storage import commit_and_push_data
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Lake Map - Nolin Lake", page_icon="🗺️", layout="wide")
@@ -132,7 +132,7 @@ with col_detail:
                         get_lake_spots.clear()
                         token = github_token()
                         if token:
-                            ok, msg = commit_and_push([SPOTS_PATH], token, repo_slug(), f"Update lake spot: {e_name.strip()}")
+                            ok, msg = commit_and_push_data([SPOTS_PATH], token, repo_slug(), f"Update lake spot: {e_name.strip()}")
                             (st.success if ok else st.warning)(msg)
                         else:
                             st.success("Saved locally.")
@@ -144,7 +144,7 @@ with col_detail:
                     get_lake_spots.clear()
                     token = github_token()
                     if token:
-                        commit_and_push([SPOTS_PATH], token, repo_slug(), f"Delete lake spot: {existing['name']}")
+                        commit_and_push_data([SPOTS_PATH], token, repo_slug(), f"Delete lake spot: {existing['name']}")
                     st.rerun()
 
         else:
@@ -181,7 +181,7 @@ with col_detail:
 
                     token = github_token()
                     if token:
-                        ok, msg = commit_and_push([SPOTS_PATH], token, repo_slug(), f"Add lake spot: {spot.name}")
+                        ok, msg = commit_and_push_data([SPOTS_PATH], token, repo_slug(), f"Add lake spot: {spot.name}")
                         (st.success if ok else st.warning)(msg)
                     else:
                         st.success("Saved locally.")

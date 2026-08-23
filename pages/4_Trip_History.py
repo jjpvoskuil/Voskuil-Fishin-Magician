@@ -29,7 +29,7 @@ import streamlit as st
 
 from core.appstate import get_lake_spots, get_weather_bundle, github_token, repo_slug
 from core.storage import (
-    read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push,
+    read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push_data,
 )
 from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
@@ -233,7 +233,7 @@ def _render_trip_detail_body(row, key_prefix):
             if ok:
                 token = github_token()
                 if token:
-                    commit_and_push(
+                    commit_and_push_data(
                         [TRIP_LOG_PATH], token, repo_slug(), f"Delete trip {trip_id} from Trip History",
                     )
                 st.session_state.pop(delete_pending_key, None)
@@ -704,7 +704,7 @@ else:
             token = github_token()
             if token:
                 plural = "s" if len(saved_ids) != 1 else ""
-                commit_and_push(
+                commit_and_push_data(
                     [TRIP_LOG_PATH], token, repo_slug(),
                     f"Update trip{plural} {', '.join(saved_ids)} via Trip History grid edit",
                 )
