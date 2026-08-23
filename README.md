@@ -625,9 +625,17 @@ data save now pushes to a separate `data` branch instead of `main`, so a routine
 see "Deploying on Streamlit Community Cloud" below for how that's wired up. A real code
 deploy (or a platform-level restart outside this app's control) can still reset
 connected sessions, same as before - punch-list #47/#51 mean an already-started session
-recovers correctly when that happens, but a session you were still setting up (hadn't
-hit "Start Session" yet) can still be lost in that rarer case. Making that survive too is
-an open idea for a future punch-list item.
+recovers correctly when that happens.
+
+**Setting up a session survives a reset too (punch-list #53).** Punch-list #52 made
+restarts rarer; this closes the remaining gap for the case that's left - a session you
+were still *setting up* (hadn't hit "Start Session" yet) used to be lost completely if a
+reset hit while you were mid-conditions-form or mid-lure-picking, with nothing on disk
+yet to recover from. The conditions form and whatever lures you've queued so far are now
+also carried in the page's URL (the same trick as "Who's fishing"), kept in sync as you
+go, so a reconnect at any point - even before picking a single lure - restores exactly
+where you left off instead of a blank form. Clears itself automatically once you actually
+hit "Start Session," since the session is durably saved from that point on anyway.
 
 **Conditions can change mid-session (punch-list #49).** Fish/forage activity and wind
 can shift fast once you're actually out there, so an active session now has its own
