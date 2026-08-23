@@ -63,7 +63,11 @@ def lure_can_take_trailer(item: dict) -> bool:
 # --- "How it was fished" / outcome vocabulary --------------------------------
 DEPTH_MODES = ["Single depth", "Varied / multiple depths"]
 
-FISH_ACTIVITY_OPTIONS = ["Very active", "Active", "Moderate", "Sluggish", "Inactive / shut down"]
+# Punch-list #50: both sliders read least-active -> most-active, left to
+# right - FISH_ACTIVITY_OPTIONS used to run the opposite direction (most
+# active first), so the two sliders visually disagreed with each other
+# right next to one another in the Spot Session conditions form.
+FISH_ACTIVITY_OPTIONS = ["Inactive / shut down", "Sluggish", "Moderate", "Active", "Very active"]
 
 FORAGE_ACTIVITY_OPTIONS = [
     "None seen", "Sparse / scattered", "Moderate", "Active / schooling", "Frenzied (busting bait)",

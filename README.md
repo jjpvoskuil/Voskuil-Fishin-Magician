@@ -966,9 +966,10 @@ biology (upward strike bias, etc.) that was already there:
 
 3. **Live fish/forage activity and wind, on Spot Session only (punch-list #49).** Spot
    Session's own condition form already asked for "Fish activity" and "Forage activity"
-   (five-point sliders, Very active/Active/Moderate/Sluggish/Inactive down to None
-   seen/Sparse/Moderate/Active-schooling/Frenzied-busting-bait) and a wind reading -
-   these used to be recorded to the trip log and otherwise ignored. They now feed
+   (five-point sliders, both running least active to most active - Inactive/Sluggish/
+   Moderate/Active/Very active, and None seen/Sparse/Moderate/Active-schooling/Frenzied-
+   busting-bait) and a wind reading - these used to be recorded to the trip log and
+   otherwise ignored. They now feed
    `recommend()` directly: "Very active"/"Active" fish, "Active / schooling"/"Frenzied
    (busting bait)" forage, or wind at/above ~10 mph (`core.onwater.WIND_BANDS`' own
    "Moderate Chop / Action Trigger" cutoff) promote a reaction/moving bait (walking
