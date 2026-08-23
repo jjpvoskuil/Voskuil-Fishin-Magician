@@ -4,14 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import streamlit as st
 
-from .lures import (
-    LureBlock, BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, STRUCTURE_TYPES,
-    resolve_water_clarity, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK,
-)
+from .lures import LureBlock, STRUCTURE_TYPES, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK
 from .lure_inventory import resolve_image_source, image_data_uri_or_url
 from .lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE
 from .appstate import get_lake_spots, get_cabelas_suggestions
 from .cabelas_lookup import search_page_url
+from .onwater import resolve_water_clarity, visibility_band, STAIN_COLOR_OPTIONS
 
 # Punch-list #8: cap how many real Cabela's products get suggested per lure
 # block when nothing color-matched is in the tackle-box inventory - "only
@@ -296,6 +294,18 @@ def render_cabelas_suggestions(
 def render_lure_block(block: LureBlock):
     with st.container(border=True):
         st.markdown(f"**{block.name}**")
+        if block.why:
+            # Punch-list #49: "why this lure and color combination was
+            # chosen" - core.lures.recommend()'s per-key reason(s) (season
+            # pattern, plus whichever nudges actually touched this lure -
+            # structure, pressure, forage, depth, activity/wind) followed by
+            # a color reason _build_block() always appends. Distinct from
+            # block.note below (personal catch-history track record) and
+            # from LureRecommendation.rationale (one shared caption for the
+            # whole situation, not attributed to any one lure) - this is the
+            # one place both "why this lure" and "why this color" live
+            # together, right on the card they're about.
+            st.caption("💡 Why: " + " ".join(block.why))
         if block.note:
             # Punch-list #37: block.note carries the "why this pick, and how
             # much to trust it" signal - core.lures.recommend()'s personal-
@@ -382,7 +392,7 @@ OTHER_LOCATION_LABEL = "Other (pick structure manually)"
 @dataclass
 class LakeSetupOptions:
     water_clarity: str          # resolved: Clear / Green stained / Brown stained / Muddy
-    base_stain: str              # what the angler picked before the stirred-up flag was applied
+    secchi_ft: float             # raw visibility reading the angler entered
     stirred_up: bool
     structure_type: str
     water_temp_override_f: float
@@ -395,20 +405,27 @@ def render_lake_setup_sidebar(
     default_structure_index: int = 0,
     default_water_temp_f: float = 85.0,
     default_fish_depth_ft: float = 8.0,
-    default_base_stain: str = DEFAULT_BASE_STAIN,
+    default_secchi_ft: float = 2.5,
 ) -> LakeSetupOptions:
     """
     Shared "Lake Setup Options" sidebar (currently only used by the 7-Day
     Forecast page - Lake Map dropped its own use of this when Spot Session
-    took over on-the-water recommendations, and Spot Session has always had
-    its own, separate condition inputs). Every value returned here is a
+    took over on-the-water recommendations). Every value returned here is a
     direct input the angler controls, feeding straight into recommend() so
     the guidance stays consistent with the rest of the app's rules.
 
-    Water color: Nolin normally runs a greenish-brown stain (leaning brown),
-    but wind/rain can stir it up to muddy regardless of the usual color -
-    so this is two independent inputs (base stain color, and a stirred-up
-    flag) resolved into one effective clarity key for the lure engine.
+    Water clarity (punch-list #49): mirrors the Secchi-depth model Spot
+    Session's own condition form has always used (core.onwater.
+    resolve_water_clarity()/visibility_band()) instead of the plain Clear/
+    Green/Brown dropdown this sidebar used before - a real visibility
+    reading in feet (default 2.5', Nolin's typical "Stained" band) is a more
+    accurate, and more consistent-with-the-rest-of-the-app, way to get to
+    the same four color-table keys. A reading only asks for a stain color
+    (Green vs Brown) when it lands in the genuinely ambiguous "Stained"
+    band (1.5-4 ft) - a Clear or Muddy reading resolves on its own. The
+    "stirred up" flag still always overrides straight to Muddy, exactly as
+    before, since a Secchi estimate taken a bit before (or after) a wind/
+    rain event may not reflect it yet.
 
     Location: picking one of the angler's own saved spots (data/lake_spots.csv,
     same catalog as the Lake Map page) auto-resolves that spot's structure
@@ -433,22 +450,27 @@ def render_lake_setup_sidebar(
     with st.sidebar:
         st.header("Lake Setup Options")
 
-        c1, c2 = st.columns(2)
-        base_stain = c1.selectbox(
-            "Water stain", BASE_STAIN_OPTIONS,
-            index=(
-                BASE_STAIN_OPTIONS.index(default_base_stain)
-                if default_base_stain in BASE_STAIN_OPTIONS
-                else BASE_STAIN_OPTIONS.index(DEFAULT_BASE_STAIN)
-            ),
-            key="lso_base_stain",
-            help="Nolin's normal color under typical conditions.",
+        st.session_state.setdefault("lso_secchi", default_secchi_ft)
+        secchi_ft = st.number_input(
+            "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
+            help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
+            key="lso_secchi",
         )
-        stirred_up = c2.checkbox(
-            "Stirred up / muddy", key="lso_stirred_up",
-            help="Recent wind or rain - overrides the stain color to Muddy regardless of what's picked above.",
+        vis_band = visibility_band(secchi_ft)
+        st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
+
+        stain_color = None
+        if vis_band["label"] == "Stained":
+            st.session_state.setdefault("lso_stain_color", STAIN_COLOR_OPTIONS[0])
+            stain_color = st.selectbox(
+                "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
+                key="lso_stain_color",
+            )
+        stirred_up = st.checkbox(
+            "Stirred up / muddy right now (recent wind or rain)", key="lso_stirred_up",
+            help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color.",
         )
-        clarity = resolve_water_clarity(base_stain, stirred_up)
+        clarity = resolve_water_clarity(secchi_ft, stain_color, stirred_up)
 
         structure = None
         if include_structure:
@@ -489,7 +511,7 @@ def render_lake_setup_sidebar(
 
     return LakeSetupOptions(
         water_clarity=clarity,
-        base_stain=base_stain,
+        secchi_ft=secchi_ft,
         stirred_up=stirred_up,
         structure_type=structure,
         water_temp_override_f=water_temp_override,

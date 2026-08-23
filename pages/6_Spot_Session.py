@@ -27,7 +27,7 @@ from core.activity_log import (
     nearest_weight_slider_option, nearest_length_slider_option,
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
-from core.ui import render_lure_block, render_square_thumbnail, inject_mobile_css
+from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
 from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip, delete_trip
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
@@ -1036,10 +1036,16 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict, angler: str = "")
     """Adds one more lure to an already-running session - the same "switch
     rods any time" ability as picking lures before Start Session, just
     writing a brand-new TripEntry row (its own lure_start_time = right
-    now) instead of queuing into the pre-session pending list, since this
-    session's start time/time window/conditions snapshot are already
-    locked in (see active["base_conditions"], captured once at Start
-    Session and reused unchanged for every lure added after)."""
+    now) instead of queuing into the pre-session pending list, using this
+    session's own conditions snapshot (active["base_conditions"]) for
+    everything about the SESSION as a whole. That snapshot is captured once
+    at Start Session and normally reused unchanged for every lure added
+    after - EXCEPT fish activity/forage activity/wind/sky, which the
+    "🔄 Conditions changed? Get updated suggestions" panel (punch-list #49)
+    can update mid-session; if the angler has tapped "Update conditions"
+    there, this picks up whatever was most recently saved, not necessarily
+    what was true at Start Session. Water clarity/temp/depth are never
+    touched mid-session, so those always stay what they were at the start."""
     active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
@@ -1711,6 +1717,104 @@ if active is not None:
                 st.caption(f"{lure['label']} - {fish_count} fish - {start} to {end}")
 
     st.divider()
+    # Punch-list #49: "conditions change on a dime mid-session (fish/forage
+    # activity, wind/clouds) - let me adjust these and see quick new lure
+    # suggestions and why, without ending the session." A live preview, not
+    # a form you submit: every widget below recomputes the score + lure
+    # cards (with per-lure "why") on the spot, prefilled from whatever this
+    # session's conditions currently are. Tapping "Update conditions" is a
+    # separate, deliberate step that bakes the shown values into
+    # active["base_conditions"] - only then does any NEW lure you add (from
+    # here down, or from "Add a lure to this session" below) pick them up;
+    # lures already added keep whatever was true when *they* were added
+    # (see _add_lure_to_active_session()'s own docstring). Only exposes the
+    # fields that genuinely "change on a dime" - water clarity/temp/depth
+    # stay as captured at Start Session, same as before this feature.
+    with st.expander("🔄 Conditions changed? Get updated suggestions", expanded=False):
+        st.caption(
+            "Fish/forage activity, wind, and sky conditions can shift fast mid-session - adjust them here to "
+            "preview fresh lure suggestions (and why) right away. Tap \"Update conditions\" below to also apply "
+            "them to any new lure you add from this point forward; lures you've already added keep what was "
+            "true when you added them."
+        )
+        mc_ns = f"midsession_{spot['spot_id']}_{_angler_session_slug(resolved_angler)}"
+        mc_base = active.get("base_conditions") or {}
+
+        fa_key = f"{mc_ns}_fish_activity"
+        st.session_state.setdefault(fa_key, mc_base.get("fish_activity") or "Moderate")
+        mid_fish_activity = st.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, key=fa_key)
+        fo_key = f"{mc_ns}_forage_activity"
+        st.session_state.setdefault(fo_key, mc_base.get("forage_activity") or "Moderate")
+        mid_forage_activity = st.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, key=fo_key)
+
+        mw1, mw2 = st.columns(2)
+        wb_key = f"{mc_ns}_wind_band"
+        st.session_state.setdefault(wb_key, mc_base.get("wind_band") or WIND_BAND_LABELS[1])
+        mid_wind_band = mw1.selectbox("Wind", WIND_BAND_LABELS, help=_wind_help, key=wb_key)
+        wd_key = f"{mc_ns}_wind_dir"
+        st.session_state.setdefault(wd_key, mc_base.get("wind_direction") or "SW")
+        mid_wind_direction = mw2.selectbox("Wind direction", WIND_DIRECTIONS, key=wd_key)
+
+        lc_key = f"{mc_ns}_light_condition"
+        st.session_state.setdefault(lc_key, mc_base.get("light_condition") or LIGHT_CONDITIONS[2])
+        mid_light_condition = st.selectbox(
+            "Sky conditions", LIGHT_CONDITIONS,
+            help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
+            key=lc_key,
+        )
+
+        mid_cond = dict(mc_base)
+        mid_cond.update({
+            "fish_activity": mid_fish_activity, "forage_activity": mid_forage_activity,
+            "wind_band": mid_wind_band, "wind_direction": mid_wind_direction,
+            "light_condition": mid_light_condition,
+        })
+        _mid_now = lake_now_naive()
+        _mid_segment = _guess_segment(_mid_now.hour, _mid_now)
+        mid_water_clarity, mid_season, mid_avg_cloud_pct, mid_avg_wind_mph, mid_rt, mid_score_result = _compute_scoring(
+            mid_cond, session_date, bundle, _mid_now, _mid_segment,
+        )
+
+        st.divider()
+        mm1, mm2 = st.columns([1, 2])
+        mm1.metric(
+            f"{_mid_segment} activity score", f"{mid_score_result.score}/10",
+            help=_score_breakdown_help(mid_score_result.breakdown, mid_score_result.score),
+        )
+        mm2.write(
+            f"**Season:** {mid_season.replace('_', ' ').title()}  \n"
+            f"**Structure:** {active['structure_type']}  \n"
+            f"**Water clarity:** {mid_water_clarity} (unchanged from session start)"
+        )
+        if mid_score_result.notes:
+            st.caption(" · ".join(mid_score_result.notes))
+        for warn in mid_score_result.warnings:
+            st.warning(warn)
+
+        mid_rec = recommend(
+            mid_season, mid_cond.get("water_temp_f"), _mid_segment, mid_rt["pressure_trend_24h"],
+            structure_type=active["structure_type"], water_clarity=mid_water_clarity,
+            fish_depth_ft=mid_cond.get("fish_depth_ft"), forage=mid_cond.get("forage_seen"),
+            inventory=get_inventory(), trip_history=get_trip_history(), spot_id=spot["spot_id"],
+            fish_activity=mid_fish_activity, forage_activity=mid_forage_activity,
+            wind_mph=wind_mph_for_band(mid_wind_band),
+        )
+        render_lure_recommendation(mid_rec)
+
+        if st.button(
+            "🔄 Update conditions", key=f"{mc_ns}_apply", type="primary",
+            help="Any lure you add from now on will use these readings; lures already added are untouched.",
+        ):
+            mid_cond.update({
+                "avg_cloud_pct": mid_avg_cloud_pct, "avg_wind_mph": mid_avg_wind_mph,
+                "pressure_trend_24h": mid_rt["pressure_trend_24h"] if mid_rt else None,
+                "wind_band_logged": mid_wind_band,
+            })
+            active["base_conditions"] = mid_cond
+            st.session_state[active_session_key] = active
+            st.success("Saved - any lure you add from here on will use these updated conditions.")
+
+    st.divider()
     with st.expander("➕ Add a lure to this session"):
         inventory_items = get_inventory()
         _multi_lure_picker(
@@ -1817,11 +1921,18 @@ else:
         # Punch-list #37: spot_id lets recommend()'s personal-history boost use
         # the strongest possible match - "have I actually caught fish on this
         # lure AT THIS SPOT before" - not just a general structure-type match.
+        # Punch-list #49: fish_activity/forage_activity/wind_mph are Spot
+        # Session's own live, on-the-water read (render_conditions_block()'s
+        # sliders/wind picker above) - the one thing this page can offer that
+        # the 7-Day Forecast page never can, since it's an actual observation,
+        # not a forecast.
         rec = recommend(
             season, cond_values["water_temp_f"], _preview_segment, rt["pressure_trend_24h"],
             structure_type=structure_type, water_clarity=water_clarity,
             fish_depth_ft=cond_values.get("fish_depth_ft"), forage=cond_values.get("forage_seen"),
             inventory=inventory_items, trip_history=get_trip_history(), spot_id=spot["spot_id"],
+            fish_activity=cond_values.get("fish_activity"), forage_activity=cond_values.get("forage_activity"),
+            wind_mph=wind_mph_for_band(cond_values.get("wind_band")),
         )
         _render_recommendation_with_quick_add(rec, spot["spot_id"], session_build_seq, key_prefix=f"quickadd_{spot['spot_id']}_{session_build_seq}")
 

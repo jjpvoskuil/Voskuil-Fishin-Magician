@@ -232,12 +232,21 @@ this repo that can override it on this hosting.
   lists your own saved spots (from the Lake Map page) - pick one and its structure type
   is filled in automatically, the same way Spot Session resolves it; pick "Other" to
   set a structure type by hand instead.
-- **Water color model** - Nolin normally runs a greenish-brown stain (leaning brown).
-  Pick your usual base stain color (Clear / Green stained / Brown stained, defaults to
-  Green stained on both the Lake Setup Options sidebar and Spot Session) plus a
-  separate "stirred up / muddy" checkbox for after wind or heavy rain - the two combine
-  into one effective water-clarity reading that drives lure color choice, independent
-  of the base color you picked.
+- **Water clarity as a real visibility reading (punch-list #49)** - the Lake Setup
+  Options sidebar used to ask for water color as a plain three-way Clear/Green
+  stained/Brown stained dropdown, with no actual visibility input; it now uses the
+  same Secchi-depth model Spot Session's own condition form has always used
+  (`core.onwater.resolve_water_clarity()`/`visibility_band()`): enter how far down you
+  can see a light-colored object (defaults to 2.5 ft, Nolin's typical "Stained" band -
+  1.5-4 ft), and a stain-color picker (Green stained vs. Brown stained) only appears
+  when that reading actually lands in the ambiguous middle "Stained" band, since a
+  Secchi reading alone can't tell green tint from brown tint. A reading above 4 ft
+  resolves straight to Clear, below 1.5 ft straight to Muddy, no extra pick needed
+  either way. A separate "stirred up / muddy right now" checkbox still always
+  overrides straight to Muddy regardless of the reading, for right after wind or heavy
+  rain, exactly as before. Same default (2.5 ft, Green stained when asked) as the
+  three-way dropdown used to resolve to, so this is a more accurate input with no
+  change to the out-of-the-box behavior.
 - **Forage selector** - pick which baitfish/prey are actually available (Gizzard Shad,
   Threadfin Shad, Bluegill/Sunfish, Crawfish, Shiners/Minnows, Stonerollers). Nothing is
   pre-checked - an empty selection means "not specified" rather than assuming a forage
@@ -548,7 +557,10 @@ plausible day/segment combinations, with the tails far more balanced).
   conflated time-of-day light level (already captured separately by the "Time window"
   field) with actual cloud cover (this field's only real downstream use - it drives the
   same `avg_cloud_pct` input a real forecast's cloud-cover reading would) - see
-  `core/onwater.py` for the full rationale.
+  `core/onwater.py` for the full rationale. As of punch-list #49, the water-visibility
+  band (`resolve_water_clarity()`/`visibility_band()`) is shared with the 7-Day
+  Forecast page's own "Lake Setup Options" sidebar too - see "Water clarity as a real
+  visibility reading" below.
 
 ## Trip logging & calibration
 
@@ -591,6 +603,21 @@ phone used to reload "the" one active session for a spot regardless of whose it 
 (picking up whichever one had started more recently), so one angler's own reconnect
 could land them on a different angler's session, and ending it from there really did end
 the wrong one. Reconnecting now always restores *your own* named session specifically.
+
+**Conditions can change mid-session (punch-list #49).** Fish/forage activity and wind
+can shift fast once you're actually out there, so an active session now has its own
+"🔄 Conditions changed? Get updated suggestions" panel (right below the lure list,
+above "➕ Add a lure to this session") - a live preview, not a form you submit: adjust
+fish activity, forage activity, wind, or sky conditions and the score plus lure cards
+(with the same per-lure "why" from above) refresh immediately, no page reload needed.
+Tapping "🔄 Update conditions" is a separate, deliberate step: only then do the shown
+values get baked into the session's own conditions, so any *new* lure you add from that
+point on - from this panel or from "➕ Add a lure to this session" below it - carries
+them forward; lures you already added keep exactly what was true when you added them,
+untouched. Water clarity, water temp, and fish depth are deliberately left out of this
+panel and stay whatever they were at Start Session - those don't swing session-to-
+session the way activity and wind do, and changing them mid-session would call the
+whole session's premise into question in a way this panel isn't meant to.
 
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
@@ -895,7 +922,7 @@ it's meant as a helpful signal, not a guarantee.
 Punch-list #37: the angler asked directly how a suggested lure gets picked, especially
 one not already in the tackle box, and said general bass-fishing knowledge alone
 "is really not all the helpful" - the recommendation needed to be grounded in real
-Nolin Lake experience and, where possible, the angler's own results. Two sources now
+Nolin Lake experience and, where possible, the angler's own results. Three sources now
 feed `core.lures.recommend()`'s season/structure lure picks, on top of the general bass
 biology (upward strike bias, etc.) that was already there:
 
@@ -936,6 +963,48 @@ biology (upward strike bias, etc.) that was already there:
    enough times to clear the minimum-sample gate. The note shows up right on the lure's
    own card (⬤ "Your own history: N of M similar trips landed fish...") rather than
    being buried, so you can judge the strength of the signal yourself before trusting it.
+
+3. **Live fish/forage activity and wind, on Spot Session only (punch-list #49).** Spot
+   Session's own condition form already asked for "Fish activity" and "Forage activity"
+   (five-point sliders, Very active/Active/Moderate/Sluggish/Inactive down to None
+   seen/Sparse/Moderate/Active-schooling/Frenzied-busting-bait) and a wind reading -
+   these used to be recorded to the trip log and otherwise ignored. They now feed
+   `recommend()` directly: "Very active"/"Active" fish, "Active / schooling"/"Frenzied
+   (busting bait)" forage, or wind at/above ~10 mph (`core.onwater.WIND_BANDS`' own
+   "Moderate Chop / Action Trigger" cutoff) promote a reaction/moving bait (walking
+   topwater, buzzbait, chatterbait, swim jig, lipless crankbait, or spinnerbait -
+   whichever's already closest to being picked, or a season-appropriate default if
+   none of them are anywhere in the plan) to the very front of first choice.
+   "Sluggish"/"Inactive / shut down" fish or "None seen" forage nudge the other way,
+   toward a slower finesse presentation (finesse shaky head, drop shot, wacky rig
+   senko, or football jig) - the same style of nudge the existing pressure-trend
+   rationale already used, just driven by what you actually observe on the water
+   instead of a barometer reading. This is Spot-Session-only on purpose - the 7-Day
+   Forecast page is a genuine forecast, and has no way to know whether fish will be
+   schooling three days from now, so these three inputs default to unused there and
+   change nothing about its picks.
+
+### Why this lure and this color (punch-list #49)
+
+Every lure block now shows a short "💡 Why:" line explaining why THAT specific lure -
+and its suggested color - made the card, instead of leaving that only in the one
+shared caption below the whole recommendation (which explains the overall situation -
+season, structure, pressure - but was never attributed to any one lure). Each reason
+sentence traces back to whichever rule actually put that lure in the plan: the season
+pattern (every pick's first reason), plus whichever nudges specifically touched it -
+added for the structure type, added for the water clarity/temp, added to match
+reported forage, swapped in for your sonar depth reading, or moved up front for
+reported fish/forage activity or wind (see above). A final sentence always names the
+water clarity behind the suggested colors shown ("Colors shown are Nolin's documented
+picks for green stained water."). This is separate from - and shown alongside - the
+lure's own personal-catch-history note (punch-list #37) and the shared situational
+caption at the bottom of the whole recommendation, which still covers context that
+doesn't belong to any single lure (the season's overall pattern description, the
+structure-specific casting tip, etc.). Built in `core.lures.recommend()` (a `key_why`
+dict, tagged as each lure key enters or moves within first/second choice) and
+`_build_block()` (which appends the color reason last, since it's the one place that
+actually knows which colors got picked for today's water clarity) - see
+`LureBlock.why` for the full field-level rationale.
 
 ## Development punch list
 

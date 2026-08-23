@@ -6419,6 +6419,156 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     items` is populated at recommendation-build time from data that was already
     correctly on disk.
 
+110. **Punch-list #49: "add why this lure and color combination was chosen" + "add
+    water clarity to the lake conditions sidebar, default 2.5'" + "use the activity
+    slider to help drive lure suggestions in Spot Session, and let me adjust
+    conditions mid-session and see quick new lure suggestions and why."** Three
+    related asks from one conversation, discussed and scoped before any code was
+    written (the angler explicitly asked to discuss the activity-driven piece
+    first), then implemented together since all three touch the same recommendation
+    path.
+
+    **Why this lure and color.** `LureRecommendation.rationale` already existed as
+    one shared caption for the whole situation (season pattern, structure tip,
+    pressure/forage notes), but nothing was attributed to any one lure - a card
+    showed its color and how to run it, with no reasoning for either. Fix: a new
+    `key_why: dict` local in `recommend()`, tagged every time a lure key enters or
+    moves within first_keys/second_keys - one reason per rule that actually touched
+    it (season pattern, structure crank-nudge, low-light topwater mention, jerkbait
+    clarity nudge, pressure nudge, forage nudge, depth-driven crank swap, the new
+    activity/wind nudge below) - threaded through to `_build_block()` via a new
+    `why` param, which appends one more reason of its own (which colors got picked
+    for today's water clarity, since only `_build_block()` actually knows that) into
+    a new `LureBlock.why: list` field. `core.ui.render_lure_block()` shows it as a
+    "💡 Why: ..." caption near the top of the card. Deliberately kept separate from
+    `LureBlock.note` (personal catch-history track record, punch-list #37) and the
+    shared `rationale` caption (still covers whole-situation context that doesn't
+    belong to one lure) rather than folding everything into one place.
+
+    **Water clarity on the Lake Setup Options sidebar.** Investigation before
+    writing any code turned up that this already existed, just not where the
+    angler was looking: Spot Session's own condition form has always asked for a
+    Secchi-depth reading in feet (default 2.5', matching the angler's own ask
+    exactly) via `core.onwater.resolve_water_clarity()`/`visibility_band()` -
+    Clear above 4 ft, Muddy below 1.5 ft, and only asks for a Green-vs-Brown stain
+    color in the ambiguous 1.5-4 ft "Stained" band in between, plus a "stirred up"
+    checkbox that always overrides to Muddy. The 7-Day Forecast page's "Lake Setup
+    Options" sidebar, by contrast, only ever had a plain three-way Clear/Green/
+    Brown dropdown with no real visibility input. Ported the exact Spot Session
+    model over: `core/ui.py`'s `render_lake_setup_sidebar()` now asks for the same
+    Secchi reading (default 2.5 ft), same conditional stain-color picker, same
+    stirred-up override, and `LakeSetupOptions.base_stain` was replaced with
+    `secchi_ft`. Confirmed via a scratch AppTest (not committed) that the new
+    default (2.5 ft, no override) resolves to the exact same "Green stained" result
+    the old dropdown's own explicit default (`default_base_stain="Green stained"`,
+    removed from `pages/1_7_Day_Forecast.py`'s call site) used to - zero behavior
+    change for anyone who never touches this input - and that 6 ft/0.5 ft/stirred-
+    up all resolve to Clear/Muddy/Muddy respectively as expected.
+
+    **Fish/forage activity + wind driving lure choice, Spot-Session-only.**
+    Discussed first, per the angler's own request. Spot Session's condition form
+    already collected "Fish activity" and "Forage activity" (five-point sliders)
+    every session, but neither field did anything - recorded to the trip log and
+    otherwise ignored, confirmed by grep before writing any code (zero references
+    in `core.lures`/`core.lure_history`). Added three new optional `recommend()`
+    params - `fish_activity`, `forage_activity`, `wind_mph` - all defaulting to
+    `None` so the 7-Day Forecast page (which never passes them, since it's a
+    genuine forecast with no way to know if fish will be schooling three days out)
+    is a guaranteed no-op; confirmed with a dedicated test
+    (`test_no_activity_or_wind_params_leaves_picks_unchanged`) that omitting vs.
+    explicitly passing `None` for all three produces byte-identical picks. "Very
+    active"/"Active" fish, "Active / schooling"/"Frenzied (busting bait)" forage,
+    or wind at/above 10 mph (`core.onwater.WIND_BANDS`' own "Moderate Chop / Action
+    Trigger" lower bound, reused as a plain number since `core.lures` importing
+    `core.onwater` back would be circular) call `_promote_reaction_bait()` - a new
+    helper that promotes whichever reaction/moving bait (walking topwater, buzzbait,
+    chatterbait, swim jig, lipless crankbait, spinnerbait) is already closest to
+    being picked (first choice already, else promoted up from second choice) to the
+    very front of first choice, or inserts a season-appropriate default
+    (walking_topwater in low light, else chatterbait) if none of them are anywhere
+    in the plan yet. "Sluggish"/"Inactive / shut down" fish or "None seen" forage
+    call the mirror-image `_promote_finesse_bait()` instead, toward finesse shaky
+    head/drop shot/wacky rig senko/football jig - the same style of nudge the
+    existing pressure-trend rationale already used, just driven by a live
+    observation instead of a barometer reading. `pages/6_Spot_Session.py`'s pending-
+    mode `recommend()` call now passes `fish_activity=cond_values.get("fish_activity")`,
+    `forage_activity=cond_values.get("forage_activity")`, and
+    `wind_mph=wind_mph_for_band(cond_values.get("wind_band"))`.
+
+    **A real bug found and fixed during this work**: an early version of the
+    activity/wind nudge ran BEFORE the existing depth-based reorder step
+    (`first_keys_unique.sort(key=lambda k: _depth_match_score(...))`, which
+    re-orders each tier by how well each lure's depth range matches the sonar
+    reading) - meaning the nudge's own "insert at the front" promotion got
+    silently undone the moment a `fish_depth_ft` reading was also present, which
+    is the normal case in Spot Session. Caught by manual smoke-testing before
+    writing the formal unit tests (`recommend(..., fish_depth_ft=15,
+    fish_activity="Very active")` came back with the promoted bait at the END of
+    first choice instead of the front). Fixed by moving the whole nudge block to
+    run AFTER the depth reorder, operating on `first_keys_unique`/
+    `second_keys_unique` (the post-dedup lists that actually reach the angler)
+    instead of the pre-dedup `first_keys`/`second_keys`. Guarded against
+    regressing again with `test_fish_activity_promotion_survives_a_fish_depth_
+    reorder()`, which asserts the promoted pick stays at the front with both
+    `fish_depth_ft` and `fish_activity` set together.
+
+    **Adjust conditions mid-session, see fresh suggestions.** While discussing the
+    activity nudge, the angler raised a related but separate observation: fish/
+    forage activity and wind/clouds genuinely change on a dime once you're
+    actually out fishing, and there was no way to update them without ending and
+    restarting the session. Added a new "🔄 Conditions changed? Get updated
+    suggestions" expander to the active-session view in `pages/6_Spot_Session.py`
+    (between the lure list and "➕ Add a lure to this session"), prefilled from
+    `active["base_conditions"]`: fish activity, forage activity, wind, and sky
+    condition sliders/selects, a live score+rationale preview and lure
+    recommendation cards (reusing `core.ui.render_lure_recommendation()`,
+    newly imported into this page) that recompute on every widget change with no
+    button needed - genuinely live, not a submit-and-wait form. A separate
+    "🔄 Update conditions" button is a deliberate, explicit step: only clicking it
+    writes the shown values into `active["base_conditions"]` (plus recomputed
+    `avg_cloud_pct`/`avg_wind_mph`/`pressure_trend_24h`/`wind_band_logged`) and
+    session_state - chosen over auto-syncing on every rerun specifically to avoid
+    a subtler unintended side effect: `_add_lure_to_active_session()` already
+    copies `active["base_conditions"]` fresh for every lure it adds, so silently
+    auto-writing it on every page rerun (which happens on ANY button click
+    anywhere on the page, not just this panel) would have meant every session's
+    `avg_wind_mph`/`pressure_trend_24h` quietly drifted to "right now" on every
+    interaction, not just when the angler deliberately updated something - a much
+    bigger, unrequested behavior change. Water clarity/temp/fish depth are
+    deliberately NOT part of this panel (out of scope per the angler's own framing
+    of what "changes on a dime") and stay exactly what they were at Start Session.
+    `_add_lure_to_active_session()`'s docstring updated to reflect that
+    `base_conditions` is no longer unconditionally "locked in once."
+
+    Verification: `python3 -m py_compile` on every edited file; full suite grew
+    from 338 to 347 (9 new tests in `tests/test_lures.py` covering the `why` field,
+    the season-reason tagging, the structure-nudge reason, both directions of the
+    activity nudge, the wind nudge and its 10 mph threshold, the depth-reorder
+    regression above, and the no-params-is-a-no-op guarantee). A thorough scratch
+    `AppTest` walkthrough (not committed) against the real Spot Session page and
+    real inventory (spot `f574f116`, angler "John", weather bundle mocked to
+    `None` via `unittest.mock.patch` since this sandbox has no route to the
+    live Open-Meteo API - confirmed Spot Session already tolerates a `None`
+    bundle gracefully) exercised the full flow end-to-end: set fish activity to
+    "Very active" before starting, confirmed a why-caption mentioning it; added a
+    real inventory lure (Heddon Super Spook Jr., the same punch-list #48 item,
+    picked specifically because `walking_topwater` takes no trailer so the
+    "Add a trailer?" dialog - which AppTest doesn't fully simulate staying open
+    across reruns - never opens) and started the session; opened the mid-session
+    panel, confirmed it prefilled "Very active," changed it to "Inactive / shut
+    down," confirmed a fresh why-caption mentioning that and confirmed
+    `base_conditions` was NOT yet touched; clicked "Update conditions," confirmed
+    `base_conditions` updated; added a second lure (a different no-trailer
+    inventory item) and confirmed ITS logged conditions carried the new "Inactive
+    / shut down" reading while the FIRST lure's own logged conditions still read
+    "Very active," exactly as designed; ended the session cleanly. Every trip_log
+    row created was tracked by `trip_id` and deleted in a `finally` block; an MD5
+    checksum of `data/trip_log.csv` (and `data/lure_inventory.csv`/
+    `data/dev_tasks.csv`/`data/dev_tasks_counter.txt`) confirmed byte-identical
+    before and after the whole run. A second scratch AppTest confirmed the Lake
+    Setup Options secchi model directly (see above). No data files touched by
+    either scratch script; both deleted when done.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
