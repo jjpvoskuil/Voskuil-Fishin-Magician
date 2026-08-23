@@ -10,7 +10,7 @@ from core.appstate import (
 from core.scoring import score_day
 from core.weather import lake_today, HOME_TREND_CHART_PAST_DAYS
 from core.lake_level import NORMAL_SUMMER_POOL_FT
-from core.storage import commit_and_push
+from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
 from core.ui import inject_mobile_css, inject_compact_metric_css, render_line_chart
@@ -89,7 +89,7 @@ if water_quality is not None:
         if append_if_new(water_quality):
             token = github_token()
             if token:
-                commit_and_push(
+                commit_and_push_data(
                     [WATER_QUALITY_LOG_PATH], token, repo_slug(),
                     f"Log USACE water-quality reading {water_quality.observed_at.date().isoformat()}",
                 )

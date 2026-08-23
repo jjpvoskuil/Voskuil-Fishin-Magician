@@ -9,7 +9,7 @@ from core.lure_inventory import (
 )
 from core.lure_vision import identify_lure_photo
 from core.lures import LURE_CATEGORY_OPTIONS, LURE_PROFILES, find_inventory_gaps, guess_category_from_text
-from core.storage import commit_and_push
+from core.storage import commit_and_push_data
 from core.ui import render_cabelas_suggestions, render_square_thumbnail, inject_mobile_css
 
 CARD_THUMBNAIL_PX = 160
@@ -136,7 +136,7 @@ def _render_confirm_form(selected: dict, form_key: str, source_label: str, clean
         get_inventory.clear()
         token = github_token()
         if token:
-            ok, msg = commit_and_push(
+            ok, msg = commit_and_push_data(
                 [INVENTORY_PATH], token, repo_slug(),
                 f"Add lure to inventory: {saved_desc}",
             )
@@ -430,7 +430,7 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
             token = github_token()
             paths = [INVENTORY_PATH, IMAGES_DIR] if photo_file is not None else [INVENTORY_PATH]
             if token:
-                ok, msg = commit_and_push(
+                ok, msg = commit_and_push_data(
                     paths, token, repo_slug(),
                     f"Add lure to inventory: {item.brand} - {item.description[:50]}",
                 )
@@ -541,7 +541,7 @@ else:
                             get_inventory.clear()
                             token = github_token()
                             if token:
-                                commit_and_push(
+                                commit_and_push_data(
                                     [INVENTORY_PATH], token, repo_slug(),
                                     f"Update lure inventory item {row['item_id']}",
                                 )
@@ -551,7 +551,7 @@ else:
                             get_inventory.clear()
                             token = github_token()
                             if token:
-                                commit_and_push(
+                                commit_and_push_data(
                                     [INVENTORY_PATH, IMAGES_DIR], token, repo_slug(),
                                     f"Remove lure inventory item {row['item_id']}",
                                 )

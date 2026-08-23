@@ -28,7 +28,7 @@ from core.activity_log import (
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
 from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
-from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push, read_all_trips, update_trip, delete_trip
+from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, read_all_trips, update_trip, delete_trip
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
@@ -1000,7 +1000,7 @@ def _fish_summary_bits(fish: dict) -> list:
 def _push_or_toast(paths, commit_message, local_message):
     token = github_token()
     if token:
-        ok, msg = commit_and_push(paths, token, repo_slug(), commit_message)
+        ok, msg = commit_and_push_data(paths, token, repo_slug(), commit_message)
         st.toast(msg, icon="✅" if ok else "⚠️")
     else:
         st.toast(local_message, icon="ℹ️")

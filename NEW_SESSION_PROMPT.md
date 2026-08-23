@@ -9,7 +9,10 @@ this repo) rather than pasting an old one back in.
 ```
 I'm continuing work on my Nolin River Lake bass fishing forecast app.
 
-Repo: https://github.com/jjpvoskuil/Voskuil-Fishin-Magician (branch main)
+Repo: https://github.com/jjpvoskuil/Voskuil-Fishin-Magician (code on branch main;
+REAL CURRENT DATA lives on a separate branch called data, not main - see
+SESSION_NOTES.md's "Two branches" callout, right after the Architecture section,
+before doing anything with data/*.csv files).
 Stack: Streamlit (hosted on Streamlit Community Cloud), Python, pytest.
 
 What it does: a 7-day largemouth bass activity forecast (1-10 scale) for

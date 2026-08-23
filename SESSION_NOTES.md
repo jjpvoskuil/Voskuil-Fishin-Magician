@@ -47,7 +47,12 @@ core/
   ui.py                         Shared "Lake Setup Options" sidebar + lure-block rendering
   storage.py                    Trip log read/write + git commit-back (commit_and_push
                                  is generic over a list of paths - lure_inventory.py
-                                 reuses it rather than re-implementing git plumbing)
+                                 reuses it rather than re-implementing git plumbing).
+                                 commit_and_push_data()/sync_data_from_data_branch()
+                                 (punch-list #52) are what every real in-app save and
+                                 app.py's own boot sequence actually use - see the
+                                 "Two branches" callout right below and this module's
+                                 own docstring before changing ANY data-persistence code.
   calibration.py                Weight nudging from logged trip outcomes
   lure_inventory.py             Tackle inventory read/write + photo storage
   appstate.py                   Cached weather/weights/spots/inventory accessors, secrets handling
@@ -65,6 +70,54 @@ tests/                          pytest unit tests, one file per core module
 Deployment: Streamlit Community Cloud, auto-redeploys on push to `main`.
 `GITHUB_TOKEN` in Streamlit secrets lets the deployed app itself commit
 trip-log entries back to the repo (see `secrets.toml.example`).
+
+### ⚠️ Two branches: `main` (code) vs `data` (everything under data/) - punch-list #52
+
+**Read this before touching any data-persistence code, or before assuming
+`main`'s own `data/*.csv` files are current.** Streamlit Cloud redeploys the
+whole app on every push to `main` (see above) - and every data-mutating
+save in this app used to push straight to `main`, which meant any angler's
+routine save (logging a fish, adding a lure) could restart the app for
+every currently-connected user at once. That was the root cause of both the
+"sessions keep dropping" complaint and, combined with a second bug now
+fixed (punch-list #51), anglers briefly seeing each other's active
+sessions on reconnect. Full investigation: punch-list #51/#52 entries
+below.
+
+The fix: **all real data writes now go through `core.storage
+.commit_and_push_data()`**, which always pushes to the `data` branch, never
+`main` - Streamlit Cloud doesn't watch `data`, so a save no longer triggers
+a redeploy. `main` is pushed to directly by a Claude coding session (same
+`git push ... main:main` as always) for real code changes, and SHOULD
+still redeploy - that's expected. `app.py` calls `core.storage
+.sync_data_from_data_branch()` once per process boot (guarded by
+`st.cache_resource`) to overlay `data/` with the `data` branch's latest
+content before serving any page, so a freshly restarted process still sees
+every real save.
+
+**Practical consequences for a future coding session:**
+- `main`'s own `data/*.csv` files are frozen as of the punch-list #52
+  cutover (2026-08-23) and will NOT reflect anything logged since. If you
+  `git clone` this repo (checks out `main`), don't assume `data/trip_log
+  .csv` etc. show current data.
+- To see or work with **real current data**, fetch the `data` branch
+  specifically: `git fetch origin data`, then either `git show
+  origin/data:data/trip_log.csv` for a quick look, or check it out into a
+  separate worktree/clone if you need to work with it directly. Do not
+  merge `data` into `main` or vice versa - they're meant to diverge
+  (`main` = code history, `data` = data history) going forward.
+- Every `commit_and_push(...)` call site in `pages/`/`home.py` was
+  migrated to `commit_and_push_data(...)` (same signature, minus the
+  `branch` argument - it's hardcoded). **Any new data-saving code you add
+  must call `commit_and_push_data()`, never `commit_and_push()` directly**
+  - the latter still exists (branch-agnostic, defaults to `main`) purely as
+  the low-level primitive the wrapper and the tests build on.
+- The standing "verify via a fresh `git clone`" step in this file's
+  Operating Notes still works exactly as before for CODE changes (`main`
+  alone has everything needed to run the app and its test suite - the app
+  works fine against `main`'s frozen `data/` snapshot, same as any fresh
+  deploy would before its first real sync). It just won't show you
+  post-cutover angler data unless you also fetch `data`.
 
 ## Development log (chronological)
 
@@ -6678,6 +6731,121 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     description on file covers this full request; part 2 - reducing restart
     frequency - stays open as its own future punch-list item once discussed and
     scoped with the user).
+
+113. **Punch-list #52 (part 2 of the #51 ask): "let's go with the fix [#51] and
+    then get into #2 [reducing restart frequency] after that... if there are
+    other options to make it even more robust in addition to this, let's
+    explore. This is a frustrating situation I really want to fix."** This is
+    the "stop data pushes from landing on the branch Streamlit Cloud watches"
+    option from #51's write-up, implemented after getting explicit buy-in on
+    the design (see the "⚠️ Two branches" callout right above this log, and
+    core/storage.py's own module docstring, for the reference explanation -
+    this entry is the narrative of how it was built and verified).
+
+    **Design:** every real data-saving call site (`home.py`'s water-quality
+    log, `pages/2_Lake_Map.py`'s lake-spot add/update/delete,
+    `pages/7_Development.py`'s punch list, `pages/1_7_Day_Forecast.py`'s
+    forecast freeze, `pages/4_Trip_History.py`'s trip edit/delete,
+    `pages/5_Lure_Inventory.py`'s inventory add/edit/delete/photo,
+    `pages/6_Spot_Session.py`'s trip logging - 13 call sites total, found via
+    an exhaustive repo-wide grep for `commit_and_push(` so none were missed)
+    now calls a new `core.storage.commit_and_push_data()` instead of
+    `commit_and_push()` directly. It's the identical function, just
+    hardcoded to push to a new `DATA_BRANCH = "data"` constant instead of
+    accepting a `branch` argument - deliberately not just changing
+    `commit_and_push()`'s own default, so a future call site can't
+    accidentally reintroduce the redeploy-storm bug by simply forgetting to
+    pass `branch=`; the wrapper makes "this is a data save, it goes to the
+    data branch" the only path that exists for real callers.
+    `commit_and_push()` itself is untouched (still defaults to `main`,
+    still exactly what the existing punch-list #26 retry-on-race tests
+    exercise) - it's now the low-level primitive both the wrapper and a new
+    `sync_data_from_data_branch()` are built on (factored a shared
+    `_resolve_remote_url()` helper out of `commit_and_push()`'s own inline
+    URL-building so both use the identical "real GitHub URL unless a test
+    supplies remote_url" logic - a pure refactor, no behavior change to
+    `commit_and_push()` itself).
+
+    `sync_data_from_data_branch()` is the other half: it fetches the `data`
+    branch and runs `git checkout FETCH_HEAD -- data`, which overlays every
+    tracked path under `data/` with that commit's content WITHOUT moving
+    HEAD off of whatever branch is actually checked out (`main`, in every
+    real deployment) - restores/updates in place, doesn't touch any
+    non-`data/` file, and never commits or pushes anything itself. Never
+    raises; every failure mode (no token, the `data` branch not existing
+    yet, a transient fetch error) is a soft no-op with a descriptive
+    message, so a sync hiccup never blocks the app from booting.
+
+    `app.py` calls it once via a small `_sync_data_once()` wrapped in
+    `st.cache_resource(show_spinner=False)` - `st.cache_resource` is the
+    one Streamlit caching decorator that runs its function exactly ONCE PER
+    PROCESS, shared across every connected user/session, unlike
+    `st.cache_data` (per-args, still re-runs after its own logic decides to)
+    or `st.session_state` (per-browser-session, not shared/global). This
+    matters because `app.py`'s own top-level code re-executes on every
+    single page interaction (it's the real Streamlit entry point behind
+    `st.navigation`, not a one-time bootstrap file) - without the
+    `cache_resource` guard, this would re-fetch from GitHub on every click
+    from every user. Checked specifically whether adding a Streamlit-caching
+    call before `pg.run()` would break each page's own `st.set_page_config()`
+    "must be the first Streamlit command" rule (`app.py`'s own docstring had
+    previously guaranteed zero Streamlit calls before `pg.run()`, precisely
+    to protect that): `st.cache_resource(show_spinner=False)` never renders
+    a delta (no spinner, and the cached/no-op return value isn't displayed),
+    so it doesn't count as a render command for that ordering rule - a
+    scratch `AppTest` confirmed the app boots cleanly with this wired in
+    (see Verification below).
+
+    **Verification (all scratch, not committed):** a script against a real
+    local bare git repo (the same pattern `tests/test_storage.py` already
+    uses) walked the exact lifecycle end to end: (1) sync against a repo
+    with no `data` branch yet -> soft no-op, `main`'s `data/` untouched -
+    covers a brand-new deploy before the one-time cutover; (2) cut a `data`
+    branch off `main`, then a simulated angler save via
+    `commit_and_push_data()` -> confirmed via `git show` that the content
+    landed on `data` and specifically did NOT land on `main`; (3) a
+    separate repo still checked out on `main` with stale `data/` ran the
+    sync -> picked up the new save, confirmed still on branch `main`
+    afterward (`git rev-parse --abbrev-ref HEAD`), and confirmed a
+    non-`data/` file (a stand-in "code" file) was untouched; (4) a repeat
+    sync with nothing new -> still a clean success, idempotent; (5) no
+    token configured -> soft no-op. A second scratch script ran `app.py`
+    itself through `AppTest` with `core.storage.sync_data_from_data_branch`
+    and `core.appstate.github_token` mocked: confirmed the app boots with
+    no exception, and that a SECOND `.run()` (simulating another click)
+    does NOT re-invoke the sync - proof the `st.cache_resource` guard
+    actually holds across reruns, not just on the first one. Both scratch
+    scripts deleted when done, per the standing no-scratch-scripts-committed
+    rule.
+
+    These scratch cases were then ported into **permanent** tests in
+    `tests/test_storage.py` (`test_commit_and_push_data_lands_on_data_branch
+    _not_main`, `test_sync_data_from_data_branch_no_data_branch_yet_is_a_
+    soft_noop`, `test_sync_data_from_data_branch_pulls_latest_without_
+    switching_branch`, `test_sync_data_from_data_branch_no_token`) - this is
+    now core, permanent data-persistence behavior, not a one-off UI tweak,
+    so it gets real regression coverage rather than only scratch
+    verification. Full suite: 347 -> 351 passing. `python3 -m py_compile`
+    clean across every touched file. MD5 checksums of
+    `data/anglers.csv`/`data/trip_log.csv`/`data/lake_spots.csv`/
+    `data/dev_tasks.csv` confirmed byte-identical before and after all
+    scratch runs (every scratch git operation happened inside throwaway
+    `tmp_path`/`TemporaryDirectory` repos, never the real one).
+
+    **The one-time real cutover** (done once, by hand, immediately after
+    the code above was pushed - see the git log around this entry's own
+    commit for the exact commands): branched `data` off of `main`'s current
+    tip (`git branch data main` equivalent, so `data` starts with 100% of
+    `main`'s history and an exactly-identical `data/` snapshot - zero data
+    loss by construction, not by careful copying), then pushed `data` to
+    origin. From that point forward, `main` only advances via real code
+    pushes (this Claude session's own `git push ... main:main`, unchanged),
+    and `data` only advances via the app's own `commit_and_push_data()`
+    calls. Verified post-cutover by running `sync_data_from_data_branch()`
+    against the REAL repo (not a throwaway one) from a fresh clone and
+    confirming zero diff against `main`'s own `data/` at that exact moment
+    - proof the sync mechanism works against production, not just a fake
+    repo, before trusting it to run unattended on every future boot.
 
 ## Key design decisions & rationale
 
