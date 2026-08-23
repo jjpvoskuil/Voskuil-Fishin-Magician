@@ -6569,6 +6569,39 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     Setup Options secchi model directly (see above). No data files touched by
     either scratch script; both deleted when done.
 
+111. **Punch-list #50: "the slider should be least activity to most activity for fish
+    and forage in the conditions section. Right now they go in opposite directions."**
+    Confirmed: `core.activity_log.FISH_ACTIVITY_OPTIONS` ran most-active-first
+    (`["Very active", "Active", "Moderate", "Sluggish", "Inactive / shut down"]`) while
+    `FORAGE_ACTIVITY_OPTIONS` ran least-active-first (`["None seen", ..., "Frenzied
+    (busting bait)"]`) - the two `st.select_slider`s sit right next to each other in
+    Spot Session's conditions form (and again in the punch-list #49 mid-session panel),
+    so they visually disagreed with each other. Fix: reversed `FISH_ACTIVITY_OPTIONS`
+    to `["Inactive / shut down", "Sluggish", "Moderate", "Active", "Very active"]`,
+    matching forage's own direction. Checked every consumer before changing anything
+    (`core/lures.py`'s activity nudge, both Spot Session slider call sites, session-
+    state defaults, tests) - every single one matches by string value ("Very active",
+    "Moderate", etc.), never by list position or index, so reordering the constant was
+    a pure, safe one-line change with nothing else to update. "Moderate" (the default
+    both sliders start on) stays the middle element of both the old and new order, so
+    the default slider position is unaffected either way. README.md's own description
+    of the two sliders (punch-list #49's entry) was ALSO written with them running
+    opposite directions - fixed that too, since it had documented the bug rather than
+    the intended behavior.
+
+    Verification: `python3 -m py_compile core/activity_log.py`; full suite still 347
+    passing, unchanged (confirmed via a full-codebase grep, not just running the
+    suite, that nothing indexes these lists by position - a passing suite alone
+    wouldn't have ruled out a silent UI-only misordering with no test coverage). A
+    scratch `AppTest` (not committed) against the real Spot Session page confirmed
+    both sliders now report the same `['Inactive / shut down', 'Sluggish', 'Moderate',
+    'Active', 'Very active']` / `['None seen', 'Sparse / scattered', 'Moderate',
+    'Active / schooling', 'Frenzied (busting bait)']` order and that both still
+    default to "Moderate". No data files touched (this is a pure code/vocabulary
+    change - values already logged to `data/trip_log.csv` are stored as the string
+    itself, e.g. `"Very active"`, never a list index, so no migration was needed for
+    historical rows either).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
