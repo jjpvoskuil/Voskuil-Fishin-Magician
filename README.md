@@ -657,6 +657,34 @@ whole session's premise into question in a way this panel isn't meant to.
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
 History** page in the app for calibration status.
 
+## Leaderboard (punch-list #54)
+
+Ranks your logged trip history (same source as Trip History) a bunch of different ways -
+pick a category, optionally filter to one angler and/or species, pick a sort direction and
+how many rows to show, and see the ranked list plus a quick bar chart. Fourteen categories
+across five groups:
+
+- **Fish:** biggest fish (by weight), longest fish (by length), biggest fish by species
+  (one row per species, not a top-N ranking - a quick "what's the best of each kind"
+  summary).
+- **By lure:** most fish caught, best fish-per-use rate (total fish ÷ times that lure's been
+  used - the "Uses" column is right there so a rate from one lucky use doesn't read as
+  reliable as one from twenty), biggest single fish caught.
+- **By spot:** the same three, by location instead of lure.
+- **By angler:** the same three, by "Who's fishing."
+- **By day / by trip:** most fish caught in a single day (with who caught them, when more
+  than one angler contributed), and most fish caught on a single lure use (one trip_log
+  row).
+
+The Angler filter is hidden (not just left at "All") on the three "by angler" categories,
+since filtering to one angler while ranking by angler would be a redundant no-op. The
+Species filter only applies to the three fish-level categories above - trips logged before
+the Spot Session redesign have no per-fish species detail at all, only a flat fish-count
+column, so filtering the lure/spot/angler/day aggregates by species would silently make
+older trips disappear from those rankings with nothing to explain why. Read entirely from
+`data/trip_log.csv` (via the same cached `get_trip_history()` every other page uses) -
+this page never writes anything.
+
 ## Tackle Box (lure inventory)
 
 The **Tackle Box** page (`pages/5_Lure_Inventory.py`) is a tackle inventory tracker
@@ -1104,6 +1132,8 @@ pages/ (sidebar order set by app.py's st.navigation list, not these numeric
   6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
   4_Trip_History.py      Filterable log of every trip (Spot Session is now the only
                          way to log one) + per-trip details + calibration status
+  8_Leaderboard.py        Ranks trip history different ways - biggest/longest fish,
+                         most fish by lure/spot/angler/day, best fish-per-use rates
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
   7_Development.py        Punch list of app adjustments/fixes to track between sessions
 core/
