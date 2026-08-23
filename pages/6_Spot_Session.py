@@ -623,6 +623,54 @@ def _visual_lure_picker(inventory_items: list, key_prefix: str, empty_message: s
     return selected_item
 
 
+# --- Pending-session draft persistence (punch-list #53) ---------------------
+# Everything below Start Session (conditions form + picked lures, not yet
+# saved anywhere) lived only in st.session_state, so it was the one thing
+# punch-list #47/#51/#52 didn't already make durable - an ALREADY-STARTED
+# session recovers from disk on reconnect (#47), and #52 made a reconnect a
+# lot less frequent, but a session still being set up had nothing to
+# recover FROM. Mirrors the exact "carry it in the URL" pattern already
+# used for spot_id/edit_trip/angler above (see those for precedent) - one
+# JSON blob under a single "draft" query param, since there's real
+# structure here (a dozen-odd condition fields plus a list of picked
+# lures/trailers) rather than one scalar value.
+PENDING_DRAFT_QUERY_KEY = "draft"
+
+
+def _load_pending_draft(spot_id: str) -> dict:
+    """Parses ?draft=... back into {"spot_id", "seq", "cond", "lures"}.
+    Returns {} on anything that doesn't check out - no param, invalid JSON,
+    missing keys, or (most importantly) a draft that belongs to a
+    DIFFERENT spot than the one this URL/page is currently on, e.g. after
+    switching spots without ever hitting Start Session at the old one -
+    never raises, since this is untrusted input coming from a URL."""
+    raw = st.query_params.get(PENDING_DRAFT_QUERY_KEY)
+    if not raw:
+        return {}
+    try:
+        draft = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(draft, dict) or draft.get("spot_id") != spot_id:
+        return {}
+    if not {"seq", "cond", "lures"} <= draft.keys():
+        return {}
+    return draft
+
+
+def _save_pending_draft(spot_id: str, seq: int, cond_values: dict, pending_lures: list):
+    """Keeps ?draft=... in sync with the current pending build on every
+    render, so a reconnect at ANY point - mid-conditions-form, with lures
+    already picked, or both - restores exactly where things were left off
+    instead of starting over blank."""
+    blob = {"spot_id": spot_id, "seq": seq, "cond": cond_values, "lures": pending_lures}
+    st.query_params[PENDING_DRAFT_QUERY_KEY] = json.dumps(blob, separators=(",", ":"))
+
+
+def _clear_pending_draft():
+    st.query_params.pop(PENDING_DRAFT_QUERY_KEY, None)
+
+
 # --- Multi-lure selection for a NEW session ----------------------------------
 def _pending_lures_key(spot_id: str, seq: int) -> str:
     return f"pending_session_lures_{spot_id}_{seq}"
@@ -1904,8 +1952,21 @@ if active is not None:
 
 else:
     session_build_seq_key = f"session_build_seq_{spot['spot_id']}"
-    st.session_state.setdefault(session_build_seq_key, 0)
+    # Punch-list #53: only look for a draft to restore when session_state
+    # is genuinely fresh for this spot (the key not existing yet means this
+    # browser has never rendered a pending build here since it last reset -
+    # a real reconnect, not just a normal rerun) - otherwise this would
+    # re-apply a stale URL value over whatever's actually live every single
+    # render, fighting a manual edit made moments ago.
+    _pending_draft = {} if session_build_seq_key in st.session_state else _load_pending_draft(spot["spot_id"])
+    st.session_state.setdefault(session_build_seq_key, _pending_draft.get("seq", 0))
     session_build_seq = st.session_state[session_build_seq_key]
+    # Only actually usable if its seq still matches - if session_state
+    # already had a DIFFERENT (newer) seq for this spot by the time this
+    # ran, the draft is for a build that's already moved on.
+    if _pending_draft.get("seq") != session_build_seq:
+        _pending_draft = {}
+    st.session_state.setdefault(_pending_lures_key(spot["spot_id"], session_build_seq), _pending_draft.get("lures", []))
 
     st.divider()
     st.header("Conditions")
@@ -1916,7 +1977,7 @@ else:
     )
     weather_defaults = _weather_defaults(bundle, session_date, lake_now_naive())
     cond_key_ns = f"cond_{spot['spot_id']}_{session_build_seq}"
-    cond_values = render_conditions_block(cond_key_ns, weather_defaults)
+    cond_values = render_conditions_block(cond_key_ns, weather_defaults, prefill=_pending_draft.get("cond"))
 
     _preview_now = lake_now_naive()
     _preview_segment = _guess_segment(_preview_now.hour, _preview_now)
@@ -1969,6 +2030,12 @@ else:
     st.divider()
     st.markdown("#### Lures for this session")
     pending_lures = st.session_state.get(_pending_lures_key(spot["spot_id"], session_build_seq), [])
+    # Punch-list #53: keep the URL's draft in sync with wherever this build
+    # actually is right now - conditions form values plus whatever lures
+    # are queued so far - every render, so a reconnect at any point (even
+    # before a single lure's been picked) restores it instead of starting
+    # over blank.
+    _save_pending_draft(spot["spot_id"], session_build_seq, cond_values, pending_lures)
     if pending_lures:
         for i, lure in enumerate(pending_lures):
             lcol1, lcol2 = st.columns([5, 1])
@@ -2073,6 +2140,11 @@ else:
             "lures": active_lures,
         }
         st.session_state[session_build_seq_key] = session_build_seq + 1
+        # Punch-list #53: this build is no longer "pending" - it's active
+        # and durably saved to disk/data branch below, so the draft that
+        # was only ever a stand-in for that isn't needed anymore. Leaving
+        # it would also risk a stale seq lingering in the URL indefinitely.
+        _clear_pending_draft()
         _push_paths = [TRIP_LOG_PATH]
         if _save_new_angler_if_needed():
             _push_paths.append(ANGLERS_PATH)

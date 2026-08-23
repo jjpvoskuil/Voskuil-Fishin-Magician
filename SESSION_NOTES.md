@@ -6847,6 +6847,98 @@ every real save.
     - proof the sync mechanism works against production, not just a fake
     repo, before trusting it to run unattended on every future boot.
 
+114. **Punch-list #53: "let's take that on as the next punch list item"** - the
+    "pending session setup can still be lost" gap flagged (but deliberately not
+    built) at the end of punch-list #52's write-up: #52 made restarts rarer,
+    #51 made an already-*started* session recover correctly on reconnect, but a
+    session still being SET UP (conditions form filled in, maybe a lure or two
+    picked, "Start Session" not yet clicked) had nothing on disk to recover
+    from - any session_state reset at that point, however rare now, still lost
+    it completely.
+
+    **Design:** extended the same "carry it in the URL" pattern already
+    proven three times on this page (`spot_id`, `edit_trip`, `angler`) to the
+    whole pending build - but as ONE JSON blob under a single `?draft=...`
+    query param rather than one param per field, since there's real structure
+    here (a dozen-ish condition fields plus a list of picked lures, each
+    possibly with a nested trailer dict) rather than one scalar. Two small
+    helpers do the work: `_save_pending_draft(spot_id, seq, cond_values,
+    pending_lures)` serializes `{"spot_id", "seq", "cond", "lures"}` into the
+    query param on every render of the pending block (mirroring "write the URL
+    every run" from the earlier three); `_load_pending_draft(spot_id)` parses
+    it back, defensively - returns `{}` (never raises) on a missing param,
+    invalid JSON, a missing key, or (the important defensive check) a draft
+    whose `spot_id` doesn't match the spot this URL is currently on, which
+    matters because switching spots without ever starting a session at the
+    old one leaves the OLD draft sitting in session_state while the URL's
+    `draft` param gets overwritten by whichever spot renders next - without
+    that check, navigating back to a spot with a stale mismatched draft could
+    apply the wrong one.
+
+    The restore is gated on `session_build_seq_key not in st.session_state` -
+    i.e. only fires when this browser has genuinely never rendered a pending
+    build for this spot since its session_state last reset, not on every
+    ordinary rerun. That guard is what stops the draft from fighting a live
+    edit: `cond_values` is only ever seeded from the draft via
+    `render_conditions_block()`'s EXISTING `prefill` parameter (the same one
+    edit-mode already uses to seed a re-opened trip's fields, reused as-is,
+    not reimplemented) - and every field it seeds goes through
+    `st.session_state.setdefault()`, which only ever applies once per key, so
+    once session_state actually has a value (from either a real edit or a
+    prior restore), the draft can never overwrite it again this session. A
+    second guard - the draft's own `seq` must still match the CURRENT
+    `session_build_seq` for this spot - means a draft left over from a build
+    that's already been started and moved on to the next `seq` is silently
+    ignored rather than misapplied. `pending_lures` restores the same way,
+    via `st.session_state.setdefault(_pending_lures_key(...), draft.get
+    ("lures", []))`. `_clear_pending_draft()` pops the query param the moment
+    Start Session is actually clicked (right before that handler's own
+    `st.rerun()`) - the build is durably saved from that point on (append_trip
+    + commit_and_push_data), so the draft has nothing left to stand in for,
+    and leaving it around would just be a stale seq sitting in the URL
+    forever.
+
+    **Verification (scratch AppTest, not committed):** built a pending
+    session end to end against the real Spot Session page (changed water
+    temp, changed fish activity, added a real tackle-box lure with no
+    trailer - same `deep_diving_crankbait` item used in punch-list #49's
+    verification, to sidestep the known `st.dialog` AppTest-simulation quirk
+    documented earlier in this log) and confirmed the `draft` query param
+    exactly reflected all three changes. Then - the actual point of this
+    feature - started a BRAND NEW `AppTest` from scratch (simulating a real
+    restart: nothing carried over except the URL itself) with that same
+    `draft` value on the query string, and confirmed the water temp, fish
+    activity, AND the picked lure (shown as "✓ Added," not blank) all came
+    back exactly as left. Confirmed a genuine live edit within an already-
+    live session_state is NOT clobbered by the stale draft on a later rerun
+    (the guard actually holds, not just "happens to work" in the restore
+    case). Confirmed clicking Start Session removes `draft` from the URL.
+    Confirmed a totally fresh visit with no `draft` param at all behaves
+    exactly as it did before this feature existed. Full suite: still 351
+    passing (no existing test exercises fresh/reset session_state the way
+    this feature specifically targets, so nothing was expected to change,
+    and didn't) - followed this codebase's own established convention of
+    keeping Streamlit-page-level `AppTest` verification scratch-only, never
+    committed as a permanent pytest file (no `pages/*.py` module has one
+    anywhere in `tests/`, unlike every `core/*.py` module).
+
+    **One real mistake caught by the standing MD5-checksum-before/after
+    habit, not by luck:** step 4 of the scratch verification actually clicked
+    the real "Start Session" button against the real page - which calls
+    `append_trip()` against the REAL `data/trip_log.csv` on disk (AppTest
+    exercises the actual page code against the actual working directory;
+    only the weather bundle was mocked, not file writes). That left one
+    genuine extra row in `data/trip_log.csv` after the scratch run, caught
+    immediately by the routine post-run checksum comparison (which is
+    exactly the failure mode that check exists to catch) and fixed with a
+    plain `git checkout -- data/trip_log.csv` before anything was staged, let
+    alone committed - confirmed byte-identical to the pre-scratch checksum
+    afterward. No GITHUB_TOKEN is configured in this sandbox (no
+    `.streamlit/secrets.toml`), so `commit_and_push_data()` itself never got
+    past its own "no token configured" early return - the only real side
+    effect was ever the local file write, never a push to the real repo's
+    `data` branch.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
