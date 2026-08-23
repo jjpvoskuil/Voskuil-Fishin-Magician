@@ -604,6 +604,20 @@ phone used to reload "the" one active session for a spot regardless of whose it 
 could land them on a different angler's session, and ending it from there really did end
 the wrong one. Reconnecting now always restores *your own* named session specifically.
 
+**"Who's fishing" survives a reconnect too (punch-list #51).** Punch-list #47 above
+fixed which *data* a reconnect picks up; it didn't fix what could feed it the wrong
+angler in the first place. The "Who's fishing" picker used to live only in
+`st.session_state`, which is wiped by anything that resets your browser's connection to
+the app - most notably, Streamlit Community Cloud auto-redeploying (see "Deploying on
+Streamlit Community Cloud" below: it redeploys on *every* push to `main`, and every
+save in this app - anyone's, not just yours - pushes to `main`). When that reset hit,
+the picker silently fell back to `angler_options[0]`, which is always "John" (the first
+row in `data/anglers.csv`) - so a reconnecting angler could briefly *be* John as far as
+the app was concerned, and see John's active session/lures instead of their own, until
+they noticed and re-picked their own name. The picker now also carries its value in the
+page's URL (the same pattern the spot picker and "edit this trip" already used), so a
+reconnect restores *you*, automatically, regardless of what reset the connection.
+
 **Conditions can change mid-session (punch-list #49).** Fish/forage activity and wind
 can shift fast once you're actually out there, so an active session now has its own
 "🔄 Conditions changed? Get updated suggestions" panel (right below the lure list,

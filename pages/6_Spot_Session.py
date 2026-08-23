@@ -195,6 +195,7 @@ angler_roster = get_anglers()
 angler_options = angler_roster + [ANGLER_OTHER_LABEL]
 angler_key = "active_angler"
 angler_other_key = "active_angler_other_name"
+angler_query_key = "angler"
 
 # One-time prefill when a trip is first opened for editing, so correcting a
 # misattributed trip shows THAT trip's own logged angler rather than
@@ -216,13 +217,34 @@ if editing_trip is not None and not st.session_state.get(_angler_prefill_guard):
             st.session_state[angler_key] = ANGLER_OTHER_LABEL
             st.session_state[angler_other_key] = _edit_angler
     st.session_state[_angler_prefill_guard] = True
+elif angler_key not in st.session_state:
+    # Punch-list #51: session_state alone doesn't survive a full app
+    # restart (Streamlit Cloud auto-redeploying after ANY user's save, or
+    # just a plain reconnect) - when it resets, this picker used to
+    # silently fall back to angler_options[0], which is deterministically
+    # "John" (the first row in data/anglers.csv). Every reconnecting
+    # browser would briefly *be* John as far as _active_session_key() is
+    # concerned, and would see John's active session (his lures, his
+    # conditions) instead of their own until they noticed and re-picked
+    # their own name. Restoring from the URL - the same pattern already
+    # used for spot_id/edit_trip above - means a reconnect lands each
+    # angler back on themselves automatically instead of defaulting to
+    # whoever happens to be first in the roster.
+    _qp_angler = (st.query_params.get(angler_query_key) or "").strip()
+    if _qp_angler:
+        if _qp_angler in angler_roster:
+            st.session_state[angler_key] = _qp_angler
+        else:
+            st.session_state[angler_key] = ANGLER_OTHER_LABEL
+            st.session_state[angler_other_key] = _qp_angler
 
 st.session_state.setdefault(angler_key, angler_options[0])
 angler_choice = st.selectbox(
     "🎣 Who's fishing", angler_options, key=angler_key,
     help='Tags every trip you log with your name - Trip History can filter by angler, but '
          'everyone\'s trips stay combined in one shared log. Remembered for this browser '
-         'session; pick "Other" to add a new name to the list.',
+         'session (and carried in the page link) so a reconnect brings you back as '
+         'yourself; pick "Other" to add a new name to the list.',
 )
 angler_other_name = ""
 if angler_choice == ANGLER_OTHER_LABEL:
@@ -232,6 +254,14 @@ if angler_choice == ANGLER_OTHER_LABEL:
         help="Saved as a new dropdown choice the next time you log a trip.",
     )
 resolved_angler = angler_other_name.strip() if angler_choice == ANGLER_OTHER_LABEL else angler_choice
+
+# Keep the URL in sync so a reconnect (a redeploy-triggered restart, a
+# locked phone, a spotty-signal drop) restores this angler instead of
+# defaulting back to angler_options[0] - see the restore block above.
+if resolved_angler:
+    st.query_params[angler_query_key] = resolved_angler
+elif angler_query_key in st.query_params:
+    st.query_params.pop(angler_query_key, None)
 
 
 def _save_new_angler_if_needed() -> bool:
