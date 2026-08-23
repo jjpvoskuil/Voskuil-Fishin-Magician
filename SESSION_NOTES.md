@@ -6602,6 +6602,83 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     itself, e.g. `"Very active"`, never a list index, so no migration was needed for
     historical rows either).
 
+112. **Punch-list #51 (part 1 of 2): "adjust the user sessions to be independent of
+    each other... take a look at sessions dropping again. We had a few times today
+    that a session dropped for a user and they had to start a new session over and we
+    had good cell coverage the entire time."** Investigated before writing any code
+    (this was the user's own explicit "let's discuss" pattern from punch-list #49,
+    applied on my own initiative here given the architectural stakes). Found two
+    distinct, concrete mechanisms rather than one vague flakiness story:
+
+    - `core.storage.commit_and_push()` defaults every data-mutating push (trip log,
+      lure inventory, dev tasks, anglers, lake spots, forecast freeze - literally
+      every write in the app) to `branch="main"`, and README.md's own documented
+      deploy step 5 says Streamlit Community Cloud auto-redeploys on every push to
+      `main`. A redeploy is a full process restart, which wipes `st.session_state`
+      for every currently-connected browser at once, not just whoever triggered it.
+      `git log --since="6 hours ago"` against today's real concurrent fishing showed
+      35 commits, with a few clusters of 2-3 within a single minute - so during an
+      actively-fished session, a restart triggered by someone else's routine save is
+      a real and fairly frequent event. This is the leading explanation for "dropped
+      with good cell coverage."
+    - A second, more specific bug fully explains "another user's lures showed up":
+      the "🎣 Who's fishing" picker (`pages/6_Spot_Session.py`, `angler_key =
+      "active_angler"`) lived only in `st.session_state`, with no URL/cookie backing
+      (its own help text says "remembered for this browser session"). When
+      session_state resets - from the redeploy above, or any plain reconnect - it
+      fell back to `angler_options[0]`, and `data/anglers.csv` has John as row 1
+      (`core/anglers.py`'s `read_anglers()` preserves file order, no sort), so that
+      default is deterministically "John" for every browser, every time. Since
+      `_active_session_key(spot_id, angler)` (punch-list #47) derives its angler
+      argument live from whatever the picker currently says, a reconnecting angler
+      who hadn't yet re-picked their own name would transiently be treated as John
+      and see John's active session (his lures, his conditions) rendered as their
+      own - not a session_state leak between browsers, but a wrong-default bug that
+      *looked* exactly like one.
+
+    Presented both findings plus two options to the user: (1) fix the angler-identity
+    default directly (small, low-risk, kills the "someone else's lures" symptom for
+    good regardless of what causes the reset), or (2) stop data pushes from landing
+    on the branch Streamlit Cloud watches, cutting how often restarts happen at all
+    (bigger, touches every `commit_and_push()` call site plus `app.py`'s boot
+    sequence, real risk on a live app with real data). User chose to do (1) now and
+    scope (2) as a deliberate follow-up discussion, explicitly not wanting to risk
+    losing history doing (2) without talking it through first.
+
+    Fix (this entry): restore the angler picker from `st.query_params` (the same
+    "session_state with a URL fallback" pattern `spot_id`/`edit_trip` already use a
+    few lines above it in the same file) whenever `angler_key` isn't already set in
+    session_state - checked *after* the existing edit-mode prefill (editing a trip
+    still shows that trip's own logged angler, unchanged) and *before* the existing
+    `angler_options[0]` fallback (a genuinely fresh link with no `?angler=` still
+    defaults to John, unchanged - the fix is specifically for the *reconnect* case).
+    Handles a name not on the roster too (an in-progress "Other" entry restores as
+    "Other" + the typed name, not just known roster names). After the picker resolves
+    `resolved_angler`, the URL is kept in sync going forward
+    (`st.query_params["angler"] = resolved_angler`, popped if blank) so a later
+    reconnect - by anyone - always restores the angler who was actually there, not
+    whoever's first in the roster.
+
+    Verification: `python3 -m py_compile pages/6_Spot_Session.py`; full suite still
+    347 passing (no test-visible behavior changed - this only affects what a fresh
+    `st.session_state` restores from, which existing tests don't construct fresh
+    session_state around). A scratch `AppTest` (written, run, then deleted per the
+    standing no-scratch-scripts-committed rule) against the real Spot Session page
+    confirmed all four cases: (a) no `angler` query param -> still defaults to John,
+    exactly as before, and the URL now carries `angler=John` going forward; (b)
+    `?angler=Matthew` on a session with no prior `active_angler` in session_state ->
+    picker restores "Matthew," not John; (c) `?angler=Uncle+Bob` (not on the roster)
+    -> picker lands on "Other" with the name field prefilled "Uncle Bob"; (d) picking
+    a different angler mid-session (`.set_value("Alex")`) updates the URL to
+    `angler=Alex` on the very next rerun. MD5 checksums of `data/anglers.csv`,
+    `data/trip_log.csv`, and `data/lake_spots.csv` confirmed byte-identical before
+    and after the scratch run - this feature never writes those files, only reads
+    them, so an unexpected diff would have meant a real bug in the restore logic
+    rather than intended behavior. Logged and marked Done as punch-list #51 (the
+    description on file covers this full request; part 2 - reducing restart
+    frequency - stays open as its own future punch-list item once discussed and
+    scoped with the user).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
