@@ -6,7 +6,7 @@ import streamlit as st
 
 from .lures import (
     LureBlock, BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, STRUCTURE_TYPES,
-    resolve_water_clarity, FORAGE_OPTIONS,
+    resolve_water_clarity, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK,
 )
 from .lure_inventory import resolve_image_source, image_data_uri_or_url
 from .lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE
@@ -307,8 +307,8 @@ def render_lure_block(block: LureBlock):
             st.info(block.note)
         if block.owned_items:
             # block.owned_items only ever contains items that both match this lure's
-            # category AND match today's suggested color (core.lures._color_matched_
-            # owned_items), already capped to the top MAX_OWNED_ITEMS_PER_BLOCK (#1/#2)
+            # category AND match today's suggested color (core.lures._split_owned_by_
+            # color), already capped to the top MAX_OWNED_ITEMS_PER_BLOCK (#1/#2)
             # by quantity on hand - so what's shown here is always ready to go, and
             # never more than 2 items (punch-list #8).
             st.success("✅ In your tackle box:")
@@ -321,12 +321,32 @@ def render_lure_block(block: LureBlock):
                 for col, it in zip(cols, photos):
                     with col:
                         render_square_thumbnail(it, size_px=OWNED_THUMBNAIL_PX)
+        elif block.owned_off_color_items:
+            # Punch-list #48: you own this lure TYPE, just not in today's
+            # suggested color (e.g. a Blue Chrome Spook when today calls for
+            # Bone/white) - the user-reported bug this fixes was this exact
+            # case rendering the plain "Not in your inventory yet" message
+            # below, which is simply false: you do own one. No photos here
+            # (deliberately - showing photo cards for a color that doesn't
+            # match today's suggestion is exactly the confusing clutter
+            # punch-list #26 removed), just an honest text note plus the
+            # normal right-color shopping suggestions underneath.
+            owned_bit = "; ".join(
+                f"{it['brand']} – {it['description']}" for it in block.owned_off_color_items[:MAX_OWNED_ITEMS_PER_BLOCK]
+            )
+            st.info(f"🎣 Already in your tackle box, just not today's suggested color: {owned_bit}")
+            render_cabelas_suggestions(
+                block.name,
+                found_caption="🛒 In today's suggested color:",
+                empty_caption="🛒 Nothing found in today's suggested color right now - what you already have is still worth a try.",
+            )
         else:
-            # Nothing color-matched on hand - suggest up to MAX_CABELAS_SUGGESTIONS
-            # real products worth buying instead (punch-list #8). Cached (see
-            # core.appstate.get_cabelas_suggestions) so repeated blocks for the same
-            # lure name across a page (e.g. the same crankbait recommended for
-            # several days/segments at once) don't each trigger a live lookup.
+            # Nothing on hand in this category at all - suggest up to
+            # MAX_CABELAS_SUGGESTIONS real products worth buying instead
+            # (punch-list #8). Cached (see core.appstate.get_cabelas_
+            # suggestions) so repeated blocks for the same lure name across
+            # a page (e.g. the same crankbait recommended for several
+            # days/segments at once) don't each trigger a live lookup.
             render_cabelas_suggestions(
                 block.name,
                 found_caption="🛒 Not in your inventory yet - worth considering from Cabela's:",

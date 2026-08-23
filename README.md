@@ -300,9 +300,30 @@ this repo that can override it on this hosting.
   only the ones whose description shares color/pattern words with the suggestion
   (e.g. "shad" in both "Green shad" and "Tennessee Shad") are shown as ✅ "Color
   match." An owned item in the same lure category but a different color (e.g. a
-  green-pumpkin crankbait next to a chartreuse suggestion) isn't shown for that
-  block at all - if none of your on-hand items match today's suggested color, the
-  block falls back to the normal 🛒 pick-up-suggestion treatment.
+  green-pumpkin crankbait next to a chartreuse suggestion) isn't shown as a photo
+  "match" for that block - but per punch-list #48 below, it's also not treated as
+  if you don't own it: if you own the category but not today's color, the block
+  shows an honest 🎣 "already in your tackle box, just not today's suggested
+  color" note instead of the misleading 🛒 pick-up-suggestion treatment. Only when
+  you own *nothing at all* in that category does the block fall back to the real
+  🛒 pick-up-suggestion treatment.
+- **Honest "wrong color" messaging, not "you don't own this" (punch-list #48).**
+  A user reported the 7-Day Forecast showing Top-Water Walking Bait as recommended
+  with a "not in your inventory yet" note, despite owning a Heddon Super Spook Jr.
+  tagged exactly as that category. Investigation confirmed the categorization and
+  color-match logic were both working as designed (Entries 25/26): the Spook's
+  description is "Blue Chrome," and "Chrome/blue" is only a suggested color for
+  Walking Topwater under "Clear" water - Nolin's default/typical conditions
+  (Green/Brown stained, Muddy) suggest other colors instead, so the item correctly
+  didn't show as a color-matched pick. The real bug was the *message*: owning zero
+  of a lure type and owning one in the wrong color both collapsed into the same
+  "not in your inventory yet" wording, which reads as "you don't have this bait"
+  when the truth is "you have it, just not in this color today." Fixed by adding
+  a new `LureBlock.owned_off_color_items` field (populated by
+  `core.lures._split_owned_by_color()`) and a new UI branch that shows a distinct,
+  accurate message for the "own it, wrong color" case - text-only, no photo
+  thumbnail, keeping the anti-clutter design from Entry 26 intact for the true
+  zero-ownership case.
 - **Top-2-per-category capping, and real Cabela's buy suggestions when you own
   nothing that matches** - within a lure block, at most the top 2 color-matched
   owned items are shown (ranked #1/#2 by quantity on hand), not every match, so a
@@ -853,16 +874,21 @@ own, and also what lets an owned medium-diving crank actually get surfaced.
 Category match is only half the story, though - owning *a* Medium-Diving Crankbait
 doesn't mean you own it in *today's suggested color*. So each owned item's free-text
 `description` is also checked against the block's suggested colors for the current
-water clarity (`core.lures._color_tokens()` / `_color_matched_owned_items()` - a
+water clarity (`core.lures._color_tokens()` / `_split_owned_by_color()` - a
 simple, explainable keyword match, same philosophy as the rest of the engine, not a
 real color model). Only items that share a color/pattern word with the suggestion
 (e.g. "shad" in both "Green shad" and "Tennessee Shad") are shown as ✅ **"Color
 match"** - an owned item in the same category but a different color is left out of
-that block entirely rather than shown as a maybe-match, and if nothing you own
-matches, the block falls back to the plain 🛒 "not in your inventory" treatment.
-Because it's keyword-based against free text rather than a structured color field,
-it can occasionally miss a real match (different wording) or flag a coincidental
-one - it's meant as a helpful signal, not a guarantee.
+the photo-match list. As of punch-list #48, though, that off-color item isn't
+treated as unowned either: `_split_owned_by_color()` returns it separately as
+`owned_off_color_items`, and `core.ui.render_lure_block()` shows a 🎣 "already in
+your tackle box, just not today's suggested color" note for it (text only, no
+thumbnail) instead of the old, misleading "not in your inventory" note. Only when
+nothing at all is owned in that category does the block fall back to the real 🛒
+"not in your inventory yet" / Cabela's-suggestion treatment. Because the color
+check is keyword-based against free text rather than a structured color field, it
+can occasionally miss a real match (different wording) or flag a coincidental one -
+it's meant as a helpful signal, not a guarantee.
 
 ### Where the lure recommendations actually come from
 

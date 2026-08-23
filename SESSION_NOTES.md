@@ -6340,6 +6340,85 @@ trip-log entries back to the repo (see `secrets.toml.example`).
     `data/trip_log.csv` matching exactly before and after the whole test
     run. No other data files touched.
 
+109. **Punch-list #48: "the lure recommendations showed top walking top water but
+    it said I didn't have a match in my tackle box, but I do have the super spook
+    Jr. Can you double check the logic and make sure things are working
+    properly."** Investigation started from the reported item itself:
+    `data/lure_inventory.csv` row `item_id=82ac5107`, `brand=Heddon`,
+    `description="Heddon Super Spook Jr. - Blue Chrome"`,
+    `category=walking_topwater`, `quantity=1` - confirmed correctly tagged, so the
+    categorization step (`core.lures._group_owned_by_category()`) was never the
+    problem. Next checked `LURE_PROFILES["walking_topwater"]["colors"]`: `Clear`
+    -> `["Bone/white", "Chrome/blue"]`, `Green stained` -> `["Chartreuse/white",
+    "Bone"]`, `Brown stained` -> `["Bone", "Brown/orange"]`, `Muddy` -> `["Black",
+    "Solid white"]`. "Chrome/blue" is a suggested color ONLY under "Clear" water -
+    Nolin Lake's default/typical conditions (Green/Brown stained, Muddy per the
+    lake's own general turbidity) suggest entirely different colors, so
+    `_color_tokens()`'s word-overlap check correctly found no match between "Blue
+    Chrome" and any of those. In other words: this was never a real
+    matching-logic bug (Entries 25/26's color-match filtering was doing exactly
+    what it was designed to do, and what the angler explicitly asked for back
+    then - "only show color-matched owned items, not everything in the
+    category"). The actual bug was the *message*: owning zero of a lure type at
+    all, and owning one but in the wrong color for today, both collapsed into the
+    identical "🛒 not in your inventory yet" wording - which reads as "you don't
+    own this bait," when the true state for a real, on-hand, correctly-tagged
+    Spook was "you own this, just not in this color today." That's a
+    trust-damaging false negative even though the recommendation engine itself
+    was never wrong.
+
+    Fix (deliberately a messaging fix, not a reversal of the Entry 26 anti-
+    clutter filtering decision): `core/lures.py` - removed the old
+    `_color_matched_owned_items()` function (confirmed zero remaining callers via
+    grep) and replaced it with `_split_owned_by_color(owned_items,
+    suggested_colors) -> (matched, unmatched)`, called from `_build_block()` to
+    populate both `LureBlock.owned_items` (unchanged behavior: color-matched,
+    ranked by quantity, capped to `MAX_OWNED_ITEMS_PER_BLOCK`) and a new
+    `LureBlock.owned_off_color_items` field (everything in-category but NOT
+    color-matched - previously computed and silently discarded, now kept).
+    `core/ui.py` - `render_lure_block()` gained a new `elif
+    block.owned_off_color_items:` branch, between the existing "has color-matched
+    owned items" and "true zero-ownership" branches, showing `🎣 "Already in your
+    tackle box, just not today's suggested color: <brand/description...>"`
+    followed by the normal Cabela's suggestion-for-today's-color block -
+    deliberately text-only, no photo thumbnail, to preserve Entry 26's
+    anti-clutter design for what is still fundamentally a "you'll need to pick
+    something else today" case, not a "here's your ready-to-go match" case. The
+    true zero-ownership `else` branch (own nothing in the category at all) is
+    unchanged, still showing the original "🛒 not in your inventory yet" wording,
+    which is now accurate again since it's no longer covering the off-color case
+    too.
+
+    Verification: `python3 -m py_compile` on both edited files; full suite grew
+    from 335 to 338 (3 new tests added to `tests/test_lures.py`, calling
+    `core.lures._build_block()` directly rather than through the full
+    `recommend()` situational engine, following the file's existing pattern of
+    testing private helpers directly): (1)
+    `test_owned_off_color_item_populates_off_color_list_not_owned_items` -
+    reproduces the exact reported scenario verbatim (the real Spook description
+    text, `walking_topwater`, "Green stained" water) and asserts `owned_items ==
+    []` / `owned_off_color_items` contains the item, then re-runs the same
+    `_build_block()` call under "Clear" water and asserts the reverse (owned,
+    not off-color) - confirming both halves of the split are correct for the
+    same real data; (2)
+    `test_owned_off_color_items_empty_when_nothing_owned_in_category` - confirms
+    the true zero-ownership case leaves BOTH lists empty (not just
+    `owned_items`), covering both `owned_items=None` and `owned_items=[]`
+    call shapes; (3) `test_owned_off_color_items_excludes_color_matched_items` -
+    a mixed category (one matched item, one off-color item) confirms no item
+    ever appears in both lists at once. All 338 tests pass. A live end-to-end
+    scratch `AppTest` run against the real 7-Day Forecast page (using the
+    angler's actual saved inventory) was attempted but not possible in this
+    environment - the forecast page's weather fetch (`core.weather.
+    fetch_forecast()` -> Open-Meteo) requires outbound network access this
+    sandbox's egress rules don't allow, so this step was skipped in favor of the
+    direct, deterministic unit coverage above, which exercises the exact
+    real inventory row and the exact real category/color combination from the
+    report. `git status`/`git diff --stat` confirmed zero data file changes -
+    this was a pure code fix, no CSV migration needed since `owned_off_color_
+    items` is populated at recommendation-build time from data that was already
+    correctly on disk.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
