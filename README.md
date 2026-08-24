@@ -260,9 +260,10 @@ this repo that can override it on this hosting.
   including any lure added mid-session) writes one trip-log row per lure fished, all
   sharing a real `session_id`; this page groups those rows back into a single
   session card so a multi-lure outing shows up once, not scattered across several
-  rows. Trips logged before this redesign existed were retroactively grouped once
-  (matched by date + time-of-day window + location + angler, not raw timestamps -
-  see SESSION_NOTES.md entry 117 for why); a handful of genuinely solo, one-lure
+  rows. Trips logged before this redesign existed were retroactively grouped
+  (matched by date + time-of-day window + angler, with a same-day time-gap check
+  so two genuinely separate outings don't get merged - see SESSION_NOTES.md
+  entry 118 for why); a handful of genuinely solo, one-lure
   trips still show as their own single-lure session. The page opens to
   just six filters - date range (pick a single date, a range, or today even before
   today's session is logged), time of day,
