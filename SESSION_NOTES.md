@@ -7399,6 +7399,45 @@ every real save.
     (no `core/*.py` changes). Confirmed via a fresh `git clone` into a new
     temp dir.
 
+121. **Punch-list #56: collapse lure suggestions inside the mid-session
+    conditions panel, keep "Update conditions" outside it** - "When I want
+    to change conditions during the session... I want to be able to
+    change the conditions and see the updated score but the lure
+    suggestions should be collapsed until I want to see them. I still
+    want the 'update conditions' button to be visible outside of the lure
+    recommendations collapse so that I can just keep the same lures but
+    quickly update the conditions."
+
+    `pages/6_Spot_Session.py`'s punch-list #49 mid-session panel
+    (`"🔄 Conditions changed? Get updated suggestions"`) already recomputed
+    the score and the full lure recommendation list live as sliders moved,
+    all inside one `st.expander`. The fix nests the recommendation call
+    (`render_lure_recommendation(mid_rec)`) inside its own SECOND,
+    collapsed-by-default expander (`"🎣 See updated lure suggestions"`)
+    right where it already sat in the layout, and leaves the
+    `"🔄 Update conditions"` button where it already was - directly below
+    the score, outside that new nested expander. Confirmed nested
+    `st.expander`s work fine in this app's Streamlit version (1.62) before
+    relying on it (some older Streamlit releases disallow the nesting
+    outright). No change to the actual scoring/recommendation logic - this
+    was purely a layout change, so `core/*.py` is untouched.
+
+    **Verification:** a new scratch AppTest script injects a synthetic
+    "active session" directly into `session_state` (matching the exact
+    shape `▶ Start Session` builds, at a real spot) to reach this panel
+    without having to drive the whole picker/Start-Session UI flow, then
+    confirms: both expanders render with zero exceptions and in the right
+    nesting order; the score metric is visible independent of either
+    expander; the `"🔄 Update conditions"` button is NOT among the buttons
+    scoped to the inner lure-suggestions expander (i.e. it's a sibling,
+    not a child); and - the actual functional check - clicking
+    `"🔄 Update conditions"` succeeds and saves, without the test ever
+    touching the inner expander at all, matching the user's literal ask.
+    Also reloaded the page fresh (no active session) to confirm nothing
+    else in the file broke. `pytest tests/ -q` still 353 passed (no
+    `core/*.py` changes this round). Confirmed via a fresh `git clone`
+    into a new temp dir.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
