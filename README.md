@@ -657,7 +657,12 @@ them forward; lures you already added keep exactly what was true when you added 
 untouched. Water clarity, water temp, and fish depth are deliberately left out of this
 panel and stay whatever they were at Start Session - those don't swing session-to-
 session the way activity and wind do, and changing them mid-session would call the
-whole session's premise into question in a way this panel isn't meant to.
+whole session's premise into question in a way this panel isn't meant to. The updated
+lure recommendation cards live in their own **"🎣 See updated lure suggestions"**
+sub-section, collapsed by default (punch-list #56) - the score updates live without
+opening it, and "🔄 Update conditions" sits right below the score rather than inside
+that sub-section, so a quick "just log this new reading, keep fishing what I've got"
+update never requires scrolling past a full lure list you didn't ask to see.
 
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at

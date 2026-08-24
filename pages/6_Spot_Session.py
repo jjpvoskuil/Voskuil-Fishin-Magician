@@ -1541,6 +1541,16 @@ if active is not None:
     # (see _add_lure_to_active_session()'s own docstring). Only exposes the
     # fields that genuinely "change on a dime" - water clarity/temp/depth
     # stay as captured at Start Session, same as before this feature.
+    #
+    # Punch-list #56: the score updates live as soon as a condition slider
+    # moves, but the lure suggestion cards below it are tucked into their
+    # OWN nested, collapsed-by-default expander now - most of the time an
+    # angler opens this panel just to nudge a reading and re-check the
+    # score, planning to keep fishing the same lure, and doesn't want a
+    # full recommendation list (with per-lure "why" text) shoving that out
+    # of view every time. "🔄 Update conditions" itself stays OUTSIDE that
+    # nested expander, directly under the score, so updating conditions and
+    # moving on never requires opening the lure suggestions at all.
     with st.expander("🔄 Conditions changed? Get updated suggestions", expanded=False):
         st.caption(
             "Fish/forage activity, wind, and sky conditions can shift fast mid-session - adjust them here to "
@@ -1610,7 +1620,8 @@ if active is not None:
             fish_activity=mid_fish_activity, forage_activity=mid_forage_activity,
             wind_mph=wind_mph_for_band(mid_wind_band),
         )
-        render_lure_recommendation(mid_rec)
+        with st.expander("🎣 See updated lure suggestions", expanded=False):
+            render_lure_recommendation(mid_rec)
 
         if st.button(
             "🔄 Update conditions", key=f"{mc_ns}_apply", type="primary",
