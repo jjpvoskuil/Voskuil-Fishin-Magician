@@ -13,13 +13,33 @@ fished, all sharing a real `session_id` (see core.storage.TripEntry,
 punch-list #55). This page's whole point is to show one RECORD per outing,
 not one per lure - `build_sessions()` below groups rows by session_id and
 that becomes the unit everything else (filtering, display, editing,
-deletion) operates on. A row logged before session_id existed (or anything
-that isn't a Spot Session row at all - a legacy "Log a Trip" entry) has no
-session_id; it becomes its own single-lure "session" rather than being
-guessed into a group by date/spot/timestamp proximity, which would risk
-silently mis-grouping unrelated rows (confirmed this app's own real data
-has same-session lure rows whose timestamps aren't even close together
-inconsistent enough to trust a heuristic).
+deletion) operates on. A row with no session_id becomes its own
+single-lure "session" rather than being guessed into a group.
+
+Rows logged before session_id existed were retroactively backfilled once
+(same day punch-list #55 shipped, before any real trips existed with a
+session_id already stamped) rather than left permanently ungrouped: every
+legacy row was grouped by the exact tuple (trip_date, segment, spot_id,
+angler) - not raw logged_at/lure_start_time proximity, which was ruled out
+first because a real same-session pair of lure rows can have timestamps
+anywhere from ~10 minutes to the full width of a Dawn/Morning/etc. window
+apart for the first vs. last lure of a long session. date+segment+spot+
+angler is exactly the tuple a live Spot Session run holds fixed for every
+lure logged during it, so it's a precise reconstruction of the grouping a
+real session_id encodes, not a proximity heuristic - verified against the
+real data before running it (every resulting multi-row group's member
+timestamps formed one continuous, non-overlapping timeline; none looked
+like two distinct outings mashed together). Groups of exactly one row were
+left with session_id="" (no behavior change - already handled as solo
+above). One acknowledged, unfixed limitation: two genuinely separate
+outings by the same angler, at the same spot, in the same time-of-day
+segment, on the same calendar date, would be indistinguishable from one
+continuous session by this key and would get merged - didn't occur in the
+real data checked at backfill time, but a future edit/delete on a session
+this old should keep that possibility in mind. Every row logged going
+forward gets a real session_id straight from Spot Session - see
+pages/6_Spot_Session.py's Start Session handler - so this backfill was a
+one-time correction, not an ongoing heuristic.
 
 --- Editing scope (deliberate, documented boundaries) ------------------------
 This page is now the ONLY place a logged trip is edited - the old
@@ -275,13 +295,20 @@ st.subheader("Filters")
 
 valid_dates = [s["date"] for s in sessions if s["date"] is not None]
 min_date, max_date = (min(valid_dates), max(valid_dates)) if valid_dates else (None, None)
+# Today should always be pickable even if it has no logged sessions yet (an
+# in-progress day's trips aren't in trip_log.csv until Spot Session ends) -
+# so the upper bound is the later of the latest logged date and today, not
+# just whatever's already been logged.
+_today = lake_today()
+max_pickable_date = max(max_date, _today) if max_date else _today
+min_pickable_date = min(min_date, _today) if min_date else _today
 
 f1, f2, f3 = st.columns(3)
 date_range = f1.date_input(
-    "Date range", value=(min_date, max_date) if min_date else None,
-    min_value=min_date, max_value=max_date,
+    "Date range", value=(min_date, max_date) if min_date else (_today, _today),
+    min_value=min_pickable_date, max_value=max_pickable_date,
     help="Pick a single date, or a start and end date for a range.",
-) if min_date else None
+)
 
 segment_options = sorted({s["segment"] for s in sessions if s["segment"]})
 segments = f2.multiselect(

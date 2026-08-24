@@ -7172,6 +7172,70 @@ every real save.
     the `core.storage.FIELDNAMES`/`TripEntry` schema change. Also
     confirmed via a fresh `git clone` into a new temp dir.
 
+117. **Retroactive session_id backfill + today's-date filter fix** -
+    immediate same-session follow-up to entry 116. Two asks: (1) "Can we go
+    back in history and stamp a session ID on it even if it didn't before?
+    ...group anything that has the same date and time window as a session
+    and 'manually' add a session ID to those records" and (2) "let's also
+    be able to select today's date in the filter even though the day is
+    not yet complete."
+
+    **Backfill approach:** a one-time, uncommitted Python script (not a
+    repo file - matches the punch-list #52 cutover's own precedent of a
+    by-hand one-time migration rather than a permanent script) grouped
+    every legacy (session_id-less) `data/trip_log.csv` row by the exact
+    tuple `(trip_date, segment, spot_id, angler)` - angler read out of
+    `conditions_json`. This is deliberately NOT the raw-timestamp-
+    proximity heuristic entry 116 already ruled out (same real data has
+    same-session lure rows whose `logged_at`/`lure_start_time` values span
+    anywhere from ~10 minutes to the full width of a Dawn/Morning/etc.
+    window) - date+segment+spot+angler is exactly the tuple a live Spot
+    Session run holds fixed for every lure logged during it, so it's a
+    precise reconstruction of the grouping a real `session_id` would
+    encode, not a guess. Ran against the actual `data` branch's live
+    `trip_log.csv` (fetched fresh first, same "always sync from `origin/
+    data` before touching real data" discipline as the punch-list #52/
+    #55 dev_tasks.csv work) inside a scratch git worktree, not the
+    session's own `main` checkout - keeps `main`'s already-frozen `data/`
+    files untouched and the real data edit isolated to its own branch/
+    commit. Result on the 78 real logged rows: 15 legacy groups of 2-12
+    rows each got a freshly generated `session_id` (60 rows total,
+    verified every resulting group's member timestamps formed one
+    continuous, non-overlapping timeline before trusting the grouping);
+    the remaining 18 genuinely solo rows were left with `session_id=""`,
+    unchanged. Verified via scratch AppTest: Trip History now shows 33
+    session cards (18 solo + 15 backfilled) instead of 78 one-per-lure
+    rows, and a real Save on one of the largest backfilled sessions (the
+    12-lure 2026-08-22 Dawn/Matthew outing) round-trips its `session_id`
+    correctly with no row-count change. Pushed straight to the `data`
+    branch (real angler data, never `main` - see the two-branch policy in
+    `core/storage.py`'s module docstring).
+
+    Acknowledged, unfixed limitation of the backfill key (documented in
+    both this file's Known limitations and `pages/4_Trip_History.py`'s own
+    module docstring): two genuinely separate real outings by the same
+    angler, at the same spot, in the same time-of-day segment, on the same
+    calendar date, would be indistinguishable from one continuous session
+    by this key and would merge. Didn't occur in the real data checked at
+    backfill time.
+
+    **Today's-date filter fix:** the Date range filter's `max_value` was
+    bound to the latest `trip_date` actually present in the data, which
+    meant today couldn't be picked at all until at least one trip had
+    already been logged today (today's Spot Session doesn't write to
+    `trip_log.csv` until ⏹ End Session). Fixed in `pages/4_Trip_History.py`
+    by widening the pickable range to `max(latest_logged_date,
+    lake_today())` (and the mirrored `min(...)` for the lower bound, plus
+    always rendering the widget even in the edge case where no session has
+    a parseable date at all, defaulting to today/today instead of `None`).
+    Verified via a scratch AppTest against a synthetic CSV whose only
+    logged trip was dated yesterday - confirms today is selectable and the
+    widget accepts `(today, today)` without being clamped away.
+
+    **Verification:** `pytest tests/ -q` still 353 passed (no `core/*.py`
+    changes this round, so no new committed test cases). Confirmed via a
+    fresh `git clone` into a new temp dir.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -7427,14 +7491,16 @@ every real save.
   correctly editing per-lure conditions independently would need its own
   UI per lure rather than one shared block, a bigger change than this
   round took on.
-- (entry 116) A trip logged before punch-list #55 (no `session_id`) shows
-  up as its own single-lure "session" in Trip History, never retroactively
-  grouped with other rows from what was really the same real-world outing
-  - confirmed via the app's own real data that guessing a grouping from
-  date/spot/timestamp proximity would sometimes be wrong (a same-session
-  pair of lure rows whose own logged start times differed by ~10 minutes).
-  Only sessions logged going forward (after this round's Spot Session
-  change) group correctly.
+- (entry 117) Legacy trips (logged before punch-list #55) were retroactively
+  grouped by a one-time backfill keyed on (trip_date, segment, spot_id,
+  angler) rather than left permanently ungrouped - see entry 117. The one
+  acknowledged gap: two genuinely separate real outings by the same angler,
+  at the same spot, in the same time-of-day segment, on the same calendar
+  date, are indistinguishable from one continuous session by that key and
+  would get merged together. Didn't occur in the real data checked at
+  backfill time; if it ever does for a future edit, the merged session's
+  Save/Delete would need to be used carefully (or the row's `session_id`
+  fixed by hand in trip_log.csv).
 - (entry 116) Trip History no longer lets you recompute/re-score a trip's
   predicted_score from an edited condition, and the avg_cloud_pct/avg_
   wind_mph/pressure_trend_24h/moon_phase readouts stay exactly as
