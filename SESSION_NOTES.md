@@ -31,7 +31,9 @@ pages/
   1_7_Day_Forecast.py          Full week, drill into any day, per-segment lure blocks
   2_Lake_Map.py                Click-anywhere map + location-specific recommendation
   3_Log_a_Trip.py               Trip logging form
-  4_Trip_History.py             Logged trips + calibration status
+  4_Trip_History.py             Filter-first, one-card-per-session browser/editor
+                                 (punch-list #55) - groups trip_log rows by
+                                 session_id into one editable record per outing
   5_Lure_Inventory.py           Tackle inventory: brand/description/photo/price/qty
 core/
   astro.py                     Moon phase + solunar rise/transit/set (Meeus low-precision algorithm)
@@ -7065,6 +7067,111 @@ every real save.
     ever looks lower than expected for a lure that's actually logged under
     two names.
 
+116. **Punch-list #55: Trip History full redesign** - "I want to open the page
+    and only see a few filters to start... Once I set my filters and hit a
+    'see Trips button', a grid should pop up... Each record row is a
+    session... I want the ability to edit any of the data points in that
+    record... I should also be able to delete the entire record with a
+    confirmation warning." Scoped up front with the user via 3 questions
+    (session grouping, whether to drop the page's own summary metrics now
+    that Leaderboard covers rankings, whether to fully replace the Spot
+    Session "Edit this trip" handoff) - all three landed on the
+    recommended option: add a real `session_id`, drop the summary/
+    calibration section, and make Trip History the ONE place a trip is
+    edited.
+
+    **Data model change:** `core.storage.FIELDNAMES`/`TripEntry` gained a
+    `session_id` field (blank default). `pages/6_Spot_Session.py`'s
+    ▶ Start Session handler now stamps one `str(uuid.uuid4())[:8]` per
+    session and every lure it writes carries it - `_add_lure_to_active_
+    session()` (a lure added mid-session) and `_reconstruct_active_
+    session()` (the punch-list #29 reconnect path) both preserve it too.
+    Rows logged before this change have no session_id and are NOT
+    retroactively grouped by guessing from date/spot/timestamp proximity -
+    confirmed via the real data/trip_log.csv that this would be unreliable
+    (found a real two-lure session whose own logged "start" times differ
+    by ~10 minutes). A blank-session_id row becomes its own single-lure
+    "session" in Trip History instead.
+
+    **Spot Session cleanup:** the entire "Edit this trip" handoff -
+    `spot_session_edit_trip_id`/`?edit_trip=` query-param plumbing, the
+    edit-mode banner, the angler/date prefill branches, and the ~200-line
+    EDIT MODE block itself (conditions/lure/trailer/fish-list editor +
+    Save/Cancel) - is removed outright, not just unlinked. Trip History is
+    now the only editing path.
+
+    **New pages/4_Trip_History.py:** six filters (date range - single date
+    or a range -, time of day, location, angler, lure type, specific
+    lure), each a multiselect defaulting to "all." Results stay hidden
+    until "🔍 See Trips" is pressed once; after that, changing a filter
+    live-updates the same visible list (Streamlit reruns on every widget
+    change anyway, so a second button press isn't needed). `build_sessions()`
+    (pure, no `st.*` calls - same "keep the diffing/grouping logic testable
+    without a script run" convention this page's old grid-diff helpers
+    used) groups enriched rows by session_id (or a synthetic `solo:
+    <trip_id>` key) into one summary dict per session: date/segment/
+    location/angler/structure_type from the earliest lure, fish_total
+    summed across every lure. Matching sessions render as a stack of
+    `st.expander` cards (plain widgets, not `st.data_editor` - this app's
+    established mobile-friendly pattern, see the "Using it on a phone"
+    README section) titled with date/time-of-day/location/angler/fish
+    count. Expanding one shows an editable form covering session-level
+    fields (date, time window, angler, structure type, every observed
+    condition) plus a per-lure block for each member row (lure/color/
+    technique/trailer/notes, and a full per-fish editor - existing fish
+    get editable species/weight/length/hit-types/retrieve fields plus a
+    "Remove" checkbox, an "➕ Add a fish" mini-form appends new ones,
+    `fish_caught`/`biggest_fish_lb` are derived from the list rather than
+    independently editable, matching how a live Spot Session computes
+    them). ONE "💾 Save changes" button commits every lure row in the
+    session at once via `update_trip()` (session-level condition edits
+    apply uniformly to every lure - documented trade-off below), and one
+    "🗑️ Delete this session" (two-step confirm, matching the Development
+    page's own delete pattern) removes every member row.
+
+    **Deliberately out of scope, documented in the page's own module
+    docstring:** location (spot_id) stays read-only - remapping it has
+    structure_type/water_clarity implications this round didn't take on;
+    predicted_score and the informational avg_cloud_pct/avg_wind_mph/
+    pressure_trend_24h/moon_phase readouts stay exactly as originally
+    computed rather than being silently re-scored from an edited
+    condition (matches the OLD grid's own behavior - it never recomputed
+    these either); lure_start_time/lure_end_time/session_end_time are
+    shown read-only, not editable; and editing session-level conditions
+    here flattens any per-lure divergence a session picked up from Spot
+    Session's mid-session "🔄 Conditions changed?" feature (punch-list #49)
+    back to one shared value across every lure - a narrow edge case, not
+    handled specially. `water_clarity` is no longer its own directly-
+    editable dropdown (the old grid's shortcut, taken because it couldn't
+    reach the richer Secchi/stain fields) - it's now derived via
+    `core.onwater.resolve_water_clarity(secchi_ft, stain_color,
+    stirred_up)` from the newly-editable inputs, matching how every other
+    page in the app computes it.
+
+    **Verification:** `pytest tests/ -q` (353 passed, incl. two new
+    `tests/test_storage.py` cases for session_id round-tripping through
+    append/read and a legacy row missing the column entirely surviving an
+    `update_trip()` full-file rewrite). Scratch (uncommitted) AppTest
+    scripts, this page's established pattern for `pages/*.py` verification:
+    (1) Spot Session's full lifecycle against an isolated trip_log.csv -
+    Start Session stamps a real session_id, a mid-session-added lure
+    shares it, End Session stamps lure_end_time on both rows without
+    losing it, and a simulated reconnect (a fresh AppTest instance, same
+    file) correctly reconstructs the active session's session_id; (2) Trip
+    History against an isolated COPY of the real (frozen, session_id-less)
+    data/trip_log.csv plus two synthetic rows sharing one session_id -
+    initial load, "See Trips," the specific-lure filter narrowing to
+    exactly the synthetic session, a session-level edit (water temp)
+    applying to both lure rows while preserving session_id, adding a fish
+    to a lure via the per-fish editor and confirming fish_caught derives
+    correctly, and deleting the whole session removing both rows - all
+    verified with zero exceptions; the single-date (vs. range) filter
+    case was caught this way (a 1-element date tuple wasn't handled) and
+    fixed; (3) every other page (Home, 7-Day Forecast, Lake Map, Tackle
+    Box, Development, Leaderboard) still loads with zero exceptions after
+    the `core.storage.FIELDNAMES`/`TripEntry` schema change. Also
+    confirmed via a fresh `git clone` into a new temp dir.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -7308,6 +7415,34 @@ every real save.
   check the way it would in an unbroken session. Shows up as a harmless
   extra row for the same lure, not lost data; clean up via Trip History if
   it ever happens.
+- (entry 116) Trip History's session-level condition edit (water temp,
+  clarity, wind, sky, precip, forage, fish/forage activity, fish depth) is
+  applied to EVERY lure row in that session uniformly on Save - a session
+  where Spot Session's mid-session "🔄 Conditions changed?" (punch-list
+  #49) was used partway through can have real per-lure divergence in
+  fish_activity/forage_activity/wind/sky between lures added before vs.
+  after that update, and saving an edit here flattens it back to one
+  shared value. Narrow edge case (needs BOTH a multi-lure session AND a
+  mid-session conditions update to matter), not handled specially -
+  correctly editing per-lure conditions independently would need its own
+  UI per lure rather than one shared block, a bigger change than this
+  round took on.
+- (entry 116) A trip logged before punch-list #55 (no `session_id`) shows
+  up as its own single-lure "session" in Trip History, never retroactively
+  grouped with other rows from what was really the same real-world outing
+  - confirmed via the app's own real data that guessing a grouping from
+  date/spot/timestamp proximity would sometimes be wrong (a same-session
+  pair of lure rows whose own logged start times differed by ~10 minutes).
+  Only sessions logged going forward (after this round's Spot Session
+  change) group correctly.
+- (entry 116) Trip History no longer lets you recompute/re-score a trip's
+  predicted_score from an edited condition, and the avg_cloud_pct/avg_
+  wind_mph/pressure_trend_24h/moon_phase readouts stay exactly as
+  originally computed - editing "Wind" here corrects what you observed,
+  it doesn't ask the scoring engine what it would have said with the new
+  reading. Same behavior the old grid already had (it never recomputed
+  these either); a deliberate choice to keep this an editing/correction
+  tool, not a live rescoring one.
 
 ## Operating notes
 

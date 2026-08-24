@@ -1,15 +1,55 @@
 """
-Trip History & Model Calibration.
+Trip History - browse, filter, and edit logged sessions.
 
-Every logged trip - whether from the old (now-removed) Log a Trip page or
-the current Spot Session page - lands in the same shared trip_log.csv via
-core.storage.TripEntry, so this page reads and filters all of them
-together. Spot Session rows carry a much richer `conditions` dict (water
-temp, wind band, retrieve style, etc. - see core/activity_log.py and
-core/onwater.py); legacy rows carry a smaller, different set of keys (e.g.
-modeled_thermocline_band_ft). The "Trip details" expander below renders
-whatever keys are actually present for a given row and skips the rest, so
-both kinds of entries display sensibly without special-casing.
+Punch-list #55 full redesign. Every logged trip - whether from the old
+(now-removed) Log a Trip page or the current Spot Session page - lands in
+the same shared trip_log.csv via core.storage.TripEntry, so this page
+reads and groups all of them together.
+
+--- Sessions, not lure-rows -------------------------------------------------
+A single "Spot Session" (one ▶ Start Session through one ⏹ End Session run,
+including any lure added mid-session) writes ONE trip_log.csv row PER LURE
+fished, all sharing a real `session_id` (see core.storage.TripEntry,
+punch-list #55). This page's whole point is to show one RECORD per outing,
+not one per lure - `build_sessions()` below groups rows by session_id and
+that becomes the unit everything else (filtering, display, editing,
+deletion) operates on. A row logged before session_id existed (or anything
+that isn't a Spot Session row at all - a legacy "Log a Trip" entry) has no
+session_id; it becomes its own single-lure "session" rather than being
+guessed into a group by date/spot/timestamp proximity, which would risk
+silently mis-grouping unrelated rows (confirmed this app's own real data
+has same-session lure rows whose timestamps aren't even close together
+inconsistent enough to trust a heuristic).
+
+--- Editing scope (deliberate, documented boundaries) ------------------------
+This page is now the ONLY place a logged trip is edited - the old
+"Edit this trip" -> Spot Session handoff (and its query-param plumbing) is
+gone entirely (see pages/6_Spot_Session.py, punch-list #55). Editing a
+session covers: date, time-of-day window, angler, structure type, every
+observed condition (water temp/clarity/stain/stirred-up, wind, sky,
+precipitation, forage seen, fish/forage activity, fish depth), and per
+lure: lure/color/technique, trailer, notes, and the full per-fish catch
+list (add/edit/remove). A few things are deliberately OUT of scope, same
+spirit as the old grid's own documented limitations:
+  - Location (spot_id) stays read-only - remapping it would need to also
+    reconsider structure_type/water_clarity implications tied to the spot
+    itself, not something this round's ask covers.
+  - predicted_score, and the informational-only avg_cloud_pct/avg_wind_mph/
+    pressure_trend_24h/moon_phase readouts, stay exactly as originally
+    recorded - they're what the forecast/scoring engine actually computed
+    at logging time, not something to silently recompute from an edited
+    condition. Editing "Wind" here corrects what you observed; it doesn't
+    retroactively re-score the trip.
+  - lure_start_time/lure_end_time/session_end_time stay read-only - shown
+    for reference, not editable here.
+  - This page edits SESSION-level conditions once and applies them to
+    EVERY lure in that session uniformly. A session where the angler used
+    Spot Session's "🔄 Conditions changed? Get updated suggestions"
+    mid-session (punch-list #49) can have per-lure divergence in
+    fish_activity/forage_activity/wind/sky between lures added before vs.
+    after that update - saving an edit here flattens that back to one
+    shared value across the whole session. Narrow edge case, not handled
+    specially.
 
 The "Location" filter/display resolves each trip's `spot_id` against the
 angler's *current* saved-spot catalog (core.lake_spots / data/lake_spots.csv)
@@ -27,20 +67,27 @@ from datetime import datetime, time as dtime
 import pandas as pd
 import streamlit as st
 
-from core.appstate import get_lake_spots, get_weather_bundle, github_token, repo_slug
+from core.appstate import get_lake_spots, get_weather_bundle, get_anglers, github_token, repo_slug
 from core.storage import (
     read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push_data,
 )
-from core.calibration import calibration_summary, MIN_SAMPLES_PER_SIDE
-from core.lures import LURE_PROFILES, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS
+from core.lures import LURE_PROFILES, STRUCTURE_TYPES, FORAGE_OPTIONS
+from core.onwater import (
+    LIGHT_CONDITIONS, WIND_BAND_LABELS, WIND_DIRECTIONS, STAIN_COLOR_OPTIONS,
+    PRECIPITATION_OPTIONS, resolve_water_clarity,
+)
+from core.activity_log import (
+    FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
+    FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, format_weight_lb_oz, parse_weight_lb_oz,
+)
 from core.scoring import SEGMENTS, segment_time_ranges
 from core.weather import lake_today
-from core.activity_log import format_weight_lb_oz, parse_weight_lb_oz
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", layout="wide")
 inject_mobile_css()
-st.title("📊 Trip History & Model Calibration")
+st.title("📊 Trip History")
+st.caption("Filter down to the sessions you want, then open one to see (and edit) everything about it.")
 
 rows = read_all_trips()
 
@@ -52,6 +99,11 @@ if not rows:
     st.stop()
 
 
+# ==============================================================================
+# Pure helpers (no Streamlit calls) - kept free of st.* so this logic can be
+# exercised by a scratch script without spinning up a script run, same
+# convention as this page's previous grid-diff helpers.
+# ==============================================================================
 def _parse_date(s: str):
     try:
         return datetime.fromisoformat(s).date()
@@ -66,16 +118,6 @@ def _parse_conditions(row: dict) -> dict:
         return {}
 
 
-def _format_fish_caught_at(iso_time_str) -> str:
-    """"08:15:32.123456" -> "8:15 AM" - same formatting Spot Session's own
-    _format_fish_time() helper uses. Returns None (bit simply omitted) for
-    a blank/unparseable value."""
-    try:
-        return dtime.fromisoformat(iso_time_str).strftime("%-I:%M %p")
-    except (TypeError, ValueError):
-        return None
-
-
 def _lure_type_label(cond: dict) -> str:
     category = cond.get("lure_category")
     if not category:
@@ -83,261 +125,106 @@ def _lure_type_label(cond: dict) -> str:
     return LURE_PROFILES.get(category, {}).get("name", category)
 
 
-spot_name_by_id = {s["spot_id"]: s["name"] for s in get_lake_spots()}
+def _format_fish_caught_at(iso_time_str) -> str:
+    try:
+        return dtime.fromisoformat(iso_time_str).strftime("%-I:%M %p")
+    except (TypeError, ValueError):
+        return None
 
 
-def _location_label(row: dict) -> str:
-    """Current saved-spot name for this trip's spot_id, falling back to
-    whatever spot_name was stored at logging time if that spot_id isn't (or
-    is no longer) in the saved-spot catalog."""
-    return spot_name_by_id.get(row.get("spot_id")) or row.get("spot_name") or "Unknown location"
+def _fish_summary_bits(fish: dict) -> list:
+    count = fish.get("count") or 1
+    species_label = fish.get("species") or "Unknown species"
+    bits = [f"{count} x {species_label}" if count > 1 else species_label]
+    caught_at_label = _format_fish_caught_at(fish.get("caught_at"))
+    if caught_at_label:
+        bits.append(caught_at_label)
+    if fish.get("weight_lb"):
+        weight_str = format_weight_lb_oz(fish["weight_lb"])
+        bits.append(f"~{weight_str} each" if count > 1 else weight_str)
+    if fish.get("length_in"):
+        bits.append(f"{fish['length_in']:g} in")
+    if fish.get("depth_ft"):
+        bits.append(f"{fish['depth_ft']:g} ft deep")
+    if fish.get("hit_types"):
+        bits.append(", ".join(fish["hit_types"]))
+    presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
+    if presentation:
+        bits.append(presentation)
+    return bits
 
 
-# Parse once up front so every row has a usable date, a conditions dict, a
-# derived lure-type label, and a resolved location name available for both
-# filtering and display. fish_activity/forage_activity/wind_direction/
-# trailer_used are all logged inside the conditions dict rather than as
-# their own trip_log.csv columns (see core/storage.py's FIELDNAMES), so they
-# need the same flat-column treatment as _lure_type/_location before they
-# can be used as filter widgets below.
-for row in rows:
-    row["_date"] = _parse_date(row.get("trip_date"))
-    row["_conditions"] = _parse_conditions(row)
-    row["_lure_type"] = _lure_type_label(row["_conditions"])
-    row["_location"] = _location_label(row)
-    row["_fish_activity"] = row["_conditions"].get("fish_activity") or ""
-    row["_forage_activity"] = row["_conditions"].get("forage_activity") or ""
-    row["_wind_direction"] = row["_conditions"].get("wind_direction") or ""
-    row["_trailer_used"] = bool(row["_conditions"].get("trailer_used"))
-    # Punch-list #26: whoever the "Who's fishing" picker was set to when
-    # this trip was logged (core/anglers.py) - blank for anything logged
-    # before that feature existed.
-    row["_angler"] = row["_conditions"].get("angler") or ""
-
-df = pd.DataFrame(rows)
-
-# (json_key, label, formatter). Every key is optional - legacy Log a Trip
-# rows and Spot Session rows each only populate a subset, so a row simply
-# shows whichever of these it has data for. Defined up here (rather than
-# down by "Trip details") so _render_trip_detail_body below can use it -
-# both the grid's "Selected trip" quick-jump panel and the full "Trip
-# details" list further down call that same function.
-FIELD_SPECS = [
-    ("source", "Logged from", lambda v: "🎯 Spot Session" if v == "spot_session" else "📝 Legacy (Log a Trip)"),
-    ("angler", "Angler", str),
-    ("start_time", "Session start time", str),
-    # Punch-list #34: stamped once by "⏹ End Session" (pages/6_Spot_Session.py's
-    # _end_session()) on EVERY lure in the session, retired or not - the one
-    # real moment the whole session was actually closed, distinct from
-    # "Lure end time" below (which, for a lure retired early via "🔄 Change,"
-    # is that lure's own earlier swap-out time, not the session's). Blank on
-    # a still-open session (nothing has ended it yet) and on any row logged
-    # before this field existed.
-    ("session_end_time", "Session end time", str),
-    ("water_temp_f", "Water temp", lambda v: f"{v}°F"),
-    ("secchi_ft", "Water clarity (secchi)", lambda v: f"{v} ft"),
-    ("stirred_up", "Muddy / stirred up", lambda v: "Yes" if v else None),
-    ("wind_band", "Wind", str),
-    ("avg_wind_mph", "Avg wind", lambda v: f"{v:.0f} mph" if isinstance(v, (int, float)) else str(v)),
-    ("light_condition", "Sky condition", str),  # renamed from "Light condition" (punch-list #10);
-    # underlying JSON key is unchanged, so older logged trips (saved with the pre-#10 Night/
-    # Crepuscular/Overcast-Diffuse-Day/Direct-High-Sun vocabulary) still display their real
-    # historical value here as-is, just under the new column label.
-    ("precipitation", "Precipitation", str),
-    ("avg_cloud_pct", "Cloud cover", lambda v: f"{v:.0f}%" if isinstance(v, (int, float)) else str(v)),
-    ("pressure_trend_24h", "Pressure trend (24h)", lambda v: f"{v:+.1f} hPa" if isinstance(v, (int, float)) else str(v)),
-    ("moon_phase", "Moon phase", str),
-    ("fish_depth_ft", "Fish holding depth", lambda v: f"{v} ft"),
-    ("forage_seen", "Forage seen (pre-trip)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
-    ("lure_start_time", "Lure start time", str),
-    ("lure_end_time", "Lure end time", str),
-    # wind_speed_mph (a raw mph number) is punch-list #12's retired field -
-    # only trips logged before that change still have it; wind_band_logged
-    # (the same Glassy/Light Ripple/Moderate Chop/Heavy bands as "Wind"
-    # above, but for the specific lure use rather than the session-start
-    # reading) is what's written now. A row will only ever have one of the
-    # two, so both simply show up under their own row when present.
-    ("wind_speed_mph", "Wind speed (logged)", lambda v: f"{v:g} mph" if isinstance(v, (int, float)) else str(v)),
-    ("wind_band_logged", "Wind (logged)", str),
-    ("wind_direction", "Wind direction (logged)", str),
-    # depth_fished_ft/depth_fished_varied_note (an overall "primary depth" for the
-    # whole lure use) were dropped from the "Add results" form - per-fish "depth
-    # caught at" already captures this in more detail. Only trips logged before
-    # that change still set these two.
-    ("depth_fished_ft", "Depth fished", lambda v: f"{v} ft"),
-    ("depth_fished_varied_note", "Depth variation notes", str),
-    ("fish_activity", "Fish activity", str),
-    ("forage_activity", "Forage activity", str),
-    ("forage_type_seen", "Forage type seen (while fishing)", lambda v: ", ".join(v) if isinstance(v, list) else str(v)),
-    # retrieve_speed/retrieve_style used to be logged once per lure-use entry; Spot
-    # Session's "Add results" redesign moved presentation to a per-fish record
-    # instead (see the "fish" renderer below), so these two only ever populate for
-    # trips logged before that change - kept here so that older history still
-    # renders, not because new entries write them.
-    ("retrieve_speed", "Retrieve speed", str),
-    ("retrieve_style", "Retrieve style", str),
-    ("trailer_used", "Trailer used", lambda v: "Yes" if v else None),
-    ("trailer_name", "Trailer", str),
-    ("trailer_color", "Trailer color", str),
-    ("trailer_category", "Trailer category", str),
-    ("modeled_thermocline_band_ft", "Modeled thermocline band", str),
-]
+def _derive_fish_totals(fish_list: list) -> tuple:
+    """(fish_caught, biggest_fish_lb) derived from a structured fish list -
+    the same math Spot Session's _record_fish()/_remove_fish() use, so a
+    session edited here stays internally consistent with how a live session
+    computes these two same columns."""
+    if not fish_list:
+        return 0, None
+    fish_caught = sum((f.get("count") or 1) for f in fish_list)
+    weights = [f["weight_lb"] for f in fish_list if f.get("weight_lb")]
+    biggest = max(weights) if weights else None
+    return fish_caught, biggest
 
 
-def _render_trip_detail_body(row, key_prefix):
-    """Renders one trip's full detail: Edit/Delete buttons, headline facts,
-    notes, every populated FIELD_SPECS entry, and per-fish catch records.
-    Shared by the grid's "Selected trip" quick-jump panel and the full "Trip
-    details" list further down, so there's exactly one place that knows how
-    to render a trip. key_prefix keeps widget keys distinct between the two
-    call sites - the same trip can be rendered in both places on the same
-    run (selected AND still present in the full filtered list), and
-    Streamlit errors on a duplicate widget key within one run."""
-    cond = row["_conditions"]
-    trip_id = row["trip_id"]
+def _session_group_key(row: dict) -> str:
+    """Real session_id when present (punch-list #55); otherwise a synthetic,
+    guaranteed-unique key so a legacy/solo row becomes its own one-lure
+    "session" rather than being silently merged with anything else."""
+    sid = (row.get("session_id") or "").strip()
+    return sid if sid else f"solo:{row.get('trip_id')}"
 
-    # Edit navigates back to Spot Session pre-loaded with this trip's spot
-    # and data, so it can be corrected and saved back in place instead of
-    # appending a duplicate. Only offered for Spot Session rows with a
-    # resolvable current spot - legacy "Log a Trip" rows and rows whose spot
-    # was since deleted have nowhere in Spot Session to edit them back into.
-    can_edit = cond.get("source") == "spot_session" and row.get("spot_id") in spot_name_by_id
-    edit_col, delete_col = st.columns([1, 1])
-    if can_edit:
-        if edit_col.button("✏️ Edit this trip", key=f"{key_prefix}_edit_{trip_id}"):
-            st.session_state["spot_session_target_id"] = row["spot_id"]
-            st.session_state["spot_session_edit_trip_id"] = trip_id
-            st.query_params["spot_id"] = row["spot_id"]
-            st.query_params["edit_trip"] = trip_id
-            st.switch_page("pages/6_Spot_Session.py")
 
-    # Delete is a two-step confirm (plain button flips a pending flag, which
-    # then swaps in a "Yes, delete it" / "Cancel" pair) rather than deleting
-    # on the first click - this permanently removes the row from
-    # trip_log.csv with no undo, so a single mis-click shouldn't be able to
-    # lose a logged trip. Keyed on trip_id alone (not key_prefix) so the
-    # pending state is shared no matter which rendering of this same trip
-    # started the confirm - clicking Delete in the "Selected trip" panel and
-    # then finding the row in the full list below shows the same pending
-    # confirm there too, instead of two independent, confusing ones.
-    delete_pending_key = f"delete_confirm_{trip_id}"
-    if not st.session_state.get(delete_pending_key):
-        if delete_col.button("🗑️ Delete this trip", key=f"{key_prefix}_delete_{trip_id}"):
-            st.session_state[delete_pending_key] = True
-            st.rerun()
-    else:
-        st.warning("Delete this trip permanently? This can't be undone.")
-        dc1, dc2 = st.columns(2)
-        if dc1.button("Yes, delete it", key=f"{key_prefix}_confirm_delete_{trip_id}", type="primary", width='stretch'):
-            ok = delete_trip(trip_id)
-            if ok:
-                token = github_token()
-                if token:
-                    commit_and_push_data(
-                        [TRIP_LOG_PATH], token, repo_slug(), f"Delete trip {trip_id} from Trip History",
-                    )
-                st.session_state.pop(delete_pending_key, None)
-                st.session_state.pop("trip_history_selected_id", None)
-                st.toast("Trip deleted.", icon="✅")
-            else:
-                st.session_state.pop(delete_pending_key, None)
-                st.toast("Couldn't find that trip - it may have already been removed.", icon="⚠️")
-            st.rerun()
-        if dc2.button("Cancel", key=f"{key_prefix}_cancel_delete_{trip_id}", width='stretch'):
-            st.session_state.pop(delete_pending_key, None)
-            st.rerun()
+def _sort_key_for_member(row: dict) -> str:
+    cond = row.get("_conditions") or {}
+    return cond.get("lure_start_time") or row.get("logged_at") or ""
 
-    # predicted_score is blank for a trip logged via "Add results" without ever
-    # filling in "Conditions right now" first - no live reading, no score.
-    raw_score = row.get("predicted_score")
-    has_score = raw_score not in (None, "") and not pd.isna(raw_score)
-    top_bits = [
-        f"**Lure:** {row['lure_used'] or '-'} ({row['color_used'] or 'color n/a'})",
-        f"**Technique:** {row['technique_used'] or '-'}",
-        f"**Fish caught:** {row['fish_caught']}"
-        + (f", biggest {format_weight_lb_oz(row['biggest_fish_lb'])}" if row.get("biggest_fish_lb") else ""),
-        f"**Predicted score:** {raw_score}/10" if has_score else "**Predicted score:** n/a (no live conditions entered)",
-    ]
-    st.markdown("  \n".join(top_bits))
-    if row.get("notes"):
-        st.caption(f"Notes: {row['notes']}")
 
-    detail_lines = []
-    for key, label, fmt in FIELD_SPECS:
-        value = cond.get(key)
-        if value in (None, "", [], False) and key not in ("stirred_up", "trailer_used"):
-            continue
-        if key in ("stirred_up", "trailer_used") and not value:
-            continue
-        try:
-            formatted = fmt(value)
-        except (TypeError, ValueError):
-            formatted = str(value)
-        if formatted is None:
-            continue
-        detail_lines.append(f"- **{label}:** {formatted}")
-    if detail_lines:
-        st.markdown("\n".join(detail_lines))
-    else:
-        st.caption("No additional condition details recorded for this trip.")
+def build_sessions(enriched_rows: list) -> list:
+    """Groups already-enriched trip rows (each must already carry _date/
+    _conditions/_location/_angler/_lure_type - see the enrichment loop
+    below) into one dict per session:
 
-    # Per-fish catch records (Spot Session's "Add results" section) - a list of
-    # dicts, one per fish, so it gets its own renderer rather than the generic
-    # single-line FIELD_SPECS formatter above (which would otherwise show an
-    # unreadable raw Python list-of-dicts string).
-    fish_list = cond.get("fish")
-    if isinstance(fish_list, list) and fish_list:
-        # count defaults to 1 for older rows logged before the "group of small
-        # fish" entry type existed - see pages/6_Spot_Session.py's "Add fish" form.
-        total_fish = sum((f.get("count") or 1) for f in fish_list if isinstance(f, dict))
-        st.markdown(f"**Fish caught ({total_fish}):**")
-        for i, fish in enumerate(fish_list, start=1):
-            if not isinstance(fish, dict):
-                continue
-            count = fish.get("count") or 1
-            species_label = fish.get("species") or "Unknown species"
-            bits = [f"{count} x {species_label}" if count > 1 else species_label]
-            # Punch-list #32: the real clock time this catch was logged
-            # (core/activity_log.py-adjacent convention, stamped by
-            # pages/6_Spot_Session.py's _new_fish_from_form() as
-            # "caught_at") - absent on rows logged before that existed, in
-            # which case this bit is simply skipped like every other
-            # optional per-fish field here.
-            caught_at_label = _format_fish_caught_at(fish.get("caught_at"))
-            if caught_at_label:
-                bits.append(caught_at_label)
-            if fish.get("weight_lb"):
-                weight_str = format_weight_lb_oz(fish["weight_lb"])
-                bits.append(f"~{weight_str} each" if count > 1 else weight_str)
-            if fish.get("length_in"):
-                bits.append(f"{fish['length_in']:g} in")
-            if fish.get("depth_ft"):
-                bits.append(f"{fish['depth_ft']:g} ft deep")
-            if fish.get("hit_types"):
-                # New per-fish field from the Spot Session redesign - a
-                # multiple-choice "how did the fish take it" record (a
-                # strike can legitimately be more than one of these, e.g.
-                # "light hit" that turned out "fouled"). Only present on
-                # trips logged after that redesign shipped.
-                bits.append(", ".join(fish["hit_types"]))
-            presentation = " / ".join(x for x in [fish.get("retrieve_speed"), fish.get("retrieve_style")] if x)
-            if presentation:
-                bits.append(presentation)
-            st.markdown(f"- Fish #{i}: {', '.join(str(b) for b in bits)}")
-            if fish.get("notes"):
-                st.caption(f"　{fish['notes']}")
+      {session_key, rows (member rows, sorted by lure start time), date,
+       segment, location, angler, structure_type, fish_total,
+       lure_labels (list), lure_types (set), specific_lures (set)}
+
+    date/segment/location/angler/structure_type are taken from whichever
+    member row has the EARLIEST _sort_key_for_member (the session's first
+    lure) - representative of the session as a whole. fish_total sums
+    fish_caught across every member row."""
+    groups = {}
+    for row in enriched_rows:
+        key = _session_group_key(row)
+        groups.setdefault(key, []).append(row)
+
+    sessions = []
+    for key, members in groups.items():
+        members_sorted = sorted(members, key=_sort_key_for_member)
+        first = members_sorted[0]
+        fish_total = 0
+        for m in members:
+            try:
+                fish_total += int(m.get("fish_caught") or 0)
+            except (TypeError, ValueError):
+                pass
+        sessions.append({
+            "session_key": key,
+            "rows": members_sorted,
+            "date": first["_date"],
+            "segment": first.get("segment"),
+            "location": first["_location"],
+            "angler": first["_angler"],
+            "structure_type": first.get("structure_type"),
+            "fish_total": fish_total,
+            "lure_labels": [m.get("lure_used") or "Unspecified" for m in members_sorted],
+            "lure_types": {m["_lure_type"] for m in members},
+            "specific_lures": {m.get("lure_used") for m in members if m.get("lure_used")},
+        })
+    return sessions
 
 
 def segment_display_label(name, seg_ranges):
-    """"Dawn" -> "Dawn (5:52 AM-7:52 AM)" when `seg_ranges` (from
-    core.scoring.segment_time_ranges) has a real clock range for `name`,
-    else `name` unchanged (no bundle available, or an unrecognized/legacy
-    value like "" or a hand-edited string) - same idea as Spot Session's
-    "Time window" picker (pages/6_Spot_Session.py's _segment_option_label),
-    kept as its own pure function here (no Streamlit calls) so it - and the
-    label<->name round-trip built from it below - is directly unit
-    testable, same reasoning as the rest of this "Grid inline-edit helpers"
-    section."""
     if seg_ranges and name in seg_ranges:
         s, e = seg_ranges[name]
         return f"{name} ({s.strftime('%-I:%M %p')}-{e.strftime('%-I:%M %p')})"
@@ -345,125 +232,30 @@ def segment_display_label(name, seg_ranges):
 
 
 def segment_label_maps(canonical_options, seg_ranges):
-    """Builds the two directions of the label<->name translation the grid's
-    "Time of day" SelectboxColumn needs (see grid_editor_input/edited_grid
-    below): `label_by_name` to show real clock ranges in the dropdown,
-    `name_by_label` to translate an edited cell straight back to a plain
-    canonical segment name before it's ever compared or saved. Labels are
-    guaranteed unique here since each is built from a distinct `name` in
-    `canonical_options`."""
     label_by_name = {name: segment_display_label(name, seg_ranges) for name in canonical_options}
     name_by_label = {label: name for name, label in label_by_name.items()}
     return label_by_name, name_by_label
 
 
-# --- Grid inline-edit helpers -------------------------------------------------
-# Pure/pandas-only (no Streamlit calls) so the diffing logic can be unit
-# tested without spinning up a script run - st.data_editor itself isn't
-# reachable from AppTest in the pinned Streamlit/testing version, so this is
-# the part that actually gets test coverage; see _scratch_grid_edit_test.py.
-def _norm_date_str(v):
-    if pd.isna(v):
-        return ""
-    if isinstance(v, (pd.Timestamp, datetime)):
-        return v.date().isoformat()
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    return str(v)
+# ==============================================================================
+# Enrichment + session grouping
+# ==============================================================================
+spot_name_by_id = {s["spot_id"]: s["name"] for s in get_lake_spots()}
 
 
-def _norm_text(v):
-    if pd.isna(v):
-        return ""
-    return str(v).strip()
+def _location_label(row: dict) -> str:
+    return spot_name_by_id.get(row.get("spot_id")) or row.get("spot_name") or "Unknown location"
 
 
-def _norm_int(v):
-    return int(v) if pd.notna(v) else 0
+for row in rows:
+    row["_date"] = _parse_date(row.get("trip_date"))
+    row["_conditions"] = _parse_conditions(row)
+    row["_lure_type"] = _lure_type_label(row["_conditions"])
+    row["_location"] = _location_label(row)
+    row["_angler"] = row["_conditions"].get("angler") or ""
 
+sessions = build_sessions(rows)
 
-def _norm_float_or_none(v):
-    return float(v) if pd.notna(v) else None
-
-
-def _norm_weight_lb_oz(v):
-    """Normalizer for the grid's lb-oz-formatted "Biggest fish" column - parses
-    whatever text is currently in the cell (whether it's the untouched
-    formatted display, e.g. "3 lb 8 oz", or something the angler typed over
-    it) back into decimal pounds for both the diff comparison and the actual
-    saved value. See core.activity_log.parse_weight_lb_oz."""
-    if pd.isna(v):
-        return None
-    return parse_weight_lb_oz(str(v))
-
-
-# Only columns a straightforward flat trip_log.csv field maps to are
-# editable here - segment/structure_type/water_clarity/lure_used/color_used/
-# fish_caught/biggest_fish_lb/notes/trip_date. Location (needs spot_id
-# resolution) and anything pulled from conditions_json (lure type, fish/
-# forage activity, predicted score) stay read-only in the grid; those still
-# go through "Edit this trip" -> Spot Session, which already round-trips
-# conditions_json correctly (see the edit-mode prefill fix a few sessions
-# back).
-COLUMN_NORMALIZERS = {
-    "trip_date": _norm_date_str,
-    "segment": _norm_text,
-    "structure_type": _norm_text,
-    "water_clarity": _norm_text,
-    "lure_used": _norm_text,
-    "color_used": _norm_text,
-    "notes": _norm_text,
-    "fish_caught": _norm_int,
-    "biggest_fish_lb": _norm_weight_lb_oz,
-}
-
-
-def _normalize_grid_row(df, trip_id, columns):
-    return {col: COLUMN_NORMALIZERS[col](df.loc[trip_id, col]) for col in columns}
-
-
-def _grid_edit_diff(original_df, edited_df, editable_columns):
-    """Compare original_df and edited_df (both indexed by trip_id, same
-    columns) and return {trip_id: {every editable column: normalized new
-    value}} for each row where at least one editable column's normalized
-    value actually changed. Every editable column is included for a changed
-    row (not just the ones that differ) so the caller has a complete set of
-    values to build a replacement TripEntry from."""
-    changes = {}
-    for trip_id in original_df.index:
-        if trip_id not in edited_df.index:
-            continue
-        old = _normalize_grid_row(original_df, trip_id, editable_columns)
-        new = _normalize_grid_row(edited_df, trip_id, editable_columns)
-        if old != new:
-            changes[trip_id] = new
-    return changes
-
-
-GRID_EDITABLE_COLUMNS = list(COLUMN_NORMALIZERS.keys())
-
-
-# --- Filters -----------------------------------------------------------------
-st.subheader("Filters")
-
-valid_dates = [d for d in df["_date"] if d is not None]
-min_date, max_date = (min(valid_dates), max(valid_dates)) if valid_dates else (None, None)
-
-f1, f2, f3, f13 = st.columns(4)
-date_range = f1.date_input(
-    "Date range", value=(min_date, max_date) if min_date else None,
-    min_value=min_date, max_value=max_date,
-) if min_date else None
-
-# Labeling each segment with a real clock range makes "Dawn"/"Morning"/etc.
-# concrete rather than requiring the angler to remember the cutoffs - same
-# idea as Spot Session's "Time window" picker. There's no single trip date
-# this filter applies to (it can span the whole trip history), so today's
-# actual sunrise/sunset-derived ranges are used as a representative
-# reference rather than an exact-for-every-row value; the underlying
-# filter values stay the plain segment names either way; format_func only
-# changes what's displayed, so this can't drift from what's actually
-# stored/filtered.
 try:
     _th_bundle = get_weather_bundle(7)
 except Exception:
@@ -471,326 +263,413 @@ except Exception:
 _th_seg_ranges = segment_time_ranges(_th_bundle, lake_today())
 
 
-segment_options = sorted(df["segment"].dropna().unique().tolist())
+# ==============================================================================
+# Filters - deliberately few, per punch-list #55: date range (single date
+# allowed), time of day, location, angler, lure type, specific lure. Each
+# multiselect defaults to "all" (empty selection = no filtering on that
+# field). Results stay hidden until "See Trips" is pressed at least once;
+# after that, changing a filter live-updates the same visible results (no
+# need to press the button again).
+# ==============================================================================
+st.subheader("Filters")
+
+valid_dates = [s["date"] for s in sessions if s["date"] is not None]
+min_date, max_date = (min(valid_dates), max(valid_dates)) if valid_dates else (None, None)
+
+f1, f2, f3 = st.columns(3)
+date_range = f1.date_input(
+    "Date range", value=(min_date, max_date) if min_date else None,
+    min_value=min_date, max_value=max_date,
+    help="Pick a single date, or a start and end date for a range.",
+) if min_date else None
+
+segment_options = sorted({s["segment"] for s in sessions if s["segment"]})
 segments = f2.multiselect(
     "Time of day", segment_options, default=[],
     format_func=lambda name: segment_display_label(name, _th_seg_ranges),
-    help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a reference point - "
-         "they shift a few minutes day to day, so a trip logged under this same window name may have "
-         "run a bit earlier or later.",
+    help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a reference point.",
 )
-spot_options = sorted(df["_location"].dropna().unique().tolist())
-spots = f3.multiselect("Location", spot_options, default=[])
-# Punch-list #26: blank/unspecified anglers (anything logged before the
-# "Who's fishing" picker existed) are left out of the option list, same
-# convention as fish_activity/forage_activity/wind_direction below - there's
-# nothing meaningful to filter "blank" down to.
-angler_options = sorted(v for v in df["_angler"].unique().tolist() if v)
-anglers = f13.multiselect("Angler", angler_options, default=[])
+location_options = sorted({s["location"] for s in sessions if s["location"]})
+locations = f3.multiselect("Location", location_options, default=[])
 
 f4, f5, f6 = st.columns(3)
-lure_type_options = sorted(df["_lure_type"].dropna().unique().tolist())
-lure_types = f4.multiselect("Lure type", lure_type_options, default=[])
-clarity_options = sorted(df["water_clarity"].dropna().unique().tolist())
-clarities = f5.multiselect("Water clarity", clarity_options, default=[])
-structure_options = sorted(df["structure_type"].dropna().unique().tolist())
-structures = f6.multiselect("Structure type", structure_options, default=[])
+angler_options = sorted({s["angler"] for s in sessions if s["angler"]})
+anglers = f4.multiselect("Angler", angler_options, default=[])
+lure_type_options = sorted({lt for s in sessions for lt in s["lure_types"] if lt})
+lure_types = f5.multiselect("Lure type", lure_type_options, default=[])
+specific_lure_options = sorted({lu for s in sessions for lu in s["specific_lures"] if lu})
+specific_lures = f6.multiselect("Specific lure", specific_lure_options, default=[])
 
-# fish activity / forage activity / wind direction - all newer fields Spot
-# Session's "Add results" section logs per-lure-use (see the "Conditions
-# during this lure use" widgets in pages/6_Spot_Session.py), added here so
-# they're filterable the same as the original condition fields above.
-f9, f10, f11 = st.columns(3)
-fish_activity_options = sorted(v for v in df["_fish_activity"].unique().tolist() if v)
-fish_activities = f9.multiselect("Fish activity", fish_activity_options, default=[])
-forage_activity_options = sorted(v for v in df["_forage_activity"].unique().tolist() if v)
-forage_activities = f10.multiselect("Forage activity", forage_activity_options, default=[])
-wind_direction_options = sorted(v for v in df["_wind_direction"].unique().tolist() if v)
-wind_directions = f11.multiselect("Wind direction", wind_direction_options, default=[])
 
-f7, f8, f12 = st.columns([1, 1, 2])
-catches_only = f7.checkbox("Only trips with a catch", value=False)
-trailer_only = f8.checkbox("Only trips using a trailer", value=False)
-search_text = f12.text_input("Search lure, color, or notes", value="")
+def _session_matches(s: dict) -> bool:
+    if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
+        start, end = date_range
+        if s["date"] is None or not (start <= s["date"] <= end):
+            return False
+    elif date_range and isinstance(date_range, tuple) and len(date_range) == 1:
+        # A single date picked in the range-style widget (either the user's
+        # first click before picking an end date, or a deliberate single-day
+        # "range") - Streamlit represents this as a 1-tuple rather than a
+        # bare date. Treat it as "exactly this one date," same as the plain
+        # (non-tuple) case below.
+        if s["date"] != date_range[0]:
+            return False
+    elif date_range and not isinstance(date_range, tuple):
+        if s["date"] != date_range:
+            return False
+    if segments and s["segment"] not in segments:
+        return False
+    if locations and s["location"] not in locations:
+        return False
+    if anglers and s["angler"] not in anglers:
+        return False
+    if lure_types and not (s["lure_types"] & set(lure_types)):
+        return False
+    if specific_lures and not (s["specific_lures"] & set(specific_lures)):
+        return False
+    return True
 
-filtered = df.copy()
 
-if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
-    start, end = date_range
-    filtered = filtered[filtered["_date"].apply(lambda d: d is not None and start <= d <= end)]
-if segments:
-    filtered = filtered[filtered["segment"].isin(segments)]
-if spots:
-    filtered = filtered[filtered["_location"].isin(spots)]
-if anglers:
-    filtered = filtered[filtered["_angler"].isin(anglers)]
-if lure_types:
-    filtered = filtered[filtered["_lure_type"].isin(lure_types)]
-if clarities:
-    filtered = filtered[filtered["water_clarity"].isin(clarities)]
-if structures:
-    filtered = filtered[filtered["structure_type"].isin(structures)]
-if fish_activities:
-    filtered = filtered[filtered["_fish_activity"].isin(fish_activities)]
-if forage_activities:
-    filtered = filtered[filtered["_forage_activity"].isin(forage_activities)]
-if wind_directions:
-    filtered = filtered[filtered["_wind_direction"].isin(wind_directions)]
-if catches_only:
-    filtered = filtered[pd.to_numeric(filtered["fish_caught"], errors="coerce").fillna(0) > 0]
-if trailer_only:
-    filtered = filtered[filtered["_trailer_used"]]
-if search_text.strip():
-    needle = search_text.strip().lower()
-    haystack = (
-        filtered["lure_used"].fillna("") + " " +
-        filtered["color_used"].fillna("") + " " +
-        filtered["notes"].fillna("")
-    ).str.lower()
-    filtered = filtered[haystack.str.contains(needle, regex=False)]
+st.session_state.setdefault("trip_history_see_trips", False)
+if st.button("🔍 See Trips", type="primary"):
+    st.session_state["trip_history_see_trips"] = True
 
-st.caption(f"Showing {len(filtered)} of {len(df)} logged trips.")
+if not st.session_state["trip_history_see_trips"]:
+    st.caption("Set your filters above, then press **See Trips** to pull up matching sessions.")
+    st.stop()
 
-if filtered.empty:
-    st.warning("No trips match these filters.")
-else:
-    # A wide, scrollable, inline-editable grid via st.data_editor - restores
-    # the original 14-field view (this used to be a plain st.dataframe before
-    # a manual st.columns-per-row grid replaced it just to get a real 🔍
-    # button on each row, since st.dataframe/st.data_editor can't host a real
-    # per-row button in this pinned Streamlit version - only
-    # st.column_config.LinkColumn, a clickable URL). Trade-off: no more
-    # click-a-row-to-jump; use the "Jump to a trip's detail" picker below the
-    # grid instead, which drives the same "Selected trip" panel the 🔍 button
-    # used to.
-    #
-    # Only the columns that map straight onto a flat trip_log.csv field are
-    # editable (see COLUMN_NORMALIZERS above) - location, lure type, fish/
-    # forage activity, and predicted score stay read-only here since editing
-    # those safely means touching spot_id or conditions_json, which "Edit
-    # this trip" (Spot Session) already knows how to do correctly.
-    st.caption(
-        "Scroll right for every field (on a phone: swipe left within the grid itself, "
-        "not the page). Date, time of day, structure, water "
-        "clarity, lure, color, fish caught, biggest fish, and notes are "
-        "editable here - changes save automatically. Location, angler, lure "
-        "type, fish/forage activity, and score are shown for reference only; "
-        "use \"✏️ Edit this trip\" (via the detail picker below) to change those."
-    )
+filtered_sessions = [s for s in sessions if _session_matches(s)]
+filtered_sessions.sort(key=lambda s: (s["date"] or datetime.min.date(), _sort_key_for_member(s["rows"][0])), reverse=True)
 
-    grid_sorted = filtered.sort_values("trip_date", ascending=False)
-    grid_display = grid_sorted.set_index("trip_id")[[
-        "trip_date", "segment", "_location", "_angler", "structure_type", "water_clarity",
-        "_lure_type", "lure_used", "color_used", "_fish_activity", "_forage_activity",
-        "fish_caught", "biggest_fish_lb", "predicted_score", "notes",
-    ]].copy()
-    grid_display["trip_date"] = pd.to_datetime(grid_display["trip_date"], errors="coerce")
-    grid_display["fish_caught"] = pd.to_numeric(grid_display["fish_caught"], errors="coerce").fillna(0).astype(int)
-    # Displayed/edited as lb-oz text (e.g. "3 lb 8 oz") rather than a raw
-    # decimal - see core.activity_log.format_weight_lb_oz/parse_weight_lb_oz
-    # and _norm_weight_lb_oz above, which parses this column's text back to
-    # decimal pounds for both the diff check and the saved value.
-    grid_display["biggest_fish_lb"] = (
-        pd.to_numeric(grid_display["biggest_fish_lb"], errors="coerce").apply(format_weight_lb_oz)
-    )
-    grid_display["predicted_score"] = pd.to_numeric(grid_display["predicted_score"], errors="coerce")
+st.caption(f"Showing {len(filtered_sessions)} of {len(sessions)} sessions.")
 
-    # SelectboxColumn requires every value already present in the column to
-    # be one of its options, or Streamlit errors rendering that cell - so the
-    # option lists are the canonical set plus whatever's actually in this
-    # data (legacy/blank values included) rather than just the canonical set
-    # on its own.
-    def _select_options(canonical, series):
-        observed = set(v for v in series.dropna().unique().tolist() if v)
-        return [""] + sorted(set(canonical) | observed)
+if not filtered_sessions:
+    st.warning("No sessions match these filters.")
+    st.stop()
 
-    # SelectboxColumn has no separate display/value distinction like a
-    # regular st.selectbox's format_func - whatever's in the options list IS
-    # what's shown AND what gets written back on edit. So the "Time of day"
-    # column is relabeled with the same today's-clock-range text as the
-    # filter above, but only on a throwaway copy (`grid_editor_input`) fed
-    # into the widget - `grid_display` itself (the diff/save baseline) stays
-    # on plain canonical segment names the whole time, and the labels are
-    # translated straight back to plain names the moment the widget returns,
-    # before any diffing or saving happens. This keeps every stored trip's
-    # `segment` field a bare name like "Dawn" - never "Dawn (5:52 AM-7:52 AM)" -
-    # regardless of what the dropdown displayed while editing.
-    _segment_canonical_options = _select_options(SEGMENTS, grid_display["segment"])
-    _segment_label_by_name, _segment_name_by_label = segment_label_maps(_segment_canonical_options, _th_seg_ranges)
-    grid_editor_input = grid_display.copy()
-    grid_editor_input["segment"] = grid_editor_input["segment"].map(
-        lambda v: _segment_label_by_name.get(v, v)
-    )
 
-    edited_grid = st.data_editor(
-        grid_editor_input,
-        key="trip_history_grid_editor",
-        width="stretch",
-        hide_index=True,
-        num_rows="fixed",
-        disabled=["_location", "_angler", "_lure_type", "_fish_activity", "_forage_activity", "predicted_score"],
-        column_config={
-            "trip_date": st.column_config.DateColumn("Date"),
-            "segment": st.column_config.SelectboxColumn(
-                "Time of day", options=[_segment_label_by_name[v] for v in _segment_canonical_options],
-                help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a "
-                     "reference point - they shift a few minutes day to day.",
-            ),
-            "_location": st.column_config.TextColumn("Location"),
-            "_angler": st.column_config.TextColumn("Angler"),
-            "structure_type": st.column_config.SelectboxColumn(
-                "Structure", options=_select_options(STRUCTURE_TYPES, grid_display["structure_type"]),
-            ),
-            "water_clarity": st.column_config.SelectboxColumn(
-                "Water clarity", options=_select_options(WATER_CLARITY_OPTIONS, grid_display["water_clarity"]),
-            ),
-            "_lure_type": st.column_config.TextColumn("Lure type"),
-            "lure_used": st.column_config.TextColumn("Lure"),
-            "color_used": st.column_config.TextColumn("Color"),
-            "_fish_activity": st.column_config.TextColumn("Fish activity"),
-            "_forage_activity": st.column_config.TextColumn("Forage activity"),
-            "fish_caught": st.column_config.NumberColumn("Fish caught", min_value=0, step=1),
-            "biggest_fish_lb": st.column_config.TextColumn(
-                "Biggest fish",
-                help='e.g. "3 lb 8 oz" (a plain decimal like "3.5" also works).',
-            ),
-            "predicted_score": st.column_config.NumberColumn("Score", format="%.1f"),
-            "notes": st.column_config.TextColumn("Notes"),
-        },
-    )
+# ==============================================================================
+# One card per session - date/time/location/angler/fish-count header, expand
+# for full detail + editing. Plain widgets (no st.data_editor) - matches
+# this app's established mobile-friendly pattern (Development page, Spot
+# Session) rather than a wide grid needing sideways swiping.
+# ==============================================================================
+def _angler_options_for(current: str) -> list:
+    roster = get_anglers()
+    opts = list(roster)
+    if current and current not in opts:
+        opts.append(current)
+    if "" not in opts:
+        opts = [""] + opts
+    return opts
 
-    # Translate the "Time of day" column straight back from labeled text
-    # ("Dawn (5:52 AM-7:52 AM)") to the plain canonical name ("Dawn") before
-    # any diffing/saving - see the comment above `grid_editor_input` for why.
-    edited_grid["segment"] = edited_grid["segment"].map(lambda v: _segment_name_by_label.get(v, v))
 
-    # Auto-save: st.data_editor commits (and reruns the script) as soon as a
-    # cell edit is confirmed, so simply diffing the just-rendered edited copy
-    # against grid_display on every run - no separate "Save" button - is
-    # enough to make an edit "just update," matching what was asked for.
-    grid_changes = _grid_edit_diff(grid_display, edited_grid, GRID_EDITABLE_COLUMNS)
-    if grid_changes:
-        rows_by_id = {r["trip_id"]: r for r in rows}
-        saved_ids, missing_ids = [], []
-        for trip_id, new_vals in grid_changes.items():
-            original_row = rows_by_id.get(trip_id)
-            if not original_row:
-                missing_ids.append(trip_id)
+def _push(paths, message):
+    token = github_token()
+    if token:
+        return commit_and_push_data(paths, token, repo_slug(), message)
+    return True, None
+
+
+def _render_fish_editor(ns: str, existing_fish: list) -> list:
+    """Renders every existing fish as editable widgets (species/weight/
+    length/hit types/retrieve style+speed), each with a "Remove this fish"
+    checkbox, plus an "Add a fish" mini-form that appends new blank slots
+    to session_state immediately (before the session's own Save button is
+    ever pressed) - same "append to a session_state list, mutate freely,
+    read it all back on Save" pattern Spot Session's own edit flow used.
+    Returns the CURRENT list of fish dicts read straight from this run's
+    widget values (skipping any checked "Remove"), for the caller to save."""
+    list_key = f"{ns}_fish_list"
+    st.session_state.setdefault(list_key, list(existing_fish) if existing_fish else [])
+    fish_list = st.session_state[list_key]
+
+    kept = []
+    for i, fish in enumerate(fish_list):
+        with st.container(border=True):
+            remove = st.checkbox("Remove this fish", key=f"{ns}_fish_{i}_remove", value=False)
+            species_default = fish.get("species") or FISH_SPECIES_OPTIONS[0]
+            species_idx_default = (
+                FISH_SPECIES_OPTIONS.index(species_default) if species_default in FISH_SPECIES_OPTIONS
+                else len(FISH_SPECIES_OPTIONS) - 1
+            )
+            sc1, sc2 = st.columns(2)
+            species_idx = sc1.selectbox(
+                "Species", options=list(range(len(FISH_SPECIES_OPTIONS))),
+                format_func=lambda j: FISH_SPECIES_OPTIONS[j], index=species_idx_default,
+                key=f"{ns}_fish_{i}_species",
+            )
+            species_label = FISH_SPECIES_OPTIONS[species_idx]
+            species_other = ""
+            if species_label == "Other (type in species)":
+                species_other = sc2.text_input(
+                    "Species (type it in)",
+                    value=fish.get("species_other") or (fish.get("species") if species_default not in FISH_SPECIES_OPTIONS else ""),
+                    key=f"{ns}_fish_{i}_species_other",
+                )
+            wc1, wc2, wc3 = st.columns(3)
+            weight_text = wc1.text_input(
+                "Weight", value=format_weight_lb_oz(fish.get("weight_lb")) if fish.get("weight_lb") else "",
+                placeholder="e.g. 3 lb 8 oz", key=f"{ns}_fish_{i}_weight",
+            )
+            length_in = wc2.number_input(
+                "Length (in)", min_value=0.0, max_value=40.0, step=0.5,
+                value=float(fish.get("length_in") or 0.0), key=f"{ns}_fish_{i}_length",
+            )
+            count = wc3.number_input(
+                "Count", min_value=1, step=1, value=int(fish.get("count") or 1), key=f"{ns}_fish_{i}_count",
+                help="More than 1 for a group of same-size fish logged together.",
+            )
+            hit_types = st.pills(
+                "Type of hit", HIT_TYPE_OPTIONS, selection_mode="multi",
+                default=fish.get("hit_types") or [], key=f"{ns}_fish_{i}_hit_types",
+            )
+            rc1, rc2 = st.columns(2)
+            retrieve_style_default = fish.get("retrieve_style") if fish.get("retrieve_style") in RETRIEVE_STYLE_OPTIONS else RETRIEVE_STYLE_OPTIONS[0]
+            retrieve_style = rc1.selectbox(
+                "Retrieve style", RETRIEVE_STYLE_OPTIONS, index=RETRIEVE_STYLE_OPTIONS.index(retrieve_style_default),
+                key=f"{ns}_fish_{i}_style",
+            )
+            retrieve_speed_default = fish.get("retrieve_speed") if fish.get("retrieve_speed") in RETRIEVE_SPEED_OPTIONS else RETRIEVE_SPEED_OPTIONS[1]
+            retrieve_speed = rc2.selectbox(
+                "Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=RETRIEVE_SPEED_OPTIONS.index(retrieve_speed_default),
+                key=f"{ns}_fish_{i}_speed",
+            )
+            if remove:
                 continue
-            raw_score = original_row.get("predicted_score")
+            species_final = species_other.strip() if (species_label == "Other (type in species)" and species_other.strip()) else species_label
+            new_fish = dict(fish)
+            new_fish.update({
+                "species": species_final,
+                "species_other": species_other or None,
+                "count": int(count),
+                "weight_lb": parse_weight_lb_oz(weight_text) if weight_text.strip() else None,
+                "length_in": length_in or None,
+                "hit_types": hit_types,
+                "retrieve_style": retrieve_style,
+                "retrieve_speed": retrieve_speed,
+            })
+            kept.append(new_fish)
+
+    with st.expander("➕ Add a fish"):
+        seq_key = f"{ns}_new_fish_seq"
+        st.session_state.setdefault(seq_key, 0)
+        seq = st.session_state[seq_key]
+        species_idx = st.selectbox(
+            "Species", options=list(range(len(FISH_SPECIES_OPTIONS))), format_func=lambda j: FISH_SPECIES_OPTIONS[j],
+            key=f"{ns}_addfish_{seq}_species",
+        )
+        species_label = FISH_SPECIES_OPTIONS[species_idx]
+        species_other = ""
+        if species_label == "Other (type in species)":
+            species_other = st.text_input("Species (type it in)", key=f"{ns}_addfish_{seq}_species_other")
+        awc1, awc2, awc3 = st.columns(3)
+        weight_text = awc1.text_input("Weight", placeholder="e.g. 3 lb 8 oz", key=f"{ns}_addfish_{seq}_weight")
+        length_in = awc2.number_input("Length (in)", min_value=0.0, max_value=40.0, step=0.5, key=f"{ns}_addfish_{seq}_length")
+        count = awc3.number_input("Count", min_value=1, step=1, value=1, key=f"{ns}_addfish_{seq}_count")
+        hit_types = st.pills("Type of hit", HIT_TYPE_OPTIONS, selection_mode="multi", key=f"{ns}_addfish_{seq}_hit_types")
+        arc1, arc2 = st.columns(2)
+        retrieve_style = arc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"{ns}_addfish_{seq}_style")
+        retrieve_speed = arc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"{ns}_addfish_{seq}_speed")
+        if st.button("Add fish", key=f"{ns}_addfish_{seq}_button", type="primary", width="stretch"):
+            species_final = species_other.strip() if (species_label == "Other (type in species)" and species_other.strip()) else species_label
+            fish_list.append({
+                "species": species_final, "species_other": species_other or None, "count": int(count),
+                "weight_lb": parse_weight_lb_oz(weight_text) if weight_text.strip() else None,
+                "length_in": length_in or None, "hit_types": hit_types,
+                "retrieve_style": retrieve_style, "retrieve_speed": retrieve_speed,
+            })
+            st.session_state[list_key] = fish_list
+            st.session_state[seq_key] = seq + 1
+            st.rerun()
+
+    return kept
+
+
+def _render_session_card(session: dict):
+    ns = f"th_{session['session_key']}"
+    first_row = session["rows"][0]
+    cond = first_row["_conditions"]
+
+    st.markdown("#### Session")
+    ec1, ec2 = st.columns(2)
+    edit_date = ec1.date_input("Date", value=session["date"] or lake_today(), max_value=lake_today(), key=f"{ns}_date")
+    segment_canon = SEGMENTS if not session["segment"] or session["segment"] in SEGMENTS else SEGMENTS + [session["segment"]]
+    label_by_name, name_by_label = segment_label_maps(segment_canon, _th_seg_ranges)
+    seg_default = session["segment"] if session["segment"] in segment_canon else SEGMENTS[0]
+    seg_label = ec2.selectbox(
+        "Time of day", [label_by_name[n] for n in segment_canon],
+        index=segment_canon.index(seg_default), key=f"{ns}_segment",
+    )
+    edit_segment = name_by_label[seg_label]
+
+    ac1, ac2 = st.columns(2)
+    angler_opts = _angler_options_for(session["angler"])
+    edit_angler = ac1.selectbox("Angler", angler_opts, index=angler_opts.index(session["angler"]) if session["angler"] in angler_opts else 0, key=f"{ns}_angler")
+    structure_default = session["structure_type"] if session["structure_type"] in STRUCTURE_TYPES else STRUCTURE_TYPES[0]
+    edit_structure = ac2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ns}_structure")
+
+    st.caption(f"📍 Location: **{session['location']}** (not editable here)")
+
+    st.markdown("##### Conditions")
+    cc1, cc2, cc3 = st.columns(3)
+    edit_water_temp = cc1.number_input("Water temp (°F)", min_value=32.0, max_value=100.0, step=0.5, value=float(cond.get("water_temp_f") or 75.0), key=f"{ns}_watertemp")
+    edit_secchi = cc2.number_input("Water clarity - Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5, value=float(cond.get("secchi_ft") or 2.5), key=f"{ns}_secchi")
+    stain_default = cond.get("stain_color") if cond.get("stain_color") in STAIN_COLOR_OPTIONS else STAIN_COLOR_OPTIONS[0]
+    edit_stain = cc3.selectbox("Base stain color", STAIN_COLOR_OPTIONS, index=STAIN_COLOR_OPTIONS.index(stain_default), key=f"{ns}_stain")
+    edit_stirred = st.checkbox("Stirred up / muddy at the time (overrides Secchi reading)", value=bool(cond.get("stirred_up")), key=f"{ns}_stirred")
+    resolved_clarity = resolve_water_clarity(edit_secchi, edit_stain, edit_stirred)
+    st.caption(f"Resolved water clarity: **{resolved_clarity}**")
+
+    wc1, wc2, wc3 = st.columns(3)
+    wind_default = cond.get("wind_band") if cond.get("wind_band") in WIND_BAND_LABELS else WIND_BAND_LABELS[1]
+    edit_wind_band = wc1.selectbox("Wind", WIND_BAND_LABELS, index=WIND_BAND_LABELS.index(wind_default), key=f"{ns}_wind_band")
+    wind_dir_default = cond.get("wind_direction") if cond.get("wind_direction") in WIND_DIRECTIONS else WIND_DIRECTIONS[0]
+    edit_wind_direction = wc2.selectbox("Wind direction", WIND_DIRECTIONS, index=WIND_DIRECTIONS.index(wind_dir_default), key=f"{ns}_wind_dir")
+    light_default = cond.get("light_condition") if cond.get("light_condition") in LIGHT_CONDITIONS else LIGHT_CONDITIONS[0]
+    edit_light = wc3.selectbox("Sky condition", LIGHT_CONDITIONS, index=LIGHT_CONDITIONS.index(light_default), key=f"{ns}_light")
+
+    pc1, pc2 = st.columns(2)
+    precip_default = cond.get("precipitation") if cond.get("precipitation") in PRECIPITATION_OPTIONS else PRECIPITATION_OPTIONS[0]
+    edit_precip = pc1.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=PRECIPITATION_OPTIONS.index(precip_default), key=f"{ns}_precip")
+    edit_fish_depth = pc2.number_input("Fish holding depth (ft)", min_value=0.0, max_value=100.0, step=0.5, value=float(cond.get("fish_depth_ft") or 0.0), key=f"{ns}_fishdepth")
+
+    forage_default = [f for f in (cond.get("forage_seen") or []) if f in FORAGE_OPTIONS]
+    edit_forage = st.multiselect("Forage seen", FORAGE_OPTIONS, default=forage_default, key=f"{ns}_forage")
+
+    ac3, ac4 = st.columns(2)
+    fish_act_default = cond.get("fish_activity") if cond.get("fish_activity") in FISH_ACTIVITY_OPTIONS else FISH_ACTIVITY_OPTIONS[2]
+    edit_fish_activity = ac3.selectbox("Fish activity", FISH_ACTIVITY_OPTIONS, index=FISH_ACTIVITY_OPTIONS.index(fish_act_default), key=f"{ns}_fishact")
+    forage_act_default = cond.get("forage_activity") if cond.get("forage_activity") in FORAGE_ACTIVITY_OPTIONS else FORAGE_ACTIVITY_OPTIONS[1]
+    edit_forage_activity = ac4.selectbox("Forage activity", FORAGE_ACTIVITY_OPTIONS, index=FORAGE_ACTIVITY_OPTIONS.index(forage_act_default), key=f"{ns}_forageact")
+
+    st.caption(
+        "Predicted score, and the cloud%/wind-mph/pressure-trend/moon-phase readouts, stay exactly as "
+        "originally recorded - editing conditions here corrects what you observed, it doesn't re-run the "
+        "scoring engine."
+    )
+
+    st.divider()
+    st.markdown("##### Lures fished this session")
+    lure_edits = []
+    for row in session["rows"]:
+        lure_cond = row["_conditions"]
+        lns = f"{ns}_lure_{row['trip_id']}"
+        with st.container(border=True):
+            lc1, lc2, lc3 = st.columns(3)
+            edit_lure_used = lc1.text_input("Lure", value=row.get("lure_used") or "", key=f"{lns}_name")
+            edit_color_used = lc2.text_input("Color", value=row.get("color_used") or "", key=f"{lns}_color")
+            edit_technique = lc3.text_input("Technique", value=row.get("technique_used") or "", key=f"{lns}_technique")
+
+            tc1, tc2, tc3 = st.columns(3)
+            edit_trailer_used = tc1.checkbox("Used a trailer", value=bool(lure_cond.get("trailer_used")), key=f"{lns}_trailer_used")
+            edit_trailer_name = tc2.text_input("Trailer", value=lure_cond.get("trailer_name") or "", key=f"{lns}_trailer_name", disabled=not edit_trailer_used)
+            edit_trailer_color = tc3.text_input("Trailer color", value=lure_cond.get("trailer_color") or "", key=f"{lns}_trailer_color", disabled=not edit_trailer_used)
+
+            edit_notes = st.text_area("Notes", value=row.get("notes") or "", key=f"{lns}_notes")
+
+            start_bit = lure_cond.get("lure_start_time")
+            end_bit = lure_cond.get("lure_end_time")
+            st.caption(f"Started {start_bit or '?'} · Ended {end_bit or 'still open'} (times aren't editable here)")
+
+            is_structured = isinstance(lure_cond.get("fish"), list) and lure_cond.get("source") == "spot_session"
+            st.markdown("**Fish caught**")
+            if is_structured:
+                edited_fish = _render_fish_editor(lns, lure_cond.get("fish") or [])
+                fish_caught, biggest_fish_lb = _derive_fish_totals(edited_fish)
+                st.caption(f"{fish_caught} fish from this lure, biggest {format_weight_lb_oz(biggest_fish_lb)}" if biggest_fish_lb else f"{fish_caught} fish from this lure")
+            else:
+                edited_fish = lure_cond.get("fish")  # legacy rows: leave whatever (usually absent) untouched
+                fcc1, fcc2 = st.columns(2)
+                fish_caught = fcc1.number_input("Fish caught", min_value=0, step=1, value=int(row.get("fish_caught") or 0), key=f"{lns}_fish_caught_flat")
+                biggest_text = fcc2.text_input(
+                    "Biggest fish", value=format_weight_lb_oz(row.get("biggest_fish_lb")) if row.get("biggest_fish_lb") else "",
+                    placeholder="e.g. 3 lb 8 oz", key=f"{lns}_biggest_flat",
+                )
+                biggest_fish_lb = parse_weight_lb_oz(biggest_text) if biggest_text.strip() else None
+
+            lure_edits.append({
+                "trip_id": row["trip_id"], "logged_at": row.get("logged_at"), "spot_id": row.get("spot_id"),
+                "spot_name": row.get("spot_name"), "predicted_score": row.get("predicted_score"),
+                "raw_conditions": lure_cond, "lure_used": edit_lure_used, "color_used": edit_color_used,
+                "technique_used": edit_technique, "notes": edit_notes, "trailer_used": edit_trailer_used,
+                "trailer_name": edit_trailer_name if edit_trailer_used else None,
+                "trailer_color": edit_trailer_color if edit_trailer_used else None,
+                "fish": edited_fish, "fish_caught": fish_caught, "biggest_fish_lb": biggest_fish_lb,
+            })
+
+    st.divider()
+    save_col, delete_col = st.columns(2)
+    if save_col.button("💾 Save changes", key=f"{ns}_save", type="primary", width="stretch"):
+        shared_updates = {
+            "water_temp_f": edit_water_temp, "secchi_ft": edit_secchi, "stain_color": edit_stain,
+            "stirred_up": edit_stirred, "wind_band": edit_wind_band, "wind_direction": edit_wind_direction,
+            "light_condition": edit_light, "precipitation": edit_precip, "forage_seen": edit_forage,
+            "fish_activity": edit_fish_activity, "forage_activity": edit_forage_activity,
+            "fish_depth_ft": edit_fish_depth, "angler": edit_angler,
+        }
+        saved_ids, missing_ids = [], []
+        for le in lure_edits:
+            new_cond = dict(le["raw_conditions"])
+            new_cond.update(shared_updates)
+            new_cond["trailer_used"] = le["trailer_used"]
+            new_cond["trailer_name"] = le["trailer_name"]
+            new_cond["trailer_color"] = le["trailer_color"]
+            if le["fish"] is not None:
+                new_cond["fish"] = le["fish"]
+            raw_score = le["predicted_score"]
             entry = TripEntry(
-                trip_date=new_vals["trip_date"],
-                segment=new_vals["segment"],
-                spot_id=original_row["spot_id"],
-                spot_name=original_row["spot_name"],
-                structure_type=new_vals["structure_type"],
-                water_clarity=new_vals["water_clarity"],
-                lure_used=new_vals["lure_used"],
-                color_used=new_vals["color_used"],
-                technique_used=original_row.get("technique_used", ""),
-                fish_caught=new_vals["fish_caught"],
-                biggest_fish_lb=new_vals["biggest_fish_lb"],
-                predicted_score=float(raw_score) if raw_score not in (None, "") else None,
-                conditions=original_row["_conditions"],
-                notes=new_vals["notes"],
-                trip_id=trip_id,
-                logged_at=original_row.get("logged_at") or "",
+                trip_date=edit_date.isoformat(), segment=edit_segment, spot_id=le["spot_id"],
+                spot_name=le["spot_name"], structure_type=edit_structure, water_clarity=resolved_clarity,
+                lure_used=le["lure_used"], color_used=le["color_used"], technique_used=le["technique_used"],
+                fish_caught=le["fish_caught"], biggest_fish_lb=le["biggest_fish_lb"],
+                predicted_score=float(raw_score) if raw_score not in (None, "") and not pd.isna(raw_score) else None,
+                conditions=new_cond, notes=le["notes"], trip_id=le["trip_id"], logged_at=le["logged_at"] or "",
+                session_id=session["session_key"] if not session["session_key"].startswith("solo:") else "",
             )
             if update_trip(entry):
-                saved_ids.append(trip_id)
+                saved_ids.append(le["trip_id"])
             else:
-                missing_ids.append(trip_id)
+                missing_ids.append(le["trip_id"])
         if saved_ids:
-            token = github_token()
-            if token:
-                plural = "s" if len(saved_ids) != 1 else ""
-                commit_and_push_data(
-                    [TRIP_LOG_PATH], token, repo_slug(),
-                    f"Update trip{plural} {', '.join(saved_ids)} via Trip History grid edit",
-                )
-            st.toast(f"Saved {len(saved_ids)} trip{'s' if len(saved_ids) != 1 else ''}.", icon="✅")
+            _push([TRIP_LOG_PATH], f"Update session {session['session_key']} via Trip History ({len(saved_ids)} lure row(s))")
+            st.toast(f"Saved {len(saved_ids)} lure row(s).", icon="✅")
         if missing_ids:
-            st.toast("Couldn't save some edits - that trip may have been deleted elsewhere.", icon="⚠️")
+            st.toast("Couldn't save some rows - they may have been deleted elsewhere.", icon="⚠️")
         st.rerun()
 
-    # Jump to a trip's full detail - replaces the old per-row 🔍 button, which
-    # st.data_editor can't host (no real per-row buttons in this Streamlit
-    # version). Drives the same "Selected trip" panel below.
-    # Suffixed with a short trip_id fragment so two trips with otherwise
-    # identical date/location/segment/catch labels don't collide into one
-    # dict key (which would silently drop one of them from the picker).
-    jump_options = {
-        (
-            f"{r['trip_date']} · {r['_location']} · {r['segment']}"
-            + (f" · {r['fish_caught']} caught" if str(r.get('fish_caught') or '0') != '0' else "")
-            + f" ({r['trip_id'][:6]})"
-        ): r["trip_id"]
-        for _, r in grid_sorted.iterrows()
-    }
-    jc1, jc2 = st.columns([4, 1])
-    jump_label = jc1.selectbox(
-        "Jump to a trip's full detail", options=list(jump_options.keys()),
-        index=None, placeholder="Pick a trip...", key="trip_history_jump_picker",
-    )
-    if jc2.button("🔍 View", key="trip_history_jump_button", disabled=jump_label is None):
-        st.session_state["trip_history_selected_id"] = jump_options[jump_label]
-        st.rerun()
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Trips shown", len(filtered))
-    total_caught = pd.to_numeric(filtered["fish_caught"], errors="coerce").fillna(0).sum()
-    c2.metric("Total bass caught", int(total_caught))
-    success_rate = (pd.to_numeric(filtered["fish_caught"], errors="coerce").fillna(0) > 0).mean() * 100
-    c3.metric("Trips with a catch", f"{success_rate:.0f}%")
-
-# Quick-jump panel for whichever trip's 🔍 button was last clicked in the grid
-# above - looked up against the FULL (unfiltered) df rather than filtered, so
-# it keeps showing even if the angler changes a filter afterward that would
-# otherwise exclude this trip. Sits right below the grid (not gated on
-# filtered being non-empty) so clicking 🔍 always "takes you to the record
-# detail" immediately, no scrolling required.
-selected_trip_id = st.session_state.get("trip_history_selected_id")
-if selected_trip_id:
-    selected_matches = df[df["trip_id"] == selected_trip_id]
-    if selected_matches.empty:
-        st.session_state.pop("trip_history_selected_id", None)
-    else:
-        selected_row = selected_matches.iloc[0]
-        st.divider()
-        sel_header_col, sel_close_col = st.columns([5, 1])
-        sel_header_col.subheader(
-            f"📌 {selected_row['trip_date']} · {selected_row['_location']} · {selected_row['segment']}"
-        )
-        if sel_close_col.button("✖ Close", key="close_selected_trip"):
-            st.session_state.pop("trip_history_selected_id", None)
+    delete_pending_key = f"{ns}_delete_confirm"
+    if not st.session_state.get(delete_pending_key):
+        if delete_col.button("🗑️ Delete this session", key=f"{ns}_delete", width="stretch"):
+            st.session_state[delete_pending_key] = True
             st.rerun()
-        with st.container(border=True):
-            _render_trip_detail_body(selected_row, key_prefix="selected")
+    else:
+        st.warning(
+            f"Delete this whole session permanently? This removes all {len(session['rows'])} lure row(s) "
+            "and every fish logged on them. This can't be undone."
+        )
+        dc1, dc2 = st.columns(2)
+        if dc1.button("Yes, delete it", key=f"{ns}_confirm_delete", type="primary", width="stretch"):
+            deleted = [delete_trip(r["trip_id"]) for r in session["rows"]]
+            if any(deleted):
+                _push([TRIP_LOG_PATH], f"Delete session {session['session_key']} via Trip History ({sum(deleted)} row(s))")
+                st.toast("Session deleted.", icon="✅")
+            else:
+                st.toast("Couldn't find that session - it may have already been removed.", icon="⚠️")
+            st.session_state.pop(delete_pending_key, None)
+            st.rerun()
+        if dc2.button("Cancel", key=f"{ns}_cancel_delete", width="stretch"):
+            st.session_state.pop(delete_pending_key, None)
+            st.rerun()
 
-# --- Calibration status (always over ALL logged trips, not just the filtered
-# view - it's a property of the model, not of whatever the user is looking at
-# right now) ------------------------------------------------------------------
-st.divider()
-st.subheader("Model calibration status")
-summary = calibration_summary(rows)
-st.caption(
-    f"Each factor needs at least {MIN_SAMPLES_PER_SIDE} logged trips where it was present AND "
-    f"{MIN_SAMPLES_PER_SIDE} where it wasn't, before your own results start nudging that factor's weight."
-)
-for factor, counts in summary["detail"].items():
-    calibrated = factor in summary["factors_calibrated"]
-    label = factor.replace("_", " ").title()
-    status = "✅ calibrating from your data" if calibrated else "⏳ needs more trips"
-    st.write(f"**{label}** - {status}  \n"
-             f"_{counts['on_total']} trips with factor present, {counts['off_total']} without_")
 
-# --- Trip details ---------------------------------------------------------
-st.divider()
-st.subheader("Trip details")
-if filtered.empty:
-    st.caption("No trips to show for the current filters.")
-else:
-    for _, row in filtered.sort_values("trip_date", ascending=False).iterrows():
-        title = f"{row['trip_date']} · {row['_location']} · {row['segment']}"
-        with st.expander(title):
-            _render_trip_detail_body(row, key_prefix="list")
+for session in filtered_sessions:
+    date_bit = session["date"].isoformat() if session["date"] else "Unknown date"
+    lure_summary = ", ".join(session["lure_labels"][:3]) + ("…" if len(session["lure_labels"]) > 3 else "")
+    title = (
+        f"{date_bit} · {session['segment'] or '?'} · {session['location']} · "
+        f"{session['angler'] or 'Unspecified angler'} · {session['fish_total']} fish"
+    )
+    with st.expander(title):
+        st.caption(f"Lure(s): {lure_summary}")
+        _render_session_card(session)
