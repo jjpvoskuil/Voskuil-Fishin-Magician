@@ -7340,6 +7340,65 @@ every real save.
     docstring addition + a new call site). Confirmed via a fresh `git
     clone` into a new temp dir.
 
+120. **View mode by default, edit only on request** - immediate follow-up.
+    User: "when I open a collapsed session, can you add an edit button to
+    the top? I don't want any of the fields to be editable until this
+    button is pushed so I don't accidentally edit something by mistake."
+
+    `pages/4_Trip_History.py`'s session card was a single function
+    (`_render_session_card()`) that always rendered every field as a live
+    widget the instant a card was expanded - exactly the accidental-edit
+    risk the user flagged. Split it into three:
+    - `_render_session_view(session)` - new, read-only. Every field that
+      used to be a widget (date, time-of-day, angler, structure type, all
+      the condition fields, and per-lure lure/color/technique/trailer/
+      notes/fish) is now plain `st.write`/`st.caption` text - nothing here
+      can change a value no matter how the card is clicked around in.
+      Structured per-fish rows reuse `_fish_summary_bits()`, a formatting
+      helper that was written back in the original #55 build but never
+      actually wired up anywhere until now.
+    - `_render_session_edit(session, ns, ens)` - the original editable
+      form, functionally unchanged, but every widget's key was moved from
+      the session's base namespace (`ns`) to a dedicated `{ns}__fld`
+      namespace (`ens`), specifically so Save/Cancel can wipe just the
+      form's widget state without touching the session's edit-mode flag or
+      its separate delete-confirmation state. Gained a "Cancel" button
+      next to the existing "💾 Save changes".
+    - `_render_session_card(session)` - now just a small dispatcher: an
+      `{ns}_edit_mode` flag in `session_state` (default False) picks view
+      vs. edit; a "✏️ Edit" button (view mode only) flips it on. Both Save
+      and Cancel call a new `_clear_edit_state(ens)` helper (drops every
+      `session_state` key under the `ens` prefix) before flipping the flag
+      back off - Cancel so an in-progress, unsaved edit doesn't linger and
+      silently reappear next time Edit is pressed (a real Streamlit
+      gotcha: a widget's `value=` argument is only honored the FIRST time
+      that key is created - once `session_state` already holds an entry
+      for it, later runs ignore `value=` and keep showing whatever was
+      last typed, backed or not), Save so the next time Edit is pressed it
+      starts from the freshly-saved values instead of the stale pre-save
+      widgets. Delete stays outside the edit-mode gate entirely, in both
+      view and edit mode - it already has its own two-step confirmation,
+      which is a different, already-adequate guard against a mistake, and
+      gating it behind Edit too would just be an extra click for no safety
+      benefit.
+
+    **Verification:** a new scratch AppTest script exercises the full
+    loop against an isolated single-session CSV: view mode shows no
+    session-level `date_input` widget and an Edit button; clicking Edit
+    reveals exactly one; typing into it and pressing Cancel leaves the
+    file on disk untouched AND confirms - by re-opening Edit in a fresh
+    `AppTest` instance - that the widget shows the ORIGINAL value again,
+    not the discarded typed one (proving `_clear_edit_state()` actually
+    cleared the stale key, not just that the file was untouched); typing
+    and pressing Save persists the new value to disk and returns to view
+    mode; Delete succeeds without ever entering edit mode. A second
+    scratch script replayed this against all 30 real backfilled sessions
+    (varied shapes - legacy flat-fish rows, structured fish lists,
+    multi-lure, multi-spot) opening every single one's edit form in turn
+    and confirming zero exceptions. `pytest tests/ -q` still 353 passed
+    (no `core/*.py` changes). Confirmed via a fresh `git clone` into a new
+    temp dir.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

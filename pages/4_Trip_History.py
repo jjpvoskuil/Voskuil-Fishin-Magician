@@ -51,6 +51,20 @@ going forward gets a real session_id straight from Spot Session - see
 pages/6_Spot_Session.py's Start Session handler - so this backfill was a
 one-time correction, not an ongoing heuristic.
 
+--- View mode by default, edit mode only on request -------------------------
+An expanded session card opens READ-ONLY (`_render_session_view()`) - every
+field is plain text, not a widget, so nothing can be changed just by
+opening the card. Pressing "✏️ Edit" swaps in the actual editable form
+(`_render_session_edit()`), whose widgets live under a distinct
+`{ns}__fld`-prefixed session_state namespace (`ens`); Save or Cancel both
+call `_clear_edit_state(ens)` to drop every one of those widget entries and
+flip back to read-only - Cancel so in-progress edits are discarded rather
+than lingering in session_state to reappear next time Edit is pressed, Save
+so the next edit starts from the freshly-saved values instead of stale
+widget state. Deleting a session stays available in both view and edit mode
+(it already has its own two-step confirmation, so it doesn't need the same
+accidental-change guard editing does).
+
 --- Editing scope (deliberate, documented boundaries) ------------------------
 This page is now the ONLY place a logged trip is edited - the old
 "Edit this trip" -> Spot Session handoff (and its query-param plumbing) is
@@ -544,62 +558,168 @@ def _render_fish_editor(ns: str, existing_fish: list) -> list:
     return kept
 
 
-def _render_session_card(session: dict):
-    ns = f"th_{session['session_key']}"
+def _clear_edit_state(ens: str):
+    """Drops every widget's session_state entry under the edit-mode namespace
+    `ens` - called on Cancel (discard in-progress, unsaved edits) and after a
+    successful Save (so re-entering edit mode later starts fresh from the
+    just-saved values instead of stale widget state Streamlit would otherwise
+    keep remembering by key)."""
+    for k in [k for k in st.session_state if k.startswith(ens)]:
+        del st.session_state[k]
+
+
+def _render_session_view(session: dict):
+    """Read-only display of everything _render_session_edit() below can
+    edit - the default view. Nothing here is a widget, so there's no way to
+    accidentally change a value just by having the card open; editing only
+    becomes possible after pressing "✏️ Edit" (see _render_session_card)."""
+    first_row = session["rows"][0]
+    cond = first_row["_conditions"]
+
+    st.markdown("#### Session")
+    vc1, vc2 = st.columns(2)
+    vc1.write(f"**Date:** {session['date'].isoformat() if session['date'] else 'Unknown'}")
+    seg_label = segment_display_label(session["segment"], _th_seg_ranges) if session["segment"] else "Unspecified"
+    vc2.write(f"**Time of day:** {seg_label}")
+    va1, va2 = st.columns(2)
+    va1.write(f"**Angler:** {session['angler'] or 'Unspecified'}")
+    va2.write(f"**Structure type:** {session['structure_type'] or 'Unspecified'}")
+    st.caption(f"📍 Location: **{session['location']}** (not editable here)")
+
+    st.markdown("##### Conditions")
+    cc1, cc2, cc3 = st.columns(3)
+    cc1.write(f"**Water temp:** {cond['water_temp_f']:g}°F" if cond.get("water_temp_f") is not None else "**Water temp:** —")
+    cc2.write(f"**Water clarity - Secchi depth:** {cond['secchi_ft']:g} ft" if cond.get("secchi_ft") is not None else "**Secchi depth:** —")
+    cc3.write(f"**Base stain color:** {cond.get('stain_color') or '—'}")
+    st.write(f"**Stirred up / muddy at the time:** {'Yes' if cond.get('stirred_up') else 'No'}")
+    resolved_clarity = resolve_water_clarity(
+        cond.get("secchi_ft") if cond.get("secchi_ft") is not None else 2.5,
+        cond.get("stain_color") or STAIN_COLOR_OPTIONS[0], bool(cond.get("stirred_up")),
+    )
+    st.caption(f"Resolved water clarity: **{resolved_clarity}**")
+
+    wc1, wc2, wc3 = st.columns(3)
+    wc1.write(f"**Wind:** {cond.get('wind_band') or '—'}")
+    wc2.write(f"**Wind direction:** {cond.get('wind_direction') or '—'}")
+    wc3.write(f"**Sky condition:** {cond.get('light_condition') or '—'}")
+
+    pc1, pc2 = st.columns(2)
+    pc1.write(f"**Precipitation:** {cond.get('precipitation') or '—'}")
+    pc2.write(f"**Fish holding depth:** {cond['fish_depth_ft']:g} ft" if cond.get("fish_depth_ft") is not None else "**Fish holding depth:** —")
+
+    forage_seen = cond.get("forage_seen") or []
+    st.write(f"**Forage seen:** {', '.join(forage_seen) if forage_seen else 'None noted'}")
+
+    ac3, ac4 = st.columns(2)
+    ac3.write(f"**Fish activity:** {cond.get('fish_activity') or '—'}")
+    ac4.write(f"**Forage activity:** {cond.get('forage_activity') or '—'}")
+
+    st.caption(
+        "Predicted score, and the cloud%/wind-mph/pressure-trend/moon-phase readouts, stay exactly as "
+        "originally recorded - editing conditions here corrects what you observed, it doesn't re-run the "
+        "scoring engine."
+    )
+
+    st.divider()
+    st.markdown("##### Lures fished this session")
+    for row in session["rows"]:
+        lure_cond = row["_conditions"]
+        with st.container(border=True):
+            lv1, lv2, lv3 = st.columns(3)
+            lv1.write(f"**Lure:** {row.get('lure_used') or '—'}")
+            lv2.write(f"**Color:** {row.get('color_used') or '—'}")
+            lv3.write(f"**Technique:** {row.get('technique_used') or '—'}")
+
+            if lure_cond.get("trailer_used"):
+                st.write(f"**Trailer:** {lure_cond.get('trailer_name') or '—'} ({lure_cond.get('trailer_color') or '—'})")
+            else:
+                st.write("**Trailer:** None")
+
+            if row.get("notes"):
+                st.write(f"**Notes:** {row['notes']}")
+
+            start_bit = lure_cond.get("lure_start_time")
+            end_bit = lure_cond.get("lure_end_time")
+            st.caption(f"Started {start_bit or '?'} · Ended {end_bit or 'still open'}")
+
+            is_structured = isinstance(lure_cond.get("fish"), list) and lure_cond.get("source") == "spot_session"
+            st.markdown("**Fish caught**")
+            if is_structured:
+                fish_list = lure_cond.get("fish") or []
+                if not fish_list:
+                    st.caption("No fish from this lure.")
+                else:
+                    for fish in fish_list:
+                        st.write("• " + " · ".join(_fish_summary_bits(fish)))
+            else:
+                fish_caught = row.get("fish_caught") or 0
+                biggest = row.get("biggest_fish_lb")
+                if biggest:
+                    st.write(f"{fish_caught} fish from this lure, biggest {format_weight_lb_oz(biggest)}")
+                else:
+                    st.write(f"{fish_caught} fish from this lure")
+
+
+def _render_session_edit(session: dict, ns: str, ens: str):
+    """The actual editable form - only ever rendered while this session's
+    edit mode is on (see _render_session_card). Every widget below is keyed
+    under `ens`, the edit-only namespace, so Save/Cancel can cleanly wipe
+    just this state via _clear_edit_state() without touching the session's
+    edit-mode flag or its (separate) delete-confirmation state."""
     first_row = session["rows"][0]
     cond = first_row["_conditions"]
 
     st.markdown("#### Session")
     ec1, ec2 = st.columns(2)
-    edit_date = ec1.date_input("Date", value=session["date"] or lake_today(), max_value=lake_today(), key=f"{ns}_date")
+    edit_date = ec1.date_input("Date", value=session["date"] or lake_today(), max_value=lake_today(), key=f"{ens}_date")
     segment_canon = SEGMENTS if not session["segment"] or session["segment"] in SEGMENTS else SEGMENTS + [session["segment"]]
     label_by_name, name_by_label = segment_label_maps(segment_canon, _th_seg_ranges)
     seg_default = session["segment"] if session["segment"] in segment_canon else SEGMENTS[0]
     seg_label = ec2.selectbox(
         "Time of day", [label_by_name[n] for n in segment_canon],
-        index=segment_canon.index(seg_default), key=f"{ns}_segment",
+        index=segment_canon.index(seg_default), key=f"{ens}_segment",
     )
     edit_segment = name_by_label[seg_label]
 
     ac1, ac2 = st.columns(2)
     angler_opts = _angler_options_for(session["angler"])
-    edit_angler = ac1.selectbox("Angler", angler_opts, index=angler_opts.index(session["angler"]) if session["angler"] in angler_opts else 0, key=f"{ns}_angler")
+    edit_angler = ac1.selectbox("Angler", angler_opts, index=angler_opts.index(session["angler"]) if session["angler"] in angler_opts else 0, key=f"{ens}_angler")
     structure_default = session["structure_type"] if session["structure_type"] in STRUCTURE_TYPES else STRUCTURE_TYPES[0]
-    edit_structure = ac2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ns}_structure")
+    edit_structure = ac2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ens}_structure")
 
     st.caption(f"📍 Location: **{session['location']}** (not editable here)")
 
     st.markdown("##### Conditions")
     cc1, cc2, cc3 = st.columns(3)
-    edit_water_temp = cc1.number_input("Water temp (°F)", min_value=32.0, max_value=100.0, step=0.5, value=float(cond.get("water_temp_f") or 75.0), key=f"{ns}_watertemp")
-    edit_secchi = cc2.number_input("Water clarity - Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5, value=float(cond.get("secchi_ft") or 2.5), key=f"{ns}_secchi")
+    edit_water_temp = cc1.number_input("Water temp (°F)", min_value=32.0, max_value=100.0, step=0.5, value=float(cond.get("water_temp_f") or 75.0), key=f"{ens}_watertemp")
+    edit_secchi = cc2.number_input("Water clarity - Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5, value=float(cond.get("secchi_ft") or 2.5), key=f"{ens}_secchi")
     stain_default = cond.get("stain_color") if cond.get("stain_color") in STAIN_COLOR_OPTIONS else STAIN_COLOR_OPTIONS[0]
-    edit_stain = cc3.selectbox("Base stain color", STAIN_COLOR_OPTIONS, index=STAIN_COLOR_OPTIONS.index(stain_default), key=f"{ns}_stain")
-    edit_stirred = st.checkbox("Stirred up / muddy at the time (overrides Secchi reading)", value=bool(cond.get("stirred_up")), key=f"{ns}_stirred")
+    edit_stain = cc3.selectbox("Base stain color", STAIN_COLOR_OPTIONS, index=STAIN_COLOR_OPTIONS.index(stain_default), key=f"{ens}_stain")
+    edit_stirred = st.checkbox("Stirred up / muddy at the time (overrides Secchi reading)", value=bool(cond.get("stirred_up")), key=f"{ens}_stirred")
     resolved_clarity = resolve_water_clarity(edit_secchi, edit_stain, edit_stirred)
     st.caption(f"Resolved water clarity: **{resolved_clarity}**")
 
     wc1, wc2, wc3 = st.columns(3)
     wind_default = cond.get("wind_band") if cond.get("wind_band") in WIND_BAND_LABELS else WIND_BAND_LABELS[1]
-    edit_wind_band = wc1.selectbox("Wind", WIND_BAND_LABELS, index=WIND_BAND_LABELS.index(wind_default), key=f"{ns}_wind_band")
+    edit_wind_band = wc1.selectbox("Wind", WIND_BAND_LABELS, index=WIND_BAND_LABELS.index(wind_default), key=f"{ens}_wind_band")
     wind_dir_default = cond.get("wind_direction") if cond.get("wind_direction") in WIND_DIRECTIONS else WIND_DIRECTIONS[0]
-    edit_wind_direction = wc2.selectbox("Wind direction", WIND_DIRECTIONS, index=WIND_DIRECTIONS.index(wind_dir_default), key=f"{ns}_wind_dir")
+    edit_wind_direction = wc2.selectbox("Wind direction", WIND_DIRECTIONS, index=WIND_DIRECTIONS.index(wind_dir_default), key=f"{ens}_wind_dir")
     light_default = cond.get("light_condition") if cond.get("light_condition") in LIGHT_CONDITIONS else LIGHT_CONDITIONS[0]
-    edit_light = wc3.selectbox("Sky condition", LIGHT_CONDITIONS, index=LIGHT_CONDITIONS.index(light_default), key=f"{ns}_light")
+    edit_light = wc3.selectbox("Sky condition", LIGHT_CONDITIONS, index=LIGHT_CONDITIONS.index(light_default), key=f"{ens}_light")
 
     pc1, pc2 = st.columns(2)
     precip_default = cond.get("precipitation") if cond.get("precipitation") in PRECIPITATION_OPTIONS else PRECIPITATION_OPTIONS[0]
-    edit_precip = pc1.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=PRECIPITATION_OPTIONS.index(precip_default), key=f"{ns}_precip")
-    edit_fish_depth = pc2.number_input("Fish holding depth (ft)", min_value=0.0, max_value=100.0, step=0.5, value=float(cond.get("fish_depth_ft") or 0.0), key=f"{ns}_fishdepth")
+    edit_precip = pc1.selectbox("Precipitation", PRECIPITATION_OPTIONS, index=PRECIPITATION_OPTIONS.index(precip_default), key=f"{ens}_precip")
+    edit_fish_depth = pc2.number_input("Fish holding depth (ft)", min_value=0.0, max_value=100.0, step=0.5, value=float(cond.get("fish_depth_ft") or 0.0), key=f"{ens}_fishdepth")
 
     forage_default = [f for f in (cond.get("forage_seen") or []) if f in FORAGE_OPTIONS]
-    edit_forage = st.multiselect("Forage seen", FORAGE_OPTIONS, default=forage_default, key=f"{ns}_forage")
+    edit_forage = st.multiselect("Forage seen", FORAGE_OPTIONS, default=forage_default, key=f"{ens}_forage")
 
     ac3, ac4 = st.columns(2)
     fish_act_default = cond.get("fish_activity") if cond.get("fish_activity") in FISH_ACTIVITY_OPTIONS else FISH_ACTIVITY_OPTIONS[2]
-    edit_fish_activity = ac3.selectbox("Fish activity", FISH_ACTIVITY_OPTIONS, index=FISH_ACTIVITY_OPTIONS.index(fish_act_default), key=f"{ns}_fishact")
+    edit_fish_activity = ac3.selectbox("Fish activity", FISH_ACTIVITY_OPTIONS, index=FISH_ACTIVITY_OPTIONS.index(fish_act_default), key=f"{ens}_fishact")
     forage_act_default = cond.get("forage_activity") if cond.get("forage_activity") in FORAGE_ACTIVITY_OPTIONS else FORAGE_ACTIVITY_OPTIONS[1]
-    edit_forage_activity = ac4.selectbox("Forage activity", FORAGE_ACTIVITY_OPTIONS, index=FORAGE_ACTIVITY_OPTIONS.index(forage_act_default), key=f"{ns}_forageact")
+    edit_forage_activity = ac4.selectbox("Forage activity", FORAGE_ACTIVITY_OPTIONS, index=FORAGE_ACTIVITY_OPTIONS.index(forage_act_default), key=f"{ens}_forageact")
 
     st.caption(
         "Predicted score, and the cloud%/wind-mph/pressure-trend/moon-phase readouts, stay exactly as "
@@ -612,7 +732,7 @@ def _render_session_card(session: dict):
     lure_edits = []
     for row in session["rows"]:
         lure_cond = row["_conditions"]
-        lns = f"{ns}_lure_{row['trip_id']}"
+        lns = f"{ens}_lure_{row['trip_id']}"
         with st.container(border=True):
             lc1, lc2, lc3 = st.columns(3)
             edit_lure_used = lc1.text_input("Lure", value=row.get("lure_used") or "", key=f"{lns}_name")
@@ -657,7 +777,7 @@ def _render_session_card(session: dict):
             })
 
     st.divider()
-    save_col, delete_col = st.columns(2)
+    save_col, cancel_col = st.columns(2)
     if save_col.button("💾 Save changes", key=f"{ns}_save", type="primary", width="stretch"):
         shared_updates = {
             "water_temp_f": edit_water_temp, "secchi_ft": edit_secchi, "stain_color": edit_stain,
@@ -694,11 +814,39 @@ def _render_session_card(session: dict):
             st.toast(f"Saved {len(saved_ids)} lure row(s).", icon="✅")
         if missing_ids:
             st.toast("Couldn't save some rows - they may have been deleted elsewhere.", icon="⚠️")
+        _clear_edit_state(ens)
+        st.session_state[f"{ns}_edit_mode"] = False
         st.rerun()
 
+    if cancel_col.button("Cancel", key=f"{ns}_cancel_edit", width="stretch"):
+        _clear_edit_state(ens)
+        st.session_state[f"{ns}_edit_mode"] = False
+        st.rerun()
+
+
+def _render_session_card(session: dict):
+    ns = f"th_{session['session_key']}"
+    ens = f"{ns}__fld"  # edit-only widget namespace - see _clear_edit_state()
+    edit_mode_key = f"{ns}_edit_mode"
+    st.session_state.setdefault(edit_mode_key, False)
+
+    top1, top2 = st.columns([4, 1])
+    if st.session_state[edit_mode_key]:
+        top1.caption("✏️ Editing - press Save or Cancel below when you're done.")
+    else:
+        if top2.button("✏️ Edit", key=f"{ns}_enter_edit", width="stretch"):
+            st.session_state[edit_mode_key] = True
+            st.rerun()
+
+    if st.session_state[edit_mode_key]:
+        _render_session_edit(session, ns, ens)
+    else:
+        _render_session_view(session)
+
+    st.divider()
     delete_pending_key = f"{ns}_delete_confirm"
     if not st.session_state.get(delete_pending_key):
-        if delete_col.button("🗑️ Delete this session", key=f"{ns}_delete", width="stretch"):
+        if st.button("🗑️ Delete this session", key=f"{ns}_delete", width="stretch"):
             st.session_state[delete_pending_key] = True
             st.rerun()
     else:
