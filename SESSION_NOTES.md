@@ -7236,6 +7236,59 @@ every real save.
     changes this round, so no new committed test cases). Confirmed via a
     fresh `git clone` into a new temp dir.
 
+118. **Backfill v2 (wider key) + "where's today's session?" check** -
+    immediate follow-up to entry 117. User: "Let's group an individual
+    session as a date + time + angler for setting a session ID on the old
+    sessions" (drop spot_id from the key), plus "I didn't see a session
+    for today, but I logged one earlier. Can you check that?"
+
+    **"Where's today's session?" investigation:** fetched the live `data`
+    branch's real `trip_log.csv` fresh and confirmed BOTH of today's
+    (2026-08-24) sessions were already correctly persisted - a 3-lure Dawn
+    session at Stripe Island Point (7 fish, already backfilled into
+    session_id `88393a0c` by entry 117) and a 1-lure Morning session at
+    Jeanne's Point (0 fish, genuinely solo). Ran the actual current
+    `pages/4_Trip_History.py` against this exact data via a scratch
+    AppTest with a completely fresh widget state (no filters pre-set): it
+    correctly showed both as cards, and the default date-range widget
+    value already spanned through today. So the underlying data and
+    grouping logic were both fine - told the user the most likely
+    explanation was that the Streamlit Cloud redeploy triggered by this
+    session's two earlier pushes to `main` (entries 116/117, ~20:40 and
+    20:56 UTC) hadn't finished rolling out yet when they checked, or their
+    browser tab had a stale pre-redeploy page open - suggested a hard
+    refresh rather than a data problem to chase.
+
+    **Backfill v2:** re-ran the retroactive backfill from scratch (reset
+    every row's session_id to "" first - a full redo of entry 117's v1,
+    not additive) using `(trip_date, segment, angler)` instead of
+    `(trip_date, segment, spot_id, angler)`. Investigated the actual
+    effect of dropping spot_id before applying it: found 3 new cross-spot
+    candidate groups. Two were legitimate real single outings that moved
+    between spots (a Matthew afternoon session touching 3 spots across
+    ~3 hours, a John morning session touching 2 across ~1 hour - both with
+    continuous, non-overlapping per-lure timestamps) - exactly the case
+    the wider key is meant to capture. The third was a genuine false-merge
+    risk: trip `98295ad3` nominally shares `(2026-08-21, Dawn, Matthew)`
+    with two other rows, but its `logged_at` is a full calendar day later
+    than theirs (`2026-08-22T10:38` vs. `2026-08-21T11:08`/`11:09`) -
+    almost certainly a different, later outing whose `trip_date` was
+    entered wrong, not the same session. Added a safeguard for exactly
+    this: within each `(date, segment, angler)` candidate group, members
+    are sorted by `logged_at` and split into clusters at any gap over 6
+    hours; only a cluster of 2+ rows gets a session_id. This correctly
+    split `98295ad3` off into its own solo card while keeping the other
+    two real cross-spot merges intact. Result: 65 of 78 rows grouped into
+    17 sessions (up from entry 117's 60/15), 13 left solo (down from 18).
+    Verified end-to-end via scratch AppTest against the real backfilled
+    data (30 session cards = 17 grouped + 13 solo; the anomalous row
+    confirmed showing as its own separate card, not merged) before
+    pushing. Pushed straight to the `data` branch, same as v1 - real
+    angler data, never `main`. `pages/4_Trip_History.py`'s own module
+    docstring and this file's Known limitations were both updated to
+    describe v2's key and the 6-hour clustering safeguard in place of v1's
+    now-superseded description.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -7491,16 +7544,17 @@ every real save.
   correctly editing per-lure conditions independently would need its own
   UI per lure rather than one shared block, a bigger change than this
   round took on.
-- (entry 117) Legacy trips (logged before punch-list #55) were retroactively
-  grouped by a one-time backfill keyed on (trip_date, segment, spot_id,
-  angler) rather than left permanently ungrouped - see entry 117. The one
-  acknowledged gap: two genuinely separate real outings by the same angler,
-  at the same spot, in the same time-of-day segment, on the same calendar
-  date, are indistinguishable from one continuous session by that key and
-  would get merged together. Didn't occur in the real data checked at
-  backfill time; if it ever does for a future edit, the merged session's
-  Save/Delete would need to be used carefully (or the row's `session_id`
-  fixed by hand in trip_log.csv).
+- (entry 118) Legacy trips (logged before punch-list #55) were retroactively
+  grouped by a one-time backfill (redone as v2 in entry 118) keyed on
+  (trip_date, segment, angler), clustered further by a 6-hour logged_at gap
+  - see entry 118. The one acknowledged gap: two genuinely separate real
+  outings by the same angler, in the same time-of-day segment, on the same
+  calendar date, AND within 6 hours of each other, are indistinguishable
+  from one continuous session by that key and would get merged together.
+  Didn't occur in the real data checked at backfill time; if it ever does
+  for a future edit, the merged session's Save/Delete would need to be
+  used carefully (or the row's `session_id` fixed by hand in
+  trip_log.csv).
 - (entry 116) Trip History no longer lets you recompute/re-score a trip's
   predicted_score from an edited condition, and the avg_cloud_pct/avg_
   wind_mph/pressure_trend_24h/moon_phase readouts stay exactly as

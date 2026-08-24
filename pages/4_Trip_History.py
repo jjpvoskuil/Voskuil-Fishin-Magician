@@ -16,28 +16,38 @@ that becomes the unit everything else (filtering, display, editing,
 deletion) operates on. A row with no session_id becomes its own
 single-lure "session" rather than being guessed into a group.
 
-Rows logged before session_id existed were retroactively backfilled once
+Rows logged before session_id existed were retroactively backfilled twice
 (same day punch-list #55 shipped, before any real trips existed with a
-session_id already stamped) rather than left permanently ungrouped: every
-legacy row was grouped by the exact tuple (trip_date, segment, spot_id,
-angler) - not raw logged_at/lure_start_time proximity, which was ruled out
-first because a real same-session pair of lure rows can have timestamps
-anywhere from ~10 minutes to the full width of a Dawn/Morning/etc. window
-apart for the first vs. last lure of a long session. date+segment+spot+
-angler is exactly the tuple a live Spot Session run holds fixed for every
-lure logged during it, so it's a precise reconstruction of the grouping a
-real session_id encodes, not a proximity heuristic - verified against the
-real data before running it (every resulting multi-row group's member
-timestamps formed one continuous, non-overlapping timeline; none looked
-like two distinct outings mashed together). Groups of exactly one row were
-left with session_id="" (no behavior change - already handled as solo
-above). One acknowledged, unfixed limitation: two genuinely separate
-outings by the same angler, at the same spot, in the same time-of-day
-segment, on the same calendar date, would be indistinguishable from one
-continuous session by this key and would get merged - didn't occur in the
-real data checked at backfill time, but a future edit/delete on a session
-this old should keep that possibility in mind. Every row logged going
-forward gets a real session_id straight from Spot Session - see
+session_id already stamped) rather than left permanently ungrouped. v1
+grouped by (trip_date, segment, spot_id, angler); v2 (the version actually
+live) dropped spot_id per user feedback - a single continuous outing can
+legitimately move between more than one named spot (confirmed in the real
+data: a Matthew afternoon session crossing 3 spots, a John morning session
+crossing 2, both with continuous, non-overlapping timestamps) - so the key
+is now just (trip_date, segment, angler). Neither version used raw logged_
+at/lure_start_time proximity as the PRIMARY key - that was ruled out first
+because a real same-session pair of lure rows can have timestamps anywhere
+from ~10 minutes to the full width of a Dawn/Morning/etc. window apart for
+the first vs. last lure of a long session, and (date, segment, angler) is
+exactly the tuple a live Spot Session run holds fixed for every lure
+logged during it.
+
+Dropping spot_id from the key did surface a real false-merge risk that
+timestamp proximity is still used to guard against: a candidate (date,
+segment, angler) group is further split into clusters by elapsed real time
+(logged_at, sorted) - any gap over 6 hours starts a new cluster, so a
+same-key coincidence doesn't merge two genuinely different outings. Caught
+exactly one real case this way - trip 98295ad3 shared (2026-08-21, Dawn,
+Matthew) with two other rows on paper, but its logged_at was a full
+calendar day later than theirs (its trip_date was almost certainly entered
+wrong) - left solo instead of merged. Groups/clusters of exactly one row
+stay session_id="" (no behavior change - already handled as solo above).
+One acknowledged, unfixed limitation: two genuinely separate outings by
+the same angler, in the same time-of-day segment, on the same calendar
+date, AND within the 6-hour clustering window of each other, would still
+be indistinguishable from one continuous session and would get merged -
+didn't occur in the real data checked at backfill time. Every row logged
+going forward gets a real session_id straight from Spot Session - see
 pages/6_Spot_Session.py's Start Session handler - so this backfill was a
 one-time correction, not an ongoing heuristic.
 
