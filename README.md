@@ -275,14 +275,20 @@ this repo that can override it on this hosting.
   stays empty until you press **"🔍 See Trips"**; after that, changing a filter
   updates the results immediately without pressing it again. Matching sessions show
   as a stack of collapsed cards (date · time of day · location · angler · fish
-  count) - open one to see and edit everything about it: date, time window, angler,
+  count) - open one to see everything about it: date, time window, angler,
   structure type, every observed condition (water temp, clarity/stain/stirred-up,
   wind, sky, precipitation, forage seen, fish/forage activity, fish depth), and per
-  lure - lure, color, technique, trailer, notes, and the full per-fish catch list
-  (add/edit/remove, same fields as Spot Session's own "Log a fish" popup). A single
-  **"💾 Save changes"** button saves every lure in the session at once; editing a
-  shared condition (like water temp) applies it to every lure in that session, not
-  just one. **"🗑️ Delete this session"** asks you to confirm, then removes every
+  lure - lure, color, technique, trailer, notes, and the full per-fish catch list.
+  It opens read-only - nothing here is an editable field until you press
+  **"✏️ Edit"** at the top, so just browsing a session can never accidentally
+  change something in it. Edit swaps in the actual form (add/edit/remove fish,
+  same fields as Spot Session's own "Log a fish" popup); a single
+  **"💾 Save changes"** button saves every lure in the session at once (editing a
+  shared condition like water temp applies it to every lure in that session, not
+  just one), or **"Cancel"** discards whatever you typed and goes back to read-only
+  without saving anything. **"🗑️ Delete this session"** stays available either way
+  (it has its own two-step confirmation, so it doesn't need Edit first) - confirm
+  it, then it removes every
   lure row (and every fish logged on them) for good. A few things stay read-only by
   design: location (remapping a spot isn't part of this), and predicted score /
   cloud-cover / wind-mph / pressure-trend / moon-phase, which stay exactly as
