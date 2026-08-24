@@ -76,7 +76,7 @@ TRIP_LOG_PATH = REPO_ROOT / "data" / "trip_log.csv"
 DATA_BRANCH = "data"
 
 FIELDNAMES = [
-    "trip_id", "logged_at", "trip_date", "segment", "spot_id", "spot_name",
+    "trip_id", "session_id", "logged_at", "trip_date", "segment", "spot_id", "spot_name",
     "structure_type", "water_clarity", "lure_used", "color_used", "technique_used",
     "fish_caught", "biggest_fish_lb", "predicted_score", "conditions_json", "notes",
 ]
@@ -103,6 +103,16 @@ class TripEntry:
     notes: str = ""
     trip_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     logged_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    # Punch-list #55: groups every lure/fish logged in one Spot Session run
+    # (▶ Start Session through ⏹ End Session, including any lure added
+    # mid-session) so Trip History can show one record per outing instead of
+    # one per lure. Blank ("") for any row written before this field
+    # existed and for anything that isn't a Spot Session row - Trip History
+    # treats a blank session_id as its own single-lure "session" rather than
+    # guessing at grouping from date/spot/timestamp proximity. See
+    # pages/6_Spot_Session.py's Start Session handler for where a real value
+    # gets stamped.
+    session_id: str = ""
 
     def to_row(self) -> dict:
         d = asdict(self)

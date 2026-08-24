@@ -90,6 +90,69 @@ def test_commit_and_push_simple_success(tmp_path, bare_and_seed):
     assert "Saved and pushed" in msg
 
 
+def test_session_id_round_trips_through_append_and_read(tmp_path, monkeypatch):
+    """Punch-list #55: session_id is a real column now (see FIELDNAMES),
+    stamped by pages/6_Spot_Session.py's Start Session handler and read back
+    by Trip History to group a session's lures into one record. Confirms
+    the field survives append_trip -> read_all_trips unchanged, and that a
+    row saved before this field existed (no session_id key at all) doesn't
+    break reading/rewriting the file."""
+    monkeypatch.setattr(storage, "TRIP_LOG_PATH", tmp_path / "trip_log.csv")
+
+    entry = storage.TripEntry(
+        trip_date="2026-08-24", segment="Morning", spot_id="s1", spot_name="Test Spot",
+        structure_type="Main-lake point", water_clarity="Green stained", lure_used="Fluke",
+        color_used="", technique_used="", fish_caught=0, biggest_fish_lb=None,
+        predicted_score=5.0, conditions={}, session_id="abc12345",
+    )
+    storage.append_trip(entry)
+
+    rows = storage.read_all_trips()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "abc12345"
+    assert rows[0]["trip_id"] == entry.trip_id
+
+
+def test_update_trip_preserves_legacy_rows_missing_session_id_column(tmp_path, monkeypatch):
+    """A row written before session_id existed has no such key in its dict
+    (its file's header predates the column) - update_trip rewriting the
+    whole file (with the new header) shouldn't choke on that row missing a
+    key, and should leave it with a blank session_id rather than erroring."""
+    log_path = tmp_path / "trip_log.csv"
+    monkeypatch.setattr(storage, "TRIP_LOG_PATH", log_path)
+    # Simulate a pre-#55 file: header/row with no session_id column at all.
+    old_fieldnames = [f for f in storage.FIELDNAMES if f != "session_id"]
+    import csv
+    with open(log_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=old_fieldnames)
+        writer.writeheader()
+        writer.writerow({
+            "trip_id": "legacy01", "logged_at": "2026-01-01T00:00:00", "trip_date": "2026-01-01",
+            "segment": "Dawn", "spot_id": "s1", "spot_name": "Test Spot",
+            "structure_type": "Flat", "water_clarity": "Clear", "lure_used": "Worm",
+            "color_used": "", "technique_used": "", "fish_caught": "0", "biggest_fish_lb": "",
+            "predicted_score": "4.0", "conditions_json": "{}", "notes": "",
+        })
+
+    new_entry = storage.TripEntry(
+        trip_date="2026-08-24", segment="Morning", spot_id="s2", spot_name="Another Spot",
+        structure_type="Flat", water_clarity="Clear", lure_used="Jig", color_used="",
+        technique_used="", fish_caught=1, biggest_fish_lb=2.5, predicted_score=6.0,
+        conditions={}, session_id="new123",
+    )
+    storage.append_trip(new_entry)
+    # update_trip on the NEW row rewrites the whole file (including the old
+    # legacy row, which is missing session_id entirely) - shouldn't raise.
+    new_entry.notes = "edited"
+    assert storage.update_trip(new_entry) is True
+
+    rows = storage.read_all_trips()
+    by_id = {r["trip_id"]: r for r in rows}
+    assert by_id["legacy01"]["session_id"] == ""
+    assert by_id[new_entry.trip_id]["session_id"] == "new123"
+    assert by_id[new_entry.trip_id]["notes"] == "edited"
+
+
 def test_commit_and_push_retries_and_succeeds_on_real_concurrent_push(tmp_path, bare_and_seed):
     """The real punch-list #26 scenario: two anglers' devices (repoA, repoB)
     both cloned the same starting point and both append a trip row before
