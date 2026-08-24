@@ -100,6 +100,7 @@ import streamlit as st
 from core.appstate import get_lake_spots, get_weather_bundle, get_anglers, github_token, repo_slug
 from core.storage import (
     read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push_data,
+    sync_data_from_data_branch,
 )
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, FORAGE_OPTIONS
 from core.onwater import (
@@ -118,6 +119,26 @@ st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", lay
 inject_mobile_css()
 st.title("📊 Trip History")
 st.caption("Filter down to the sessions you want, then open one to see (and edit) everything about it.")
+
+# This running server only syncs data/trip_log.csv from GitHub once, at boot
+# (see app.py's _sync_data_once(), st.cache_resource-guarded, and core.storage's
+# module docstring) - so a data-only fix pushed straight to the `data` branch
+# outside a live Spot Session save (a session_id backfill, a hand-edit) won't
+# show up here until either the whole app restarts or this button is pressed.
+_refresh_col, _ = st.columns([1, 3])
+if _refresh_col.button(
+    "🔄 Refresh from GitHub", help=(
+        "Pulls the latest trip_log.csv (and the rest of data/) from GitHub right now, "
+        "without waiting for the app to restart. Use this if a trip you know was saved "
+        "(by you or someone else) isn't showing up here yet."
+    ),
+):
+    _token = github_token()
+    if _token:
+        _ok, _msg = sync_data_from_data_branch(_token, repo_slug())
+        (st.success if _ok else st.warning)(_msg)
+    else:
+        st.info("No GitHub token configured here - nothing to refresh.")
 
 rows = read_all_trips()
 

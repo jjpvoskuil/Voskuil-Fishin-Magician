@@ -264,7 +264,11 @@ this repo that can override it on this hosting.
   (matched by date + time-of-day window + angler, with a same-day time-gap check
   so two genuinely separate outings don't get merged - see SESSION_NOTES.md
   entry 118 for why); a handful of genuinely solo, one-lure
-  trips still show as their own single-lure session. The page opens to
+  trips still show as their own single-lure session. A **"🔄 Refresh from GitHub"**
+  button at the top pulls the latest saved data on demand - this server only syncs
+  automatically once, when it starts up, so if a trip you know was saved isn't
+  showing up yet, press this before assuming something's wrong (see
+  SESSION_NOTES.md entry 119). The page opens to
   just six filters - date range (pick a single date, a range, or today even before
   today's session is logged), time of day,
   location, angler, lure type, and specific lure, each defaulting to "all" - and
