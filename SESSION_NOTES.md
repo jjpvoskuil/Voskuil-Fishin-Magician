@@ -118,6 +118,41 @@ every real save.
   works fine against `main`'s frozen `data/` snapshot, same as any fresh
   deploy would before its first real sync). It just won't show you
   post-cutover angler data unless you also fetch `data`.
+- **⚠️ `data/dev_tasks.csv`/`dev_tasks_counter.txt` are the one exception to
+  "a coding session's own pushes go to `main`."** A Claude coding session
+  logs punch-list items directly (via `core.dev_tasks.append_task()`/
+  `mark_done()`, editing the real working-copy CSV, then committing +
+  pushing like any other change) - that's `data/` content written by the
+  CODING session, not the deployed app, so it's easy to reflexively bundle
+  it into the same `main` push as whatever code change it's documenting
+  (this happened for punch-list #51-#55, all logged straight to `main`).
+  **That's wrong and creates real divergence risk**: found and confirmed
+  live right after logging #55 - at that moment `origin/data`'s
+  `dev_tasks.csv` was one item behind `origin/main`'s (stuck at #54,
+  `main` already at #55), specifically because the deployed app's own
+  `sync_data_from_data_branch()` overlays `data/` from the `data` branch on
+  every boot, which can overwrite a `main`-only punch-list addition with
+  whatever `data` still has - there's no guarantee a coding session's
+  direct-to-`main` write to a `data/` file ever reliably reaches the branch
+  the live app actually reads from. (By the time this was written up
+  moments later the two had already re-converged on their own - most
+  likely because a redeploy plus a subsequent live write happened to carry
+  `main`'s newer content forward - but that's incidental timing, not
+  something to rely on going forward.) **The fix, effective immediately:
+  when a coding session modifies `data/dev_tasks.csv` or
+  `dev_tasks_counter.txt`, push that change to BOTH `main` (so a plain
+  `git clone` still has a current-enough punch list for a session to read
+  at startup, per this file's own "New-session prompt" instructions) AND
+  `data` (so the deployed app's Development page reflects it immediately,
+  with no dependency on redeploy timing).** Push `data` the same way the
+  one-time #52 cutover did - clone/checkout the `data` branch, `git
+  checkout origin/main -- data/dev_tasks.csv data/dev_tasks_counter.txt`
+  (pulls in just those two paths, leaves every other file on `data` - real
+  angler-logged `trip_log.csv`/etc. - completely untouched), commit, push
+  to `data`. This same reasoning would apply to any other `data/` file a
+  future coding session ever edits directly rather than through the app's
+  own UI - dev_tasks.csv is just the one this app's standing workflow
+  actually does that for today.
 
 ## Development log (chronological)
 
