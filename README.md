@@ -14,10 +14,10 @@ button (Streamlit's default is a tiny low-contrast arrow easy to miss on a touch
 wide multi-column rows (the 7-Day Forecast's day-by-day score row, its time-of-day breakdown,
 and "Today at a glance") reflow into a readable stacked layout below a phone-width breakpoint
 instead of squishing into unreadable slivers - see `core.ui.inject_mobile_css()`, called near
-the top of every page. Trip History's grid stays a single wide `st.data_editor` on a phone
-(swipe left within the grid itself, not the page, to see the rest of its columns) rather than
-being redesigned into a stacked-card view - a deliberate scope choice to avoid losing inline
-editing on the one page that already has it.
+the top of every page. Trip History's punch-list #55 redesign replaced its old wide,
+sideways-swiping `st.data_editor` grid with a stack of collapsed session cards (plain
+widgets, same mobile-friendly pattern as Spot Session and the Development page) - no
+horizontal scrolling needed to browse or edit a trip from a phone anymore.
 
 Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
 this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
@@ -202,17 +202,9 @@ this repo that can override it on this hosting.
   lists everything already saved for the selected date. It all writes into the same shared
   trip log the **Trip History** page reads from - Spot Session is the only way to log
   a trip; see "How the model works" below for the condition bands behind this page's
-  inputs. Made a mistake on a past trip, or just want to fix it up? Click "✏️ Edit
-  this trip" on that trip's entry on the Trip History page - it opens Spot Session on
-  that same spot with a simplified single-trip editor: the same consolidated
-  Conditions block plus an editable start time/time window (both freely correctable,
-  since you're fixing historical data), the lure/trailer pickers, a plain inline fish
-  list (add/remove, same fields as the popup above, no dialog needed since you're not
-  mid-session), and a single **"💾 Save changes"**/"Cancel edit" pair - saving updates
-  that same trip in place rather than adding a duplicate. Logged it against the wrong
-  spot? While editing, just pick the right one from the "📍 Location" dropdown at the
-  top before saving - everything else you'd already filled in carries over to the new
-  spot instead of clearing out.
+  inputs. Made a mistake on a past trip, or just want to fix it up? Corrections now
+  happen entirely on the **Trip History** page itself (punch-list #55) - see that
+  section below - rather than through a handoff back to this page.
 - **Per-lure recommendation blocks** - each recommended lure (first choice, then a
   second-choice section) gets its own self-contained block: specific colors for that
   lure, trailer type/color if one applies, depth to run, presentation style, and a
@@ -263,34 +255,35 @@ this repo that can override it on this hosting.
   where it left off ("Reconnected - picked this session back up..."). This app
   still needs a live connection to do anything - it can't work with zero
   signal - but a dropped-and-restored connection won't cost you your place.
-- **Trip History** - every logged trip in one filterable, wide, scrollable grid:
-  filter by date/date range, time of day, location, lure type, water clarity,
-  structure type, fish activity, forage activity, wind direction, catches-only,
-  trailer-used-only, or free-text search. The "Time of day" filter and the grid's
-  own "Time of day" cell both label each window with a real clock range in
-  parentheses (e.g. "Dawn (5:52 AM-7:52 AM)") using today's actual sunrise/sunset -
-  a reference point rather than that exact trip's own date, since a filter/grid
-  column spans trips logged on many different days and the windows shift a few
-  minutes day to day. The grid itself shows 14 fields (scroll
-  right to see them all) and lets you edit date, time of day, structure, water
-  clarity, lure, color, fish caught, biggest fish, and notes right in the cell -
-  changes save automatically, no separate "Save" button. Every fish weight shown
-  anywhere on this page - the grid's "Biggest fish" column, the per-trip detail
-  panel's summary line, and each per-fish catch record - displays as lb-oz (e.g.
-  "3 lb 8 oz") rather than a decimal pound, since that's how most anglers actually
-  think and talk about a fish's weight; weight is still stored as decimal pounds
-  underneath, and the grid's "Biggest fish" cell also accepts a plain decimal
-  (e.g. "3.5") if you'd rather type it that way. Location, lure type,
-  fish/forage activity, and predicted score are shown for reference but aren't
-  grid-editable (they need Spot Session's fuller edit flow to stay consistent
-  with the underlying conditions data). Use the "Jump to a trip's full detail"
-  picker below the grid to open a trip's full detail in a "📌 Selected trip"
-  panel - no scrolling required. From there (or from the same trip's entry
-  further down in the full "Trip details" list), "✏️ Edit this trip" jumps back
-  to Spot Session with that trip pre-loaded so you can correct and re-save it
-  (see "Spot Session page" above), and "🗑️ Delete this trip" asks you to
-  confirm, then removes it for good. The model's calibration status sits below
-  the grid too.
+- **Trip History (punch-list #55 redesign)** - one record per fishing *session*,
+  not one per lure. A Spot Session run (▶ Start Session through ⏹ End Session,
+  including any lure added mid-session) writes one trip-log row per lure fished, all
+  sharing a real `session_id`; this page groups those rows back into a single
+  session card so a multi-lure outing shows up once, not scattered across several
+  rows. A session logged before this redesign (no `session_id` yet) shows as its
+  own single-lure session rather than being guessed into a group. The page opens to
+  just six filters - date range (pick a single date or a range), time of day,
+  location, angler, lure type, and specific lure, each defaulting to "all" - and
+  stays empty until you press **"🔍 See Trips"**; after that, changing a filter
+  updates the results immediately without pressing it again. Matching sessions show
+  as a stack of collapsed cards (date · time of day · location · angler · fish
+  count) - open one to see and edit everything about it: date, time window, angler,
+  structure type, every observed condition (water temp, clarity/stain/stirred-up,
+  wind, sky, precipitation, forage seen, fish/forage activity, fish depth), and per
+  lure - lure, color, technique, trailer, notes, and the full per-fish catch list
+  (add/edit/remove, same fields as Spot Session's own "Log a fish" popup). A single
+  **"💾 Save changes"** button saves every lure in the session at once; editing a
+  shared condition (like water temp) applies it to every lure in that session, not
+  just one. **"🗑️ Delete this session"** asks you to confirm, then removes every
+  lure row (and every fish logged on them) for good. A few things stay read-only by
+  design: location (remapping a spot isn't part of this), and predicted score /
+  cloud-cover / wind-mph / pressure-trend / moon-phase, which stay exactly as
+  originally computed rather than being silently re-scored from an edit. Fish
+  weight displays as lb-oz (e.g. "3 lb 8 oz") everywhere on this page; type it that
+  way or as a plain decimal ("3.5") when editing. The old wide `st.data_editor`
+  grid, the "Edit this trip" handoff back to Spot Session, and this page's own
+  summary metrics/calibration-status section are gone - rankings/totals live on the
+  **Leaderboard** page instead.
 - **Tackle Box (lure inventory)** - your tackle box, tracked: brand, full description,
   a category (matching it to one of the forecast engine's lure types), a photo, the
   last price paid, and how many you have on hand. Seeded from a Cabela's order history

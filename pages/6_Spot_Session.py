@@ -1,6 +1,7 @@
 import json
 import re
-from datetime import date as ddate, datetime, time as dtime
+import uuid
+from datetime import datetime, time as dtime
 
 import streamlit as st
 
@@ -92,37 +93,6 @@ else:
         st.switch_page("pages/2_Lake_Map.py")
     st.stop()
 
-# --- Edit mode detection (arrived via Trip History's "Edit this trip") ------
-edit_trip_id = st.session_state.get("spot_session_edit_trip_id") or st.query_params.get("edit_trip")
-editing_trip = None
-editing_cond = {}
-if edit_trip_id:
-    editing_trip = next((t for t in read_all_trips() if t.get("trip_id") == edit_trip_id), None)
-    if editing_trip is None:
-        st.session_state.pop("spot_session_edit_trip_id", None)
-        st.query_params.pop("edit_trip", None)
-        edit_trip_id = None
-    else:
-        st.session_state["spot_session_edit_trip_id"] = edit_trip_id
-        st.query_params["edit_trip"] = edit_trip_id
-        try:
-            editing_cond = json.loads(editing_trip.get("conditions_json") or "{}")
-        except json.JSONDecodeError:
-            editing_cond = {}
-
-
-def _exit_edit_mode():
-    # Punch-list #26: also clear this trip's one-time angler-prefill guard
-    # (see the "Who's fishing" picker below) so editing this same trip
-    # again later in the same browser session re-seeds it from the trip's
-    # own stored angler, rather than leaving a stale True flag around -
-    # same reasoning as entry 53's edit_prefill_done_<trip_id>_* sweep.
-    if edit_trip_id:
-        st.session_state.pop(f"angler_prefill_done_{edit_trip_id}", None)
-    st.session_state.pop("spot_session_edit_trip_id", None)
-    st.query_params.pop("edit_trip", None)
-
-
 def _guess_segment(hour: int, now: datetime = None) -> str:
     """Best-effort guess at the time-of-day segment for a given moment
     (`now`). Prefers the real thing - `seg_ranges` (module-level, computed a
@@ -167,16 +137,6 @@ if spot.get("transition_depth_ft"):
     meta_bits.append(f"transition {spot['transition_depth_ft']} ft ({spot.get('transition_grade', '')})")
 st.caption(" · ".join(meta_bits) if meta_bits else "No saved details for this spot yet - add some from the Lake Map page.")
 
-if editing_trip is not None:
-    ec1, ec2 = st.columns([5, 1])
-    ec1.info(
-        f"✏️ Editing the trip logged **{editing_trip['trip_date']}** - conditions and results below are "
-        f"pre-filled from that entry. **Save changes** updates that same trip instead of adding a new one."
-    )
-    if ec2.button("Cancel edit", key="cancel_edit_top"):
-        _exit_edit_mode()
-        st.rerun()
-
 if st.button("← Back to Lake Map"):
     st.switch_page("pages/2_Lake_Map.py")
 
@@ -197,27 +157,7 @@ angler_key = "active_angler"
 angler_other_key = "active_angler_other_name"
 angler_query_key = "angler"
 
-# One-time prefill when a trip is first opened for editing, so correcting a
-# misattributed trip shows THAT trip's own logged angler rather than
-# whichever angler happens to be "active" in this browser session right
-# now. Guarded on edit_trip_id alone (not spot_id, unlike the conditions
-# block's own per-spot-scoped prefill) since this widget's key never
-# changes when the location picker switches spots mid-edit - without a
-# guard, this block re-running on every rerun would silently overwrite a
-# manual angler correction the instant anything else on the page changed,
-# the same class of bug already documented (and fixed) for other fields in
-# SESSION_NOTES.md's entry 51/53.
-_angler_prefill_guard = f"angler_prefill_done_{edit_trip_id}"
-if editing_trip is not None and not st.session_state.get(_angler_prefill_guard):
-    _edit_angler = (editing_cond.get("angler") or "").strip()
-    if _edit_angler:
-        if _edit_angler in angler_roster:
-            st.session_state[angler_key] = _edit_angler
-        else:
-            st.session_state[angler_key] = ANGLER_OTHER_LABEL
-            st.session_state[angler_other_key] = _edit_angler
-    st.session_state[_angler_prefill_guard] = True
-elif angler_key not in st.session_state:
+if angler_key not in st.session_state:
     # Punch-list #51: session_state alone doesn't survive a full app
     # restart (Streamlit Cloud auto-redeploying after ANY user's save, or
     # just a plain reconnect) - when it resets, this picker used to
@@ -227,7 +167,7 @@ elif angler_key not in st.session_state:
     # concerned, and would see John's active session (his lures, his
     # conditions) instead of their own until they noticed and re-picked
     # their own name. Restoring from the URL - the same pattern already
-    # used for spot_id/edit_trip above - means a reconnect lands each
+    # used for spot_id above - means a reconnect lands each
     # angler back on themselves automatically instead of defaulting to
     # whoever happens to be first in the roster.
     _qp_angler = (st.query_params.get(angler_query_key) or "").strip()
@@ -316,13 +256,6 @@ if st.session_state.pop(f"session_canceled_banner_{spot['spot_id']}", False):
     st.info("❌ Session canceled - nothing from that session was saved. Pick lures below to start a new one.")
 
 st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
-if editing_trip is not None:
-    try:
-        _edit_date = ddate.fromisoformat(editing_trip.get("trip_date")) if editing_trip.get("trip_date") else None
-    except ValueError:
-        _edit_date = None
-    if _edit_date:
-        st.session_state[f"session_date_{spot['spot_id']}"] = _edit_date
 
 session_date = st.date_input(
     "Session date",
@@ -354,7 +287,6 @@ _wind_help = "\n".join(
 todays_entries = [
     t for t in read_all_trips()
     if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date.isoformat()
-    and t.get("trip_id") != edit_trip_id
 ]
 if todays_entries:
     summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
@@ -1164,6 +1096,7 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict, angler: str = "")
         predicted_score=active.get("predicted_score"),
         conditions=lure_conditions,
         notes="",
+        session_id=active.get("session_id", ""),
     )
     entry = TripEntry(**entry_kwargs)
     append_trip(entry)
@@ -1459,6 +1392,7 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
     segment_name = None
     water_clarity = None
     start_time_iso = None
+    session_id = None
     for t, cond in rows:
         entry_kwargs = dict(
             trip_date=t.get("trip_date"),
@@ -1475,6 +1409,11 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
             predicted_score=float(t["predicted_score"]) if t.get("predicted_score") not in (None, "") else None,
             conditions=cond,
             notes=t.get("notes") or "",
+            # Punch-list #55: preserve whatever session_id this row already
+            # has (blank for a row logged before that field existed) so a
+            # reconnect's subsequent update_trip() calls (record/remove a
+            # fish, retire a lure, end the session) don't silently drop it.
+            session_id=t.get("session_id") or "",
         )
         lures.append({
             "trip_id": t.get("trip_id"), "logged_at": t.get("logged_at"), "label": t.get("lure_used"),
@@ -1494,11 +1433,13 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
             segment_name = t.get("segment")
             water_clarity = t.get("water_clarity")
             start_time_iso = cond.get("start_time")
+            session_id = t.get("session_id") or ""
     return {
         "spot_name": spot["name"],
         "session_date": session_date_iso,
         "start_time": start_time_iso or lake_now_naive().time().isoformat(),
         "segment_name": segment_name,
+        "session_id": session_id,
         "structure_type": structure_type,
         "water_clarity": water_clarity,
         "predicted_score": predicted_score,
@@ -1506,214 +1447,6 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
         "lures": lures,
         "reconstructed": True,
     }
-
-
-# ==============================================================================
-# EDIT MODE - correcting one already-logged trip
-# ==============================================================================
-if editing_trip is not None:
-    st.divider()
-    st.header("Conditions")
-
-    def _find_inventory_item_by_label(label, items):
-        if not label:
-            return None
-        return next((it for it in items if inventory_item_label(it) == label), None)
-
-    def _parse_iso_time(s):
-        try:
-            return dtime.fromisoformat(s) if s else None
-        except ValueError:
-            return None
-
-    if editing_cond.get("wind_band_logged") in WIND_BAND_LABELS:
-        _prefill_wind_band = editing_cond["wind_band_logged"]
-    elif editing_cond.get("wind_band") in WIND_BAND_LABELS:
-        _prefill_wind_band = editing_cond["wind_band"]
-    elif isinstance(editing_cond.get("wind_speed_mph"), (int, float)):
-        _prefill_wind_band = wind_band(editing_cond["wind_speed_mph"])["label"]
-    else:
-        _prefill_wind_band = None
-
-    edit_prefill = {
-        "water_temp_f": editing_cond.get("water_temp_f"),
-        "secchi_ft": editing_cond.get("secchi_ft"),
-        "stain_color": editing_cond.get("stain_color") if editing_cond.get("stain_color") in STAIN_COLOR_OPTIONS else None,
-        "stirred_up": bool(editing_cond.get("stirred_up", False)),
-        "wind_band": _prefill_wind_band,
-        "wind_direction": editing_cond.get("wind_direction") if editing_cond.get("wind_direction") in WIND_DIRECTIONS else None,
-        "light_condition": editing_cond.get("light_condition") if editing_cond.get("light_condition") in LIGHT_CONDITIONS else None,
-        "precipitation": editing_cond.get("precipitation") if editing_cond.get("precipitation") in PRECIPITATION_OPTIONS else None,
-        "forage_seen": editing_cond.get("forage_seen") or editing_cond.get("forage_type_seen") or [],
-        "fish_activity": editing_cond.get("fish_activity"),
-        "forage_activity": editing_cond.get("forage_activity"),
-        "fish_depth_ft": editing_cond.get("fish_depth_ft"),
-    }
-    edit_key_ns = f"editcond_{edit_trip_id}_{spot['spot_id']}"
-    cond_values = render_conditions_block(edit_key_ns, weather_defaults={}, prefill=edit_prefill)
-
-    tc1, tc2 = st.columns(2)
-    _edit_start_key = f"{edit_key_ns}_start_time"
-    st.session_state.setdefault(_edit_start_key, _parse_iso_time(editing_cond.get("start_time")) or lake_now_naive().time())
-    edit_start_time = tc1.time_input("Session start time", key=_edit_start_key)
-    _edit_segment_default = editing_trip.get("segment") if editing_trip.get("segment") in SEGMENTS else _guess_segment(edit_start_time.hour)
-    _edit_segment_key = f"{edit_key_ns}_segment"
-    st.session_state.setdefault(_edit_segment_key, _edit_segment_default)
-    edit_segment_name = tc2.selectbox("Time window", SEGMENTS, format_func=_segment_option_label, key=_edit_segment_key)
-
-    edit_at_time = datetime.combine(session_date, edit_start_time)
-    water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
-        cond_values, session_date, bundle, edit_at_time, edit_segment_name,
-    )
-    st.caption(f"Recomputed score for this entry: **{score_result.score}/10** ({season.replace('_', ' ').title()}, {water_clarity} water)")
-
-    st.divider()
-    st.markdown("#### Lure used")
-    inventory_items = get_inventory()
-    _edit_lure_prefix = f"editlure_{edit_trip_id}_{spot['spot_id']}"
-    _matched_lure = _find_inventory_item_by_label(editing_trip.get("lure_used"), inventory_items)
-    if _matched_lure:
-        st.session_state.setdefault(f"{_edit_lure_prefix}_selected_id", _matched_lure["item_id"])
-    selected_lure_item = _visual_lure_picker(inventory_items, key_prefix=_edit_lure_prefix)
-    lure_used = inventory_item_label(selected_lure_item) if selected_lure_item else (editing_trip.get("lure_used") or "")
-    color_used = selected_lure_item.get("description", "") if selected_lure_item else (editing_trip.get("color_used") or "")
-
-    use_trailer = False
-    if lure_can_take_trailer(selected_lure_item):
-        _use_trailer_key = f"edit_use_trailer_{edit_trip_id}_{spot['spot_id']}"
-        st.session_state.setdefault(_use_trailer_key, bool(editing_cond.get("trailer_used")))
-        use_trailer = st.checkbox("Used a trailer", key=_use_trailer_key)
-
-    trailer_name, trailer_color, trailer_category = "", "", None
-    selected_trailer_item = None
-    if use_trailer:
-        st.markdown("**Trailer**")
-        trailer_items = [it for it in inventory_items if is_trailer_eligible(it)]
-        _edit_trailer_prefix = f"edittrailer_{edit_trip_id}_{spot['spot_id']}"
-        _matched_trailer = _find_inventory_item_by_label(editing_cond.get("trailer_name"), inventory_items)
-        if _matched_trailer:
-            st.session_state.setdefault(f"{_edit_trailer_prefix}_selected_id", _matched_trailer["item_id"])
-        selected_trailer_item = _visual_lure_picker(
-            trailer_items, key_prefix=_edit_trailer_prefix,
-            empty_message="No trailer-style baits found in your tackle box - add one on the Tackle Box page, or type this one in below.",
-        )
-        if selected_trailer_item is None:
-            _trailer_name_key = f"edit_trailer_name_{edit_trip_id}_{spot['spot_id']}"
-            st.session_state.setdefault(_trailer_name_key, editing_cond.get("trailer_name") or "")
-            trailer_name = st.text_input("Trailer name", key=_trailer_name_key)
-        else:
-            trailer_name = inventory_item_label(selected_trailer_item)
-            trailer_category = selected_trailer_item.get("category")
-        _trailer_color_key = f"edit_trailer_color_{edit_trip_id}_{spot['spot_id']}"
-        st.session_state.setdefault(
-            _trailer_color_key,
-            selected_trailer_item.get("description", "") if selected_trailer_item else (editing_cond.get("trailer_color") or ""),
-        )
-        trailer_color = st.text_input("Trailer color", key=_trailer_color_key)
-
-    _notes_key = f"edit_notes_{edit_trip_id}_{spot['spot_id']}"
-    st.session_state.setdefault(_notes_key, editing_trip.get("notes") or "")
-    log_notes = st.text_area("Notes", key=_notes_key)
-
-    st.divider()
-    st.markdown("#### Fish caught")
-    _edit_fish_key = f"edit_fish_list_{edit_trip_id}_{spot['spot_id']}"
-    _edit_fish_list = editing_cond.get("fish")
-    st.session_state.setdefault(_edit_fish_key, list(_edit_fish_list) if isinstance(_edit_fish_list, list) else [])
-    edit_fish_records = st.session_state[_edit_fish_key]
-
-    if edit_fish_records:
-        for i, fish in enumerate(edit_fish_records):
-            frow1, frow2 = st.columns([5, 1])
-            frow1.write(f"🐟 Fish #{i + 1}: {', '.join(str(b) for b in _fish_summary_bits(fish))}")
-            if frow2.button("Remove", key=f"edit_remove_fish_{edit_trip_id}_{spot['spot_id']}_{i}"):
-                edit_fish_records.pop(i)
-                st.session_state[_edit_fish_key] = edit_fish_records
-                st.rerun()
-    else:
-        st.caption("No fish logged yet for this trip.")
-
-    _edit_fish_seq_key = f"edit_fish_seq_{edit_trip_id}_{spot['spot_id']}"
-    st.session_state.setdefault(_edit_fish_seq_key, 0)
-    _efseq = st.session_state[_edit_fish_seq_key]
-    with st.container(border=True):
-        st.markdown("**Add a fish**")
-        species_idx = st.selectbox(
-            "Species", options=list(range(len(FISH_SPECIES_OPTIONS))), format_func=lambda j: FISH_SPECIES_OPTIONS[j],
-            key=f"edit_new_fish_species_{edit_trip_id}_{spot['spot_id']}_{_efseq}",
-        )
-        species_label = FISH_SPECIES_OPTIONS[species_idx]
-        species_other = ""
-        if species_label == "Other (type in species)":
-            species_other = st.text_input("Species (type it in)", key=f"edit_new_fish_species_other_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        weight_lb_value = _weight_input(f"edit_new_fish_weight_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        length_in_value = _length_input(f"edit_new_fish_length_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        # Punch-list #33: st.pills, same reasoning as _fish_entry_dialog's
-        # own "Type of hit" field above - see that call site's comment.
-        hit_types = st.pills(
-            "Type of hit", HIT_TYPE_OPTIONS, selection_mode="multi",
-            key=f"edit_new_fish_hit_types_{edit_trip_id}_{spot['spot_id']}_{_efseq}",
-        )
-        rc1, rc2 = st.columns(2)
-        retrieve_style = rc1.selectbox("Retrieve style", RETRIEVE_STYLE_OPTIONS, key=f"edit_new_fish_style_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        retrieve_speed = rc2.selectbox("Retrieve speed", RETRIEVE_SPEED_OPTIONS, index=1, key=f"edit_new_fish_speed_{edit_trip_id}_{spot['spot_id']}_{_efseq}")
-        if st.button("Add fish", key=f"edit_new_fish_add_{edit_trip_id}_{spot['spot_id']}_{_efseq}", type="primary", width='stretch'):
-            edit_fish_records.append(_new_fish_from_form(
-                species_label, species_other, weight_lb_value, length_in_value, hit_types, retrieve_style, retrieve_speed,
-            ))
-            st.session_state[_edit_fish_key] = edit_fish_records
-            st.session_state[_edit_fish_seq_key] = _efseq + 1
-            st.rerun()
-
-    st.divider()
-    save_col, cancel_col = st.columns(2)
-    if save_col.button("💾 Save changes", key=f"save_edit_{spot['spot_id']}", type="primary", width='stretch'):
-        fish_weights = [f["weight_lb"] for f in edit_fish_records if f.get("weight_lb")]
-        conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, edit_start_time, edit_segment_name, angler=resolved_angler)
-        conditions.update({
-            "lure_category": selected_lure_item.get("category") if selected_lure_item else None,
-            "trailer_used": use_trailer,
-            "trailer_name": trailer_name or None,
-            "trailer_color": trailer_color or None,
-            "trailer_category": trailer_category,
-            "lure_start_time": edit_start_time.isoformat() if edit_start_time else None,
-            "lure_end_time": editing_cond.get("lure_end_time"),
-            "fish": edit_fish_records,
-            "source": "spot_session",
-        })
-        entry = TripEntry(
-            trip_id=edit_trip_id,
-            logged_at=editing_trip.get("logged_at") or datetime.utcnow().isoformat(),
-            trip_date=session_date.isoformat(),
-            segment=edit_segment_name,
-            spot_id=spot["spot_id"],
-            spot_name=spot["name"],
-            structure_type=structure_type,
-            water_clarity=water_clarity,
-            lure_used=lure_used,
-            color_used=color_used,
-            technique_used="",
-            fish_caught=sum((f.get("count") or 1) for f in edit_fish_records),
-            biggest_fish_lb=max(fish_weights) if fish_weights else None,
-            predicted_score=score_result.score,
-            conditions=conditions,
-            notes=log_notes,
-        )
-        update_trip(entry)
-        _push_paths = [TRIP_LOG_PATH]
-        if _save_new_angler_if_needed():
-            _push_paths.append(ANGLERS_PATH)
-        _push_or_toast(
-            _push_paths, f"Update trip {entry.trip_id} from spot session edit ({spot['name']})",
-            "Trip updated locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
-        )
-        _exit_edit_mode()
-        st.rerun()
-    if cancel_col.button("Cancel edit", key=f"cancel_edit_bottom_{spot['spot_id']}", width='stretch'):
-        _exit_edit_mode()
-        st.rerun()
-
-    st.stop()
 
 
 # ==============================================================================
@@ -2085,6 +1818,15 @@ else:
             cond_values, session_date, bundle, at_time, segment_name,
         )
         base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler=resolved_angler)
+        # Punch-list #55: a real session_id, stamped once here and reused by
+        # every lure this session ever writes (including ones added later
+        # via _add_lure_to_active_session()) - lets Trip History group every
+        # lure/fish from one outing into a single record. Rows written
+        # before this existed have no session_id; Trip History treats those
+        # as their own single-lure "session" rather than guessing at
+        # grouping from date/spot/timestamp proximity (see that page's own
+        # docstring for why).
+        session_id = str(uuid.uuid4())[:8]
 
         active_lures = []
         for lure in pending_lures:
@@ -2116,6 +1858,7 @@ else:
                 predicted_score=score_result.score,
                 conditions=lure_conditions,
                 notes="",
+                session_id=session_id,
             )
             entry = TripEntry(**entry_kwargs)
             append_trip(entry)
@@ -2138,6 +1881,7 @@ else:
             # lure.
             "base_conditions": base_conditions,
             "lures": active_lures,
+            "session_id": session_id,
         }
         st.session_state[session_build_seq_key] = session_build_seq + 1
         # Punch-list #53: this build is no longer "pending" - it's active
