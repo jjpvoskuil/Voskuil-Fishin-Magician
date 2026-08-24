@@ -7289,6 +7289,57 @@ every real save.
     describe v2's key and the 6-hour clustering safeguard in place of v1's
     now-superseded description.
 
+119. **Root-caused the "grouping isn't showing up" reports - a deploy-
+    staleness gap, not a data or logic bug** - immediate follow-up. User,
+    after filtering Trip History to 8/23-8/24: "I'd still like to group
+    this tighter... A good example is John fishing at stripe island point
+    at dawn. Ideally, these would be grouped as one session... 8/24/26
+    session was there, so that is all good."
+
+    Checked the actual live `data` branch's `trip_log.csv` directly (not
+    the running app): the 8/23 Dawn/Stripe Island Point/John group (4 rows)
+    was ALREADY correctly stamped with one shared `session_id` (`cdab3244`)
+    by entry 118's v2 backfill, pushed before this report came in. So the
+    persisted data was already right - the user's live app was showing
+    something stale.
+
+    Root cause: `app.py`'s `_sync_data_once()` (punch-list #52) is
+    `st.cache_resource`-guarded to run exactly ONCE PER PROCESS BOOT, by
+    design - it exists to overlay `data/` with the `data` branch's latest
+    content when the app *starts*, not to keep polling GitHub on every
+    page view. That's correct for how real in-app saves work (Spot Session
+    writes locally then pushes - the LOCAL file the running process reads
+    is already current for its own saves). But a change pushed to `data`
+    from OUTSIDE the running app - exactly what a Claude coding session's
+    backfill script does - has no way to reach that already-running
+    process's local disk until it next reboots. Entries 117/118 got a free
+    reboot from this session's own `main` pushes landing around the same
+    time, which is why 8/24 "was there" (that process boot's sync happened
+    to catch a mid-session backfill state) while 8/23's LATER v2 correction
+    hadn't been picked up yet by the time the user checked.
+
+    Two fixes, one immediate + one structural:
+    - Immediate: this very commit is itself a `main` push, so it triggers
+      the redeploy/reboot the user's live app needed to pick up entry
+      118's already-correct data - no separate action needed once this
+      lands.
+    - Structural: added a "🔄 Refresh from GitHub" button to the top of
+      `pages/4_Trip_History.py` (`core.storage.sync_data_from_data_branch`
+      called directly, bypassing `_sync_data_once()`'s once-per-boot
+      guard) so a user (or a future coding session) can force a resync on
+      demand instead of waiting for/needing a reboot. Documented the whole
+      gotcha in `core/storage.py`'s `sync_data_from_data_branch()`
+      docstring for the next coding session that pushes a data-only fix
+      straight to the `data` branch.
+
+    **Verification:** confirmed via a direct fetch of the live `data`
+    branch that the 8/23 grouping was already correct before writing any
+    code this round. Scratch AppTest confirms the new button renders and
+    the no-token path (this sandbox has none) behaves cleanly. `pytest
+    tests/ -q` still passing (no `core/*.py` behavior change, only a
+    docstring addition + a new call site). Confirmed via a fresh `git
+    clone` into a new temp dir.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

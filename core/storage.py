@@ -335,6 +335,22 @@ def sync_data_from_data_branch(
     one-time cutover), a transient network/auth error - any of these just
     means the app keeps running on whatever's already on disk, exactly as
     it did before this function existed.
+
+    **A future coding session should know:** because app.py only calls this
+    ONCE per process boot, a change pushed straight to DATA_BRANCH from
+    OUTSIDE a live running app - a hand-run data migration/backfill script,
+    a manual CSV edit, anything committed and pushed the way a Claude
+    coding session does it - will NOT be visible in the already-running
+    live app until that process next restarts (a `main` push triggers one;
+    Streamlit Cloud's own idle-reboot cycle is the other). Confirmed via a
+    real case: the punch-list #55 session_id backfill (SESSION_NOTES.md
+    entries 117/118) was pushed to `data` correctly, but the user reported
+    seeing stale (ungrouped) sessions in the live app afterward - the data
+    was right, the running process just hadn't re-synced yet. Two ways to
+    close that gap for a user waiting right now: (1) push any real commit
+    to `main` (triggers a redeploy, which reboots and re-syncs), or (2) use
+    the manual "🔄 Refresh from GitHub" button on Trip History (entry 119),
+    which calls this function directly, bypassing the once-per-boot guard.
     """
     if not github_token:
         return False, "No GITHUB_TOKEN configured - using whatever data/ already has locally."
