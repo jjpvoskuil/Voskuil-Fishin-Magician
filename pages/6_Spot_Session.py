@@ -29,7 +29,10 @@ from core.activity_log import (
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
 from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
-from core.storage import TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, read_all_trips, update_trip, delete_trip
+from core.storage import (
+    TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, push_pending_data,
+    read_all_trips, update_trip, delete_trip,
+)
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
@@ -977,13 +980,126 @@ def _fish_summary_bits(fish: dict) -> list:
     return bits
 
 
+# --- Push-health tracking + autosave retry (punch-list #58) -----------------
+# The angler's own report: a save happens (every fish/lure/etc. already
+# writes to data/trip_log.csv and pushes immediately - see each handler
+# below), but if that push doesn't land on GitHub for any reason, the row
+# only exists on THIS process's local disk. That's invisible and harmless
+# right up until the process itself restarts (a real code deploy, or - the
+# suspected cause of the actual incident this was built for - a resource-
+# limit restart on Streamlit Community Cloud with no code push involved at
+# all) - at which point the fresh process's data/ is whatever the "data"
+# branch last had, silently dropping anything that was only ever
+# committed-not-pushed in the now-dead process. core.storage's retry/backoff
+# (punch-list #58) makes any ONE push attempt considerably more resilient to
+# a flaky connection, but that alone still leaves a gap: a push that fails
+# even after those retries (GITHUB_TOKEN briefly bad, a longer outage) just
+# sits there unpushed with nothing else ever trying again - until the very
+# next real save happens to succeed and carries it along for free (a `git
+# push` always sends everything HEAD is ahead by, not just the newest
+# commit). If a while passes with no new save (thinking, watching a bobber,
+# between spots) and the process dies in that window, it's gone regardless
+# of how good the retry-per-attempt logic is.
+#
+# _PUSH_HEALTH_KEY tracks whether the LAST push attempt actually succeeded,
+# independent of which action triggered it. Whenever it's failing, the
+# "session in progress" view below shows a persistent (not a toast that can
+# be missed) warning with a manual retry button, AND a background
+# st.fragment(run_every=...) heartbeat (see _autosave_heartbeat() below)
+# keeps quietly retrying on its own every 30s the tab stays open and
+# connected - belt (visible + actionable) and suspenders (automatic),
+# exactly what was asked for. This closes the gap for as long as the
+# process itself survives; it can't do anything about data that was only
+# ever local to a process that's already gone - the real fix for that is
+# making each individual push attempt (and the retries around it) as
+# resilient as reasonably possible, which is what core.storage's own
+# punch-list #58 changes are for.
+_PUSH_HEALTH_KEY = "_push_health"
+
+
+def _push_health() -> dict:
+    return st.session_state.setdefault(
+        _PUSH_HEALTH_KEY, {"ok": True, "message": "", "consecutive_failures": 0},
+    )
+
+
+def _record_push_result(ok: bool, message: str):
+    health = _push_health()
+    if ok:
+        health["ok"] = True
+        health["consecutive_failures"] = 0
+        health["message"] = ""
+    else:
+        health["ok"] = False
+        health["consecutive_failures"] = health.get("consecutive_failures", 0) + 1
+        health["message"] = message
+    st.session_state[_PUSH_HEALTH_KEY] = health
+
+
 def _push_or_toast(paths, commit_message, local_message):
     token = github_token()
     if token:
         ok, msg = commit_and_push_data(paths, token, repo_slug(), commit_message)
+        _record_push_result(ok, msg)
         st.toast(msg, icon="✅" if ok else "⚠️")
     else:
+        # No token at all isn't a "failing push" in the retry-worthy sense -
+        # there's nothing to retry until one's configured - so this
+        # deliberately doesn't touch push health/trigger the warning banner.
         st.toast(local_message, icon="ℹ️")
+
+
+def _retry_pending_push(show_toast: bool = True) -> bool:
+    """Manual/heartbeat retry of whatever's already committed locally but
+    hasn't reached GitHub yet - see the block comment above. Safe to call
+    any time, including when nothing's actually pending (push_pending_data
+    is a harmless no-op then) - so both the manual "🔁 Retry save now"
+    button and the automatic heartbeat can call this unconditionally
+    without first checking whether there's really something to retry."""
+    token = github_token()
+    if not token:
+        return False
+    ok, msg = push_pending_data(token, repo_slug())
+    _record_push_result(ok, msg)
+    if show_toast:
+        st.toast(msg, icon="✅" if ok else "⚠️")
+    return ok
+
+
+def _render_push_health_banner():
+    """Persistent (not a toast - those can be missed, especially mid-cast)
+    warning shown right at the top of an in-progress session whenever the
+    last push attempt failed, with a manual retry button. Silent/renders
+    nothing when the last push succeeded or none has happened yet."""
+    health = _push_health()
+    if health.get("ok", True):
+        return
+    n = health.get("consecutive_failures", 1)
+    st.warning(
+        f"⚠️ The last {n} save{'s' if n != 1 else ''} couldn't reach GitHub yet "
+        f"(saved on this device, just not backed up there) - {health.get('message', '')}. "
+        "Everything you log keeps working normally, and this keeps retrying automatically "
+        "every 30 seconds while this page stays open - tap below to retry right now instead."
+    )
+    if st.button("🔁 Retry save now", key="retry_pending_push_btn"):
+        if _retry_pending_push():
+            st.rerun()
+
+
+@st.fragment(run_every=30)
+def _autosave_heartbeat():
+    """Punch-list #58: a periodic, no-interaction-required retry of any
+    currently-unpushed save, running independently of whatever the angler
+    is doing on the rest of the page - the "even if I don't touch anything
+    for a while" half of the autosave ask. st.fragment(run_every=30) means
+    this one small block re-executes on its own every 30 seconds the
+    browser tab stays open and connected, without rerunning (or blocking)
+    the rest of the page. Only actually does anything when the last known
+    push attempt failed - otherwise push_pending_data() is a cheap no-op
+    ("Everything up-to-date"), so this doesn't hammer GitHub every 30
+    seconds during a session where every save has been landing fine."""
+    if not _push_health().get("ok", True):
+        _retry_pending_push(show_toast=False)
 
 
 def _record_fish(spot_id: str, lure_index: int, fish_record: dict, angler: str = ""):
@@ -1496,6 +1612,14 @@ if active is not None:
         f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"
     )
     st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
+
+    # Punch-list #58: persistent save-health warning + silent 30s background
+    # retry heartbeat - see the block comment above _push_or_toast() for the
+    # full "why". Rendered/started once here, right under the session
+    # header, so it's visible no matter how far down the angler has
+    # scrolled to tap a lure or open "Add a lure to this session."
+    _render_push_health_banner()
+    _autosave_heartbeat()
 
     retired_lures = []
     for i, lure in enumerate(active["lures"]):

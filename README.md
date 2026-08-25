@@ -578,16 +578,45 @@ restarts/redeploys. Without a token, entries still work but only persist for tha
 session.
 
 Every push (trip log, inventory, saved spots, punch-list, water-quality log, angler
-roster) goes through `core.storage.commit_and_push()`, which now retries on a rejected
-push: if it comes back non-fast-forward (another device saved in the moment between this
-one's own last fetch and its push), it fetches, rebases onto the latest remote commit,
-and tries again, up to a few attempts before giving up and telling you to retry the save
-yourself. `.gitattributes` marks every `data/*.csv` file `merge=union`, so two
-independent appends to the same file (the common case - two people logging separate
-trips) rebase cleanly without a real conflict; a genuine same-row edit from two devices
-at once isn't caught by that rule and will silently produce two rows rather than
-blocking, so if that ever happens, check Trip History for a duplicate rather than
-assuming one save quietly overwrote the other.
+roster) goes through `core.storage.commit_and_push()`, which retries a failed push
+instead of giving up on the first try: a rejected/non-fast-forward push (another device
+saved in the moment between this one's own last fetch and its push) fetches, rebases
+onto the latest remote commit, and tries again; a plain transient network failure
+(dropped connection, DNS hiccup, GitHub's edge returning a 5xx - all expected sometimes
+when this app is used standing at the lake on spotty cell signal, punch-list #58) gets
+the same kind of automatic retry with a short backoff between attempts, no fetch/rebase
+needed since nothing about the remote actually changed. Either way it's a few attempts
+before giving up and telling you to retry yourself. `.gitattributes` marks every
+`data/*.csv` file `merge=union`, so two independent appends to the same file (the common
+case - two people logging separate trips) rebase cleanly without a real conflict; a
+genuine same-row edit from two devices at once isn't caught by that rule and will
+silently produce two rows rather than blocking, so if that ever happens, check Trip
+History for a duplicate rather than assuming one save quietly overwrote the other.
+
+**Autosave, and what happens when a save can't reach GitHub (punch-list #58).** Every
+fish you log, lure you add, and lure you retire already writes to `data/trip_log.csv`
+and pushes immediately - not batched until the end of the session - so nothing you've
+already logged depends on this page staying open or your connection staying up.
+What used to be a real gap: if a push failed for any reason OTHER than a rejected
+push (a dropped connection, GitHub having a bad moment), nothing ever tried it again -
+the save just sat committed on this device only, invisible and harmless right up until
+the app process itself restarted (a real code deploy, or a resource-limit restart with
+no code change involved at all - suspected cause of a real incident: an hour-long Spot
+Session lost every fish it had logged, because none of it had ever actually reached
+GitHub, and reconnecting found nothing to pick back up from). Two things close that
+gap now: every push attempt itself retries harder (see above), and while a session is
+in progress, Spot Session runs a quiet background check every 30 seconds
+(`st.fragment(run_every=30)`) that retries any push still stuck locally-only - no tap
+required. If a save is currently stuck, a persistent (not a toast - easy to miss
+mid-cast) warning banner appears at the top of the session with a "🔁 Retry save now"
+button, so you always know when something hasn't backed up yet instead of assuming
+silence means success. This can't do anything about data that was only ever local to a
+process that's already gone by the time it's retried - the fix for that is making the
+push itself as resilient as reasonably possible before that can happen, which is what
+this actually does. A genuinely dropped connection at the exact moment you're mid-form
+(typing a fish's weight, not yet tapped "✅ Record") is still a real gap - see "Known
+limitations" below and entry 90 in `SESSION_NOTES.md` - this app has no offline queue,
+by Streamlit's own live-round-trip architecture.
 
 **Who's fishing.** The Spot Session page opens with a "🎣 Who's fishing" picker -
 John, Matthew, Alex, or "Other" (type in a name, which is then remembered as a real

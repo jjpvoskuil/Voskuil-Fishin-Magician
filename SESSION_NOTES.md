@@ -7438,6 +7438,103 @@ every real save.
     `core/*.py` changes this round). Confirmed via a fresh `git clone`
     into a new temp dir.
 
+122. **Punch-list #57/#58: recovered a lost Spot Session, root-caused why it
+    was lost, and hardened the save path against it happening again.** The
+    angler reported: recording a Spot Session at Stripe Island Point for
+    about an hour (24 fish, all on a Heddon Super Spook Jr.), then adding a
+    lure mid-session dropped back to a blank "build a new session" screen
+    instead of picking the existing one back up - nothing from that hour
+    was there anymore.
+
+    **Recovery:** the angler had independently logged conditions + all 24
+    catches in a spreadsheet while fishing. Cross-checked `data/trip_log
+    .csv` on the `data` branch and confirmed zero rows existed for that
+    date - the whole session, including the 2 lures added at 7:50 AM (name
+    supplied separately by the angler, matched to existing tackle-box
+    items), had never reached GitHub at all. Recreated it with a one-off
+    script calling the same `core.storage`/`core.scoring`/`core.onwater`
+    functions the real page uses (predicted_score computed the same way,
+    `bundle=None` since no live weather is fetchable after the fact -
+    same graceful-degradation path the page itself takes on a failed
+    fetch), so the 3 resulting `TripEntry` rows are shaped exactly like
+    ones the app would have written live, sharing one real `session_id`.
+
+    **Root cause:** every fish/lure/etc. already writes to `data/trip_log
+    .csv` and pushes immediately (this was already true - confirmed, not a
+    gap). The real gap was in `core.storage.commit_and_push()`: only a
+    rejected/non-fast-forward push got retried - any OTHER failure (a
+    dropped connection, GitHub having a bad moment) returned immediately
+    and NOTHING ever tried again. A commit that fails to push that way just
+    sits on that one process's local disk - fine as long as the process
+    keeps running (the next real save's own push carries it along for
+    free, since `git push` sends everything HEAD is ahead by), but gone
+    for good if the process restarts first, since a fresh boot is a clean
+    checkout from GitHub with no memory of the dead process's local-only
+    commits. `git log main` showed no code push during the session's
+    window (ruling out a redeploy), which points at a resource-limit
+    restart on Streamlit Community Cloud - a known failure mode on that
+    hosting tier, and one this app can't prevent from app code, only make
+    much less costly when it happens.
+
+    **Fix (`core/storage.py`):** `commit_and_push()`'s retry loop now also
+    retries a plain transient network failure (dropped connection, DNS
+    hiccup, GitHub 5xx - matched via `_is_transient_network_error()` against
+    known flaky-connection phrasing) the same way it already retried a
+    rejected push, with a short backoff between attempts - genuinely
+    expected outdoors on spotty cell signal. New `push_pending()` /
+    `push_pending_data()`: retries whatever's ALREADY committed locally
+    without adding/committing anything new - the piece `commit_and_push()`
+    alone can't provide, since it only even attempts a push when there's a
+    fresh diff to stage. Safe to call anytime, including when nothing's
+    pending (a plain no-op).
+
+    **Fix (`pages/6_Spot_Session.py`):** a new push-health tracker
+    (`st.session_state["_push_health"]`, updated by every `_push_or_toast()`
+    call - i.e. every save on this page, for free) plus two new pieces
+    only shown/run while a session is in progress: a persistent warning
+    banner (not a toast - too easy to miss mid-cast) with a manual
+    "🔁 Retry save now" button whenever the last push failed, and a quiet
+    `st.fragment(run_every=30)` heartbeat that retries on its own every 30
+    seconds the tab stays open and connected, with no interaction required
+    - the actual "autosave, periodically, even if I'm not touching
+    anything" ask. Belt (visible + actionable) and suspenders (automatic).
+    Explicitly scoped to Spot Session only, not every data-saving page -
+    that's where an in-progress, time-sensitive session actually lives;
+    the underlying `core.storage` retry/backoff improvements benefit every
+    page's saves regardless. A genuinely dropped connection at the exact
+    moment of an unsubmitted form (mid-typing a fish's weight, not yet
+    tapped "✅ Record") is still a real gap, unchanged from entry 90's
+    "no offline queue" limitation - this closes the "already-saved data
+    silently vanishes" gap, not "a truly live network outage loses
+    whatever you were mid-typing," which no amount of retry-after-the-fact
+    can fix without an offline-capable client this app doesn't have.
+
+    **Verification:** `tests/test_storage.py` gained real-git-backed tests
+    for the transient-retry path (a flaky push that recovers after 2
+    failures), the give-up path (a persistently transient failure),
+    `push_pending()`'s core scenario (an already-committed, never-pushed
+    change gets picked up by a later, independent call with zero new
+    changes), its no-op case, its `push_pending_data()`
+    DATA_BRANCH-hardcoded sibling, and the error-classifier itself.
+    `pytest tests/ -q`: 360 passed (353 + 7 new). A scratch interactive
+    AppTest scenario (not committed - same pattern as prior rounds) drove
+    the actual UI path end to end: picked a spot with no open session,
+    added a lure, Start Session (first real exercise of the new banner/
+    heartbeat code, since the smoke-tested pages don't have an active
+    session), confirmed a no-token save does NOT trip the warning (by
+    design), then monkeypatched a failing push and confirmed the banner +
+    retry button appear and a successful retry clears it. Also re-ran the
+    full page smoke test (all 9 pages, weather/lake-level fixtures mocked
+    - this sandbox has no outbound network) with the recreated session's
+    real data checked out from the `data` branch, confirming Spot Session
+    correctly shows that session as already-ended (all rows have a real
+    `lure_end_time`) rather than as still-open. Confirmed via a fresh `git
+    clone` into a new temp dir.
+
+    **Punch-list #57** was logged (and marked Done) describing the
+    incident and the ask, per the standing workflow of tracking a fixed
+    item on the Development page even when it's resolved same-session.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
