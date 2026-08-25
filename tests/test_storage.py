@@ -243,7 +243,7 @@ def test_commit_and_push_gives_up_after_max_retries(tmp_path, bare_and_seed, mon
     ok, msg = storage.commit_and_push(
         ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
         commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
-        max_push_retries=3,
+        max_push_retries=3, retry_backoff_seconds=0,
     )
     assert ok is False
     assert "after 3 attempts" in msg
@@ -369,3 +369,146 @@ def test_sync_data_from_data_branch_no_token(tmp_path, bare_and_seed):
     ok, msg = storage.sync_data_from_data_branch(github_token="", repo_slug="a/b", repo_root=repo)
     assert ok is False
     assert "No GITHUB_TOKEN" in msg
+
+
+# --- Punch-list #58: transient-network retry + push_pending() ---------------
+# The session-loss investigation: a save that fails to push for a plain
+# transient reason (dropped connection, DNS hiccup, a GitHub 5xx - all
+# expected sometimes when this app is used standing at the lake on spotty
+# cell signal) used to behave exactly like a hard failure - one attempt, then
+# give up, leaving the commit sitting locally-only until some LATER save
+# happens to succeed and carry it along. These tests cover the two-part fix:
+# commit_and_push() now retries a transient failure the same way it already
+# retried a rejected push, and push_pending() gives autosave a way to retry
+# an already-committed-but-unpushed save on its own, without needing a new
+# change to trigger it.
+
+def test_commit_and_push_retries_transient_network_error_then_succeeds(tmp_path, bare_and_seed, monkeypatch):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+
+    push_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "push"]:
+            push_calls.append(args)
+            if len(push_calls) < 3:
+                return subprocess.CompletedProcess(
+                    args, returncode=128, stdout="",
+                    stderr="fatal: unable to access 'https://github.com/...': Could not resolve host: github.com",
+                )
+            return real_run(args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+        max_push_retries=5, retry_backoff_seconds=0,
+    )
+    assert ok is True, msg
+    assert "Saved and pushed" in msg
+    assert len(push_calls) == 3  # two transient failures, then a real (unpatched) push succeeds
+
+
+def test_commit_and_push_gives_up_after_max_retries_on_persistent_transient_error(tmp_path, bare_and_seed, monkeypatch):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+
+    push_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "push"]:
+            push_calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=128, stdout="", stderr="fatal: Connection timed out")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+        max_push_retries=3, retry_backoff_seconds=0,
+    )
+    assert ok is False
+    assert "after 3 attempts" in msg
+    assert len(push_calls) == 3
+
+
+def test_push_pending_retries_and_eventually_pushes_an_already_committed_change(tmp_path, bare_and_seed):
+    """The core punch-list #58 scenario: a prior commit_and_push_data() call
+    committed locally but its push kept failing (simulated here by just
+    never calling push at all the first time - i.e. the commit sits
+    unpushed) - a LATER, independent push_pending_data() call (autosave's
+    heartbeat/manual retry, with no new file changes at all) should still
+    get that commit onto the remote."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,caught while offline\n")
+    subprocess.run(["git", "add", "data/trip_log.csv"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "committed locally, never pushed"], cwd=repo, check=True)
+
+    # Nothing new to add/commit - push_pending must still find and push the
+    # already-committed change above.
+    ok, msg = storage.push_pending(
+        github_token="x", repo_slug="unused/unused", branch="main",
+        repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+    assert "Saved and pushed" in msg
+
+    on_remote = subprocess.run(
+        ["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed, capture_output=True, text=True, check=True,
+    )
+    assert "caught while offline" in on_remote.stdout
+
+
+def test_push_pending_is_a_harmless_noop_when_nothing_is_pending(tmp_path, bare_and_seed):
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    ok, msg = storage.push_pending(
+        github_token="x", repo_slug="unused/unused", branch="main",
+        repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+
+def test_push_pending_no_token():
+    ok, msg = storage.push_pending(github_token="", repo_slug="a/b")
+    assert ok is False
+    assert "No GITHUB_TOKEN" in msg
+
+
+def test_push_pending_data_lands_on_data_branch(tmp_path, bare_and_seed):
+    """push_pending_data (the DATA_BRANCH-hardcoded sibling autosave should
+    actually call) must retry against 'data', never 'main' - same
+    redeploy-storm concern commit_and_push_data() itself exists for."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,pending save\n")
+    ok, _ = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="pending save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+
+    ok2, msg2 = storage.push_pending_data(
+        github_token="x", repo_slug="unused/unused", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok2 is True, msg2  # already pushed above - this should be a harmless no-op, not an error
+
+    on_data = subprocess.run(
+        ["git", "show", f"{storage.DATA_BRANCH}:data/trip_log.csv"], cwd=bare_and_seed,
+        capture_output=True, text=True, check=True,
+    )
+    assert "pending save" in on_data.stdout
+    on_main = subprocess.run(
+        ["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed, capture_output=True, text=True, check=True,
+    )
+    assert "pending save" not in on_main.stdout
+
+
+def test_is_transient_network_error_matches_common_flaky_connection_phrasing():
+    assert storage._is_transient_network_error("fatal: unable to access 'https://...': Could not resolve host: github.com")
+    assert storage._is_transient_network_error("error: RPC failed; curl 56 Recv failure: Connection reset by peer")
+    assert storage._is_transient_network_error("fatal: The requested URL returned error: 503")
+    assert not storage._is_transient_network_error("fatal: Authentication failed for 'https://...'")
+    assert not storage._is_transient_network_error("! [rejected] main -> main (non-fast-forward)")

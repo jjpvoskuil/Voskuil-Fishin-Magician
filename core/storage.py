@@ -61,6 +61,7 @@ import csv
 import io
 import json
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
@@ -187,6 +188,120 @@ def _resolve_remote_url(github_token: str, repo_slug: str, remote_url: Optional[
     return remote_url or f"https://x-access-token:{github_token}@github.com/{repo_slug}.git"
 
 
+# Punch-list #58 (session-loss investigation): substrings seen in real git
+# push failures caused by a flaky/dropped connection rather than something
+# that retrying won't fix (bad auth, a real conflict). This app is used
+# standing at the lake on spotty cell signal, so "the push itself timed out
+# or the socket dropped" is expected to happen sometimes - worth a few
+# automatic retries, unlike e.g. "Authentication failed" which will just
+# fail again instantly. Deliberately conservative (matches only known
+# transient-network phrasing) so a real auth/permissions problem still
+# fails fast instead of burning through retries pointlessly.
+_TRANSIENT_ERROR_MARKERS = (
+    "could not resolve host",
+    "connection timed out",
+    "connection reset",
+    "connection refused",
+    "operation timed out",
+    "network is unreachable",
+    "temporarily unavailable",
+    "empty reply from server",
+    "recv failure",
+    "ssl_read",
+    "the requested url returned error: 5",  # 502/503/504 from GitHub's edge
+    "unable to access",
+)
+
+
+def _is_transient_network_error(stderr: str) -> bool:
+    lowered = (stderr or "").lower()
+    return any(marker in lowered for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+def _push_with_retries(
+    remote: str,
+    branch: str,
+    repo_root: Path,
+    max_push_retries: int,
+    retry_backoff_seconds: float,
+) -> tuple:
+    """Shared push-and-recover loop used by both commit_and_push() (right
+    after it commits something new) and push_pending() (retrying whatever
+    was already committed locally by a PRIOR call that failed to reach the
+    remote). Never adds/commits anything itself - purely "try to get
+    whatever's on HEAD onto `branch`."
+
+    Two distinct failure modes get an automatic retry, each handled
+    differently, same split as before this was extracted into its own
+    function:
+    - A rejected/non-fast-forward push (someone else's save landed first) -
+      fetch + rebase onto the latest remote commit, then retry the push.
+    - A transient network error (dropped connection, DNS hiccup, GitHub's
+      edge returning a 5xx) - just retry the push itself after a short
+      backoff, no fetch/rebase needed since nothing about the remote
+      actually changed.
+    Anything else (auth failure, a real rebase conflict) returns
+    immediately - retrying those just burns time for a result that won't
+    change.
+    """
+    last_error = ""
+    for attempt in range(1, max_push_retries + 1):
+        push = subprocess.run(
+            ["git", "push", remote, f"HEAD:{branch}"],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+        if push.returncode == 0:
+            return True, "Saved and pushed to GitHub."
+
+        stderr = push.stderr or ""
+        last_error = stderr.strip() or push.stdout.strip()
+        rejected = (
+            "[rejected]" in stderr
+            or "non-fast-forward" in stderr
+            or "fetch first" in stderr
+        )
+        transient = _is_transient_network_error(stderr)
+        if not (rejected or transient):
+            return False, f"Saved locally, but push failed: {last_error}"
+        if attempt == max_push_retries:
+            break
+
+        if rejected:
+            fetch = subprocess.run(
+                ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+            )
+            if fetch.returncode != 0:
+                if _is_transient_network_error(fetch.stderr or ""):
+                    # The fetch itself hit the same kind of flaky-connection
+                    # error the push did - worth another full loop rather
+                    # than giving up on the whole retry chain over one
+                    # dropped fetch.
+                    time.sleep(retry_backoff_seconds * attempt)
+                    continue
+                return False, f"Saved locally, but push failed and the retry fetch also failed: {fetch.stderr.strip()}"
+
+            rebase = subprocess.run(
+                ["git", "rebase", "FETCH_HEAD"], cwd=repo_root, capture_output=True, text=True,
+            )
+            if rebase.returncode != 0:
+                subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+                return False, (
+                    "Saved locally, but another device's save conflicted with this one "
+                    "and couldn't be auto-merged - please retry the save."
+                )
+            # Rebased onto the latest remote branch - loop around and retry the push.
+        else:
+            # Transient network failure, not a rejection - nothing about the
+            # remote branch changed, so just wait a beat and try the exact
+            # same push again (a dropped cell signal often recovers within
+            # a few seconds).
+            time.sleep(retry_backoff_seconds * attempt)
+
+    return False, (
+        f"Saved locally, but push failed after {max_push_retries} attempts: {last_error}"
+    )
+
+
 def commit_and_push(
     paths: list,
     github_token: str,
@@ -196,6 +311,7 @@ def commit_and_push(
     repo_root: Path = REPO_ROOT,
     max_push_retries: int = 3,
     remote_url: Optional[str] = None,
+    retry_backoff_seconds: float = 1.0,
 ) -> tuple:
     """
     Commit the given paths (files or directories, repo-relative or absolute)
@@ -210,10 +326,21 @@ def commit_and_push(
     silently lost save, a rejected push is retried up to max_push_retries
     times: fetch the remote branch, rebase this commit on top of it (a
     same-file, append-only CSV change essentially never conflicts in
-    practice), and push again. Only a genuine non-fast-forward rejection is
-    retried this way - any other failure (auth, network, a real rebase
-    conflict) returns immediately with a message describing what happened,
-    same as before this retry loop existed.
+    practice), and push again.
+
+    Punch-list #58: a plain transient network failure (dropped connection,
+    DNS hiccup, a GitHub 5xx) now gets the same kind of automatic retry
+    (with a short backoff between attempts - see _push_with_retries()),
+    instead of giving up on the first try the way this used to. Only a
+    genuine non-retryable failure (bad auth, a real rebase conflict) still
+    returns immediately. This matters a lot in practice for this app: it's
+    used standing at the lake on spotty cell signal, and a save that "fails
+    once, quietly" used to just sit committed-but-unpushed on this process's
+    local disk - fine as long as the process keeps running, but gone for
+    good if it ever restarts before a later save happens to succeed and
+    carry it along. See push_pending() below for the other half of this
+    fix - retrying an already-committed, still-unpushed save on its own,
+    without needing a brand new change to trigger it.
 
     repo_root defaults to the real repo checkout (REPO_ROOT) so every real
     caller behaves exactly as before; tests point it at a throwaway git repo
@@ -224,7 +351,9 @@ def commit_and_push(
     repo_slug exactly as before); tests pass a local file:// bare-repo URL
     instead, so the retry/rebase logic below can be exercised against real
     git plumbing (a genuine concurrent-push race) rather than only mocked
-    subprocess calls.
+    subprocess calls. retry_backoff_seconds defaults to a real (if short)
+    delay for production use; tests pass 0 so the retry-exhaustion cases
+    don't slow the suite down.
     """
     if not github_token:
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
@@ -237,51 +366,43 @@ def commit_and_push(
         if diff.returncode == 0:
             return True, "No changes to commit."
         subprocess.run(["git", "commit", "-m", commit_message], cwd=repo_root, check=True)
-
-        last_error = ""
-        for attempt in range(1, max_push_retries + 1):
-            push = subprocess.run(
-                ["git", "push", remote, f"HEAD:{branch}"],
-                cwd=repo_root, capture_output=True, text=True,
-            )
-            if push.returncode == 0:
-                return True, "Saved and pushed to GitHub."
-
-            stderr = push.stderr or ""
-            last_error = stderr.strip() or push.stdout.strip()
-            rejected = (
-                "[rejected]" in stderr
-                or "non-fast-forward" in stderr
-                or "fetch first" in stderr
-            )
-            if not rejected:
-                return False, f"Saved locally, but push failed: {last_error}"
-            if attempt == max_push_retries:
-                break
-
-            fetch = subprocess.run(
-                ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
-            )
-            if fetch.returncode != 0:
-                return False, f"Saved locally, but push failed and the retry fetch also failed: {fetch.stderr.strip()}"
-
-            rebase = subprocess.run(
-                ["git", "rebase", "FETCH_HEAD"], cwd=repo_root, capture_output=True, text=True,
-            )
-            if rebase.returncode != 0:
-                subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
-                return False, (
-                    "Saved locally, but another device's save conflicted with this one "
-                    "and couldn't be auto-merged - please retry the save."
-                )
-            # Rebased onto the latest remote branch - loop around and retry the push.
-
-        return False, (
-            f"Saved locally, but push failed after {max_push_retries} attempts "
-            f"(another device kept saving at the same time): {last_error}"
-        )
+        return _push_with_retries(remote, branch, repo_root, max_push_retries, retry_backoff_seconds)
     except subprocess.CalledProcessError as e:
         return False, f"Saved locally, but push failed: {e}"
+
+
+def push_pending(
+    github_token: str,
+    repo_slug: str,
+    branch: str = "main",
+    repo_root: Path = REPO_ROOT,
+    max_push_retries: int = 3,
+    remote_url: Optional[str] = None,
+    retry_backoff_seconds: float = 1.0,
+) -> tuple:
+    """Punch-list #58: retries pushing whatever's ALREADY committed locally
+    on `branch`'s ref, without adding or committing anything new. This is
+    the piece commit_and_push() alone can't provide: if a prior
+    commit_and_push()/commit_and_push_data() call committed a change locally
+    but failed to push it (a dropped connection, GitHub having a bad
+    moment), that commit just sits on local disk - fine as long as this
+    process keeps running (the next real save's own commit_and_push() call
+    will happily carry it along, since a git push always sends everything
+    HEAD is ahead of the remote by, not just the newest commit), but gone
+    for good if the process restarts first. Calling this on a timer (see
+    pages/6_Spot_Session.py's autosave heartbeat) closes that window by
+    retrying on its own, without waiting for the next real change.
+
+    Safe to call anytime, including when there's nothing pending - `git
+    push` on a branch that's already up to date is a fast, harmless no-op
+    (returns success)."""
+    if not github_token:
+        return False, "No GITHUB_TOKEN configured - saved locally only for this session."
+    try:
+        remote = _resolve_remote_url(github_token, repo_slug, remote_url)
+        return _push_with_retries(remote, branch, repo_root, max_push_retries, retry_backoff_seconds)
+    except subprocess.CalledProcessError as e:
+        return False, f"Push failed: {e}"
 
 
 def commit_and_push_data(
@@ -292,6 +413,7 @@ def commit_and_push_data(
     repo_root: Path = REPO_ROOT,
     max_push_retries: int = 3,
     remote_url: Optional[str] = None,
+    retry_backoff_seconds: float = 1.0,
 ) -> tuple:
     """Punch-list #52: the function every real in-app data save should call
     instead of commit_and_push() directly. Identical to commit_and_push()
@@ -302,6 +424,28 @@ def commit_and_push_data(
     return commit_and_push(
         paths, github_token, repo_slug, commit_message, branch=DATA_BRANCH,
         repo_root=repo_root, max_push_retries=max_push_retries, remote_url=remote_url,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
+
+
+def push_pending_data(
+    github_token: str,
+    repo_slug: str,
+    repo_root: Path = REPO_ROOT,
+    max_push_retries: int = 3,
+    remote_url: Optional[str] = None,
+    retry_backoff_seconds: float = 1.0,
+) -> tuple:
+    """The DATA_BRANCH-hardcoded sibling of push_pending(), matching how
+    commit_and_push_data() relates to commit_and_push() - see push_pending()
+    for what this actually does and why. This is the one every in-app
+    autosave-retry call site should use (pages/6_Spot_Session.py), for the
+    same "never let a call site accidentally target main" reason
+    commit_and_push_data() itself exists."""
+    return push_pending(
+        github_token, repo_slug, branch=DATA_BRANCH, repo_root=repo_root,
+        max_push_retries=max_push_retries, remote_url=remote_url,
+        retry_backoff_seconds=retry_backoff_seconds,
     )
 
 
