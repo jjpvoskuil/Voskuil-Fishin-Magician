@@ -655,6 +655,27 @@ own name. The picker now also carries its value in the page's URL (the same patt
 spot picker and "edit this trip" already used), so a reconnect restores *you*,
 automatically, regardless of what reset the connection.
 
+**A fresh visit no longer silently becomes someone else's session, and anyone can
+"just watch" instead (punch-list #59).** Punch-list #51 fixed the picker's fallback for
+*your own* reconnect; it didn't cover a genuinely fresh visit with no identity attached at
+all - a bare or bookmarked link, someone else's phone, a family member checking in. That
+case used to fall back to `angler_options[0]` too (always "John"), landing that visitor
+directly on the real angler's live session as if they *were* that angler - one tap on
+"⏹ End Session" (which has no confirmation step) or "❌ Cancel Session" could end or
+delete a session that wasn't theirs, with no warning to either person. Now, a fresh visit
+with no established name or watch link shows an explicit landing choice instead of ever
+guessing: pick your own name to start fishing (anyone who already has a session going
+here right now is left off this list entirely, so you can't pick your way into someone
+else's session by accident), or choose **"👀 Just watching"** to follow someone else's
+live session read-only - no login, no buttons that change anything, and it auto-refreshes
+every 20 seconds so new catches show up on their own. If more than one angler has a
+session open here at once, watching asks which one. Typing an already-active name into
+"Other" (the one path this can't outright hide, since it's free text) warns you and
+requires an explicit confirmation click rather than silently granting access - the
+deliberate-click still lets the real angler reclaim their own session by name if they've
+somehow lost their URL-based identity, without letting anyone else in by accident. Once
+you've picked a name, everything works exactly as before (punch-list #47/#51 above).
+
 **Sessions dropping less often (punch-list #52).** The other half of the fix above: every
 data save now pushes to a separate `data` branch instead of `main`, so a routine save
 (logging a fish, adding a lure) no longer restarts the app for every connected angler -

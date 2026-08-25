@@ -7535,6 +7535,104 @@ every real save.
     incident and the ask, per the standing workflow of tracking a fixed
     item on the Development page even when it's resolved same-session.
 
+123. **Punch-list #59: verified (then closed) a multi-user safety gap - a
+    second person opening Spot Session with no identity of their own could
+    silently land on, and modify, someone else's real live session.** The
+    angler's follow-up ask after entry 122's recovery: "my son was home
+    checking in on my session periodically... make sure he (or anyone) can
+    log into the session without it messing up the on-going session."
+
+    **Investigation:** built a disposable AppTest scenario (`streamlit
+    .testing.v1.AppTest`, not committed) proving two things concretely
+    against real session state, not just by reading code. Picking a
+    *different* angler name (e.g. `?angler=Matthew`) was already fully
+    isolated - confirmed safe, no changes needed there. Opening the page
+    with *no* `?angler=` at all was not: the "Who's fishing" picker
+    silently defaulted to `angler_options[0]` (always "John," the first
+    roster row - the same fallback punch-list #51 already fixed for the
+    *reconnecting owner's own* browser, but not for a visitor who'd never
+    picked a name in the first place), landing that visitor directly on
+    the real angler's live session, header and all. Viewing alone touched
+    nothing on disk, but a single tap on "⏹ End Session" - which has no
+    confirmation step - did: a before/after AppTest run showed one tap
+    genuinely closing out the real angler's still-open session on disk,
+    with no warning to either person. "❌ Cancel Session" (which deletes
+    the session outright) does have a two-step confirm; "End Session" did
+    not.
+
+    **Fix chosen:** rather than just adding friction (a confirm dialog) to
+    "End Session," the angler asked for a proper read-only "watch" mode -
+    remove the risk instead of just slowing it down, and also stop the
+    "who's fishing" picker from ever offering a name that's already
+    mid-session here. Implemented in `pages/6_Spot_Session.py`:
+    - The angler picker's option list, and the very first "who's this"
+      landing choice for a brand-new visit, now both exclude any angler
+      who already has an open session at this spot today - you simply
+      can't pick your way into someone else's live session anymore,
+      whether by accident or on purpose, from the dropdown. (The
+      currently-established angler's own name stays selectable even while
+      their own session is open, so starting/reconnecting to your own
+      session is unaffected.)
+    - A brand-new visit with no established identity and no restorable
+      URL now shows an explicit landing choice instead of ever silently
+      defaulting: pick your own name (from the anglers *without* an open
+      session), add a new name via "Other," or choose **"👀 Just watching
+      (read-only, no login)"**. Watching shows a live, read-only summary
+      (start time, segment, water clarity, predicted score, each lure with
+      its running fish count) built via the same `_reconstruct_active_
+      session()` the real owner's own reconnect flow already used - reused
+      purely for display, never stored into `st.session_state`'s
+      `active_session_*` key, and the render function calls none of
+      `append_trip`/`update_trip`/`delete_trip`. No button in the watch
+      view can change anything. Wrapped in `st.fragment(run_every=20)` so
+      a new catch shows up on its own. If more than one angler has a
+      session open at the spot, watching asks which one.
+    - The one path that can't be hidden outright - typing an already-
+      active name into "Other," free text - now warns
+      ("_name_ already has a session in progress here... if that's you
+      reconnecting, confirm below") and requires an explicit confirmation
+      click rather than silently granting access. This is also the real
+      angler's own recovery path if they ever genuinely lose their
+      URL-carried identity (a truly fresh device/link with no `?angler=`)
+      and need to reclaim their own session by name - the deliberate
+      click turns "instant and silent" into "requires an informed,
+      affirmative action," without fully re-opening the original gap.
+      Picking their own name back off the *dropdown* isn't available in
+      that scenario (their name is excluded while their session is
+      active, same as anyone else's) - this "Other" + confirm path is the
+      intended fallback.
+    - `_angler_session_slug()`, `_active_session_key()`,
+      `_PER_LURE_CONDITION_KEYS`, `_open_session_rows()`,
+      `_reconstruct_active_session()`, and a new `_anglers_with_open_
+      session()` (which `_other_anglers_with_open_session()` is now a
+      thin wrapper around) all moved earlier in the file, next to the
+      angler picker - the picker itself now needs to call them before
+      deciding what to show, and Streamlit executes a page top-to-bottom
+      on every rerun, so they have to be defined before that point.
+      Purely a reordering; no behavior of any of them changed.
+
+    **Verification:** `pytest tests/ -q` unaffected (360 passed - this
+    change is UI-flow logic in the page module itself, not covered by the
+    existing unit-test surface). A disposable AppTest scenario (not
+    committed) exercised the actual flow end to end against the real
+    `data` branch content, restoring `data/trip_log.csv` via `git checkout`
+    after each run: (1) a fresh, identity-less visit shows only the
+    landing chooser, no session content, no session-mutating button
+    anywhere on the page; (2) with a real session started, a second fresh
+    visit's landing list excludes that angler's name and offers "Just
+    watching" instead; (3) picking "Just watching" shows a live read-only
+    summary with zero mutating buttons, and confirmed via a disk-state
+    diff that entering and viewing it wrote nothing; (4) typing the active
+    angler's own name into "Other" shows the warning and requires the
+    explicit confirm click before any session content is shown. Also
+    re-ran the full page smoke test (all 7 pages, weather mocked) and a
+    plain start → log → "⏹ End Session" lifecycle for an explicitly-
+    identified angler, confirming the existing normal flow is unchanged.
+    Verified via a fresh `git clone` into a new temp dir.
+
+    **Punch-list #59** was logged (and marked Done) describing the ask and
+    the fix, per the standing workflow.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
