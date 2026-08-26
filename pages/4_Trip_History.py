@@ -110,7 +110,10 @@ from datetime import datetime, time as dtime
 import pandas as pd
 import streamlit as st
 
-from core.appstate import get_lake_spots, get_weather_bundle, get_anglers, github_token, repo_slug
+from core.appstate import (
+    get_lake_spots, get_weather_bundle, get_anglers, get_trip_history, get_calibrated_weights,
+    github_token, repo_slug,
+)
 from core.storage import (
     read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push_data,
     sync_data_from_data_branch, parse_conditions,
@@ -138,17 +141,28 @@ st.caption("Filter down to the sessions you want, then open one to see (and edit
 # module docstring) - so a data-only fix pushed straight to the `data` branch
 # outside a live Spot Session save (a session_id backfill, a hand-edit) won't
 # show up here until either the whole app restarts or this button is pressed.
+# Punch-list #61: this page itself reads trips via the uncached
+# read_all_trips() below, so it always saw the refreshed file immediately -
+# but get_trip_history()/get_calibrated_weights() (Leaderboard, 7-Day
+# Forecast, and Spot Session's own lure-recommendation panels all read
+# through those, not this page's own call) are separately cached for 5
+# minutes and were NOT being cleared here, so this button used to fix only
+# THIS page's view while those stayed stale. Now clears both, same as
+# Leaderboard's copy of this button.
 _refresh_col, _ = st.columns([1, 3])
 if _refresh_col.button(
     "🔄 Refresh from GitHub", help=(
         "Pulls the latest trip_log.csv (and the rest of data/) from GitHub right now, "
-        "without waiting for the app to restart. Use this if a trip you know was saved "
-        "(by you or someone else) isn't showing up here yet."
+        "without waiting for the app to restart, and clears the Leaderboard/7-Day Forecast's "
+        "own cache of it too. Use this if a trip you know was saved (by you or someone else) "
+        "isn't showing up yet, anywhere in the app."
     ),
 ):
     _token = github_token()
     if _token:
         _ok, _msg = sync_data_from_data_branch(_token, repo_slug())
+        get_trip_history.clear()
+        get_calibrated_weights.clear()
         (st.success if _ok else st.warning)(_msg)
     else:
         st.info("No GitHub token configured here - nothing to refresh.")
@@ -807,6 +821,13 @@ def _render_session_edit(session: dict, ns: str, ens: str):
                 missing_ids.append(le["trip_id"])
         if saved_ids:
             _push([TRIP_LOG_PATH], f"Update session {session['session_key']} via Trip History ({len(saved_ids)} lure row(s))")
+            # Punch-list #61: get_trip_history()/get_calibrated_weights() (Leaderboard,
+            # 7-Day Forecast, Spot Session's own lure-recommendation panels) are
+            # separately cached for 5 minutes and don't see this page's own
+            # read_all_trips() writes on their own - clear them so an edit here
+            # shows up elsewhere right away instead of up to 5 minutes later.
+            get_trip_history.clear()
+            get_calibrated_weights.clear()
             st.toast(f"Saved {len(saved_ids)} lure row(s).", icon="✅")
         if missing_ids:
             st.toast("Couldn't save some rows - they may have been deleted elsewhere.", icon="⚠️")
@@ -855,6 +876,8 @@ def _render_session_card(session: dict):
             deleted = [delete_trip(r["trip_id"]) for r in session["rows"]]
             if any(deleted):
                 _push([TRIP_LOG_PATH], f"Delete session {session['session_key']} via Trip History ({sum(deleted)} row(s))")
+                get_trip_history.clear()
+                get_calibrated_weights.clear()
                 st.toast("Session deleted.", icon="✅")
             else:
                 st.toast("Couldn't find that session - it may have already been removed.", icon="⚠️")

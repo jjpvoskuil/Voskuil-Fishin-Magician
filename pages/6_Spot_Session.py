@@ -6,7 +6,8 @@ from datetime import datetime, time as dtime
 import streamlit as st
 
 from core.appstate import (
-    get_lake_spots, get_inventory, get_weather_bundle, get_anglers, get_trip_history, github_token, repo_slug,
+    get_lake_spots, get_inventory, get_weather_bundle, get_anglers, get_trip_history,
+    get_calibrated_weights, github_token, repo_slug,
 )
 from core.anglers import add_angler, ANGLERS_PATH, OTHER_LABEL as ANGLER_OTHER_LABEL
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
@@ -1397,6 +1398,22 @@ def _record_push_result(ok: bool, message: str):
 
 
 def _push_or_toast(paths, commit_message, local_message):
+    if TRIP_LOG_PATH in paths:
+        # Punch-list #61: get_trip_history()/get_calibrated_weights() are a
+        # separate 5-minute st.cache_data cache (core/appstate.py) that
+        # Leaderboard, 7-Day Forecast, and this page's own two
+        # lure-recommendation panels all read through - unlike every OTHER
+        # cached getter in this app (get_lake_spots, get_inventory,
+        # get_dev_tasks), it was never cleared after a write, so a catch
+        # logged just now wouldn't show up anywhere that reads through
+        # those for up to 5 more minutes. Cleared unconditionally here -
+        # regardless of whether the push itself below succeeds - since the
+        # write to local disk (append_trip()/update_trip(), already done by
+        # the caller before this runs) is what actually changed, not the
+        # push. One choke point for every trip-log write this page makes,
+        # rather than a clear() call repeated at each of the 7 call sites.
+        get_trip_history.clear()
+        get_calibrated_weights.clear()
     token = github_token()
     if token:
         ok, msg = commit_and_push_data(paths, token, repo_slug(), commit_message)

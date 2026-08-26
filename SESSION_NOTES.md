@@ -7706,6 +7706,78 @@ every real save.
     the live Streamlit Cloud process directly. Not yet logged as its own
     punch-list item pending that answer.
 
+125. **Punch-list #61: found and fixed the real cause of "Leaderboard
+    reverted to old data, and a reboot fixed it" - `get_trip_history()`/
+    `get_calibrated_weights()` were the one cached getter pair in this app
+    never cleared after a trip write, anywhere.** The angler reported the
+    Leaderboard periodically showing stale data, "corrected" by rebooting
+    the app from Streamlit Cloud's own menu - twice.
+
+    **Two compounding causes, not one:** (a) the already-known, already-
+    partially-mitigated limitation that this server only calls
+    `sync_data_from_data_branch()` once, at process boot (see that
+    function's own docstring, and entry 119) - a change pushed to the
+    `data` branch from outside the currently-running process (another
+    device's session, a hand-edit, a data-branch-only recreation like
+    entry 122's) won't show up until either the process restarts or Trip
+    History's "🔄 Refresh from GitHub" button is pressed; (b) newly found
+    while tracing that: `get_trip_history()` and `get_calibrated_weights()`
+    (`core/appstate.py`, both a 5-minute `st.cache_data`) are read by
+    Leaderboard, 7-Day Forecast, and Spot Session's own two lure-
+    recommendation panels - but unlike every *other* cached getter in this
+    app (`get_lake_spots`, `get_inventory`, `get_dev_tasks`, each cleared
+    right after its own page's own write), nothing anywhere ever called
+    `.clear()` on either of these two, on any of the 9 total write sites
+    across `pages/6_Spot_Session.py` (7 sites, all funneled through one
+    `_push_or_toast()` helper - punch-list #58) and `pages/4_Trip_History.py`
+    (2 sites: the session grid's inline-edit save, and session delete).
+    Trip History itself never noticed, since it reads trips through its own
+    uncached `read_all_trips()` call, not through either cached getter -
+    which is also why even pressing Trip History's existing refresh button
+    didn't fix Leaderboard: that button re-synced the file on disk but
+    still never cleared the cache sitting in front of it. A "reboot" fixes
+    both causes at once (fresh process, fresh cache), which is exactly why
+    that's what appeared to work.
+
+    **Fix:** every one of those 9 write sites now clears both
+    `get_trip_history` and `get_calibrated_weights` right after writing -
+    on `pages/6_Spot_Session.py` this is one `if TRIP_LOG_PATH in paths:`
+    block added at the top of `_push_or_toast()` itself, covering all 7
+    call sites at once; on `pages/4_Trip_History.py` it's two direct
+    `.clear()` calls, one per write site. Also added a **"🔄 Refresh from
+    GitHub"** button to Leaderboard (it didn't have one before at all) and
+    updated Trip History's existing one so both now clear the trip caches
+    too, not just re-sync the file - matching what the help text already
+    implied they did.
+
+    **Verification:** `pytest tests/ -q`: 369 passed (367 + 2 new -
+    `tests/test_appstate.py` gained direct proof that `get_trip_history()`/
+    `get_calibrated_weights()` really are cached across repeated calls with
+    no write in between, and that `.clear()` really does force a fresh
+    read on the next call, by swapping in a call-counting fake
+    `read_all_trips()`). Re-ran the full page smoke test (all 7 pages,
+    weather mocked) against real `data` branch content overlaid into
+    `data/`, restored via `git checkout HEAD -- data/` afterward. Verified
+    via a fresh `git clone` into a new temp dir.
+
+    **Separately, and more urgently:** while debugging this, the angler
+    mentioned "today's information" (a live session run this morning) was
+    also missing from Trip History - not a caching symptom (that page
+    reads uncached), so this was checked directly: `git log` on the `data`
+    branch shows nothing pushed since the punch-list #60 dev_tasks commit
+    the prior day, and grepping both the `data` branch's and the local
+    working copy's `trip_log.csv` for today's date turned up zero rows.
+    The angler confirmed the "reboot" mentioned above was a genuine
+    Streamlit Cloud "Reboot app" (not just a page refresh) - which replaces
+    the running container's disk with a fresh checkout from GitHub - so
+    this morning's session, having never reached GitHub before that reboot,
+    is confirmed lost the same way as entry 122's incident, this time
+    angler-triggered rather than a spontaneous crash. No written record
+    exists for this one; recreating it from memory (same process as entry
+    122/123: build rows via `core.storage`/`core.scoring`, push straight to
+    `data`) is in progress as of this entry, pending what the angler can
+    recall.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
