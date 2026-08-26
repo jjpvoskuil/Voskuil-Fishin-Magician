@@ -33,9 +33,10 @@ imports this module, not the other way around) so this stays a small,
 easily-testable, storage-format-only module.
 """
 from __future__ import annotations
-import json
 from dataclasses import dataclass
 from typing import Optional
+
+from .storage import parse_conditions
 
 # Mirrors core.lures.LIGHT_LOW - duplicated rather than imported to avoid a
 # circular import (core.lures imports this module). This is Streamlit's own
@@ -140,10 +141,7 @@ def lure_track_records(
     this module never touches the filesystem itself)."""
     by_category: dict = {}
     for row in trip_rows or []:
-        try:
-            conditions = json.loads(row.get("conditions_json") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            continue
+        conditions = parse_conditions(row)
         lure_category = conditions.get("lure_category")
         if not lure_category:
             continue

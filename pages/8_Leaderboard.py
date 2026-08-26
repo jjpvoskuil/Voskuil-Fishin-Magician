@@ -33,7 +33,6 @@ categories by species would silently make older trips vanish from a "most
 fish by lure" ranking without any indication why. Worth revisiting if that
 ever turns out to matter in practice.
 """
-import json
 from datetime import datetime
 
 import pandas as pd
@@ -43,6 +42,7 @@ from core.appstate import get_lake_spots, get_trip_history, get_anglers
 from core.lures import LURE_PROFILES
 from core.activity_log import format_weight_lb_oz
 from core.ui import inject_mobile_css
+from core.storage import parse_conditions
 
 st.set_page_config(page_title="Leaderboard - Nolin Lake", page_icon="🏆", layout="wide")
 inject_mobile_css()
@@ -60,10 +60,7 @@ if not rows:
 
 # --- Shared parsing (mirrors pages/4_Trip_History.py's own conventions) -----
 def _parse_conditions(row: dict) -> dict:
-    try:
-        return json.loads(row["conditions_json"]) if row.get("conditions_json") else {}
-    except json.JSONDecodeError:
-        return {}
+    return parse_conditions(row)
 
 
 def _parse_date(s: str):

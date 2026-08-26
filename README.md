@@ -719,6 +719,21 @@ update never requires scrolling past a full lure list you didn't ask to see.
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
 History** page in the app for calibration status.
 
+**Every reader of a trip's saved conditions is hardened against a malformed row now
+(punch-list #60).** `conditions_json` is free-text JSON, not schema-validated - a
+hand-edited CSV, a legacy row, or a future bug elsewhere could in principle leave
+something in that column that's valid JSON but not an object (a bare number, string,
+list, or null). Several places (the personal-history lure track record, calibration,
+Trip History, Leaderboard, and Spot Session's own "does someone already have a session
+open here" check) each used to parse that column with a try/except that only caught a
+genuine JSON parse *error*, then called `.get(...)` on whatever came back with no check -
+a row shaped like that would raise an uncaught error rather than just being skipped like
+any other unusable row. All of them now go through one shared `core.storage.
+parse_conditions()`, which always hands back a dict. Found while investigating a
+"briefly flashed an error, didn't stop anything" report from a real session - current
+data has no rows shaped that way, so it couldn't be reproduced end-to-end against real
+data, but the defect itself was real and is fixed regardless.
+
 ## Leaderboard (punch-list #54)
 
 Ranks your logged trip history (same source as Trip History) a bunch of different ways -

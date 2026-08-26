@@ -9,8 +9,8 @@ Requires a minimum sample size per factor before it touches anything, and
 always blends toward - never replaces - the documented default weights.
 """
 from __future__ import annotations
-import json
 from .scoring import DEFAULT_WEIGHTS
+from .storage import parse_conditions
 
 MIN_SAMPLES_PER_SIDE = 4
 MAX_NUDGE_FRACTION = 0.35  # never move a weight more than 35% from default
@@ -36,10 +36,10 @@ def calibrate_weights(trip_rows: list) -> dict:
     buckets = {k: {"on_success": 0, "on_total": 0, "off_success": 0, "off_total": 0} for k in _factor_flags({})}
 
     for row in trip_rows:
+        conditions = parse_conditions(row)
         try:
-            conditions = json.loads(row.get("conditions_json") or "{}")
             caught = int(row.get("fish_caught") or 0)
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             continue
         success = 1 if caught > 0 else 0
         flags = _factor_flags(conditions)
@@ -71,10 +71,7 @@ def calibration_summary(trip_rows: list) -> dict:
     factors have enough data to influence the model yet."""
     buckets = {k: {"on_total": 0, "off_total": 0} for k in _factor_flags({})}
     for row in trip_rows:
-        try:
-            conditions = json.loads(row.get("conditions_json") or "{}")
-        except json.JSONDecodeError:
-            continue
+        conditions = parse_conditions(row)
         flags = _factor_flags(conditions)
         for factor, is_on in flags.items():
             buckets[factor]["on_total" if is_on else "off_total"] += 1
