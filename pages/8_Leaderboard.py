@@ -38,15 +38,48 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from core.appstate import get_lake_spots, get_trip_history, get_anglers
+from core.appstate import (
+    get_lake_spots, get_trip_history, get_calibrated_weights, get_anglers, github_token, repo_slug,
+)
 from core.lures import LURE_PROFILES
 from core.activity_log import format_weight_lb_oz
 from core.ui import inject_mobile_css
-from core.storage import parse_conditions
+from core.storage import parse_conditions, sync_data_from_data_branch
 
 st.set_page_config(page_title="Leaderboard - Nolin Lake", page_icon="🏆", layout="wide")
 inject_mobile_css()
 st.title("🏆 Leaderboard")
+
+# Punch-list #61: get_trip_history() is a 5-minute st.cache_data cache (see
+# core/appstate.py) that, unlike every OTHER cached getter in this app
+# (get_lake_spots, get_inventory, get_dev_tasks - each cleared right after
+# its own page's own writes), was never cleared after a trip is logged/
+# edited/deleted anywhere. That means this page could show data up to 5
+# minutes stale after ANY save, on top of the separate "this running
+# server only syncs from the data branch once, at boot" gap Trip History's
+# own refresh button (below) exists for - see that button's comment in
+# pages/4_Trip_History.py and core.storage.sync_data_from_data_branch's
+# docstring for the full "why" behind that second gap. This mirrors that
+# same button here, and - unlike Trip History's own copy - explicitly
+# clears both trip caches too, since this page (and 7-Day Forecast) reads
+# through them rather than a live, uncached read_all_trips() call.
+_refresh_col, _ = st.columns([1, 3])
+if _refresh_col.button(
+    "🔄 Refresh from GitHub", help=(
+        "Pulls the latest trip_log.csv (and the rest of data/) from GitHub right now, and "
+        "clears this page's own cache of it - use this if you know a trip was saved (by you "
+        "or someone else, or by a change pushed straight to GitHub) but this page still "
+        "looks out of date."
+    ),
+):
+    _token = github_token()
+    if _token:
+        _ok, _msg = sync_data_from_data_branch(_token, repo_slug())
+        get_trip_history.clear()
+        get_calibrated_weights.clear()
+        (st.success if _ok else st.warning)(_msg)
+    else:
+        st.info("No GitHub token configured here - nothing to refresh.")
 
 rows = get_trip_history()
 

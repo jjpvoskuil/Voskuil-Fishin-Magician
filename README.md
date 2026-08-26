@@ -268,7 +268,14 @@ this repo that can override it on this hosting.
   button at the top pulls the latest saved data on demand - this server only syncs
   automatically once, when it starts up, so if a trip you know was saved isn't
   showing up yet, press this before assuming something's wrong (see
-  SESSION_NOTES.md entry 119). The page opens to
+  SESSION_NOTES.md entry 119). This button, and every trip-log write this app makes
+  (logging/removing a fish, adding/retiring a lure, starting/ending/canceling a
+  session, or editing/deleting a session right here), also clears the separate
+  5-minute cache behind `get_trip_history()`/`get_calibrated_weights()` - Leaderboard,
+  7-Day Forecast, and Spot Session's own lure-recommendation panels all read through
+  those, and unlike every other cached getter in this app they used to never get
+  cleared after a write, so a trip logged just now could still be invisible
+  elsewhere for up to 5 more minutes (punch-list #61). The page opens to
   just six filters - date range (pick a single date, a range, or today even before
   today's session is logged), time of day,
   location, angler, lure type, and specific lure, each defaulting to "all" - and
@@ -760,7 +767,11 @@ the Spot Session redesign have no per-fish species detail at all, only a flat fi
 column, so filtering the lure/spot/angler/day aggregates by species would silently make
 older trips disappear from those rankings with nothing to explain why. Read entirely from
 `data/trip_log.csv` (via the same cached `get_trip_history()` every other page uses) -
-this page never writes anything.
+this page never writes anything. Has its own **"🔄 Refresh from GitHub"** button
+(punch-list #61) for the same two reasons Trip History's copy exists: this server only
+syncs from GitHub once at boot, and the trip cache itself is separately held for 5
+minutes - press it if you know a trip was saved (here, on Trip History, or from a Spot
+Session elsewhere) but the rankings still look stale.
 
 ## Tackle Box (lure inventory)
 
