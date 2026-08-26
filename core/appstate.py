@@ -1,5 +1,6 @@
 """Shared, cached accessors used by every Streamlit page."""
 from __future__ import annotations
+import requests
 import streamlit as st
 
 from .weather import fetch_forecast
@@ -164,6 +165,41 @@ def github_connection_status() -> tuple:
         return False, ""
     masked = f"{token[:10]}...{token[-4:]}" if len(token) > 18 else "(configured)"
     return True, masked
+
+
+def test_github_push_access(token: str, slug: str) -> tuple:
+    """Punch-list #62 follow-up: github_connection_status() above only
+    proves a token STRING is present in secrets - it can't tell a garbage,
+    revoked, or wrong-scope token apart from a genuinely working one,
+    since checking that requires an actual round trip to GitHub. This does
+    that round trip, on demand only (never called automatically - it's a
+    real network call, not something to run on every page load): a single
+    GET against the repo itself, interpreting the response the same way a
+    person debugging this by hand would (this is, in fact, exactly the
+    manual curl check that diagnosed the previous two bad tokens in this
+    app's own history). Returns (ok, message) - never raises, so a button
+    calling this can always show *something* rather than crashing the page
+    on a network hiccup."""
+    if not token:
+        return False, "No token configured here - nothing to test."
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{slug}",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+    except Exception as e:
+        return False, f"Couldn't reach GitHub at all: {e}"
+    if resp.status_code == 401:
+        return False, "GitHub rejected this token outright (401 Bad credentials) - it's invalid, expired, or revoked."
+    if resp.status_code == 404:
+        return False, f"GitHub says '{slug}' doesn't exist or this token can't see it (404 - check repo access/scope)."
+    if resp.status_code != 200:
+        return False, f"GitHub returned an unexpected response (HTTP {resp.status_code}): {resp.text[:200]}"
+    can_push = bool((resp.json() or {}).get("permissions", {}).get("push", False))
+    if can_push:
+        return True, "Token is valid and has push access to this repo - confirmed live against GitHub just now."
+    return False, "Token is valid but does NOT have push/write access to this repo - check its repository permissions."
 
 
 def anthropic_api_key() -> str:

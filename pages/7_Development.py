@@ -23,7 +23,9 @@ See core/dev_tasks.py for why numbers are never reused, even after delete.
 """
 import streamlit as st
 
-from core.appstate import get_dev_tasks, github_token, repo_slug, github_connection_status
+from core.appstate import (
+    get_dev_tasks, github_token, repo_slug, github_connection_status, test_github_push_access,
+)
 from core.dev_tasks import (
     DEV_TASKS_COUNTER_PATH, DEV_TASKS_PATH, PAGE_OPTIONS, STATUS_DONE,
     append_task, delete_task, mark_done, reopen_task, update_task,
@@ -56,6 +58,15 @@ with st.expander(f"🔌 GitHub connection: {'connected' if _gh_configured else '
             "quoted, with no stray characters."
         )
     st.caption(f"Repo: {repo_slug()}")
+    st.caption(
+        "Note: the check above only confirms a token *string* is configured here - it can't "
+        "tell a garbage, revoked, or wrong-permission token apart from a working one. Press "
+        "below for a live round-trip check against GitHub itself."
+    )
+    if st.button("🔍 Test connection now", key="test_github_push_access_btn"):
+        with st.spinner("Checking against GitHub..."):
+            _test_ok, _test_msg = test_github_push_access(github_token(), repo_slug())
+        (st.success if _test_ok else st.error)(_test_msg)
 
 COMMIT_PATHS = [DEV_TASKS_PATH, DEV_TASKS_COUNTER_PATH]
 

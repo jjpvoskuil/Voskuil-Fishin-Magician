@@ -636,6 +636,14 @@ an orange warning if it can't see one at all - so that question never depends on
 catching a toast at the right moment. The Development page has the same check in a
 "🔌 GitHub connection" expander, alongside the repo it's pointed at.
 
+That "connected" check only proves a token *string* is present, though - it can't
+tell a garbage, revoked, or wrong-permission token apart from a genuinely working
+one (punch-list #63). Development's "🔌 GitHub connection" expander also has a
+**"🔍 Test connection now"** button that makes a real, on-demand request against
+GitHub itself and reports back specifically: invalid/revoked token, valid but no
+push access, or genuinely working - the same checks this app's own maintainer would
+otherwise have to run by hand against GitHub's API to diagnose a bad token.
+
 **Who's fishing.** The Spot Session page opens with a "🎣 Who's fishing" picker -
 John, Matthew, Alex, or "Other" (type in a name, which is then remembered as a real
 dropdown choice from then on - see `data/anglers.csv`/`core/anglers.py`). This is a
