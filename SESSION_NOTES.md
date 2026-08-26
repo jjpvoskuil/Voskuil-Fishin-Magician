@@ -7778,6 +7778,67 @@ every real save.
     `data`) is in progress as of this entry, pending what the angler can
     recall.
 
+126. **Punch-list #62: confirmed the deployed app's GitHub push has been
+    silently broken all along, and added a persistent connection-status
+    indicator so that's never invisible again.** Follow-on from entry 125:
+    the angler generated a fresh PAT, updated Streamlit Cloud's `GITHUB_TOKEN`
+    secret, and rebooted - but a live verification test (Start Session, then
+    Cancel Session, on the real deployed app) produced zero new commits on
+    the `data` branch, checked directly via `git log` immediately after.
+    Repeating the test after re-checking the secret's formatting produced
+    the identical result: no commits, no visible toast, and (separately)
+    the Cancel Session confirm needing two clicks to actually take effect
+    both times.
+
+    **The "no toast, no commits" combination pointed at one specific
+    place in the code:** `core.appstate.github_token()` reads
+    `st.secrets.get("GITHUB_TOKEN", "")` wrapped in a bare
+    `try/except Exception: return ""` - if that comes back empty for *any*
+    reason (missing key, a typo, a TOML syntax error anywhere else in the
+    secrets file breaking the whole parse, or a genuine exception), every
+    write site's shared `_push_or_toast()` takes its "no token" branch:
+    skips the push entirely, and shows only a quiet blue info-level toast
+    ("Session started locally. No GITHUB_TOKEN configured...") -
+    deliberately *not* the persistent orange failure banner, since that's
+    reserved for a token that exists but a push that failed. On a phone,
+    scrolled to the bottom of the page, that toast is trivial to miss
+    entirely - which is exactly what happened, twice, even after the
+    angler visually confirmed the secret "looked good." That gap - no
+    reliable, persistent way to answer "can this process actually see a
+    working token right now" - was the real problem being chased across
+    this whole entry and entry 125, more than any one specific broken
+    token.
+
+    **Fix:** added `core.appstate.github_connection_status()` - returns
+    whether `github_token()` comes back non-empty, plus a masked preview
+    (first 10 + last 4 characters - enough to visually match against what
+    was pasted into secrets, never enough to reconstruct it) when it does.
+    Spot Session now shows this as a persistent one-line caption at the
+    very top of the page, before the spot picker or anything else - green
+    "🔌 GitHub sync: connected (...)" or an orange warning if it can't see
+    a token at all. The Development page shows the same check inside a
+    "🔌 GitHub connection" expander (whose label itself says connected/NOT
+    connected without even opening it), alongside the repo slug it's
+    pointed at. Neither depends on a toast, a push actually happening, or
+    scroll position - both are visible on page load.
+
+    **Left open:** whether the *actual* fix (the fresh PAT itself reaching
+    Streamlit Cloud's secrets correctly) has happened yet is still
+    unconfirmed as of this entry - this indicator is what the angler will
+    check next to answer that directly, without needing another round of
+    "did you see a message" back-and-forth. Also left open: the Cancel
+    Session confirm needing two clicks, reproduced as *not* reproducible
+    in an isolated AppTest run of the exact same click sequence (the
+    server-side logic cancels correctly on the first confirm click every
+    time it was tried against real page code, with pushes mocked out) -
+    suggesting a client-side/network timing issue (a tap landing while a
+    previous rerun is still in flight - this app requires a live round
+    trip for every interaction, no offline-capable client code exists)
+    rather than a hidden logic bug, but not confirmed either way. Worth
+    revisiting if it keeps happening once the token itself is confirmed
+    fixed and push latency (which could plausibly be part of the timing
+    window) is no longer a factor.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

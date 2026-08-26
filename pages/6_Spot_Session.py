@@ -7,7 +7,7 @@ import streamlit as st
 
 from core.appstate import (
     get_lake_spots, get_inventory, get_weather_bundle, get_anglers, get_trip_history,
-    get_calibrated_weights, github_token, repo_slug,
+    get_calibrated_weights, github_token, repo_slug, github_connection_status,
 )
 from core.anglers import add_angler, ANGLERS_PATH, OTHER_LABEL as ANGLER_OTHER_LABEL
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
@@ -39,6 +39,24 @@ from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
 inject_mobile_css()
 st.title("🎯 Spot Session")
+
+# Punch-list #62: a persistent (not a toast, so it can't be missed/scrolled
+# past on a phone) line saying whether this running process can actually
+# see a GITHUB_TOKEN right now - every save on this page silently keeps
+# working locally either way, with only a toast to say whether it also
+# reached GitHub, and that toast is easy to miss. Shown once, right up
+# top, before anything else - so "is this actually saving to GitHub right
+# now" never depends on catching a toast at the right moment.
+_gh_configured, _gh_preview = github_connection_status()
+if _gh_configured:
+    st.caption(f"🔌 GitHub sync: connected ({_gh_preview})")
+else:
+    st.warning(
+        "🔌 **GitHub sync: not connected.** No GITHUB_TOKEN configured here (or Streamlit "
+        "couldn't read it) - everything you log this session will stay on this device only, "
+        "and won't survive an app restart or reboot. Check the app's Secrets in Streamlit "
+        "Cloud settings."
+    )
 
 # --- Spot picker (unchanged from before the redesign) ------------------------
 # session_state is the reliable channel from the "Fish this spot now" button on the
