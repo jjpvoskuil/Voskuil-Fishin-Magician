@@ -7883,6 +7883,79 @@ every real save.
     something else entirely) instead of another round of "still doesn't
     work" with no further detail to act on.
 
+128. **Punch-list #64: the token tested fine (entry 127's button), and the
+    push still never reached GitHub - so I reproduced both open bugs
+    myself, directly on the live deployed app, via browser automation,
+    per the angler's own suggestion ("why don't you just log into the app
+    and manually run through the process yourself").**
+
+    **Cancel Session's double-click, confirmed real:** started a real test
+    session (a throwaway angler name, a spot not otherwise in use), tapped
+    "❌ Cancel Session" then "Yes, cancel it" with the confirm dialog's
+    exact on-screen position confirmed via screenshot immediately
+    beforehand (ruling out the "clicked the wrong spot" explanation from
+    the very first live-app attempt earlier this session). The session
+    stayed open, with zero visible sign anything had gone wrong - no
+    error, no banner, just a silent reset back to the un-confirmed "❌
+    Cancel Session" button, indistinguishable from a successful cancel
+    unless you noticed the lure hadn't actually disappeared. Repeating the
+    exact same two-tap sequence a second time worked immediately and
+    showed the real "Session canceled" banner. Root cause of *why*
+    `_cancel_session()`'s `st.session_state.get(active_key)` comes back
+    `None` on that first attempt (its `active` session dict was
+    demonstrably present moments earlier, since the confirm dialog itself
+    reads from it) is still open - a genuine intermittent session_state
+    gap under this app's live Streamlit Cloud environment, not reproducible
+    in an isolated AppTest run with a mocked push (confirmed again this
+    session, see entry 126). **Fix (mitigation, not root cause):**
+    `_cancel_session()` now returns `True`/`False` instead of nothing, and
+    a `False` (the silent-failure case) shows a persistent "that didn't go
+    through, try tapping Cancel Session again" banner instead of looking
+    identical to success.
+
+    **GitHub push, confirmed genuinely broken right now, independent of
+    the token:** started a fresh session with a lure that unquestionably
+    never existed in `trip_log.csv` before, confirmed it landed on local
+    disk (visible immediately on Trip History, which reads the file
+    directly, uncached), then checked `data` branch's commit history
+    directly via `git log` - zero new commits, matching the angler's own
+    repeated reports exactly, with the entry-127 token independently
+    confirmed valid and push-capable moments before. `commit_and_push()`
+    reports `"No changes to commit."` for this write, which can only mean
+    `git diff --cached --quiet` saw no staged difference after `git add`
+    - genuinely surprising for a row that provably didn't exist a moment
+    before. Couldn't go further from outside the running container - no
+    shell/log access to that specific live process. **Fix (diagnostic,
+    not root cause):** the "No changes to commit." message now also
+    captures `git status --porcelain` for the exact paths involved and
+    `git rev-parse --abbrev-ref HEAD`, appended to the same message/toast.
+    Next time this reproduces, whatever the angler sees in that toast (or
+    Development's push-health area) should show directly whether git sees
+    the file as modified/untracked at all, and whether HEAD is even on a
+    real branch - the actual missing piece for pinning this down further.
+
+    Also confirmed and cleaned up: two throwaway test sessions
+    (`ClaudeDebugTest`/`ClaudeDebugTest2`) left rows on the live
+    container's local disk during this investigation - since neither ever
+    reached GitHub (this whole entry's point), they only exist on that
+    one running process's disk and are expected to disappear on the next
+    real redeploy (this fix's own push to `main` will trigger one), not
+    something that needed manual cleanup via Trip History.
+
+    **Verification:** `pytest tests/ -q`: 377 passed (no new tests added -
+    both changes are UX/diagnostic surfacing around existing, already-
+    tested code paths, not new logic with its own test-worthy behavior).
+    Re-ran the full page smoke test against real `data` branch content,
+    restored via `git checkout HEAD -- data/` afterward. Verified via a
+    fresh `git clone`.
+
+    **Left open:** both root causes (why `active_session_*` momentarily
+    disappears from `session_state`; why `git diff --cached` sometimes
+    sees no change for a real new row) - this entry makes both failures
+    loud instead of silent, which is what should make the next
+    reproduction actually diagnosable instead of another repeat of "it
+    didn't work, no further detail."
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8157,6 +8230,24 @@ every real save.
   reading. Same behavior the old grid already had (it never recomputed
   these either); a deliberate choice to keep this an editing/correction
   tool, not a live rescoring one.
+- (entry 128, punch-list #64) Two unresolved root causes, both confirmed
+  real by directly reproducing them on the live deployed app: (1) Spot
+  Session's Cancel Session confirm can silently no-op on its first "Yes,
+  cancel it" tap - `_cancel_session()`'s own session_state lookup for the
+  active session comes back empty even though the confirm dialog on
+  screen a moment earlier proves it was there; a second identical attempt
+  has reliably worked every time so far. Now surfaced with a visible
+  "that didn't go through, try again" banner instead of failing silently,
+  but the actual disappearing-session_state cause is still open. (2) A
+  genuinely new trip_log.csv row (Start Session, add a lure, etc.) can
+  fail to push to GitHub with `commit_and_push()` reporting "No changes
+  to commit." - confirmed via `git log` on the `data` branch showing zero
+  new commits for a write that unquestionably changed the file on disk,
+  with a token independently verified valid and push-capable at the same
+  time. `core/storage.py`'s `commit_and_push()` now appends a live
+  `git status`/`HEAD` snapshot to that exact message so the next
+  reproduction can actually be diagnosed from what the angler sees in the
+  toast, rather than needing direct server access.
 
 ## Operating notes
 

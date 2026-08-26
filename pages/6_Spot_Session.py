@@ -636,6 +636,17 @@ if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
     st.success("✅ Session closed - pick lures below whenever you're ready to start a new one.")
 if st.session_state.pop(f"session_canceled_banner_{spot['spot_id']}", False):
     st.info("❌ Session canceled - nothing from that session was saved. Pick lures below to start a new one.")
+if st.session_state.pop(f"session_cancel_failed_banner_{spot['spot_id']}", False):
+    # Punch-list #64: see _cancel_session()'s docstring - this session's own
+    # data went missing from session_state right when "Yes, cancel it" was
+    # tapped, so nothing was deleted and nothing was changed. Tapping
+    # "❌ Cancel Session" again has reliably worked on the very next try in
+    # every reproduction so far.
+    st.warning(
+        "❌ Cancel didn't go through - this session's data wasn't found where expected just now "
+        "(a dropped connection can do this). Nothing was changed or lost. Scroll down and tap "
+        "\"❌ Cancel Session\" again."
+    )
 
 st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
 
@@ -1744,7 +1755,7 @@ def _end_session(spot_id: str, angler: str = ""):
     st.session_state[f"session_closed_banner_{spot_id}"] = True
 
 
-def _cancel_session(spot_id: str, angler: str = ""):
+def _cancel_session(spot_id: str, angler: str = "") -> bool:
     """"❌ Cancel Session" (punch-list #32) - discards an in-progress session
     entirely, rather than finalizing it like "⏹ End Session" does: deletes
     every trip_log.csv row this session created (delete_trip(), the same
@@ -1755,11 +1766,26 @@ def _cancel_session(spot_id: str, angler: str = ""):
     restart at this spot without keeping anything logged so far. Every row
     to delete comes from active["lures"] (in-memory, not a fresh disk
     read), so this only ever touches rows THIS session itself created -
-    it can't reach into some other, unrelated angler's session data."""
+    it can't reach into some other, unrelated angler's session data.
+
+    Punch-list #64: returns True/False now (used to return None always) -
+    live testing on the deployed app found "Yes, cancel it" reproducibly
+    needing TWO clicks to actually take effect: the first click quietly
+    landed on this `if active is None: return` early-out (session_state's
+    active_key had gone missing by the time this ran, even though the
+    confirm dialog for it was on screen a moment earlier) and reset the UI
+    straight back to the un-confirmed "❌ Cancel Session" button with no
+    error and no trace anything had gone wrong - indistinguishable from a
+    successful cancel unless you happened to notice the lure was still
+    there. The exact cause of active_key going missing between rendering
+    the confirm dialog and handling its own button click is still open
+    (see SESSION_NOTES.md punch-list #64) - this doesn't fix that root
+    cause, but it stops the failure from being silent, which is what
+    actually made it look like a mystery."""
     active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
-        return
+        return False
     trip_ids = [lure["trip_id"] for lure in active["lures"]]
     for trip_id in trip_ids:
         delete_trip(trip_id)
@@ -1770,6 +1796,7 @@ def _cancel_session(spot_id: str, angler: str = ""):
     )
     st.session_state.pop(active_key, None)
     st.session_state[f"session_canceled_banner_{spot_id}"] = True
+    return True
 
 
 # _PER_LURE_CONDITION_KEYS, _open_session_rows(), _other_anglers_with_open_
@@ -2026,7 +2053,23 @@ if active is not None:
         ccol1, ccol2 = st.columns(2)
         if ccol1.button("Yes, cancel it", key=f"confirm_cancel_session_{spot['spot_id']}", type="primary", width='stretch'):
             st.session_state.pop(cancel_pending_key, None)
-            _cancel_session(spot["spot_id"], resolved_angler)
+            # Punch-list #64: _cancel_session() used to be called and
+            # ignored here, so its (still-unexplained) occasional silent
+            # no-op looked identical to a real cancel - the page just reset
+            # to this same un-confirmed view either way, and the ONLY way
+            # to tell the difference was noticing the lure hadn't actually
+            # disappeared. Surfacing the False case explicitly at least
+            # makes that visible instead of mysterious - tap the button
+            # again if this shows up.
+            if not _cancel_session(spot["spot_id"], resolved_angler):
+                # A plain st.warning() here wouldn't survive the st.rerun()
+                # right below it (same reason every OTHER banner on this
+                # page - session_closed_banner_/session_canceled_banner_ -
+                # is a session_state flag checked at the top of the page,
+                # not an inline call: Streamlit drops anything rendered
+                # right before a rerun that isn't re-rendered on the next
+                # run too).
+                st.session_state[f"session_cancel_failed_banner_{spot['spot_id']}"] = True
             st.rerun()
         if ccol2.button("Keep session", key=f"keep_session_{spot['spot_id']}", width='stretch'):
             st.session_state.pop(cancel_pending_key, None)
