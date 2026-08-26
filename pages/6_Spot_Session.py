@@ -31,7 +31,7 @@ from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
 from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
 from core.storage import (
     TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, push_pending_data,
-    read_all_trips, update_trip, delete_trip,
+    read_all_trips, update_trip, delete_trip, parse_conditions,
 )
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
 
@@ -216,10 +216,7 @@ def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list, a
     for t in trips_today:
         if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
             continue
-        try:
-            cond = json.loads(t.get("conditions_json") or "{}")
-        except json.JSONDecodeError:
-            continue
+        cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
         key = cond.get("start_time")
@@ -251,10 +248,7 @@ def _anglers_with_open_session(spot_id: str, session_date_iso: str, trips_today:
     for t in trips_today:
         if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
             continue
-        try:
-            cond = json.loads(t.get("conditions_json") or "{}")
-        except json.JSONDecodeError:
-            continue
+        cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
         key = cond.get("start_time")

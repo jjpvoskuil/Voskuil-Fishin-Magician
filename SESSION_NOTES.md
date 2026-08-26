@@ -7633,6 +7633,79 @@ every real save.
     **Punch-list #59** was logged (and marked Done) describing the ask and
     the fix, per the standing workflow.
 
+124. **Punch-list #60: investigated a "brief error, didn't stop anything"
+    report from a real fishing session, found and fixed a real (if
+    unreproduced end-to-end) latent bug, and flagged that this morning's
+    session data hadn't reached GitHub yet.** The angler reported seeing an
+    error message flash on Spot Session when logging a fish caught, that
+    didn't block anything.
+
+    **Data-safety check first:** confirmed via `git log` on the `data`
+    branch that nothing had been pushed since the prior session's own
+    commits (2026-08-25 17:34 UTC) - no rows at all for the reported
+    morning's session existed on GitHub yet at investigation time. Flagged
+    to the angler directly rather than assumed benign, given entry 122's
+    incident was exactly this shape (data sitting local-only on a still-
+    running process, or genuinely lost if it had already restarted).
+
+    **Root-cause investigation:** could not reproduce the exact error
+    end-to-end - a synthetic AppTest run through start session → log fish →
+    log another fish against the real current `data` branch content raised
+    no exception, and every row currently in `data/trip_log.csv` parses
+    cleanly. However, while tracing every code path a "log a fish caught"
+    rerun touches, found a real, confirmed defect: `core/lure_history.py`'s
+    `lure_track_records()` (feeds the personal-history lure suggestion
+    signal, punch-list #37) and `core/calibration.py`'s `calibrate_weights()`
+    /`calibration_summary()` (feed the scoring-weight nudges) each did
+    `conditions = json.loads(row.get("conditions_json") or "{}")` wrapped
+    in a try/except that only caught a JSON *parse* error - not the case
+    where `conditions_json` is valid JSON that isn't a dict (a bare number,
+    string, list, or null - all things a hand-edited CSV, a legacy row, or
+    a future bug elsewhere could produce, since this column is free-text
+    JSON, not schema-validated). The very next line in each function called
+    `.get(...)` unconditionally on whatever came back, so a row like that
+    raised an uncaught `AttributeError` instead of just being skipped like
+    any other bad row - exactly the profile of a "flashes once, doesn't
+    stop anything" symptom (Streamlit shows a small inline error where that
+    computation was rendering, self-clearing the next time the same code
+    runs against clean data). Current live data has zero rows shaped that
+    way, which is exactly why this couldn't be reproduced against it - the
+    defect is real, but nothing on file today happens to trigger it.
+
+    **Fix:** added `core.storage.parse_conditions(row)` - a single shared
+    helper that does the `json.loads` + "is it actually a dict" check once,
+    always returning a dict (`{}` for missing/malformed/non-dict), so every
+    caller can keep calling `.get(...)` without any of them needing their
+    own guard. Replaced every one of the (surprisingly many) places that
+    had rolled this same pattern themselves, each with the same gap:
+    `core/lure_history.py`, both functions in `core/calibration.py`, the
+    `_open_session_rows()`/`_anglers_with_open_session()` helpers added
+    right next to the angler picker yesterday (punch-list #59 - these run
+    on every single Spot Session page load now, not just when a
+    recommendation is computed, so this closes the highest-traffic copy of
+    the bug), and the near-identical local `_parse_conditions()` helpers in
+    `pages/4_Trip_History.py` and `pages/8_Leaderboard.py` (now one-line
+    wrappers around the shared version, kept for minimal call-site churn
+    in those files).
+
+    **Verification:** `pytest tests/ -q`: 367 passed (360 + 7 new -
+    `parse_conditions()` itself in `tests/test_storage.py`, a non-dict-
+    conditions case in `tests/test_lure_history.py`, and a new
+    `tests/test_calibration.py` covering both calibration functions).
+    Directly reproduced the pre-fix crash in a scratch script
+    (`lure_track_records([{"conditions_json": "24", ...}], ...)` raised
+    `AttributeError: 'int' object has no attribute 'get'` against the
+    unpatched code) and confirmed the same call now returns `{}` cleanly.
+    Re-ran the full page smoke test (all 7 pages) against real `data`
+    branch content. Verified via a fresh `git clone`.
+
+    **Left open, for the angler to weigh in on:** whether this morning's
+    session data is still safe (sitting local-only on a still-running
+    process, recoverable) or was actually lost the same way as entry 122 -
+    couldn't be determined from here, since that would require checking
+    the live Streamlit Cloud process directly. Not yet logged as its own
+    punch-list item pending that answer.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

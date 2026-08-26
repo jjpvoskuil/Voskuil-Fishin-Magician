@@ -512,3 +512,30 @@ def test_is_transient_network_error_matches_common_flaky_connection_phrasing():
     assert storage._is_transient_network_error("fatal: The requested URL returned error: 503")
     assert not storage._is_transient_network_error("fatal: Authentication failed for 'https://...'")
     assert not storage._is_transient_network_error("! [rejected] main -> main (non-fast-forward)")
+
+
+def test_parse_conditions_returns_the_dict_for_a_normal_row():
+    row = {"conditions_json": '{"lure_category": "football_jig", "avg_wind_mph": 6}'}
+    assert storage.parse_conditions(row) == {"lure_category": "football_jig", "avg_wind_mph": 6}
+
+
+def test_parse_conditions_is_a_dict_for_missing_or_blank_conditions_json():
+    assert storage.parse_conditions({}) == {}
+    assert storage.parse_conditions({"conditions_json": ""}) == {}
+    assert storage.parse_conditions({"conditions_json": None}) == {}
+
+
+def test_parse_conditions_is_a_dict_for_malformed_json():
+    assert storage.parse_conditions({"conditions_json": "not json"}) == {}
+
+
+def test_parse_conditions_is_a_dict_when_json_parses_to_a_non_dict():
+    # The real bug this was added for: conditions_json is JSON-encoded free
+    # text, not schema-validated - a bare number/string/list/null is valid
+    # JSON (json.loads succeeds) but isn't a dict. Every caller immediately
+    # calls .get(...) on the result, so this used to be an uncaught
+    # AttributeError rather than just an empty/unusable row.
+    assert storage.parse_conditions({"conditions_json": "24"}) == {}
+    assert storage.parse_conditions({"conditions_json": '"a string"'}) == {}
+    assert storage.parse_conditions({"conditions_json": "[1, 2, 3]"}) == {}
+    assert storage.parse_conditions({"conditions_json": "null"}) == {}

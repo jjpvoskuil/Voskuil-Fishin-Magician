@@ -67,6 +67,23 @@ def test_lure_track_records_skips_rows_with_no_lure_category_or_bad_json():
     assert lure_track_records(rows, situation) == {}
 
 
+def test_lure_track_records_skips_rows_where_conditions_json_is_valid_json_but_not_an_object():
+    # A real (if latent) bug: conditions_json is JSON-encoded free text, not
+    # schema-validated, so a bare number/string/list/null is valid JSON that
+    # parses without error but isn't a dict. The old code only caught a
+    # genuine parse *error* and then called conditions.get(...) unconditionally
+    # on whatever came back - an uncaught AttributeError on any of these,
+    # rather than the row just being skipped like any other unusable row.
+    rows = [
+        {"spot_id": "spot1", "structure_type": "Main-lake point", "conditions_json": "24", "fish_caught": 1},
+        {"spot_id": "spot1", "structure_type": "Main-lake point", "conditions_json": '"a string"', "fish_caught": 1},
+        {"spot_id": "spot1", "structure_type": "Main-lake point", "conditions_json": "[1, 2]", "fish_caught": 1},
+        {"spot_id": "spot1", "structure_type": "Main-lake point", "conditions_json": "null", "fish_caught": 1},
+    ]
+    situation = {"structure_type": "Main-lake point", "spot_id": "spot1"}
+    assert lure_track_records(rows, situation) == {}
+
+
 def test_lure_track_records_tracks_biggest_fish():
     rows = [
         _trip("carolina_rig", biggest_fish_lb=1.2),

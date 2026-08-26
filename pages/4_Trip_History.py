@@ -105,7 +105,6 @@ separate filter entry per historical name. Falls back to the row's stored
 (a deleted pin, or a legacy row logged against core.spots's separate
 reference-spot list).
 """
-import json
 from datetime import datetime, time as dtime
 
 import pandas as pd
@@ -114,7 +113,7 @@ import streamlit as st
 from core.appstate import get_lake_spots, get_weather_bundle, get_anglers, github_token, repo_slug
 from core.storage import (
     read_all_trips, delete_trip, update_trip, TripEntry, TRIP_LOG_PATH, commit_and_push_data,
-    sync_data_from_data_branch,
+    sync_data_from_data_branch, parse_conditions,
 )
 from core.lures import LURE_PROFILES, STRUCTURE_TYPES, FORAGE_OPTIONS
 from core.onwater import (
@@ -177,10 +176,7 @@ def _parse_date(s: str):
 
 
 def _parse_conditions(row: dict) -> dict:
-    try:
-        return json.loads(row["conditions_json"]) if row.get("conditions_json") else {}
-    except json.JSONDecodeError:
-        return {}
+    return parse_conditions(row)
 
 
 def _lure_type_label(cond: dict) -> str:

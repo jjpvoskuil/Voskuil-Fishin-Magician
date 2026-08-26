@@ -134,6 +134,33 @@ def read_all_trips() -> list:
         return list(csv.DictReader(f))
 
 
+def parse_conditions(row: dict) -> dict:
+    """Every caller that reads a trip_log.csv row's conditions_json column
+    needs this - several places used to each roll their own
+    `json.loads(row.get("conditions_json") or "{}")`, checking only for a
+    JSON *parse* error, not for the parsed value actually being a dict.
+    conditions_json is JSON-encoded free text, not schema-validated - a
+    hand-edited CSV, an old row from before some field existed, or any
+    other origin that isn't this app's own json.dumps(conditions) call
+    could in principle leave a bare number/string/list/null in that
+    column, which parses just fine but then crashes the very next line
+    every one of these callers had (`conditions.get(...)`) with an
+    uncaught AttributeError - a real bug, confirmed while investigating a
+    "brief error, didn't stop anything" report during a live Spot Session
+    (the current data never actually had a row like this, so the crash
+    couldn't be reproduced end-to-end, but the defect itself is real and
+    would show exactly that way: a one-off exception on whichever rerun
+    happened to touch the bad row, self-clearing on the next). Always
+    returns a dict - {} for missing/unparseable/non-dict conditions_json,
+    the parsed dict otherwise - so every caller can keep calling
+    .get(...) on the result without checking anything itself."""
+    try:
+        parsed = json.loads(row.get("conditions_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def append_trip(entry: TripEntry):
     ensure_log_exists()
     with open(TRIP_LOG_PATH, "a", newline="") as f:
