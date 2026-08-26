@@ -625,6 +625,17 @@ this actually does. A genuinely dropped connection at the exact moment you're mi
 limitations" below and entry 90 in `SESSION_NOTES.md` - this app has no offline queue,
 by Streamlit's own live-round-trip architecture.
 
+**"Is this actually reaching GitHub right now?" (punch-list #62).** A missing or bad
+`GITHUB_TOKEN` has always failed silently by design - every save still "succeeds"
+locally either way, with only a `st.toast()` to say whether it also reached GitHub
+(and, with no token at all, an even quieter info-level one), and a toast is genuinely
+easy to miss on a phone mid-cast. Spot Session now shows a persistent (not a toast)
+one-line connection status right at the top of the page, before anything else - a
+green "🔌 GitHub sync: connected" caption with a masked preview of the token in use, or
+an orange warning if it can't see one at all - so that question never depends on
+catching a toast at the right moment. The Development page has the same check in a
+"🔌 GitHub connection" expander, alongside the repo it's pointed at.
+
 **Who's fishing.** The Spot Session page opens with a "🎣 Who's fishing" picker -
 John, Matthew, Alex, or "Other" (type in a name, which is then remembered as a real
 dropdown choice from then on - see `data/anglers.csv`/`core/anglers.py`). This is a

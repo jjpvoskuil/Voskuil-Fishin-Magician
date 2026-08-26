@@ -23,7 +23,7 @@ See core/dev_tasks.py for why numbers are never reused, even after delete.
 """
 import streamlit as st
 
-from core.appstate import get_dev_tasks, github_token, repo_slug
+from core.appstate import get_dev_tasks, github_token, repo_slug, github_connection_status
 from core.dev_tasks import (
     DEV_TASKS_COUNTER_PATH, DEV_TASKS_PATH, PAGE_OPTIONS, STATUS_DONE,
     append_task, delete_task, mark_done, reopen_task, update_task,
@@ -39,6 +39,23 @@ st.caption(
     "you notice it - each item gets its own number. Next session, just reference a number "
     "(\"let's do #7\") or ask me to look at this list and suggest what's next."
 )
+
+# Punch-list #62: same persistent connection status shown on Spot Session -
+# see that page's own comment, and core.appstate.github_connection_status()'s
+# docstring, for why this exists (a missing/bad GITHUB_TOKEN has always
+# failed silently, with only an easy-to-miss toast to say so).
+_gh_configured, _gh_preview = github_connection_status()
+with st.expander(f"🔌 GitHub connection: {'connected' if _gh_configured else 'NOT connected'}"):
+    if _gh_configured:
+        st.success(f"GITHUB_TOKEN is configured ({_gh_preview}).")
+    else:
+        st.error(
+            "GITHUB_TOKEN is not configured here (or Streamlit couldn't read it) - every save "
+            "this app makes, on every page, stays local-only until this is fixed. Check the "
+            "app's Secrets in Streamlit Cloud settings: the key must be exactly `GITHUB_TOKEN`, "
+            "quoted, with no stray characters."
+        )
+    st.caption(f"Repo: {repo_slug()}")
 
 COMMIT_PATHS = [DEV_TASKS_PATH, DEV_TASKS_COUNTER_PATH]
 

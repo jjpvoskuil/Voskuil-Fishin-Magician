@@ -144,6 +144,28 @@ def repo_slug() -> str:
         return "jjpvoskuil/Voskuil-Fishin-Magician"
 
 
+def github_connection_status() -> tuple:
+    """Punch-list #62: whether this running process can actually see a
+    GITHUB_TOKEN right now, plus a masked preview (first 10 + last 4
+    characters - enough to visually match against what's pasted into
+    Streamlit secrets, never enough to reconstruct the real value) if it
+    can. Exists because github_token() failing (missing secret, a typo in
+    the key name, a TOML syntax error elsewhere in the secrets file that
+    breaks parsing entirely, a stale/revoked token) has always failed
+    *silently* by design - every save still "succeeds" locally with only a
+    st.toast() (or, with no token at all, an even quieter info toast) to
+    say so, and a toast is easy to miss entirely on a phone mid-session.
+    An angler debugging "did my save actually reach GitHub?" had no way to
+    check the answer without fishing for a toast or reading this app's own
+    source - this gives a persistent (not a toast), always-visible answer
+    instead. Never raises, matching github_token()'s own contract."""
+    token = github_token()
+    if not token:
+        return False, ""
+    masked = f"{token[:10]}...{token[-4:]}" if len(token) > 18 else "(configured)"
+    return True, masked
+
+
 def anthropic_api_key() -> str:
     """API key for the Tackle Box page's "Scan a lure" photo-identify
     feature (core.lure_vision). Same graceful-degradation pattern as

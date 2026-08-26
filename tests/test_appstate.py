@@ -117,3 +117,27 @@ def test_get_calibrated_weights_is_cached_until_cleared(monkeypatch):
     _, third_count = appstate.get_calibrated_weights()
     assert calls["n"] == 2
     assert third_count == 2
+
+
+def test_github_connection_status_reports_not_configured_when_token_empty(monkeypatch):
+    monkeypatch.setattr(appstate, "github_token", lambda: "")
+    configured, preview = appstate.github_connection_status()
+    assert configured is False
+    assert preview == ""
+
+
+def test_github_connection_status_masks_a_real_looking_token(monkeypatch):
+    # Punch-list #62: enough of the token shown to visually match against
+    # what's pasted into Streamlit secrets, never enough to reconstruct it.
+    monkeypatch.setattr(appstate, "github_token", lambda: "github_pat_11ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    configured, preview = appstate.github_connection_status()
+    assert configured is True
+    assert preview == "github_pat...WXYZ"
+    assert "ABCDEF" not in preview
+
+
+def test_github_connection_status_handles_a_short_token_without_crashing(monkeypatch):
+    monkeypatch.setattr(appstate, "github_token", lambda: "short")
+    configured, preview = appstate.github_connection_status()
+    assert configured is True
+    assert preview == "(configured)"
