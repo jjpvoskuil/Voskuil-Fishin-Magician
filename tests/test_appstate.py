@@ -141,3 +141,59 @@ def test_github_connection_status_handles_a_short_token_without_crashing(monkeyp
     configured, preview = appstate.github_connection_status()
     assert configured is True
     assert preview == "(configured)"
+
+
+class _FakeResponse:
+    def __init__(self, status_code, json_body=None, text=""):
+        self.status_code = status_code
+        self._json_body = json_body or {}
+        self.text = text
+
+    def json(self):
+        return self._json_body
+
+
+def test_test_github_push_access_with_no_token_skips_the_network_call(monkeypatch):
+    calls = []
+    monkeypatch.setattr(appstate.requests, "get", lambda *a, **k: calls.append(1))
+    ok, msg = appstate.test_github_push_access("", "someone/somerepo")
+    assert ok is False
+    assert "no token" in msg.lower()
+    assert calls == []
+
+
+def test_test_github_push_access_true_when_push_permission_present(monkeypatch):
+    monkeypatch.setattr(
+        appstate.requests, "get",
+        lambda *a, **k: _FakeResponse(200, {"permissions": {"push": True}}),
+    )
+    ok, msg = appstate.test_github_push_access("faketoken", "someone/somerepo")
+    assert ok is True
+    assert "push access" in msg.lower()
+
+
+def test_test_github_push_access_false_when_valid_but_read_only(monkeypatch):
+    monkeypatch.setattr(
+        appstate.requests, "get",
+        lambda *a, **k: _FakeResponse(200, {"permissions": {"push": False}}),
+    )
+    ok, msg = appstate.test_github_push_access("faketoken", "someone/somerepo")
+    assert ok is False
+    assert "does not have" in msg.lower() or "does not" in msg.lower()
+
+
+def test_test_github_push_access_false_on_401_bad_credentials(monkeypatch):
+    monkeypatch.setattr(appstate.requests, "get", lambda *a, **k: _FakeResponse(401))
+    ok, msg = appstate.test_github_push_access("badtoken", "someone/somerepo")
+    assert ok is False
+    assert "401" in msg or "bad credentials" in msg.lower()
+
+
+def test_test_github_push_access_false_on_network_error(monkeypatch):
+    def _raise(*a, **k):
+        raise ConnectionError("no route to host")
+
+    monkeypatch.setattr(appstate.requests, "get", _raise)
+    ok, msg = appstate.test_github_push_access("sometoken", "someone/somerepo")
+    assert ok is False
+    assert "couldn't reach github" in msg.lower()

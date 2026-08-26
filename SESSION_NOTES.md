@@ -7839,6 +7839,50 @@ every real save.
     fixed and push latency (which could plausibly be part of the timing
     window) is no longer a factor.
 
+127. **Punch-list #63: the entry 126 connection indicator wasn't enough -
+    added a real live test against GitHub itself, because "connected"
+    turned out to mean less than it sounded like.** The angler re-ran the
+    Start/Cancel Session test with the new indicator visible the whole
+    time, confirmed it stayed "🔌 GitHub sync: connected" throughout - and
+    the push still never reached GitHub (checked directly via `git log` on
+    `data` again: no new commits), with the Cancel Session double-click
+    issue still present too.
+
+    **Why "connected" didn't mean what it sounded like:**
+    `github_connection_status()` (entry 126) only checks whether
+    `github_token()` returns a non-empty string - it has no way to tell a
+    garbage, wrong-scope, or revoked token apart from a genuinely working
+    one, since telling those apart requires an actual round trip to
+    GitHub. A string being present (which is all a green "connected"
+    caption was actually proving) is necessary but not sufficient for a
+    push to succeed.
+
+    **Fix:** added `core.appstate.test_github_push_access(token, slug)` -
+    a real, on-demand (never automatic - it's a genuine network call, not
+    something to run on every page load) GitHub API request against the
+    repo itself, interpreting the response exactly the way this session
+    diagnosed the two previous bad tokens by hand with `curl`: 401 means
+    the token is outright invalid/revoked, a 200 with `permissions.push:
+    false` means it's valid but lacks write access, and `permissions.push:
+    true` means it's genuinely working. Wired into a new "🔍 Test
+    connection now" button inside Development's existing "🔌 GitHub
+    connection" expander (entry 126) - pressing it now gives a real
+    yes/no/why answer instead of just "a string exists."
+
+    **Verification:** `pytest tests/ -q`: 377 passed (372 + 5 new, all in
+    `tests/test_appstate.py`, covering the push-permission-true case, the
+    valid-but-read-only case, a 401, a network exception, and the
+    no-token-configured short-circuit that skips the network call
+    entirely). Re-ran the full page smoke test against real `data` branch
+    content, restored via `git checkout HEAD -- data/` afterward. Verified
+    via a fresh `git clone`.
+
+    **Left open, now the priority:** the angler still needs to press this
+    new button and report back what it says - that will finally give a
+    concrete, specific answer (bad token vs. wrong permissions vs.
+    something else entirely) instead of another round of "still doesn't
+    work" with no further detail to act on.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
