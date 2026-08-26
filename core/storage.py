@@ -391,7 +391,38 @@ def commit_and_push(
         subprocess.run(["git", "add"] + [str(p) for p in paths], cwd=repo_root, check=True)
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo_root)
         if diff.returncode == 0:
-            return True, "No changes to commit."
+            # Punch-list #64 (live-app investigation): this exact message,
+            # with nothing more, is what an angler has been seeing on every
+            # single Start Session/Cancel Session/fish log this whole time -
+            # even for a brand-new row that unquestionably differs from
+            # whatever's on disk. A plain "no changes" with no further
+            # detail was a dead end to debug from outside the running
+            # container (no shell access, no server log tailing), so this
+            # appends a live snapshot of exactly what git itself thinks is
+            # going on for these specific paths right now - which of them
+            # git sees as modified/untracked (should never be empty right
+            # after a real write - if it IS empty, the write never reached
+            # the file git is diffing at all), and whether HEAD even points
+            # at a real branch (a detached HEAD, from some prior operation
+            # leaving the checkout mid-rebase or on a raw commit SHA, would
+            # look exactly like this - "add" and "commit" both still
+            # nominally succeed, but nothing meaningful is actually
+            # advancing). Purely diagnostic - never raises, doesn't change
+            # the (ok, message) contract any caller/test relies on (still
+            # `True`, still starts with "No changes to commit.", see
+            # tests/test_storage.py's `"No changes" in msg` check), and
+            # costs two more `git` calls only on this already-rare no-op
+            # path, not on every save.
+            status = subprocess.run(
+                ["git", "status", "--porcelain"] + [str(p) for p in paths],
+                cwd=repo_root, capture_output=True, text=True,
+            )
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root, capture_output=True, text=True,
+            )
+            status_bit = status.stdout.strip() or "(git sees these path(s) as completely unmodified)"
+            branch_bit = branch.stdout.strip() or "unknown"
+            return True, f"No changes to commit. [diag: HEAD={branch_bit!r}, git status={status_bit!r}]"
         subprocess.run(["git", "commit", "-m", commit_message], cwd=repo_root, check=True)
         return _push_with_retries(remote, branch, repo_root, max_push_retries, retry_backoff_seconds)
     except subprocess.CalledProcessError as e:

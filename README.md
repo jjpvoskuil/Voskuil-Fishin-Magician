@@ -196,7 +196,10 @@ this repo that can override it on this hosting.
   entirely, rather than keeping it, for testing sessions or just wanting a clean
   restart without any of it saved. It asks you to confirm first ("Cancel this
   session? ... can't be undone") since there's no way to get a canceled session's
-  data back. Each lure still lands as its own row in the trip log (no
+  data back. **If tapping "Yes, cancel it" doesn't seem to do anything** (the
+  session just stays open, no error shown), that's a known intermittent glitch -
+  tap "❌ Cancel Session" and confirm again; it's reliably worked on the second
+  try in every case seen so far (punch-list #64). Each lure still lands as its own row in the trip log (no
   combined/bundled entry), so Trip History's per-trip filtering and detail view keep
   working exactly as before; a "📋 Already logged for this spot" line above Conditions
   lists everything already saved for the selected date. It all writes into the same shared
