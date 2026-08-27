@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 from .scoring import lake_now_naive
+from .storage import data_write_lock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FREEZE_PATH = REPO_ROOT / "data" / "segment_score_freeze.csv"
@@ -111,59 +112,66 @@ def apply_freeze(day_forecast, now=None, path: Path = FREEZE_PATH) -> list:
     of the time - freezing only happens right as a window closes), so the
     caller knows whether a git commit is worth making; no write happens at
     all if this list would be empty.
+
+    Punch-list #68: the whole read-modify-write sequence below runs under
+    data_write_lock() (see core.storage's docstring) - two concurrent
+    browser sessions loading the 7-Day Forecast right as a segment's window
+    closes could otherwise both see it as unfrozen and both write a "first
+    time observed past" row for it.
     """
     now = now or lake_now_naive()
     d = day_forecast.the_date
-    already_frozen = read_frozen_segments(d, path)
-    newly_frozen_names = []
-    new_rows_for_today = []
-    any_segment_changed = False
+    with data_write_lock():
+        already_frozen = read_frozen_segments(d, path)
+        newly_frozen_names = []
+        new_rows_for_today = []
+        any_segment_changed = False
 
-    for seg in day_forecast.segments:
-        if seg.end > now:
-            continue  # still current or upcoming - stays live, untouched
-        frozen = already_frozen.get(seg.name)
-        if frozen is not None:
-            # Already-passed segment we've seen before - reapply its
-            # locked-in values instead of whatever score_day() just
-            # recomputed from the latest weather refresh.
-            if seg.score != frozen["score"]:
-                any_segment_changed = True
-            seg.score = frozen["score"]
-            seg.solunar_overlap = frozen["solunar_overlap"]
-            seg.notes = frozen["notes"]
-            seg.breakdown = frozen["breakdown"]
-        else:
-            # First time this segment has been observed as past - lock in
-            # whatever score_day() just computed for it, right now. Its
-            # score isn't changing on THIS run (nothing to override it
-            # with yet), so no need to flag any_segment_changed here.
-            new_rows_for_today.append({
-                "the_date": d.isoformat(),
-                "segment_name": seg.name,
-                "score": seg.score,
-                "solunar_overlap": seg.solunar_overlap or "",
-                "notes_json": json.dumps(seg.notes),
-                "breakdown_json": json.dumps(seg.breakdown),
-                "frozen_at": now.isoformat(),
-            })
-            newly_frozen_names.append(seg.name)
+        for seg in day_forecast.segments:
+            if seg.end > now:
+                continue  # still current or upcoming - stays live, untouched
+            frozen = already_frozen.get(seg.name)
+            if frozen is not None:
+                # Already-passed segment we've seen before - reapply its
+                # locked-in values instead of whatever score_day() just
+                # recomputed from the latest weather refresh.
+                if seg.score != frozen["score"]:
+                    any_segment_changed = True
+                seg.score = frozen["score"]
+                seg.solunar_overlap = frozen["solunar_overlap"]
+                seg.notes = frozen["notes"]
+                seg.breakdown = frozen["breakdown"]
+            else:
+                # First time this segment has been observed as past - lock in
+                # whatever score_day() just computed for it, right now. Its
+                # score isn't changing on THIS run (nothing to override it
+                # with yet), so no need to flag any_segment_changed here.
+                new_rows_for_today.append({
+                    "the_date": d.isoformat(),
+                    "segment_name": seg.name,
+                    "score": seg.score,
+                    "solunar_overlap": seg.solunar_overlap or "",
+                    "notes_json": json.dumps(seg.notes),
+                    "breakdown_json": json.dumps(seg.breakdown),
+                    "frozen_at": now.isoformat(),
+                })
+                newly_frozen_names.append(seg.name)
 
-    if any_segment_changed:
-        # A past segment's score just got overridden back to its frozen
-        # value, which score_day()'s freshly computed overall_score (the
-        # plain average of all segment scores, before this override ran)
-        # no longer reflects - recompute it the same way score_day() does,
-        # from the now-correct (mix of frozen-past + live-future) segment
-        # scores, so the day-level number a reader sees stays consistent
-        # with the segment cards underneath it.
-        avg = sum(s.score for s in day_forecast.segments) / len(day_forecast.segments)
-        day_forecast.overall_score = round(max(1.0, min(10.0, avg)), 1)
+        if any_segment_changed:
+            # A past segment's score just got overridden back to its frozen
+            # value, which score_day()'s freshly computed overall_score (the
+            # plain average of all segment scores, before this override ran)
+            # no longer reflects - recompute it the same way score_day() does,
+            # from the now-correct (mix of frozen-past + live-future) segment
+            # scores, so the day-level number a reader sees stays consistent
+            # with the segment cards underneath it.
+            avg = sum(s.score for s in day_forecast.segments) / len(day_forecast.segments)
+            day_forecast.overall_score = round(max(1.0, min(10.0, avg)), 1)
 
-    if new_rows_for_today:
-        # Keep only today's rows (existing + new) - anything for another
-        # date is stale by definition (see module docstring) and dropped.
-        existing_today_rows = [r for r in _read_all_rows(path) if r.get("the_date") == d.isoformat()]
-        _write_all_rows(existing_today_rows + new_rows_for_today, path)
+        if new_rows_for_today:
+            # Keep only today's rows (existing + new) - anything for another
+            # date is stale by definition (see module docstring) and dropped.
+            existing_today_rows = [r for r in _read_all_rows(path) if r.get("the_date") == d.isoformat()]
+            _write_all_rows(existing_today_rows + new_rows_for_today, path)
 
     return newly_frozen_names

@@ -8503,6 +8503,101 @@ every real save.
     re-adding it now that saves actually work, confirming via `git fetch
     origin data` that the add lands before considering it done.
 
+136. **Punch-list #68 - Trip History missing everything after 8/23:
+    root-caused as a second, distinct write-race corruption (not #67's
+    redeploy-crash bug), 9 real rows recovered from git history, and a
+    real app-wide fix (file locking) shipped, pressure-tested against a
+    live repro.** User: "I'm still having issues with trip history. It is
+    only showing sessions from 8/23 and prior. In the past, if I reboot
+    the app, the data comes back but I don't want to do that until you
+    can look at the current state" - investigated entirely non-
+    destructively (own clone only, never touched the live container, no
+    reboot) before touching anything.
+
+    **Diagnosis:** `git fetch origin data` + a full commit-by-commit
+    replay of every change to `data/trip_log.csv` (305 commits total)
+    showed real fishing data - 4 rows for 8/24 (Stripe Island Point dawn +
+    Jeanne's Point morning), 3 for 8/25 (Stripe Island Point dawn), 2 for
+    8/26 (Stripe Island Point dawn) - genuinely existed on the `data`
+    branch at various points, then vanished, TWICE: once overnight
+    8/25->8/27 (necessitating the angler's own manual re-entry of the 8/26
+    session, visible in the log as "Manually backfill 2026-08-26... lost
+    before commit"), and again catastrophically around 2026-08-27
+    11:12-11:23 UTC - right around today's manual "Reboot app" for entry
+    135's #67 fix - where the file briefly ballooned from 76 to 152 rows
+    with unmistakably corrupted content (`trip_date` holding literal
+    segment names like "Dawn"/"Afternoon"/"Morning" instead of dates - a
+    column-shift signature of two writers interleaving mid-row), before
+    the very next write collapsed it back down to exactly the pre-8/24
+    73-row baseline, discarding the corrupted rows AND the real 8/26
+    backfill along with them. The few 8/27 rows left after that were the
+    angler's own test session, which they'd already deleted via Trip
+    History - a red herring, not the real bug.
+
+    Root cause: `append_trip()`/`update_trip()`/`delete_trip()`
+    (core/storage.py) wrote to `trip_log.csv` with zero locking, and
+    `commit_and_push_data()`'s shared isolated worktree (entry 133/134's
+    #67 fix) had the exact same gap one level up - nothing ever stopped
+    two overlapping writers (most plausibly the OLD pre-#67-fix container
+    process and the freshly-rebooted post-fix one, briefly alive together
+    across today's reboot, both sharing the same `repo_root` and `/tmp`)
+    from reading/writing/copying the same file at the same time. This is
+    a distinct bug from #67 (which was about a local commit alone
+    triggering a redeploy) - same family (concurrent access to shared
+    on-disk state) but a different mechanism.
+
+    **Recovery:** all 9 real rows recovered verbatim (same trip_id/
+    session_id/logged_at/conditions_json) from pre-corruption git history
+    (commits `433672f` for 8/24-8/25, `b5e2735` for 8/26) and re-appended
+    to the current `data/trip_log.csv` via a scratch worktree off `data`,
+    same discipline as entry 117's backfill - never touching `main` or the
+    live container. Verified clean (+9 diff, no collisions, correct
+    dates/fieldnames) before pushing; confirmed live on GitHub afterward.
+
+    **Fix:** added `core.storage.data_write_lock()` - an OS-level
+    `fcntl.flock` (exclusive, blocking; works across separate processes on
+    the same filesystem, unlike a plain Python `threading.Lock`) - and
+    wrapped every read-modify-write CSV cycle in it app-wide, not just
+    trip_log.csv: `append_trip`/`update_trip`/`delete_trip`
+    (core/storage.py), `append_item`/`update_item`/`delete_item`
+    (core/lure_inventory.py), `append_task`/`update_task`/`delete_task`
+    (core/dev_tasks.py, including its separate task_no counter file),
+    `add_angler` (core/anglers.py), `append_spot`/`update_spot`/
+    `delete_spot` (core/lake_spots.py), `append_if_new`
+    (core/water_quality_log.py), and `apply_freeze`
+    (core/forecast_freeze.py) - plus the shared worktree copy+commit+push
+    section in `commit_and_push_data()`/`push_pending_data()` itself,
+    since that worktree is common to every data file this app saves.
+
+    **Pressure-tested, not just unit-tested:** a scratch multi-process
+    stress script (6 real OS processes, not threads - matching the actual
+    multi-container scenario) hammering `append_trip`+`update_trip`
+    concurrently with realistic multi-KB `conditions_json` payloads (small
+    single-row appends alone didn't reproduce it - Linux's O_APPEND
+    already guarantees small single writes won't interleave, which is why
+    the bug needed either large payloads or the whole-file-rewrite path
+    `update_trip`/`delete_trip` use). **Without the lock:** reliably
+    reproduced the live incident's exact failure mode - a `ValueError`
+    crash from a corrupted row and 17 of 48 expected rows surviving.
+    **With the lock:** 48 of 48 rows, zero corruption, every run.
+
+    **Verification:** `pytest tests/ -q` still 381 passed (no test
+    changes needed - existing coverage doesn't exercise concurrent
+    processes). Scratch `AppTest` smoke test across every page (home.py +
+    all 7 pages/*.py, 7-Day Forecast's weather mocked per
+    tests/test_scoring.py's `_fake_bundle()`), zero exceptions on any
+    page. Confirmed via a fresh `git clone` from GitHub (not local disk)
+    that the pushed `main` commit contains exactly the intended 7-file
+    change, nothing else. One incidental side effect caught and reverted
+    before committing: running the AppTest smoke test locally exercised
+    the real `apply_freeze()` write path against `main`'s own (frozen)
+    `data/segment_score_freeze.csv` - `git checkout --` that file before
+    committing the real fix.
+
+    **Net state:** the 8/24-8/26 data is recovered and live on the `data`
+    branch; the underlying write-race is fixed and pressure-tested app-
+    wide; punch-list #68 logged as Done on the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8849,6 +8944,22 @@ every real save.
   genuinely landed on GitHub. If a future code push to `main` ever again
   seems not to take effect, try a manual reboot before assuming the fix
   failed - see entry 135.
+- (entry 136, punch-list #68, FIXED) A second, distinct write-race
+  corruption - unlocked concurrent writes to `trip_log.csv` (and its
+  sibling data files) plus the shared `commit_and_push_data()` worktree -
+  cost two real days of logged sessions (8/24-8/26) before it was caught;
+  the 8/26 loss was itself a recurrence after the angler had already
+  manually re-entered that exact session once. Fixed with
+  `core.storage.data_write_lock()` (an `fcntl.flock`-based lock) around
+  every data file's read-modify-write cycle and the shared worktree
+  section, pressure-tested with a real multi-process repro (see entry
+  136). If Trip History or any other data-backed page ever again shows
+  fewer real sessions than were actually logged, suspect a NEW variant of
+  this same class of bug first - check `git log` on the `data` branch for
+  a sudden row-count spike-then-collapse (this fix should prevent it, but
+  "should" isn't "can never happen again" for a family of bugs this
+  subtle) - and recover from git history the same way entry 136 did
+  before assuming the data is gone for good.
 
 ## Operating notes
 

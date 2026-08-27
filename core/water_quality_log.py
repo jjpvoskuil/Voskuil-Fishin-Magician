@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .lake_water_quality import SurfaceWaterQuality
+from .storage import data_write_lock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WATER_QUALITY_LOG_PATH = REPO_ROOT / "data" / "water_quality_log.csv"
@@ -60,19 +61,23 @@ def append_if_new(reading: SurfaceWaterQuality, path: Path = WATER_QUALITY_LOG_P
     row, so every call here is a cheap no-op except roughly once every 1-2
     weeks when USACE actually republishes. Returns True if a row was
     actually appended (i.e. this is a reading not seen before)."""
-    ensure_log_exists(path)
-    observed_at_iso = reading.observed_at.isoformat()
-    if any(row["observed_at"] == observed_at_iso for row in read_log(path)):
-        return False
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writerow({
-            "observed_at": observed_at_iso,
-            "water_temp_f": reading.water_temp_f,
-            "do_mg_l": reading.do_mg_l,
-            "do_saturation_pct": reading.do_saturation_pct,
-        })
-    return True
+    # Punch-list #68: exists-check-then-append guarded by data_write_lock()
+    # (see core.storage's docstring) so two near-simultaneous fetches of a
+    # genuinely new reading can't both pass the exists-check and both append.
+    with data_write_lock():
+        ensure_log_exists(path)
+        observed_at_iso = reading.observed_at.isoformat()
+        if any(row["observed_at"] == observed_at_iso for row in read_log(path)):
+            return False
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow({
+                "observed_at": observed_at_iso,
+                "water_temp_f": reading.water_temp_f,
+                "do_mg_l": reading.do_mg_l,
+                "do_saturation_pct": reading.do_saturation_pct,
+            })
+        return True
 
 
 def parsed_log(path: Path = WATER_QUALITY_LOG_PATH) -> list:

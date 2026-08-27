@@ -25,6 +25,7 @@ from typing import Optional
 import uuid
 
 from .lures import STRUCTURE_TYPES
+from .storage import data_write_lock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPOTS_PATH = REPO_ROOT / "data" / "lake_spots.csv"
@@ -139,10 +140,12 @@ def read_all_spots(path: Path = SPOTS_PATH) -> list:
 
 
 def append_spot(spot: LakeSpot, path: Path = SPOTS_PATH):
-    ensure_spots_file_exists(path)
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writerow(spot.to_row())
+    # Punch-list #68: see core.storage.data_write_lock's docstring.
+    with data_write_lock():
+        ensure_spots_file_exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow(spot.to_row())
 
 
 def _write_rows(rows: list, path: Path):
@@ -156,32 +159,39 @@ def _write_rows(rows: list, path: Path):
 def update_spot(spot_id: str, path: Path = SPOTS_PATH, **changes) -> bool:
     """Update fields on an existing spot by spot_id. A `bottom_structure`
     change may be passed as a list (joined automatically here) or an
-    already-joined string. Returns True if found."""
-    rows = read_all_spots(path)
-    found = False
-    for row in rows:
-        if row["spot_id"] == spot_id:
-            for k, v in changes.items():
-                if k not in FIELDNAMES:
-                    continue
-                if k == "bottom_structure" and isinstance(v, list):
-                    v = "|".join(v)
-                row[k] = "" if v is None else v
-            row["updated_at"] = datetime.utcnow().isoformat()
-            found = True
-            break
-    if found:
-        _write_rows(rows, path)
-    return found
+    already-joined string. Returns True if found.
+
+    Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_spots(path)
+        found = False
+        for row in rows:
+            if row["spot_id"] == spot_id:
+                for k, v in changes.items():
+                    if k not in FIELDNAMES:
+                        continue
+                    if k == "bottom_structure" and isinstance(v, list):
+                        v = "|".join(v)
+                    row[k] = "" if v is None else v
+                row["updated_at"] = datetime.utcnow().isoformat()
+                found = True
+                break
+        if found:
+            _write_rows(rows, path)
+        return found
 
 
 def delete_spot(spot_id: str, path: Path = SPOTS_PATH) -> bool:
-    rows = read_all_spots(path)
-    remaining = [r for r in rows if r["spot_id"] != spot_id]
-    deleted = len(remaining) != len(rows)
-    if deleted:
-        _write_rows(remaining, path)
-    return deleted
+    """Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_spots(path)
+        remaining = [r for r in rows if r["spot_id"] != spot_id]
+        deleted = len(remaining) != len(rows)
+        if deleted:
+            _write_rows(remaining, path)
+        return deleted
 
 
 def nearest_spot_within(lat: float, lon: float, spots: list, max_deg: float = 0.0001):

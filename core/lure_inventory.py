@@ -51,6 +51,8 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
+from core.storage import data_write_lock
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INVENTORY_PATH = REPO_ROOT / "data" / "lure_inventory.csv"
 IMAGES_DIR = REPO_ROOT / "data" / "lure_images"
@@ -123,10 +125,14 @@ def read_all_items(path: Path = INVENTORY_PATH) -> list:
 
 
 def append_item(item: LureItem, path: Path = INVENTORY_PATH):
-    ensure_inventory_exists(path)
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writerow(item.to_row())
+    # Punch-list #68: see core.storage.data_write_lock's docstring - the
+    # same unlocked-concurrent-write mechanism that corrupted trip_log.csv
+    # applies to every git-backed CSV this app writes, this one included.
+    with data_write_lock():
+        ensure_inventory_exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow(item.to_row())
 
 
 def _write_rows(rows: list, path: Path):
@@ -137,32 +143,39 @@ def _write_rows(rows: list, path: Path):
 
 
 def update_item(item_id: str, path: Path = INVENTORY_PATH, **changes) -> bool:
-    """Update fields on an existing item by item_id. Returns True if found."""
-    rows = read_all_items(path)
-    found = False
-    for row in rows:
-        if row["item_id"] == item_id:
-            row.update({k: v for k, v in changes.items() if k in FIELDNAMES})
-            row["updated_at"] = datetime.utcnow().isoformat()
-            found = True
-            break
-    if found:
-        _write_rows(rows, path)
-    return found
+    """Update fields on an existing item by item_id. Returns True if found.
+
+    Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_items(path)
+        found = False
+        for row in rows:
+            if row["item_id"] == item_id:
+                row.update({k: v for k, v in changes.items() if k in FIELDNAMES})
+                row["updated_at"] = datetime.utcnow().isoformat()
+                found = True
+                break
+        if found:
+            _write_rows(rows, path)
+        return found
 
 
 def delete_item(item_id: str, path: Path = INVENTORY_PATH, images_dir: Path = IMAGES_DIR) -> bool:
-    rows = read_all_items(path)
-    remaining = [r for r in rows if r["item_id"] != item_id]
-    deleted = len(remaining) != len(rows)
-    if deleted:
-        removed_img = next((r["image_filename"] for r in rows if r["item_id"] == item_id and r["image_filename"]), "")
-        _write_rows(remaining, path)
-        if removed_img:
-            img_path = images_dir / removed_img
-            if img_path.exists():
-                img_path.unlink()
-    return deleted
+    """Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_items(path)
+        remaining = [r for r in rows if r["item_id"] != item_id]
+        deleted = len(remaining) != len(rows)
+        if deleted:
+            removed_img = next((r["image_filename"] for r in rows if r["item_id"] == item_id and r["image_filename"]), "")
+            _write_rows(remaining, path)
+            if removed_img:
+                img_path = images_dir / removed_img
+                if img_path.exists():
+                    img_path.unlink()
+        return deleted
 
 
 def save_image(item_id: str, file_bytes: bytes, extension: str, images_dir: Path = IMAGES_DIR) -> str:

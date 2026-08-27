@@ -34,6 +34,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from core.storage import data_write_lock
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEV_TASKS_PATH = REPO_ROOT / "data" / "dev_tasks.csv"
 DEV_TASKS_COUNTER_PATH = DEV_TASKS_PATH.with_name("dev_tasks_counter.txt")
@@ -114,15 +116,21 @@ def _save_next_task_no(path: Path, next_no: int):
 def append_task(description: str, page: str, path: Path = DEV_TASKS_PATH) -> DevTask:
     """Create and save a new punch-list item, auto-assigning the next
     task_no (see _next_task_no()/module docstring) and advancing the
-    counter file so that number is never handed out again."""
-    ensure_dev_tasks_exists(path)
-    task_no = _next_task_no(path)
-    task = DevTask(description=description.strip(), page=page, task_no=task_no)
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writerow(task.to_row())
-    _save_next_task_no(path, task_no + 1)
-    return task
+    counter file so that number is never handed out again.
+
+    Punch-list #68: the read-counter/write-csv/write-counter sequence is
+    guarded by data_write_lock() (see core.storage's docstring) - without
+    it, two concurrent calls could both read the same counter value and
+    hand out the same task_no twice."""
+    with data_write_lock():
+        ensure_dev_tasks_exists(path)
+        task_no = _next_task_no(path)
+        task = DevTask(description=description.strip(), page=page, task_no=task_no)
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow(task.to_row())
+        _save_next_task_no(path, task_no + 1)
+        return task
 
 
 def _write_rows(rows: list, path: Path):
@@ -135,30 +143,38 @@ def _write_rows(rows: list, path: Path):
 def update_task(task_no, path: Path = DEV_TASKS_PATH, **changes) -> bool:
     """Update fields on an existing item by task_no. Returns True if found.
     task_no is compared as a string against the CSV's own string values, so
-    callers can pass either an int or a str."""
-    rows = read_all_tasks(path)
-    found = False
-    for row in rows:
-        if str(row["task_no"]) == str(task_no):
-            row.update({k: v for k, v in changes.items() if k in FIELDNAMES})
-            found = True
-            break
-    if found:
-        _write_rows(rows, path)
-    return found
+    callers can pass either an int or a str.
+
+    Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_tasks(path)
+        found = False
+        for row in rows:
+            if str(row["task_no"]) == str(task_no):
+                row.update({k: v for k, v in changes.items() if k in FIELDNAMES})
+                found = True
+                break
+        if found:
+            _write_rows(rows, path)
+        return found
 
 
 def delete_task(task_no, path: Path = DEV_TASKS_PATH) -> bool:
     """Remove the item with this task_no entirely. Returns False (no-op,
     file untouched) if no row with that task_no exists. Never touches the
     counter file, so a deleted item's number is never reassigned to a
-    later item - see module docstring."""
-    rows = read_all_tasks(path)
-    remaining = [r for r in rows if str(r["task_no"]) != str(task_no)]
-    deleted = len(remaining) != len(rows)
-    if deleted:
-        _write_rows(remaining, path)
-    return deleted
+    later item - see module docstring.
+
+    Punch-list #68: read-modify-write now guarded by data_write_lock() -
+    see core.storage's docstring for why."""
+    with data_write_lock():
+        rows = read_all_tasks(path)
+        remaining = [r for r in rows if str(r["task_no"]) != str(task_no)]
+        deleted = len(remaining) != len(rows)
+        if deleted:
+            _write_rows(remaining, path)
+        return deleted
 
 
 def mark_done(task_no, path: Path = DEV_TASKS_PATH) -> bool:
