@@ -7956,6 +7956,64 @@ every real save.
     reproduction actually diagnosable instead of another repeat of "it
     didn't work, no further detail."
 
+129. **Punch-list #65: after the entry 128 fix made Cancel Session's
+    double-click workaround actually visible/workable, the angler
+    reported the page still wasn't resetting fully afterward - "it still
+    shows the same angler, location and the lure that was selected
+    previously. It really should completely reset the page like I am
+    starting from scratch."**
+
+    Confirmed as intended-but-wrong behavior, not a bug in the delete
+    itself: `_cancel_session()` only ever cleared its own
+    `active_session_*` record - the picked angler identity, the picked
+    location, and the pending builder's lure/conditions inputs were never
+    touched, so the page looked exactly like it had before Cancel was
+    tapped, even though the underlying trip rows were genuinely gone. `⏹ End Session` deliberately keeps all of that (you're
+    still you, still at the same spot, about to log another real session
+    there) - but Cancel exists specifically for "that was a mistake or a
+    test, start over," so it should behave differently from End.
+
+    **Fix:** added `_reset_builder_to_scratch(spot_id)`, called only from
+    `_cancel_session()`'s success path (never on the entry-128
+    silent-failure branch, since nothing should change there) - pops the
+    angler identity (`active_angler`/`active_angler_other_name`) and the
+    picked location (`spot_session_target_id`) from `session_state`, pops
+    the matching `angler`/`spot_id` query params too (they're what
+    survives a reconnect, so leaving them would silently re-establish the
+    very state this is clearing), and retires the spot's
+    `session_build_seq` counter - the same mechanism `▶ Start Session`
+    already uses to make its own next builder blank - so any pending
+    lure/conditions inputs reset to fresh, unseeded widget keys rather
+    than reusing whatever was mid-build.
+
+    This surfaced a real ordering bug while building it: the existing
+    "Session canceled"/"Session closed" banners were `session_state` flags
+    keyed by `spot_id` (`session_closed_banner_{spot_id}`, etc.) and only
+    checked further down the page, after a spot was already re-resolved -
+    once Cancel started clearing the spot too, the page would hit the "no
+    spot selected yet" screen's own `st.stop()` first and the banner would
+    never render at all. Replaced all three (closed/canceled/cancel-
+    failed) with one page-wide `session_action_banner` dict (`{kind,
+    spot_name}`), checked and shown right after the GitHub connection
+    caption at the very top of the page - before any spot/angler
+    resolution - so it survives even when the location it's describing
+    was just cleared.
+
+    **Verification:** `pytest tests/ -q`: 377 passed (no new permanent
+    tests - both the reset and the banner reorder are page-level UX flow,
+    the existing pattern here is verifying via AppTest scratch scripts,
+    not permanent unit tests, since core/ has no new pure logic to cover).
+    Wrote a throwaway AppTest script exercising the exact flow: seed
+    `spot_session_target_id`/`active_angler`/a pending lure, click
+    ▶ Start Session, click ❌ Cancel Session, click "Yes, cancel it" -
+    confirmed `active_angler` and `spot_session_target_id` are both gone
+    from `session_state` afterward, `query_params` is empty, and the page
+    renders the "Session at <spot> canceled..." banner followed by the
+    fresh "No spot selected yet" screen, exactly as intended. Deleted the
+    script after. Re-ran the full page smoke test against real `data`
+    branch content, restored via `git checkout HEAD -- data/` afterward.
+    Verified via a fresh `git clone`.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

@@ -199,7 +199,12 @@ this repo that can override it on this hosting.
   data back. **If tapping "Yes, cancel it" doesn't seem to do anything** (the
   session just stays open, no error shown), that's a known intermittent glitch -
   tap "❌ Cancel Session" and confirm again; it's reliably worked on the second
-  try in every case seen so far (punch-list #64). Each lure still lands as its own row in the trip log (no
+  try in every case seen so far (punch-list #64). Unlike "⏹ End Session" (which
+  deliberately keeps your picked angler name and location - you're still you, still
+  at the same spot), a real Cancel resets the whole page back to scratch: angler,
+  location, and any picked lure(s)/conditions all clear, so the next thing you see
+  is the same blank "who's fishing" / "choose a spot" screen as a first visit
+  (punch-list #65). Each lure still lands as its own row in the trip log (no
   combined/bundled entry), so Trip History's per-trip filtering and detail view keep
   working exactly as before; a "📋 Already logged for this spot" line above Conditions
   lists everything already saved for the selected date. It all writes into the same shared
