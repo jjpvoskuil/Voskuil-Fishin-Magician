@@ -2141,8 +2141,28 @@ if active is not None:
             f"Cancel this session? This permanently discards everything logged so far - "
             f"{len(active['lures'])} lure(s) and {_cancel_fish_count} fish - and can't be undone."
         )
-        ccol1, ccol2 = st.columns(2)
-        if ccol1.button("Yes, cancel it", key=f"confirm_cancel_session_{spot['spot_id']}", type="primary", width='stretch'):
+        # Punch-list #66 (second pass): plain st.button() here reproducibly
+        # needed two taps on "Yes, cancel it" - confirmed by directly
+        # reproducing it live on the deployed app twice, both times on the
+        # very first tap of a just-appeared confirm button, at unrelated
+        # elapsed times (not aligned with any fixed interval), which argues
+        # against the earlier "autosave-heartbeat fragment race" theory
+        # (still left in place above since it's harmless either way) and
+        # points instead at Streamlit's own known behavior where a button
+        # that appears for the first time in a script run - like this one,
+        # which doesn't exist at all until "❌ Cancel Session" flips
+        # cancel_pending_key - can silently miss its own first click rather
+        # than registering it on the next rerun. st.form()'s submit buttons
+        # don't share that per-widget auto-rerun path (a form batches its
+        # contents and submits as one atomic round trip), which is the
+        # standard fix for exactly this "the button that just appeared
+        # needs two clicks" class of issue. Still logged as a mitigation,
+        # not a confirmed root cause - see SESSION_NOTES.md punch-list #66.
+        with st.form(key=f"cancel_confirm_form_{spot['spot_id']}", border=False):
+            ccol1, ccol2 = st.columns(2)
+            confirmed = ccol1.form_submit_button("Yes, cancel it", type="primary", width='stretch')
+            kept = ccol2.form_submit_button("Keep session", width='stretch')
+        if confirmed:
             st.session_state.pop(cancel_pending_key, None)
             # Punch-list #64: _cancel_session() used to be called and
             # ignored here, so its (still-unexplained) occasional silent
@@ -2162,7 +2182,7 @@ if active is not None:
                 # that isn't re-rendered on the next run too).
                 st.session_state["session_action_banner"] = {"kind": "cancel_failed", "spot_name": spot["name"]}
             st.rerun()
-        if ccol2.button("Keep session", key=f"keep_session_{spot['spot_id']}", width='stretch'):
+        if kept:
             st.session_state.pop(cancel_pending_key, None)
             st.rerun()
 

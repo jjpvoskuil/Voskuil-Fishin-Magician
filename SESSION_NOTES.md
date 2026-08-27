@@ -8083,6 +8083,52 @@ every real save.
     ships, that itself is the signal the fragment theory was wrong (see
     below) and the actual cause is still open.
 
+131. **Punch-list #66 (continued, same session): re-verified entry 130's
+    fix live before telling the angler it was done - it wasn't.**
+
+    Pushed and deployed, waited for the redeploy, then repeated the exact
+    live repro from entry 130 (fresh spot/angler this time - Gar Bank /
+    Alex - to leave the earlier Dock Rock Wall session alone). First tap
+    of "Yes, cancel it" failed again, identically: dialog closes, session
+    completely unchanged, no banner. That's two live reproductions now,
+    both failing on the very first tap of a just-appeared confirm button,
+    at unrelated elapsed times relative to any 30-second boundary - which
+    argues against entry 130's autosave-heartbeat-fragment race theory
+    (a real race would be expected to succeed sometimes on the first try)
+    and toward something that happens deterministically to a button that
+    doesn't exist in the DOM until the immediately-preceding rerun.
+
+    That matches a documented Streamlit behavior: a button rendered for
+    the first time in a script run (this one doesn't exist at all until
+    "❌ Cancel Session" flips `cancel_session_confirm_{spot_id}` and
+    reruns) can miss its own first click rather than register it on the
+    next rerun, because a plain button's click is delivered through a
+    per-widget path that a first-appearance can race against. `st.form()`
+    submit buttons don't share that path - a form batches its contents
+    and submits as one atomic round trip - which is the standard fix for
+    exactly this class of issue.
+
+    **Fix:** wrapped the "Yes, cancel it" / "Keep session" pair in
+    `st.form(key=f"cancel_confirm_form_{spot_id}", border=False)`, using
+    `st.form_submit_button()` for both instead of plain `st.button()`.
+    Everything downstream (the `if confirmed: ...` / `if kept: ...` logic,
+    `_cancel_session()`, the banners) is unchanged - only how the click
+    itself gets from the browser to this script changed. Left entry 130's
+    heartbeat guard in place too (harmless, and still a plausible partial
+    contributor even if not sufficient alone).
+
+    **Verification:** `pytest tests/ -q`: 377 passed. A throwaway AppTest
+    script (seed session_state, click "+Add", "Start Session", "Cancel
+    Session," then the new `form_submit_button` "Yes, cancel it") confirmed
+    the form version still cancels correctly end to end in one click and
+    still fires the full reset + banner - this only proves no logic
+    regression, since AppTest's synchronous harness can't reproduce the
+    actual browser-timing failure either way (same caveat as entry 130).
+    Deleted the script after; reverted the `data/trip_log.csv` row it
+    wrote via `git checkout HEAD --`. **Not yet re-verified live on the
+    redeployed app** - that's the actual test that matters here, and
+    should happen the next time this reproduces (or doesn't).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
