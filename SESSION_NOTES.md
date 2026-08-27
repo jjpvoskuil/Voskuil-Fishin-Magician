@@ -8285,14 +8285,61 @@ every real save.
     session) to pin down the real underlying exception instead of
     Streamlit's redacted-for-production error text.
 
+    **Stronger, confirmed finding found right after, which changes the
+    leading theory: this container appears to be restarting/recycling
+    during ordinary use, and any local save not yet pushed to GitHub can
+    be silently wiped when that happens - a real data-loss risk, not just
+    a crash screen.** Logged punch-list #67 itself via the Development
+    page's own "Add an item" form - confirmed present immediately after
+    (survived one page reload, "2 open" shown), then gone entirely
+    ("1 open") a couple minutes later after only a same-page button click
+    (Development's own "Test connection now") and a JS-driven scroll - no
+    explicit page reload in between. Checked `home.py`'s "N logged
+    trip(s)" count at the same time: it had been at 75 (up from the
+    baseline 73, reflecting the two Start Session attempts' local-only
+    writes) and was back down to exactly **73** - both of those trips'
+    local writes had vanished too, not just the dev-task entry. Confirmed
+    via `git fetch origin data` that neither the trip rows nor the #67
+    task ever landed on the `data` branch, and confirmed via the
+    Development page's "Test connection now" button that the GitHub
+    token itself has live, working push access - so this isn't a bad
+    token or lost connectivity, something is discarding local writes
+    before they get pushed.
+
+    The mechanism that fits every observation: `app.py`'s
+    `_sync_data_once()` (`st.cache_resource`, meant to run exactly once
+    per process boot per its own docstring) calls
+    `sync_data_from_data_branch()`, which overlays local `data/*.csv`
+    with whatever is on the remote `data` branch. If the container
+    actually reboots mid-session - for any reason, resource limits on
+    Streamlit Community Cloud's free tier being the obvious candidate for
+    an app with this much image/git/network activity per interaction -
+    `st.cache_resource`'s cache clears with it, `_sync_data_once()` runs
+    again on the fresh process, and it overwrites every local file
+    (`trip_log.csv`, `dev_tasks.csv`, ...) with the last-known-good remote
+    copy, silently discarding anything saved locally since the previous
+    successful push. This would also explain the `KeyError` crash itself
+    (a request caught mid-flight while the old process is torn down and
+    the new one is still starting up is a very plausible way to get a
+    spurious import failure on `app.py`'s own top-level `core.appstate`
+    import) rather than requiring a separate concurrent-import race
+    theory - though that fragment-collision theory isn't ruled out either
+    and could be a contributing factor rather than the whole story.
+
     **Net state:** #66's on_click fix is deployed and logically verified,
     but its actual live effectiveness against the real click-timing bug
     is **still unconfirmed** - every attempt to reach an active session
-    to test Cancel Session hit #67's crash first. **#67 (Start Session
-    crashes the whole app) is the top priority for next session**: get
-    real server logs, confirm whether it's the import race or something
-    else, and only then circle back to finishing #66's live
-    verification.
+    to test Cancel Session hit #67's crash first. **#67 is now believed
+    to be a real, live data-loss bug** (not just a crash screen) and is
+    the top priority for next session: get real server logs (Manage app
+    -> logs) to see whether the container is actually restarting and
+    why, and only then circle back to finishing #66's live verification.
+    Given #67 disappeared from the live punch list before this could be
+    re-confirmed as landed, this write-up here in SESSION_NOTES (committed
+    directly to `main`, not dependent on the app's own push flow) is the
+    durable record - re-add it to the in-app punch list next session only
+    after confirming (via `git fetch origin data`) that the add has
+    actually landed on GitHub before moving on.
 
 ## Key design decisions & rationale
 
@@ -8618,19 +8665,39 @@ every real save.
   effectiveness against the real click-timing bug is still unconfirmed**
   - every attempt to reach an active session to test it hit punch-list
   #67's crash (below) before the confirm dialog was ever reached.
-- **(entry 133, punch-list #67, NEW, unresolved, top priority)** Clicking
-  "Start Session" on Spot Session reproducibly crashes the WHOLE app (not
-  page-specific) with a redacted `KeyError` from `app.py`'s own top-level
+- **(entry 133, punch-list #67, NEW, unresolved, TOP PRIORITY - likely
+  real data loss, not just a crash screen)** Clicking "Start Session" on
+  Spot Session reproducibly crashes the WHOLE app (not page-specific)
+  with a redacted `KeyError` from `app.py`'s own top-level
   `from core.appstate import github_token, repo_slug` - live-reproduced
   twice, different spot/angler combos, well clear of any redeploy timing.
-  A page reload recovers instantly. Leading unconfirmed theory: a
-  concurrent-import race between the main script rerun and one of Spot
-  Session's `st.fragment(run_every=...)` background reruns (the same
-  fragments already implicated in the Cancel Session saga above) landing
-  during Start Session's slower-than-normal work (trip_log write +
-  `commit_and_push_data()`'s git push). Needs real Streamlit Cloud server
-  logs (not available to a sandboxed session) to confirm. See entry 133
-  for the full writeup and reproduction steps.
+  A page reload recovers instantly, but confirmed both times that
+  whatever got saved locally (a new trip_log row, and separately a new
+  punch-list entry added the same way through the Development page) later
+  vanished completely - `home.py`'s "N logged trip(s)" count dropped back
+  to the exact pre-session baseline, and the punch-list item disappeared
+  from the list a few minutes after being confirmed present. Neither ever
+  reached the `data` branch on GitHub (checked via `git fetch origin
+  data`), and the GitHub token itself was confirmed live and working via
+  Development's "Test connection now" button - so pushes aren't failing
+  for lack of a working token. Leading theory: the container is
+  restarting/recycling during ordinary use (Streamlit Community Cloud
+  resource limits are the obvious candidate), which both plausibly causes
+  this exact import `KeyError` (a request caught mid-flight while the
+  process is torn down/restarted) and, separately, means the very next
+  request re-runs `_sync_data_once()` (`app.py`), overlaying every local
+  `data/*.csv` file with the last-known-good GitHub copy and silently
+  discarding anything saved locally since the previous successful push. A
+  secondary, not-mutually-exclusive theory (a concurrent-import race
+  between the main script rerun and one of Spot Session's
+  `st.fragment(run_every=...)` background reruns, the same fragments
+  already implicated in the Cancel Session saga above) hasn't been ruled
+  out either. Needs real Streamlit Cloud server logs (Manage app -> logs,
+  not available to a sandboxed session) to confirm which. See entry 133
+  for the full writeup and reproduction steps. **Until this is
+  understood, treat any Spot Session save as at-risk until it's visibly
+  reflected on the `data` branch (or the angler otherwise confirms it
+  stuck) - not just "seemed to save locally."**
 
 ## Operating notes
 
