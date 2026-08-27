@@ -8182,6 +8182,118 @@ every real save.
     described above before saying anything more to the angler about
     whether #66 is actually fixed.**
 
+133. **Punch-list #66 (third pass, on_click fix) shipped and verified
+    offline; live re-verification blocked by discovering a new, more
+    severe crash on "Start Session" - punch-list #67, not yet fixed.**
+
+    Angler reported the Cancel Session issue again, plus a new "bigger
+    issue": starting a new session supposedly showed only the spot/angler
+    pickers with nothing after that (no Conditions, no lure suggestions,
+    no tackle box).
+
+    **Cancel Session, third pass:** replaced entry 131's
+    `st.form()`/`form_submit_button()` inline-return-value check with
+    `on_click=` callbacks (`_confirm_cancel_session()` / `_keep_session()`)
+    for both confirm-dialog buttons - Streamlit's own documented fix for a
+    widget whose action must fire reliably on the very interaction that
+    created it, since a callback runs as part of handling the click event
+    itself rather than something noticed after the fact on the next
+    script rerun. Verified with no logic regression: `pytest tests/ -q`
+    (377 passed), a throwaway AppTest repro script (start -> cancel ->
+    confirm, same row-count/banner behavior as before), and an 8-page
+    AppTest smoke test (zero exceptions) - all re-run again in a fresh
+    `git clone` to a new temp directory per the standing workflow.
+    Committed and pushed to `main` (commit `08eb66f`).
+
+    **"Nothing renders after picking spot+angler" - not reproduced as
+    described.** Live-tested three fresh spot/angler combos (Gar Bank/
+    Matthew, Midnight Point/John, plus one more) straight through: Location
+    -> "Who's fishing" -> Session date -> Conditions form -> "Suggestions
+    for right now" expander -> "Lures for this session" -> "Add from
+    tackle box" (with real lure cards/images) -> Start Session button.
+    Every field rendered correctly every time; confirmed via direct DOM
+    inspection of the app's iframe (`document.querySelector('iframe')
+    .contentDocument`) since this sandbox's synthetic scroll/keyboard
+    events still don't propagate into the deployed app's nested iframe
+    (same limitation as entry 57) - scrolling via
+    `main.scrollTo(0, main.scrollHeight)` on `[data-testid="stMain"]`
+    inside that iframe document works fine and was used throughout this
+    session to drive the UI past the fold.
+
+    **But found something worse: clicking "Start Session" itself
+    reproducibly crashes the whole app.** Live-reproduced twice, on two
+    completely different spot/angler combos, well after the on_click fix
+    had been live for several minutes (ruled out redeploy-timing
+    coincidence). Both times: after clicking "Start Session" with one
+    lure added, the ENTIRE app - not just the Spot Session page - fails
+    with a Streamlit "app has encountered an error" screen:
+    ```
+    KeyError: This app has encountered an error. The original error
+    message is redacted to prevent data leaks...
+    Traceback:
+    File "/mount/src/voskuil-fishin-magician/app.py", line 32, in <module>
+        from core.appstate import github_token, repo_slug
+    File "<frozen importlib._bootstrap>", line 1371, in _find_and_load
+    File "<frozen importlib._bootstrap>", line 1342, in _find_and_load_unlocked
+    File "<frozen importlib._bootstrap>", line 949, in _load_unlocked
+    ```
+    This is `app.py`'s own top-level import failing, not page-specific
+    logic - `app.py`'s docstring notes its top-level code (including this
+    import) reruns on every single interaction, and it had already
+    imported successfully dozens of times in the same process just before
+    each crash. A plain page reload recovers the app immediately every
+    time. Neither crashed attempt showed the started session as
+    in-progress/active when returning to that spot+angler afterward
+    (fresh builder instead), though `home.py`'s "N logged trip(s)" count
+    did tick up each time - so it's genuinely unclear whether the
+    trip_log row and/or its GitHub push completed, partially completed,
+    or rolled back. Did not find this documented anywhere in Known
+    limitations, so this looks new (or newly reproducible) this session,
+    not a rediscovery of #64-#66's cancel-button issue.
+
+    Logged as punch-list **#67** via the app's own Development page (kept
+    the write path consistent with how every other punch-list entry has
+    been added, rather than hand-editing `data/dev_tasks.csv` outside the
+    app's UI). Note: as of writing this, `git fetch origin data` still
+    doesn't show #67 in `data/dev_tasks.csv` on the `data` branch, even a
+    couple minutes after adding it in the UI - the write clearly landed
+    locally (survived a page reload, `home.py`'s trip count reflects
+    other same-session local writes too), so this may just be normal
+    async push latency, or it may be a second, milder symptom of
+    something off with pushes from this session - worth confirming first
+    thing next session before assuming #67 is safely on GitHub.
+
+    Leading theory (not confirmed - this session had no access to
+    Streamlit Cloud's real, non-redacted server logs): a concurrent-
+    import race. `core.appstate` is re-imported at the top of `app.py` on
+    every interaction; Spot Session is the only page with
+    `st.fragment(run_every=...)` background auto-reruns (a 20s spectator
+    fragment and a 30s autosave heartbeat, both already implicated in
+    entries 129-131's cancel-button theories), and Start Session's own
+    work (writing `trip_log.csv`, then `commit_and_push_data()`'s git
+    push) takes measurably longer than a normal click - widening the
+    window for one of those background fragments to tick over mid-
+    request and land a second, overlapping script execution in the same
+    Python process. Two threads racing to import the same not-yet-fully-
+    cached module is a known class of CPython `importlib` bug
+    (`_find_and_load_unlocked` raising `KeyError` on `sys.modules`
+    bookkeeping under concurrent import). Unconfirmed alternative: the
+    git operations inside `commit_and_push_data()` touching files in the
+    working tree could be triggering Streamlit Cloud's own file-watcher
+    to attempt a source reload mid-request. Either way, this needs actual
+    server logs (Manage app -> logs, not available to this sandboxed
+    session) to pin down the real underlying exception instead of
+    Streamlit's redacted-for-production error text.
+
+    **Net state:** #66's on_click fix is deployed and logically verified,
+    but its actual live effectiveness against the real click-timing bug
+    is **still unconfirmed** - every attempt to reach an active session
+    to test Cancel Session hit #67's crash first. **#67 (Start Session
+    crashes the whole app) is the top priority for next session**: get
+    real server logs, confirm whether it's the import race or something
+    else, and only then circle back to finishing #66's live
+    verification.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8499,6 +8611,26 @@ every real save.
   Session and try again - it's reliably worked on the second try in
   every case seen so far") should still be treated as necessary until a
   clean test proves otherwise.
+- (entry 133, punch-list #66 third pass) Replaced the `st.form()` confirm
+  buttons with `on_click=` callbacks - Streamlit's documented fix for a
+  widget whose action must fire on the exact interaction that created it.
+  Verified with no logic regression (pytest, AppTest); **live
+  effectiveness against the real click-timing bug is still unconfirmed**
+  - every attempt to reach an active session to test it hit punch-list
+  #67's crash (below) before the confirm dialog was ever reached.
+- **(entry 133, punch-list #67, NEW, unresolved, top priority)** Clicking
+  "Start Session" on Spot Session reproducibly crashes the WHOLE app (not
+  page-specific) with a redacted `KeyError` from `app.py`'s own top-level
+  `from core.appstate import github_token, repo_slug` - live-reproduced
+  twice, different spot/angler combos, well clear of any redeploy timing.
+  A page reload recovers instantly. Leading unconfirmed theory: a
+  concurrent-import race between the main script rerun and one of Spot
+  Session's `st.fragment(run_every=...)` background reruns (the same
+  fragments already implicated in the Cancel Session saga above) landing
+  during Start Session's slower-than-normal work (trip_log write +
+  `commit_and_push_data()`'s git push). Needs real Streamlit Cloud server
+  logs (not available to a sandboxed session) to confirm. See entry 133
+  for the full writeup and reproduction steps.
 
 ## Operating notes
 
