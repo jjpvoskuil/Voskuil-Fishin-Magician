@@ -1856,6 +1856,38 @@ def _cancel_session(spot_id: str, angler: str = "") -> bool:
     return True
 
 
+def _confirm_cancel_session(spot: dict, cancel_pending_key: str, angler: str):
+    """on_click callback for the Cancel Session confirm dialog's "Yes,
+    cancel it" button (punch-list #66, third pass). Both earlier attempts at
+    this confirm dialog - a plain st.button() (first pass) and
+    st.form()/st.form_submit_button() (second pass) - reproducibly needed
+    TWO taps to register the very first click: the button's return value,
+    checked inline in the script run that (might) follow the click, came
+    back False on that first tap even though the click visibly registered
+    (the button showed its pressed state) - live-reproduced again this
+    round on a completely fresh session (Northwest Channel Point/Alex),
+    disproving the form fix. `on_click=` is Streamlit's own documented
+    mechanism for exactly this class of bug: the callback runs as part of
+    handling the click event itself, before the next script rerun even
+    starts, rather than something the page has to notice by re-reading a
+    widget's value afterward. No st.rerun() here - Streamlit already
+    reruns the script once automatically after any widget callback."""
+    st.session_state.pop(cancel_pending_key, None)
+    # Punch-list #64: _cancel_session() returns True/False so a genuine
+    # no-op (e.g. active_key already gone from session_state) is visible
+    # via the "cancel_failed" banner instead of looking identical to a
+    # real cancel.
+    if not _cancel_session(spot["spot_id"], angler):
+        st.session_state["session_action_banner"] = {"kind": "cancel_failed", "spot_name": spot["name"]}
+
+
+def _keep_session(cancel_pending_key: str):
+    """on_click callback for the Cancel Session confirm dialog's "Keep
+    session" button - see _confirm_cancel_session()'s docstring for why
+    this uses on_click instead of an inline return-value check."""
+    st.session_state.pop(cancel_pending_key, None)
+
+
 # _PER_LURE_CONDITION_KEYS, _open_session_rows(), _other_anglers_with_open_
 # session() and _reconstruct_active_session() now live up near the angler
 # picker (punch-list #59 needed them earlier than this point, to check for
@@ -2141,50 +2173,40 @@ if active is not None:
             f"Cancel this session? This permanently discards everything logged so far - "
             f"{len(active['lures'])} lure(s) and {_cancel_fish_count} fish - and can't be undone."
         )
-        # Punch-list #66 (second pass): plain st.button() here reproducibly
-        # needed two taps on "Yes, cancel it" - confirmed by directly
-        # reproducing it live on the deployed app twice, both times on the
-        # very first tap of a just-appeared confirm button, at unrelated
-        # elapsed times (not aligned with any fixed interval), which argues
-        # against the earlier "autosave-heartbeat fragment race" theory
-        # (still left in place above since it's harmless either way) and
-        # points instead at Streamlit's own known behavior where a button
-        # that appears for the first time in a script run - like this one,
-        # which doesn't exist at all until "❌ Cancel Session" flips
-        # cancel_pending_key - can silently miss its own first click rather
-        # than registering it on the next rerun. st.form()'s submit buttons
-        # don't share that per-widget auto-rerun path (a form batches its
-        # contents and submits as one atomic round trip), which is the
-        # standard fix for exactly this "the button that just appeared
-        # needs two clicks" class of issue. Still logged as a mitigation,
-        # not a confirmed root cause - see SESSION_NOTES.md punch-list #66.
+        # Punch-list #66 (third pass): the st.form()/form_submit_button()
+        # switch from the second pass did NOT fix this - live-reproduced
+        # again (this session) on a completely fresh session (Northwest
+        # Channel Point / Alex): the very first tap on "Yes, cancel it"
+        # still silently did nothing (no banner, session unchanged, dialog
+        # just closed back to the plain "❌ Cancel Session" button), and a
+        # second identical tap went through immediately. Both the plain-
+        # button version (first pass) and the form version (second pass)
+        # share one thing in common that this pass finally changes: both
+        # read the widget's return value INLINE, after the fact, in the
+        # script run that (might) follow the click. Streamlit's own
+        # recommended fix for "a widget's action doesn't reliably fire on
+        # the exact interaction that created it" is `on_click=` - a
+        # callback Streamlit invokes directly as part of handling the
+        # click event itself, before the next script run even starts,
+        # rather than something this page has to notice by re-reading
+        # session state afterward. Switched both confirm buttons to
+        # `on_click` callbacks (`_confirm_cancel_session`/`_keep_session`
+        # below) instead of branching on the submit buttons' return
+        # values - no more `if confirmed:` / `if kept:` to potentially miss.
+        # Streamlit reruns the script once automatically after any widget
+        # callback, so neither callback calls st.rerun() itself. Still
+        # logged as a mitigation until live-reverified post-deploy - see
+        # SESSION_NOTES.md punch-list #66.
         with st.form(key=f"cancel_confirm_form_{spot['spot_id']}", border=False):
             ccol1, ccol2 = st.columns(2)
-            confirmed = ccol1.form_submit_button("Yes, cancel it", type="primary", width='stretch')
-            kept = ccol2.form_submit_button("Keep session", width='stretch')
-        if confirmed:
-            st.session_state.pop(cancel_pending_key, None)
-            # Punch-list #64: _cancel_session() used to be called and
-            # ignored here, so its (still-unexplained) occasional silent
-            # no-op looked identical to a real cancel - the page just reset
-            # to this same un-confirmed view either way, and the ONLY way
-            # to tell the difference was noticing the lure hadn't actually
-            # disappeared. Surfacing the False case explicitly at least
-            # makes that visible instead of mysterious - tap the button
-            # again if this shows up.
-            if not _cancel_session(spot["spot_id"], resolved_angler):
-                # A plain st.warning() here wouldn't survive the st.rerun()
-                # right below it (same reason every OTHER banner on this
-                # page - the page-wide "session_action_banner" dict, see
-                # the top of this file - is a session_state flag checked
-                # before rendering anything else, not an inline call:
-                # Streamlit drops anything rendered right before a rerun
-                # that isn't re-rendered on the next run too).
-                st.session_state["session_action_banner"] = {"kind": "cancel_failed", "spot_name": spot["name"]}
-            st.rerun()
-        if kept:
-            st.session_state.pop(cancel_pending_key, None)
-            st.rerun()
+            ccol1.form_submit_button(
+                "Yes, cancel it", type="primary", width='stretch',
+                on_click=_confirm_cancel_session, args=(spot, cancel_pending_key, resolved_angler),
+            )
+            ccol2.form_submit_button(
+                "Keep session", width='stretch',
+                on_click=_keep_session, args=(cancel_pending_key,),
+            )
 
 else:
     session_build_seq_key = f"session_build_seq_{spot['spot_id']}"
