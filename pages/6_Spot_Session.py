@@ -58,6 +58,38 @@ else:
         "Cloud settings."
     )
 
+# Punch-list #65: what End/Cancel Session just did, shown here - before ANY
+# spot/angler resolution below - rather than as three separate per-spot-
+# keyed checks further down the page (session_closed_banner_{spot_id}/
+# session_canceled_banner_{spot_id}/session_cancel_failed_banner_{spot_id},
+# the pre-#65 approach). That approach broke the moment a real Cancel
+# Session started also clearing the picked location (_reset_builder_to_
+# scratch() below, added for this same punch-list item): with no spot_id
+# left to key off of, the page hits the "no spot selected yet" screen's
+# own st.stop() further up and the per-spot banner check code - which
+# lived AFTER that point - would never even run. One page-wide dict
+# instead, popped and shown immediately, that carries the spot's name as
+# plain text rather than needing a live `spot` object to describe it.
+_action_banner = st.session_state.pop("session_action_banner", None)
+if _action_banner:
+    _banner_spot = _action_banner.get("spot_name") or "that spot"
+    _banner_kind = _action_banner.get("kind")
+    if _banner_kind == "closed":
+        st.success(f"✅ Session closed at {_banner_spot} - pick a spot below whenever you're ready to start a new one.")
+    elif _banner_kind == "canceled":
+        st.info(f"❌ Session at {_banner_spot} canceled - nothing from that session was saved. Starting fresh below.")
+    elif _banner_kind == "cancel_failed":
+        # Punch-list #64: see _cancel_session()'s docstring - this
+        # session's own data went missing from session_state right when
+        # "Yes, cancel it" was tapped, so nothing was deleted and nothing
+        # was changed. Tapping "❌ Cancel Session" again has reliably
+        # worked on the very next try in every reproduction so far.
+        st.warning(
+            f"❌ Cancel didn't go through at {_banner_spot} - this session's data wasn't found where "
+            "expected just now (a dropped connection can do this). Nothing was changed or lost. "
+            "Scroll down and tap \"❌ Cancel Session\" again."
+        )
+
 # --- Spot picker (unchanged from before the redesign) ------------------------
 # session_state is the reliable channel from the "Fish this spot now" button on the
 # Lake Map page (st.switch_page doesn't consistently carry query params set in that
@@ -632,21 +664,6 @@ def _save_new_angler_if_needed() -> bool:
 # this point) - see the comment block up there for the full "why" behind
 # per-angler session scoping.
 
-if st.session_state.pop(f"session_closed_banner_{spot['spot_id']}", False):
-    st.success("✅ Session closed - pick lures below whenever you're ready to start a new one.")
-if st.session_state.pop(f"session_canceled_banner_{spot['spot_id']}", False):
-    st.info("❌ Session canceled - nothing from that session was saved. Pick lures below to start a new one.")
-if st.session_state.pop(f"session_cancel_failed_banner_{spot['spot_id']}", False):
-    # Punch-list #64: see _cancel_session()'s docstring - this session's own
-    # data went missing from session_state right when "Yes, cancel it" was
-    # tapped, so nothing was deleted and nothing was changed. Tapping
-    # "❌ Cancel Session" again has reliably worked on the very next try in
-    # every reproduction so far.
-    st.warning(
-        "❌ Cancel didn't go through - this session's data wasn't found where expected just now "
-        "(a dropped connection can do this). Nothing was changed or lost. Scroll down and tap "
-        "\"❌ Cancel Session\" again."
-    )
 
 st.session_state.setdefault(f"session_date_{spot['spot_id']}", lake_today())
 
@@ -1752,7 +1769,40 @@ def _end_session(spot_id: str, angler: str = ""):
         "Session ended locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
     )
     st.session_state.pop(active_key, None)
-    st.session_state[f"session_closed_banner_{spot_id}"] = True
+    st.session_state["session_action_banner"] = {"kind": "closed", "spot_name": active.get("spot_name", spot_id)}
+
+
+def _reset_builder_to_scratch(spot_id: str):
+    """Punch-list #65: after a REAL cancel (called only from the success
+    path of _cancel_session() below, never the silent-failure one), wipe
+    every trace of the canceled session's own setup - not just its
+    active_session_* record - so the page genuinely looks like a fresh
+    visit, per the angler's own ask: "It really should completely reset
+    the page like I am starting from scratch." Deliberately different from
+    "⏹ End Session" (which keeps angler/location on purpose - you're still
+    you, still standing at the same spot, about to log another real
+    session there right after) - "❌ Cancel Session" exists specifically
+    for "that was a mistake or a test, let me start over," so this clears:
+    - the picked angler identity, back to the "who's fishing" landing
+      picker (and the "Other" name text box under it),
+    - the picked location, back to "— choose a saved spot —",
+    - the pending builder's picked lure(s) and conditions inputs, by
+      retiring this spot's session_build_seq - the same mechanism
+      ▶ Start Session already uses to make ITS next builder blank (see
+      session_build_seq_key's own comment) - so the next render's
+      pending-lures/conditions widget keys are brand new and unseeded
+      rather than reusing whatever was mid-build when Cancel was tapped.
+    Query params are popped too, not just session_state - they're what
+    survives a reconnect/page reload, so leaving them would silently
+    re-establish the very identity/location this is trying to clear."""
+    st.session_state.pop(angler_key, None)
+    st.session_state.pop(angler_other_key, None)
+    st.session_state.pop("spot_session_target_id", None)
+    st.query_params.pop(angler_query_key, None)
+    st.query_params.pop("spot_id", None)
+    seq_key = f"session_build_seq_{spot_id}"
+    st.session_state[seq_key] = st.session_state.get(seq_key, 0) + 1
+    _clear_pending_draft()
 
 
 def _cancel_session(spot_id: str, angler: str = "") -> bool:
@@ -1795,7 +1845,14 @@ def _cancel_session(spot_id: str, angler: str = "") -> bool:
         "Session canceled locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
     )
     st.session_state.pop(active_key, None)
-    st.session_state[f"session_canceled_banner_{spot_id}"] = True
+    # Punch-list #65: a page-wide banner key now (see the block right after
+    # the GitHub connection status near the top of this file), not one
+    # keyed by spot_id and checked only after a spot is re-established -
+    # _reset_builder_to_scratch() below clears the picked location too, so
+    # a per-spot-keyed check further down the page would never be reached
+    # (the "no spot selected yet" screen calls st.stop() first).
+    st.session_state["session_action_banner"] = {"kind": "canceled", "spot_name": active.get("spot_name", spot_id)}
+    _reset_builder_to_scratch(spot_id)
     return True
 
 
@@ -2064,12 +2121,12 @@ if active is not None:
             if not _cancel_session(spot["spot_id"], resolved_angler):
                 # A plain st.warning() here wouldn't survive the st.rerun()
                 # right below it (same reason every OTHER banner on this
-                # page - session_closed_banner_/session_canceled_banner_ -
-                # is a session_state flag checked at the top of the page,
-                # not an inline call: Streamlit drops anything rendered
-                # right before a rerun that isn't re-rendered on the next
-                # run too).
-                st.session_state[f"session_cancel_failed_banner_{spot['spot_id']}"] = True
+                # page - the page-wide "session_action_banner" dict, see
+                # the top of this file - is a session_state flag checked
+                # before rendering anything else, not an inline call:
+                # Streamlit drops anything rendered right before a rerun
+                # that isn't re-rendered on the next run too).
+                st.session_state["session_action_banner"] = {"kind": "cancel_failed", "spot_name": spot["name"]}
             st.rerun()
         if ccol2.button("Keep session", key=f"keep_session_{spot['spot_id']}", width='stretch'):
             st.session_state.pop(cancel_pending_key, None)
