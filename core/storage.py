@@ -55,12 +55,57 @@ specifically (`git fetch origin data && git show origin/data:data/trip_log.csv`,
 or check it out into a scratch worktree) - don't assume main's data/ folder
 reflects what anglers have actually logged since. See SESSION_NOTES.md's
 Architecture section for the full picture.
+
+--- Why commit_and_push_data() commits in an isolated worktree, not
+`repo_root` itself - punch-list #67 ---
+Punch-list #52's split (above) only ever protected the REMOTE `main`
+branch - pushing to DATA_BRANCH instead of `main` stops the push itself
+from reaching the branch Streamlit Cloud redeploys on. It did NOT protect
+`repo_root`'s own LOCAL git state on the live, currently-running deployment
+- every real save still ran `git commit` directly inside repo_root (the
+exact directory the deployed app's Python process is running from and
+Streamlit Cloud is actively watching), even though that commit's content
+only ever gets pushed to DATA_BRANCH afterward. Confirmed via Streamlit
+Cloud's own server logs (a live angler-provided log, not guesswork) that
+this local commit ALONE - regardless of which remote branch it's pushed
+to - is enough to make Streamlit Cloud think new code arrived and kick off
+a real redeploy cycle ("Pulling code changes from Github... Processing
+dependencies... Updated app!") in the middle of the still-running script's
+own execution. That redeploy swaps files on disk out from under the live
+Python interpreter mid-import (a cascade of KeyError/AttributeError/
+ImportError, all different symptoms of the same "the file changed while
+this was importing it" race - see SESSION_NOTES.md entry 133/134 for the
+full log excerpt) and, worse, appears to reset repo_root back to match
+`origin/main` as part of resyncing - discarding the very commit that
+triggered it before its push to DATA_BRANCH necessarily finished. That's
+why a trip logged (or a punch-list item added) could look saved for a
+minute and then silently vanish, never having reached GitHub at all.
+
+The fix: commit_and_push_data() and push_pending_data() now do their
+actual `git add`/`git commit`/`git push` inside a SEPARATE git worktree
+(see _ensure_data_worktree() below) - a second, independent working
+directory backed by the same .git object database, checked out to
+DATA_BRANCH, living outside repo_root entirely (under the system temp
+directory, keyed by repo_root's own path) so nothing under the live app's
+own directory tree - and critically, repo_root's own HEAD/branch ref -
+ever changes when a data save happens. The file(s) being saved are copied
+into the worktree's mirrored path immediately before committing there;
+repo_root's own working copy of those files (what the running app
+actually reads from) is untouched by this - it already has the new
+content, since that's what triggered the save in the first place.
+sync_data_from_data_branch() (below) was already safe by this same
+standard before this fix existed - it only ever does a scoped `git
+checkout FETCH_HEAD -- data`, which updates working-tree files without
+moving repo_root's HEAD or creating any commit, so it was left as-is.
 """
 from __future__ import annotations
 import csv
+import hashlib
 import io
 import json
+import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, asdict, field
@@ -463,6 +508,69 @@ def push_pending(
         return False, f"Push failed: {e}"
 
 
+def _data_worktree_dir(repo_root: Path) -> Path:
+    """Where commit_and_push_data()/push_pending_data() actually run their
+    git commands - see the module docstring's punch-list #67 section for
+    why this has to be a separate directory from repo_root. Deliberately
+    under the system temp directory (never inside repo_root, and never
+    anywhere Streamlit Cloud's own deployment tooling has any reason to
+    look), keyed by repo_root's own resolved path so tests pointing at a
+    throwaway repo each get their own isolated worktree instead of
+    colliding with each other or with a real deployment's."""
+    key = hashlib.sha1(str(Path(repo_root).resolve()).encode()).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f"fishin-magician-data-worktree-{key}"
+
+
+def _ensure_data_worktree(repo_root: Path, remote: str, branch: str) -> tuple:
+    """Creates (if it doesn't already exist on disk) and returns the
+    isolated worktree directory commit_and_push_data()/push_pending_data()
+    commit and push from, checked out to `branch`. Returns
+    (worktree_path, None) on success, (None, error_message) on failure.
+
+    Idempotent and cheap to call on every save: a worktree already present
+    on disk (the common case - every save after the first one in a given
+    process) is reused as-is, just a single Path.exists() check, no git
+    calls at all. Only the first call in a fresh process (or the first
+    call after a container restart wiped /tmp) actually runs `git
+    worktree add`.
+
+    Handles both a repo that already has `branch` fetched/known and one
+    that's never heard of it yet (a brand new machine's very first save,
+    or a fresh clone that's never pushed to DATA_BRANCH before): fetches
+    `branch` from `remote` first and creates the worktree detached at
+    FETCH_HEAD if that succeeds, or falls back to a fresh local branch
+    (`-B branch`, based on repo_root's current HEAD) if the fetch fails
+    because the branch doesn't exist on the remote at all yet - the first
+    successful push from that worktree is what actually creates it there."""
+    worktree = _data_worktree_dir(repo_root)
+    if (worktree / ".git").exists():
+        return worktree, None
+    # Not on disk (fresh process, or a fresh container whose /tmp doesn't
+    # survive restarts) - prune any stale registration left behind in
+    # repo_root/.git by a PREVIOUS process's worktree at this same path
+    # before trying to create a new one there, so a leftover registration
+    # from an already-deleted worktree directory can't make `git worktree
+    # add` fail with a spurious "already exists".
+    subprocess.run(["git", "worktree", "prune"], cwd=repo_root, capture_output=True, text=True)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    fetch = subprocess.run(
+        ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+    )
+    if fetch.returncode == 0:
+        add = subprocess.run(
+            ["git", "worktree", "add", "--detach", str(worktree), "FETCH_HEAD"],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+    else:
+        add = subprocess.run(
+            ["git", "worktree", "add", "-B", branch, str(worktree), "HEAD"],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+    if add.returncode != 0:
+        return None, (add.stderr or add.stdout).strip()
+    return worktree, None
+
+
 def commit_and_push_data(
     paths: list,
     github_token: str,
@@ -474,16 +582,58 @@ def commit_and_push_data(
     retry_backoff_seconds: float = 1.0,
 ) -> tuple:
     """Punch-list #52: the function every real in-app data save should call
-    instead of commit_and_push() directly. Identical to commit_and_push()
-    in every way except it's hardcoded to DATA_BRANCH rather than accepting
-    a branch argument - deliberately, so a future call site can't
-    accidentally reintroduce the redeploy-storm bug by omitting a branch=
-    kwarg. See the module docstring above for the full "why"."""
-    return commit_and_push(
-        paths, github_token, repo_slug, commit_message, branch=DATA_BRANCH,
-        repo_root=repo_root, max_push_retries=max_push_retries, remote_url=remote_url,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
+    instead of commit_and_push() directly - hardcoded to DATA_BRANCH rather
+    than accepting a branch argument, deliberately, so a future call site
+    can't accidentally reintroduce the redeploy-storm bug by omitting a
+    branch= kwarg. See the module docstring above for the full "why".
+
+    Punch-list #67: the actual `git add`/`git commit`/`git push` this does
+    now run inside an isolated worktree (_ensure_data_worktree() above),
+    never inside repo_root itself - each path in `paths` (absolute, like
+    every real call site's TRIP_LOG_PATH-style constant, or repo_root-
+    relative, like this module's own tests use) is copied into the
+    worktree's mirrored location immediately before committing there, so
+    the worktree always reflects exactly the same file content repo_root's
+    own copy just got written with. Falls back to a "saved locally"-style
+    failure message (matching commit_and_push()'s own failure shape) if
+    the worktree itself can't be created - the caller's own file write to
+    repo_root already succeeded by the time this runs either way, so
+    nothing about the local save is lost even if this fails."""
+    if not github_token:
+        return False, "No GITHUB_TOKEN configured - saved locally only for this session."
+    try:
+        remote = _resolve_remote_url(github_token, repo_slug, remote_url)
+        worktree, err = _ensure_data_worktree(repo_root, remote, DATA_BRANCH)
+        if worktree is None:
+            return False, f"Saved locally, but couldn't prepare the data worktree: {err}"
+
+        resolved_root = Path(repo_root).resolve()
+        dest_paths = []
+        for p in paths:
+            p = Path(p)
+            src = p if p.is_absolute() else (resolved_root / p)
+            try:
+                rel = src.resolve().relative_to(resolved_root)
+            except ValueError:
+                # Not under repo_root at all - shouldn't happen for any
+                # real call site, but use it as-is rather than failing the
+                # whole save over a path that doesn't fit the usual shape.
+                rel = p
+            dest = worktree / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                shutil.copy2(src, dest)
+            elif dest.exists():
+                dest.unlink()
+            dest_paths.append(str(rel))
+
+        return commit_and_push(
+            dest_paths, github_token, repo_slug, commit_message, branch=DATA_BRANCH,
+            repo_root=worktree, max_push_retries=max_push_retries, remote_url=remote_url,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
+    except Exception as e:
+        return False, f"Saved locally, but push failed: {e}"
 
 
 def push_pending_data(
@@ -499,9 +649,25 @@ def push_pending_data(
     for what this actually does and why. This is the one every in-app
     autosave-retry call site should use (pages/6_Spot_Session.py), for the
     same "never let a call site accidentally target main" reason
-    commit_and_push_data() itself exists."""
+    commit_and_push_data() itself exists.
+
+    Punch-list #67: retries against the SAME isolated worktree
+    commit_and_push_data() committed into (_ensure_data_worktree() reuses
+    whatever's already on disk at that path), never against repo_root -
+    whatever's sitting committed-but-unpushed after a prior failed push is
+    in the worktree, not repo_root, now that commit_and_push_data() never
+    commits there. If no worktree exists yet at all (nothing has ever been
+    committed this way in this process), there's nothing pending by
+    definition - returns the same harmless-success shape push_pending()
+    itself returns for a no-op push, rather than treating "no worktree
+    yet" as an error."""
+    if not github_token:
+        return False, "No GITHUB_TOKEN configured - saved locally only for this session."
+    worktree = _data_worktree_dir(repo_root)
+    if not (worktree / ".git").exists():
+        return True, "Nothing pending - no local data save has happened yet this process."
     return push_pending(
-        github_token, repo_slug, branch=DATA_BRANCH, repo_root=repo_root,
+        github_token, repo_slug, branch=DATA_BRANCH, repo_root=worktree,
         max_push_retries=max_push_retries, remote_url=remote_url,
         retry_backoff_seconds=retry_backoff_seconds,
     )

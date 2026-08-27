@@ -19,6 +19,21 @@ import pytest
 from core import storage
 
 
+@pytest.fixture(autouse=True)
+def _isolate_worktree_tempdir(tmp_path_factory, monkeypatch):
+    """commit_and_push_data()/push_pending_data() (punch-list #67) create a
+    real worktree directory under the system temp dir, keyed by a hash of
+    repo_root's path, and deliberately never delete it (mirroring
+    production, where repo_root - and so the worktree - is stable for the
+    whole life of the deployed container). Left alone here, every test run
+    that exercises those two functions would leave a fresh, never-cleaned
+    directory behind in the real /tmp forever. Redirect it into pytest's own
+    managed tmp tree instead, which pytest prunes automatically.
+    """
+    fake_tmp_root = tmp_path_factory.mktemp("worktree-root")
+    monkeypatch.setattr(storage.tempfile, "gettempdir", lambda: str(fake_tmp_root))
+
+
 def _run(args, cwd):
     result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
     assert result.returncode == 0, f"{args} failed: {result.stderr}"
@@ -504,6 +519,142 @@ def test_push_pending_data_lands_on_data_branch(tmp_path, bare_and_seed):
         ["git", "show", "main:data/trip_log.csv"], cwd=bare_and_seed, capture_output=True, text=True, check=True,
     )
     assert "pending save" not in on_main.stdout
+
+
+# --- Punch-list #67: commit_and_push_data() must never touch repo_root's
+# own HEAD ---------------------------------------------------------------
+# The confirmed root cause of the live Start-Session crash and real data
+# loss: repo_root is the SAME live checkout Streamlit Community Cloud has
+# deployed `main` from and watches for changes. Creating a local `git
+# commit` there - even one that only ever gets pushed to `data`, never
+# `main` - is enough on its own to trigger Streamlit Cloud's redeploy
+# detection mid-request, which corrupts the running process and can wipe
+# the very commit that was just made before its push completes. The fix
+# moves the actual add/commit/push into an isolated git worktree; these
+# tests assert the guarantee that fix exists to provide.
+
+def test_commit_and_push_data_never_touches_repo_roots_own_head(tmp_path, bare_and_seed):
+    """The core guarantee: after a successful data save, repo_root's own
+    HEAD, branch, and git history are byte-for-byte unchanged - the only
+    new commit exists in the isolated worktree, never in repo_root."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    head_before = _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    branch_before = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,angler save\n")
+    ok, msg = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="angler save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    head_after = _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    branch_after = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo).stdout.strip()
+    assert head_after == head_before, (
+        "repo_root got a new local commit - this is exactly what used to "
+        "trigger a Streamlit Cloud redeploy mid-save"
+    )
+    assert branch_after == branch_before
+
+    # The working-tree edit above (the same in-place edit a real save makes
+    # before calling commit_and_push_data) is still there, untouched and
+    # uncommitted - repo_root's index/working tree were never staged either.
+    status = _run(["git", "status", "--porcelain"], cwd=repo).stdout.strip()
+    assert status == "M data/trip_log.csv"
+
+
+def test_commit_and_push_data_accepts_absolute_paths_like_production_does(tmp_path, bare_and_seed):
+    """Production call sites pass absolute-path constants (e.g.
+    storage.TRIP_LOG_PATH), not repo-root-relative strings like most tests
+    in this file use - the worktree copy step must resolve an absolute
+    source path against repo_root correctly, not just relative ones."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    absolute_path = (repo / "data" / "trip_log.csv").resolve()
+    absolute_path.write_text("trip_id,notes\n1,first\n2,absolute path save\n")
+
+    ok, msg = storage.commit_and_push_data(
+        [absolute_path], github_token="x", repo_slug="unused/unused",
+        commit_message="absolute path save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    on_data = _run(["git", "show", f"{storage.DATA_BRANCH}:data/trip_log.csv"], cwd=bare_and_seed)
+    assert "absolute path save" in on_data.stdout
+
+
+def test_push_pending_data_reuses_the_worktree_commit_and_push_data_created(tmp_path, bare_and_seed):
+    """push_pending_data() must retry against the SAME worktree a prior
+    commit_and_push_data() call committed into, not create a second one -
+    a fresh worktree per call would defeat the point of a stable, reusable
+    isolation layer."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,first save\n")
+    ok, msg = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="first save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    worktree = storage._data_worktree_dir(repo)
+    assert worktree.exists()
+    worktrees_before = _run(["git", "worktree", "list"], cwd=repo).stdout
+
+    ok2, msg2 = storage.push_pending_data(
+        github_token="x", repo_slug="unused/unused", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok2 is True, msg2
+
+    worktrees_after = _run(["git", "worktree", "list"], cwd=repo).stdout
+    assert worktrees_before == worktrees_after, (
+        "push_pending_data() created a second worktree instead of reusing "
+        "the one commit_and_push_data() already made"
+    )
+
+
+def test_commit_and_push_data_retries_when_the_shared_worktree_falls_behind(tmp_path, bare_and_seed):
+    """Realistic punch-list #67 concurrency case: repo_root's own worktree
+    can still fall behind the remote `data` branch (e.g. a stale or
+    overlapping container pushing during a Streamlit Cloud redeploy). The
+    existing fetch+rebase+retry logic in commit_and_push() must keep
+    working when it's the WORKTREE's push that gets rejected, and
+    repo_root's own HEAD must still never move."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,first save\n")
+    ok, msg = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="first save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    # Something else pushes to `data` behind repo_root's worktree's back -
+    # e.g. a different/stale container during a redeploy.
+    outsider = _clone(bare_and_seed, tmp_path / "outsider")
+    _run(["git", "fetch", str(bare_and_seed), storage.DATA_BRANCH], cwd=outsider)
+    _run(["git", "checkout", "FETCH_HEAD"], cwd=outsider)
+    (outsider / "data" / "trip_log.csv").write_text(
+        "trip_id,notes\n1,first\n2,first save\n3,outsider save\n"
+    )
+    _run(["git", "add", "data/trip_log.csv"], cwd=outsider)
+    _run(["git", "commit", "-m", "outsider save"], cwd=outsider)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=outsider)
+
+    head_before = _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    (repo / "data" / "trip_log.csv").write_text(
+        "trip_id,notes\n1,first\n2,first save\n4,second save\n"
+    )
+    ok2, msg2 = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="second save", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok2 is True, msg2
+    assert _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip() == head_before, (
+        "repo_root's HEAD must stay put even when the worktree needs a "
+        "fetch+rebase retry"
+    )
+
+    on_data = _run(["git", "show", f"{storage.DATA_BRANCH}:data/trip_log.csv"], cwd=bare_and_seed).stdout
+    assert "outsider save" in on_data
+    assert "second save" in on_data
 
 
 def test_is_transient_network_error_matches_common_flaky_connection_phrasing():
