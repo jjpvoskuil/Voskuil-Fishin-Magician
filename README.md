@@ -1231,6 +1231,25 @@ content from that branch once per boot, so a real redeploy (from an actual code
 push) still shows current data. Nothing to configure for this in the Streamlit
 Cloud dashboard - it's entirely handled by `core/storage.py`.
 
+**...but the save itself has to avoid touching `main`'s own checkout too, not
+just its remote branch (punch-list #67).** Punch-list #52 above only protects
+the *remote* `main` branch from routine saves. It turned out that wasn't
+enough: every save still ran its `git commit` directly inside the app's own
+live working directory - the exact same checkout Streamlit Cloud has deployed
+`main` from and watches for changes - and creating that local commit, on its
+own, is enough to make Streamlit Cloud think new code arrived and kick off a
+real redeploy mid-request, regardless of which branch the commit is actually
+pushed to. That redeploy could crash the running app outright and, worse,
+could wipe out a save that hadn't finished pushing yet. Confirmed from a real
+Streamlit Cloud server log (not guesswork) showing `git commit` output lines
+immediately followed by Streamlit Cloud's own "Pulling code changes.../
+Updated app!" redeploy messages and a crash. Fixed by having
+`commit_and_push_data()`/`push_pending_data()` do their actual git work
+inside a separate, isolated git worktree instead - same object database, but
+its own independent HEAD, so a data save can no longer disturb the app's own
+running checkout at all. Again, nothing to configure for this - handled
+entirely inside `core/storage.py`.
+
 ## Project layout
 
 ```

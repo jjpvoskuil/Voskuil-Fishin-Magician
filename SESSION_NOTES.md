@@ -8341,6 +8341,83 @@ every real save.
     after confirming (via `git fetch origin data`) that the add has
     actually landed on GitHub before moving on.
 
+134. **Punch-list #67 root-caused (definitively, from real server logs)
+    and fixed: `commit_and_push_data()` now commits in an isolated git
+    worktree, never in `repo_root` itself.**
+
+    Angler followed up with the actual Streamlit Cloud server log (Manage
+    app -> logs, downloaded and shared directly - not available to this
+    sandbox in prior sessions) plus a screenshot showing the identical
+    redacted `KeyError` crash happening on a Cancel Session attempt too,
+    not just Start Session. This settled the question entry 133 left open.
+
+    **What the log actually showed:** raw application `stdout`/`stderr`
+    (including literal `git commit` output lines like `[main <sha>]
+    <message>`) interleaved with Streamlit Cloud's own deployment-lifecycle
+    messages - `Pulling code changes from Github...`, `Processing
+    dependencies!`, `Updated app!` - appearing IMMEDIATELY after each `git
+    commit` line, followed by the cascading `KeyError`/`AttributeError`/
+    `ImportError` crash. That sequence, repeated identically across
+    multiple save attempts, is a live redeploy cycle firing in the middle
+    of a request.
+
+    **Definitive root cause:** punch-list #52's branch split (`main` for
+    code, `data` for saves) only ever protected the REMOTE `main` branch -
+    `commit_and_push_data()` still ran its `git add`/`git commit` directly
+    inside `repo_root`, which is the exact SAME live working directory
+    Streamlit Community Cloud has deployed `main` from and file-watches for
+    changes. Creating that local commit is enough on its own to make
+    Streamlit Cloud think new code arrived and kick off a real redeploy -
+    regardless of which branch the commit is eventually pushed to, since
+    Streamlit Cloud has no way to know the commit's destination before
+    reacting to it. The redeploy corrupts the running Python process
+    mid-request (explains the `KeyError` on `app.py`'s own top-level
+    import) and resets `repo_root` back toward `origin/main`, discarding
+    the local commit before its push to `data` can complete (explains both
+    vanished trip_log rows and the vanished #67 punch-list entry from entry
+    133 - they were never a separate bug, just this same mechanism caught
+    in the act). This supersedes both of entry 133's leading theories
+    (concurrent-import race; container restart wiping `_sync_data_once()`)
+    - the container wasn't restarting on its own, the app's own save path
+    was triggering a redeploy every time.
+
+    **The fix (`core/storage.py`):** `commit_and_push_data()` and
+    `push_pending_data()` (the two DATA_BRANCH-hardcoded wrappers real page
+    code calls - never the generic `commit_and_push()`/`push_pending()`,
+    which are unchanged) now do their actual `git add`/`git commit`/`git
+    push` inside a separate git worktree (`git worktree add`, under the
+    system temp dir, keyed by a hash of `repo_root`'s path so it's stable
+    and reusable across saves within one deployed process), never in
+    `repo_root`. A worktree shares the same object database as `repo_root`
+    but has its own independent HEAD/index/working files, so committing
+    there cannot move `repo_root`'s own HEAD or touch its checked-out
+    files - nothing left for Streamlit Cloud's watcher to react to.
+    `sync_data_from_data_branch()` was already safe (it only ever does
+    `git fetch` + `git checkout FETCH_HEAD -- data`, never a commit) and
+    was left untouched.
+
+    Verified: `pytest tests/ -q` (381 passed - the existing 377 plus 4 new
+    regression tests added specifically for this fix, including one that
+    asserts `repo_root`'s `git rev-parse HEAD` is byte-for-byte identical
+    before and after a successful `commit_and_push_data()` call, which is
+    the actual guarantee the old code violated); an 8-page AppTest smoke
+    test (zero exceptions on every page except the pre-existing, unrelated
+    Forecast-page sandbox limitation of no outbound access to
+    `api.open-meteo.com`); and a fresh `git clone` into a new temp
+    directory per the standing workflow. Committed and pushed to `main`.
+
+    **Still to do next session (or later in this one):** live-verify on
+    the redeployed app - a real Start Session and Cancel Session should no
+    longer crash, and the resulting save should actually land on `git
+    fetch origin data` this time. That live check is also what finally lets
+    entry 133's still-unconfirmed #66 on_click fix get a clean test, since
+    #67's crash was the blocker preventing that test from ever completing.
+    Also worth re-adding punch-list #67 to the in-app Development page
+    punch list (it never actually landed there - both attempts in entry
+    133 were themselves victims of this bug) once the fix is confirmed
+    live, this time confirming via `git fetch origin data` that it lands
+    before moving on.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8665,39 +8742,26 @@ every real save.
   effectiveness against the real click-timing bug is still unconfirmed**
   - every attempt to reach an active session to test it hit punch-list
   #67's crash (below) before the confirm dialog was ever reached.
-- **(entry 133, punch-list #67, NEW, unresolved, TOP PRIORITY - likely
-  real data loss, not just a crash screen)** Clicking "Start Session" on
-  Spot Session reproducibly crashes the WHOLE app (not page-specific)
-  with a redacted `KeyError` from `app.py`'s own top-level
-  `from core.appstate import github_token, repo_slug` - live-reproduced
-  twice, different spot/angler combos, well clear of any redeploy timing.
-  A page reload recovers instantly, but confirmed both times that
-  whatever got saved locally (a new trip_log row, and separately a new
-  punch-list entry added the same way through the Development page) later
-  vanished completely - `home.py`'s "N logged trip(s)" count dropped back
-  to the exact pre-session baseline, and the punch-list item disappeared
-  from the list a few minutes after being confirmed present. Neither ever
-  reached the `data` branch on GitHub (checked via `git fetch origin
-  data`), and the GitHub token itself was confirmed live and working via
-  Development's "Test connection now" button - so pushes aren't failing
-  for lack of a working token. Leading theory: the container is
-  restarting/recycling during ordinary use (Streamlit Community Cloud
-  resource limits are the obvious candidate), which both plausibly causes
-  this exact import `KeyError` (a request caught mid-flight while the
-  process is torn down/restarted) and, separately, means the very next
-  request re-runs `_sync_data_once()` (`app.py`), overlaying every local
-  `data/*.csv` file with the last-known-good GitHub copy and silently
-  discarding anything saved locally since the previous successful push. A
-  secondary, not-mutually-exclusive theory (a concurrent-import race
-  between the main script rerun and one of Spot Session's
-  `st.fragment(run_every=...)` background reruns, the same fragments
-  already implicated in the Cancel Session saga above) hasn't been ruled
-  out either. Needs real Streamlit Cloud server logs (Manage app -> logs,
-  not available to a sandboxed session) to confirm which. See entry 133
-  for the full writeup and reproduction steps. **Until this is
-  understood, treat any Spot Session save as at-risk until it's visibly
-  reflected on the `data` branch (or the angler otherwise confirms it
-  stuck) - not just "seemed to save locally."**
+- (entry 133/134, punch-list #67, FIXED, live re-verification still
+  pending) Clicking "Start Session" (or, per the angler's own screenshot,
+  Cancel Session too) on Spot Session reproducibly crashed the WHOLE app
+  with a redacted `KeyError` from `app.py`'s own top-level import, and
+  worse, could silently discard local saves that never reached GitHub.
+  Root-caused from the angler's own Streamlit Cloud server log:
+  `commit_and_push_data()` ran its `git commit` directly inside
+  `repo_root`, the same live checkout Streamlit Cloud watches for `main`
+  changes - that local commit alone (regardless of which branch it's
+  pushed to) was enough to trigger a real mid-request redeploy, which
+  corrupted the running process and discarded the commit before its push
+  to `data` completed. Fixed by moving `commit_and_push_data()`'s and
+  `push_pending_data()`'s actual git operations into an isolated git
+  worktree that never touches `repo_root`'s own HEAD. Verified offline
+  (pytest incl. 4 new regression tests, 8-page AppTest smoke, fresh
+  clone) and shipped to `main`. **Still needs a live Start Session/Cancel
+  Session re-test on the redeployed app** to confirm the crash is
+  actually gone and saves land on `git fetch origin data` - see entry 134.
+  Until that live check happens, keep treating any Spot Session save as
+  worth double-checking against the `data` branch.
 
 ## Operating notes
 
