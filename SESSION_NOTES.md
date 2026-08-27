@@ -8129,6 +8129,59 @@ every real save.
     redeployed app** - that's the actual test that matters here, and
     should happen the next time this reproduces (or doesn't).
 
+132. **Punch-list #66 (continued again): live re-verification of the
+    entry 131 `st.form()` fix, result inconclusive - not yet resolved.**
+
+    Waited for the entry 131 deploy, then ran the live repro a third time.
+    Two data points, and they don't agree cleanly:
+
+    - Fresh spot/angler (Jeanne's Point / Matthew). First tap of "Yes,
+      cancel it" (same click, same relative position used successfully in
+      the AppTest repro) produced the same failure signature as entries
+      128/130/131: dialog closes, session completely unchanged, no banner
+      at all - not even entry 128's "didn't go through" warning.
+    - Re-opened "❌ Cancel Session" on that *same* still-active session
+      (second appearance of the confirm dialog), took a screenshot this
+      time to read the actual on-screen button coordinates before
+      clicking (rather than assuming the coordinates from the first
+      attempt still applied), and clicked "Yes, cancel it" precisely.
+      This attempt succeeded immediately: "❌ Session at Jeanne's Point
+      canceled..." banner, full reset, confirmed clean via a follow-up
+      screenshot.
+
+    That second result could mean either (a) the `st.form()` fix didn't
+    change anything and the underlying bug is still exactly the
+    "reliably works on the second try" behavior documented since
+    entry 128, or (b) the fix actually works and the first attempt's
+    "failure" was a coordinate miss in the browser-automation click
+    itself (not re-verified against a screenshot beforehand, unlike the
+    second attempt) rather than a real repro of the bug. Both are
+    consistent with what was observed. Distinguishing them needs one
+    more clean test: a session that has *never* shown the confirm dialog
+    before, screenshot it immediately to read the real button
+    coordinates, then click precisely on that very first appearance.
+
+    That test was in progress - a fresh session at Midnight Point /
+    Matthew had been started (angler picked, conditions page reached),
+    with the plan to click "Start Session" then "❌ Cancel Session" and
+    screenshot before clicking "Yes, cancel it" for the first time - when
+    this session was paused before "Start Session" was ever clicked. No
+    session was actually created at Midnight Point, so there's nothing to
+    clean up there.
+
+    **Net state:** the `st.form()` fix from entry 131 is live on `main`
+    (unchanged this round - no code was touched this session, this was
+    live-testing only) but its effectiveness is still not confirmed
+    either way. Left the Jeanne's Point session canceled and clean. Did
+    not touch the still-open question of whatever's sitting in Dock Rock
+    Wall / John from earlier repro attempts (entries 128/129) - flagged
+    as ambiguous (test data vs. a real angler's own session) and
+    deliberately left alone pending a direct question to the angler about
+    it. **This is not resolved. The next session should pick up with the
+    clean "screenshot-then-click-the-first-ever-appearance" test
+    described above before saying anything more to the angler about
+    whether #66 is actually fixed.**
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8434,6 +8487,18 @@ every real save.
   fragment AND the only one with this bug), not a confirmed root cause -
   if it reproduces again after this ships, the fragment theory was wrong
   and this is still open.
+- (entries 131-132, punch-list #66) The fragment-race theory above was
+  disproven by direct re-testing (entry 131). Replaced with `st.form()` /
+  `st.form_submit_button()` for the "Yes, cancel it" / "Keep session"
+  pair, on the theory that this is Streamlit's known "a button rendered
+  for the first time in a script run can miss its own first click"
+  behavior. **Still not confirmed fixed** - a live re-test (entry 132)
+  got one failure and one success on the same session, in a way that
+  doesn't cleanly prove or disprove the fix (see entry 132 for why). The
+  double-click workaround ("if it doesn't show a banner, just hit Cancel
+  Session and try again - it's reliably worked on the second try in
+  every case seen so far") should still be treated as necessary until a
+  clean test proves otherwise.
 
 ## Operating notes
 
