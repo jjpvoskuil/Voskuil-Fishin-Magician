@@ -8014,6 +8014,75 @@ every real save.
     branch content, restored via `git checkout HEAD -- data/` afterward.
     Verified via a fresh `git clone`.
 
+130. **Punch-list #66: the angler reported the entry 129 fix "still" not
+    working - two follow-up messages ("still getting the same issue" and
+    two screenshots of "Session in progress - John" right after canceling
+    and confirming) that looked, at first glance, inconsistent with entry
+    129's own verification.**
+
+    Directly reproduced live on the deployed app (both `main` commits
+    confirmed to have already landed there via `git ls-remote`) rather
+    than guessing from the screenshots alone: started a real session
+    (Dock Rock Wall, angler John, one real tackle-box lure), tapped
+    "❌ Cancel Session," then tapped "Yes, cancel it." First tap: the
+    confirm dialog closed and the page returned to the plain "Session in
+    progress" view - angler, location, and lure completely unchanged, and
+    critically **no banner at all**, not even entry 128's "that didn't go
+    through, try again" warning. A second, separate "❌ Cancel Session" ->
+    "Yes, cancel it" attempt right after succeeded completely: the entry
+    129 banner and full reset both worked exactly as designed. So the
+    angler's screenshots weren't a regression or a stale deploy - they
+    were catching the still-open entry 128 double-click bug in the act,
+    on the very code that (correctly) fixed everything else about it.
+
+    This ruled out entry 128's own theory of the bug: it assumed
+    `_cancel_session()` was running and returning `False` (its
+    session_state lookup for the active session coming back empty), which
+    would show the entry 128 "didn't go through" banner - that banner
+    never appeared in this reproduction, on either failing attempt tested.
+    Since NEITHER outcome banner rendered, `_cancel_session()` never ran
+    at all on the failing click - the `if ccol1.button("Yes, cancel it"):`
+    block's body didn't execute, meaning Streamlit never registered that
+    click as a "this button was pressed" event on that script run.
+
+    Went looking for what's different about this specific confirm flow
+    vs. Trip History's identical two-step "🗑️ Delete this trip" confirm,
+    which has never had this reported: `pages/6_Spot_Session.py` is the
+    only page in the app using `st.fragment(run_every=...)` - a 20-second
+    one (`_render_watch_view()`, spectator-only, not in play for an
+    angler's own session) and a 30-second one (`_autosave_heartbeat()`,
+    called unconditionally right under the "Session in progress" header,
+    for the entire time the Cancel confirm buttons are on screen). A
+    background fragment's own periodic auto-rerun landing at close to the
+    same moment as a click on an unrelated button is a known way for that
+    click to be silently dropped rather than picked up on the next full
+    script run - and the timing here (read "are you sure?", tap "Yes,
+    cancel it" a handful of seconds later) lines up with a 30-second
+    cadence often enough to plausibly explain what's been reproduced.
+
+    **Fix (not yet proven as the root cause - see "Known limitations"
+    below):** `_autosave_heartbeat()` is now skipped entirely on any
+    render where this spot's `cancel_session_confirm_{spot_id}` flag is
+    set - i.e. for as long as the "Cancel this session? ... Yes, cancel
+    it / Keep session" prompt is the only thing on screen to act on. The
+    heartbeat already no-ops most ticks anyway (see its own docstring -
+    it only does real work when the last push actually failed), so
+    pausing it for the few seconds a confirm prompt is up costs nothing
+    real. `_render_push_health_banner()` (the static warning next to it)
+    is untouched - only the periodic fragment call is guarded.
+
+    **Verification:** `pytest tests/ -q`: 377 passed. Full 7-page AppTest
+    smoke test (with `tests/test_scoring.py`'s `_fake_bundle()` mocked
+    in): all pages load with no exceptions. `data/segment_score_freeze.csv`
+    reverted afterward (smoke-test pollution, same as every prior round).
+    Could not write a permanent regression test for the actual race - it
+    depends on Streamlit's real frontend/backend websocket timing, which
+    AppTest's synchronous, no-network harness doesn't model - so this is
+    verified by re-running the exact live-app repro above (post-deploy)
+    rather than by a unit test. If the angler hits this again after this
+    ships, that itself is the signal the fragment theory was wrong (see
+    below) and the actual cause is still open.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8306,6 +8375,19 @@ every real save.
   `git status`/`HEAD` snapshot to that exact message so the next
   reproduction can actually be diagnosed from what the angler sees in the
   toast, rather than needing direct server access.
+- (entry 130, punch-list #66) Correction to the entry 128 bullet above:
+  a further live reproduction found the Cancel Session double-click bug
+  does NOT show the entry 128 "didn't go through" banner when it fails -
+  meaning `_cancel_session()` isn't running at all on the failing click
+  (not, as entry 128 assumed, running and finding `active is None`). Best
+  candidate found so far: this page's 30-second `_autosave_heartbeat()`
+  background fragment (the only `st.fragment(run_every=...)` in the app)
+  racing with the "Yes, cancel it" click. Mitigated by not calling that
+  fragment while the confirm prompt is on screen, but this is a plausible
+  fix based on circumstantial evidence (this page is the only one with a
+  fragment AND the only one with this bug), not a confirmed root cause -
+  if it reproduces again after this ships, the fragment theory was wrong
+  and this is still open.
 
 ## Operating notes
 
