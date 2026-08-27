@@ -34,6 +34,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from core.storage import data_write_lock
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ANGLERS_PATH = REPO_ROOT / "data" / "anglers.csv"
 
@@ -85,13 +87,18 @@ def add_angler(name: str, path: Path = ANGLERS_PATH) -> bool:
     worth a git commit" apart from "blank" or "already a dropdown choice" -
     see pages/6_Spot_Session.py's save handlers, which only push
     data/anglers.csv to GitHub when this returns True."""
+    # Punch-list #68: the exists-check-then-append below is guarded by
+    # data_write_lock() (see core.storage's docstring) so two concurrent
+    # "Other" adds of the same new name can't both pass the exists-check
+    # and both append a duplicate row.
     name = (name or "").strip()
     if not name:
         return False
-    existing = read_anglers(path)
-    if any(existing_name.lower() == name.lower() for existing_name in existing):
-        return False
-    ensure_anglers_exists(path)
-    with open(path, "a", newline="") as f:
-        csv.DictWriter(f, fieldnames=FIELDNAMES).writerow({"name": name})
-    return True
+    with data_write_lock():
+        existing = read_anglers(path)
+        if any(existing_name.lower() == name.lower() for existing_name in existing):
+            return False
+        ensure_anglers_exists(path)
+        with open(path, "a", newline="") as f:
+            csv.DictWriter(f, fieldnames=FIELDNAMES).writerow({"name": name})
+        return True

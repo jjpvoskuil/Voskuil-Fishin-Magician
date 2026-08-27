@@ -100,6 +100,7 @@ moving repo_root's HEAD or creating any commit, so it was left as-is.
 """
 from __future__ import annotations
 import csv
+import fcntl
 import hashlib
 import io
 import json
@@ -108,6 +109,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
@@ -115,6 +117,62 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIP_LOG_PATH = REPO_ROOT / "data" / "trip_log.csv"
+
+
+def _data_lock_path(repo_root: Path = REPO_ROOT) -> Path:
+    """Same keying scheme as _data_worktree_dir() below (a hash of
+    repo_root's resolved path, under the system temp dir) so each real
+    deployment - and each test pointing at its own throwaway repo_root -
+    gets its own independent lock file rather than colliding with unrelated
+    ones. Deliberately NOT under repo_root itself: nothing here should ever
+    be a trackable file a `git add` could accidentally pick up."""
+    key = hashlib.sha1(str(Path(repo_root).resolve()).encode()).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f"fishin-magician-data-lock-{key}"
+
+
+@contextmanager
+def data_write_lock(repo_root: Path = REPO_ROOT):
+    """Punch-list #68 (trip-history data-loss investigation): every real
+    data-mutating action in this app - append/update/delete on
+    trip_log.csv, lure_inventory.csv, dev_tasks.csv, anglers.csv,
+    lake_spots.csv, water_quality_log.csv - reads a local CSV, rewrites it
+    whole (or appends a row), and separately copies that same file into the
+    commit_and_push_data() worktree to commit+push it. None of that was ever
+    guarded against two of these sequences overlapping in time - two
+    concurrent Streamlit sessions (or, worse, an old pre-redeploy process
+    and a freshly booted one briefly alive at the same moment, sharing the
+    same repo_root and the same /tmp) each reading/writing/copying the same
+    file with no coordination at all.
+
+    Confirmed as the real mechanism behind a live incident: trip_log.csv
+    briefly ballooned from 76 to 152 rows with column-shifted garbage (real
+    segment names like "Dawn"/"Afternoon" landing in the trip_date column -
+    the unmistakable signature of two writes interleaving mid-row) right
+    around a manual app reboot, before the very next write collapsed it back
+    down and discarded several real, already-logged 8/24-8/26 sessions in
+    the process (recovered from earlier git history afterward - see
+    SESSION_NOTES.md punch-list #68).
+
+    The fix: an OS-level advisory lock (`fcntl.flock`, exclusive, blocking -
+    works across threads AND across separate processes on the same
+    filesystem, which a plain Python `threading.Lock` would not) that every
+    local-file read-modify-write AND the commit_and_push_data()/
+    push_pending_data() worktree section below both acquire for their full
+    duration. Whichever save gets there first now runs to completion (local
+    write, or worktree copy+commit+push) before any other save's critical
+    section can start, so two overlapping saves are serialized instead of
+    interleaved - eliminating this exact class of corruption regardless of
+    which two operations happen to race. Reentrant-safe is NOT needed here
+    (and not provided) - every real call site acquires this once per
+    top-level call, never while already holding it."""
+    lock_path = _data_lock_path(repo_root)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+") as lockfile:
+        fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockfile.fileno(), fcntl.LOCK_UN)
 
 # Punch-list #52: the branch every in-app data save pushes to - see the
 # module docstring above. Streamlit Cloud never watches this branch, so
@@ -207,10 +265,15 @@ def parse_conditions(row: dict) -> dict:
 
 
 def append_trip(entry: TripEntry):
-    ensure_log_exists()
-    with open(TRIP_LOG_PATH, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writerow(entry.to_row())
+    # Punch-list #68: the read-implicit-in-"a" (append position) through the
+    # actual write must be atomic against any other process/thread doing the
+    # same - see data_write_lock()'s docstring for the corruption this
+    # prevents.
+    with data_write_lock():
+        ensure_log_exists()
+        with open(TRIP_LOG_PATH, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow(entry.to_row())
 
 
 def update_trip(entry: TripEntry) -> bool:
@@ -220,36 +283,45 @@ def update_trip(entry: TripEntry) -> bool:
     logged session can be corrected and re-saved without leaving a duplicate
     behind. Returns False (no-op, file untouched) if no row with that
     trip_id exists anymore - e.g. it was deleted from trip_log.csv by
-    something else while an edit was in progress."""
-    ensure_log_exists()
-    rows = read_all_trips()
-    for i, row in enumerate(rows):
-        if row.get("trip_id") == entry.trip_id:
-            rows[i] = entry.to_row()
-            break
-    else:
-        return False
-    with open(TRIP_LOG_PATH, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        writer.writerows(rows)
-    return True
+    something else while an edit was in progress.
+
+    Punch-list #68: the read-modify-write below now runs under
+    data_write_lock() - see its docstring - so this can't interleave with
+    another process's concurrent append/update/delete on the same file."""
+    with data_write_lock():
+        ensure_log_exists()
+        rows = read_all_trips()
+        for i, row in enumerate(rows):
+            if row.get("trip_id") == entry.trip_id:
+                rows[i] = entry.to_row()
+                break
+        else:
+            return False
+        with open(TRIP_LOG_PATH, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(rows)
+        return True
 
 
 def delete_trip(trip_id: str) -> bool:
     """Remove the row with this trip_id entirely. Used by Trip History's
     per-trip "Delete" action. Returns False (no-op, file untouched) if no
-    row with that trip_id exists."""
-    ensure_log_exists()
-    rows = read_all_trips()
-    remaining = [r for r in rows if r.get("trip_id") != trip_id]
-    if len(remaining) == len(rows):
-        return False
-    with open(TRIP_LOG_PATH, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        writer.writerows(remaining)
-    return True
+    row with that trip_id exists.
+
+    Punch-list #68: same data_write_lock()-guarded read-modify-write as
+    update_trip() above, for the same reason."""
+    with data_write_lock():
+        ensure_log_exists()
+        rows = read_all_trips()
+        remaining = [r for r in rows if r.get("trip_id") != trip_id]
+        if len(remaining) == len(rows):
+            return False
+        with open(TRIP_LOG_PATH, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(remaining)
+        return True
 
 
 def _resolve_remote_url(github_token: str, repo_slug: str, remote_url: Optional[str]) -> str:
@@ -598,40 +670,50 @@ def commit_and_push_data(
     failure message (matching commit_and_push()'s own failure shape) if
     the worktree itself can't be created - the caller's own file write to
     repo_root already succeeded by the time this runs either way, so
-    nothing about the local save is lost even if this fails."""
+    nothing about the local save is lost even if this fails.
+
+    Punch-list #68: the worktree-copy-then-commit-then-push sequence below
+    now runs under data_write_lock() - see its docstring. The same worktree
+    directory is shared by every data file this app ever saves, so without
+    this, two overlapping calls (from two concurrent sessions, or an old and
+    a freshly-booted process briefly alive together across a redeploy) could
+    copy into and `git commit` the same worktree at the same time - exactly
+    the mechanism confirmed behind a real corruption incident (see
+    SESSION_NOTES.md punch-list #68)."""
     if not github_token:
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
     try:
-        remote = _resolve_remote_url(github_token, repo_slug, remote_url)
-        worktree, err = _ensure_data_worktree(repo_root, remote, DATA_BRANCH)
-        if worktree is None:
-            return False, f"Saved locally, but couldn't prepare the data worktree: {err}"
+        with data_write_lock(repo_root):
+            remote = _resolve_remote_url(github_token, repo_slug, remote_url)
+            worktree, err = _ensure_data_worktree(repo_root, remote, DATA_BRANCH)
+            if worktree is None:
+                return False, f"Saved locally, but couldn't prepare the data worktree: {err}"
 
-        resolved_root = Path(repo_root).resolve()
-        dest_paths = []
-        for p in paths:
-            p = Path(p)
-            src = p if p.is_absolute() else (resolved_root / p)
-            try:
-                rel = src.resolve().relative_to(resolved_root)
-            except ValueError:
-                # Not under repo_root at all - shouldn't happen for any
-                # real call site, but use it as-is rather than failing the
-                # whole save over a path that doesn't fit the usual shape.
-                rel = p
-            dest = worktree / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if src.exists():
-                shutil.copy2(src, dest)
-            elif dest.exists():
-                dest.unlink()
-            dest_paths.append(str(rel))
+            resolved_root = Path(repo_root).resolve()
+            dest_paths = []
+            for p in paths:
+                p = Path(p)
+                src = p if p.is_absolute() else (resolved_root / p)
+                try:
+                    rel = src.resolve().relative_to(resolved_root)
+                except ValueError:
+                    # Not under repo_root at all - shouldn't happen for any
+                    # real call site, but use it as-is rather than failing the
+                    # whole save over a path that doesn't fit the usual shape.
+                    rel = p
+                dest = worktree / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if src.exists():
+                    shutil.copy2(src, dest)
+                elif dest.exists():
+                    dest.unlink()
+                dest_paths.append(str(rel))
 
-        return commit_and_push(
-            dest_paths, github_token, repo_slug, commit_message, branch=DATA_BRANCH,
-            repo_root=worktree, max_push_retries=max_push_retries, remote_url=remote_url,
-            retry_backoff_seconds=retry_backoff_seconds,
-        )
+            return commit_and_push(
+                dest_paths, github_token, repo_slug, commit_message, branch=DATA_BRANCH,
+                repo_root=worktree, max_push_retries=max_push_retries, remote_url=remote_url,
+                retry_backoff_seconds=retry_backoff_seconds,
+            )
     except Exception as e:
         return False, f"Saved locally, but push failed: {e}"
 
@@ -660,17 +742,22 @@ def push_pending_data(
     committed this way in this process), there's nothing pending by
     definition - returns the same harmless-success shape push_pending()
     itself returns for a no-op push, rather than treating "no worktree
-    yet" as an error."""
+    yet" as an error.
+
+    Punch-list #68: also runs under data_write_lock() - see
+    commit_and_push_data()'s docstring - so a retry here can't race a
+    concurrent commit_and_push_data() call touching the same worktree."""
     if not github_token:
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
-    worktree = _data_worktree_dir(repo_root)
-    if not (worktree / ".git").exists():
-        return True, "Nothing pending - no local data save has happened yet this process."
-    return push_pending(
-        github_token, repo_slug, branch=DATA_BRANCH, repo_root=worktree,
-        max_push_retries=max_push_retries, remote_url=remote_url,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
+    with data_write_lock(repo_root):
+        worktree = _data_worktree_dir(repo_root)
+        if not (worktree / ".git").exists():
+            return True, "Nothing pending - no local data save has happened yet this process."
+        return push_pending(
+            github_token, repo_slug, branch=DATA_BRANCH, repo_root=worktree,
+            max_push_retries=max_push_retries, remote_url=remote_url,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
 
 
 def sync_data_from_data_branch(
