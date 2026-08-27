@@ -199,7 +199,8 @@ this repo that can override it on this hosting.
   data back. **If tapping "Yes, cancel it" doesn't seem to do anything** (the
   session just stays open, no error shown), that's a known intermittent glitch -
   tap "❌ Cancel Session" and confirm again; it's reliably worked on the second
-  try in every case seen so far (punch-list #64). Unlike "⏹ End Session" (which
+  try in every case seen so far (punch-list #64, mitigated further in punch-list
+  #66 - see SESSION_NOTES.md if it still turns up). Unlike "⏹ End Session" (which
   deliberately keeps your picked angler name and location - you're still you, still
   at the same spot), a real Cancel resets the whole page back to scratch: angler,
   location, and any picked lure(s)/conditions all clear, so the next thing you see

@@ -1897,6 +1897,10 @@ if _other_open_anglers:
 
 if active is not None:
     st.divider()
+    # Punch-list #66: computed up here (used below by the autosave-heartbeat
+    # guard) instead of down by "❌ Cancel Session" itself, so both places
+    # reference the exact same key without recomputing the f-string twice.
+    cancel_pending_key = f"cancel_session_confirm_{spot['spot_id']}"
     _session_angler = (active.get("base_conditions") or {}).get("angler") or resolved_angler
     st.header(f"🎣 Session in progress{f' - {_session_angler}' if _session_angler else ''}")
     if active.pop("reconstructed", False):
@@ -1916,8 +1920,36 @@ if active is not None:
     # full "why". Rendered/started once here, right under the session
     # header, so it's visible no matter how far down the angler has
     # scrolled to tap a lure or open "Add a lure to this session."
+    #
+    # Punch-list #66: skipped entirely while this spot's Cancel Session
+    # confirm ("Yes, cancel it" / "Keep session") is on screen. Live
+    # reproduction of punch-list #64's still-open "first click on 'Yes,
+    # cancel it' silently does nothing" bug found that the failure was
+    # NOT _cancel_session() returning False (that path sets a visible
+    # "cancel_failed" banner - punch-list #64/#65 - and the banner never
+    # appeared in any failing repro). The button's own `if ccol1.button(...)`
+    # block wasn't running at all on the failing click - nothing it does
+    # (delete_trip, the push, either banner) ever started. This page is
+    # the ONLY one in the app using st.fragment(run_every=...) (this one,
+    # plus _render_watch_view()'s 20s tick for spectators) - every other
+    # page's identical two-step confirm (e.g. Trip History's "🗑️ Delete
+    # this trip") has never had this reported. A background fragment's own
+    # periodic rerun landing at the same moment as a click on an unrelated
+    # button is a known source of that click being silently dropped rather
+    # than processed on the next full script run - plausible here given
+    # the timing (tap "❌ Cancel Session", read the warning, tap "Yes,
+    # cancel it" a few seconds later lines up with this heartbeat's 30s
+    # cadence) and given no other page pairs a fragment with a confirm-
+    # click flow. Not calling the fragment at all while the confirm buttons
+    # are the only thing the angler can act on removes that window - it
+    # already skips its own work most ticks anyway (see its docstring), so
+    # pausing it for the few seconds a "are you sure" prompt is up costs
+    # nothing. Unproven as THE root cause (see SESSION_NOTES.md punch-list
+    # #66), but a real candidate worth eliminating rather than another
+    # diagnostic-only pass.
     _render_push_health_banner()
-    _autosave_heartbeat()
+    if not st.session_state.get(cancel_pending_key):
+        _autosave_heartbeat()
 
     retired_lures = []
     for i, lure in enumerate(active["lures"]):
@@ -2094,7 +2126,9 @@ if active is not None:
     # deletes every trip_log.csv row the session created with no undo, so
     # it gets the same two-step "are you sure" confirm Trip History's own
     # "🗑️ Delete this trip" uses, rather than acting on the first click.
-    cancel_pending_key = f"cancel_session_confirm_{spot['spot_id']}"
+    # (cancel_pending_key itself is defined up where "Session in progress"
+    # is first rendered - punch-list #66 - so the autosave-heartbeat guard
+    # up there can see it too.)
     if not st.session_state.get(cancel_pending_key):
         if escol2.button("❌ Cancel Session", key=f"cancel_session_{spot['spot_id']}", width='stretch'):
             st.session_state[cancel_pending_key] = True
