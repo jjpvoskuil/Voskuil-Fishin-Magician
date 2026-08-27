@@ -8418,6 +8418,91 @@ every real save.
     live, this time confirming via `git fetch origin data` that it lands
     before moving on.
 
+135. **Punch-list #67 live-verified fixed - both Start Session and Cancel
+    Session now work with zero crashes, and one important operational
+    gotcha discovered along the way: a routine push-triggered redeploy
+    was NOT enough to actually pick up this fix - a manual "Reboot app"
+    was needed.**
+
+    First live attempt after pushing entry 134's fix (commit `1a3702d`)
+    and waiting for the normal auto-redeploy: picked a fresh spot/angler
+    (Jeanne's Point / Alex) never used in earlier repro attempts, added a
+    lure, clicked Start Session - **it crashed again**, identical redacted
+    `KeyError` screen. Opened "Manage app" (top-right, in the browser,
+    not available to this sandbox in earlier sessions) to read the FULL,
+    non-redacted server log directly instead of relying on a
+    separately-downloaded log file, and found the actual local commit
+    line still read `[main f1dcb6a] Start spot session (Jeanne's
+    Point...)` - `[main ...]`, not `[detached HEAD ...]` or `[data
+    ...]` - meaning the OLD code (committing straight into `repo_root`)
+    was still what actually ran, despite the redeploy log showing
+    `Pulling code changes... / Updated app!` right before it.
+
+    Scrolling the same log further back turned up the real reason this
+    bug was ever this consistent: **every single past save shows the
+    identical pattern** - `[main <hash>] Start/Cancel spot session...`
+    immediately followed by `KeyError: 'core.appstate'` / `KeyError:
+    'core'`, going all the way back to the very first Start Session of
+    the day, seconds after a fresh container boot, with no redeploy
+    cycle anywhere nearby. That rules out this being tied to Spot
+    Session's `st.fragment(run_every=...)` background reruns specifically
+    (a punch-list #67 predecessor theory) - the exact same crash also hit
+    a `Development` page punch-list-item save, which has no fragments at
+    all. Every one of these local commits was on branch `main`, confirming
+    entry 134's root cause was right; the open question was why the fix
+    that was supposed to stop that hadn't taken effect.
+
+    Used `Manage app`'s "Reboot app" action (a full fresh `git clone`,
+    not the lighter-weight incremental `git pull` a routine push
+    triggers) to rule out a stale/partial deploy. After the reboot,
+    repeated the exact same test on a different fresh spot/angler (Dock
+    Rock Wall / Matthew): Start Session succeeded with **zero crash**,
+    and the log line now read `[detached HEAD 1c20740] Start spot session
+    (Dock Rock Wall, 1 lure(s))` - the commit is finally happening in the
+    isolated worktree, not `repo_root`. Immediately followed with Cancel
+    Session on the same session: the confirm dialog fired correctly on
+    the very first click (punch-list #66's `on_click` fix, finally
+    live-tested against a real session instead of being blocked by #67),
+    confirmed with "Yes, cancel it," and it succeeded too - `[detached
+    HEAD 844a630] Cancel spot session (Dock Rock Wall) - discard 1
+    row(s)`, again zero crash. Confirmed via `git fetch origin data` from
+    outside the app that both commits are genuinely on GitHub, not just
+    "seemed to save": `844a630` and `1c20740` are the two most recent
+    commits on the `data` branch, and `trip_log.csv` at that ref shows no
+    orphaned Dock Rock Wall row (Cancel Session correctly discarded the
+    row Start Session had written, as designed).
+
+    **Why the routine redeploy didn't work but the reboot did:**
+    `repo_root` is the SAME long-lived checkout that this exact bug has
+    been committing directly into, on branch `main`, for months - meaning
+    it likely accumulated a large number of local-only commits that were
+    never actually part of `origin/main`'s history (every past "Start
+    Session"/"Cancel Session"/dev-task save, per the log). A routine
+    Streamlit Cloud redeploy applies new code with a lightweight `git
+    pull`-style update to that SAME existing checkout, not a fresh clone;
+    with `repo_root`'s local `main` that badly diverged from
+    `origin/main`, that update most likely failed to actually land
+    cleanly (the log still claimed "Updated app!" either way), leaving
+    the OLD `core/storage.py` running. A full reboot forces a genuinely
+    fresh `git clone`, which starts `repo_root` clean and matching
+    `origin/main` exactly, sidestepping the divergent-history problem
+    entirely. Going forward this should be a one-time fix, not a
+    recurring chore: since the fix itself means no save will ever create
+    another local commit in `repo_root` again, `repo_root`'s history
+    should stay clean and should never diverge from `origin/main` again -
+    ordinary pushes to `main` should redeploy normally from here on. If a
+    future code push ever again seems to not take effect, this is the
+    first thing to suspect and "Reboot app" is the fix.
+
+    **Net state: punch-list #67 is fixed and live-confirmed. Punch-list
+    #66's `on_click` fix is ALSO now live-confirmed** (first clean test
+    ever, on the very first click, no double-tap needed) - both had been
+    blocked on each other for several sessions. Remaining follow-up: the
+    in-app Development page punch list still doesn't show #67 (both
+    add-attempts in entry 133 were themselves victims of the bug) - worth
+    re-adding it now that saves actually work, confirming via `git fetch
+    origin data` that the add lands before considering it done.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -8735,33 +8820,35 @@ every real save.
   Session and try again - it's reliably worked on the second try in
   every case seen so far") should still be treated as necessary until a
   clean test proves otherwise.
-- (entry 133, punch-list #66 third pass) Replaced the `st.form()` confirm
-  buttons with `on_click=` callbacks - Streamlit's documented fix for a
-  widget whose action must fire on the exact interaction that created it.
-  Verified with no logic regression (pytest, AppTest); **live
-  effectiveness against the real click-timing bug is still unconfirmed**
-  - every attempt to reach an active session to test it hit punch-list
-  #67's crash (below) before the confirm dialog was ever reached.
-- (entry 133/134, punch-list #67, FIXED, live re-verification still
-  pending) Clicking "Start Session" (or, per the angler's own screenshot,
-  Cancel Session too) on Spot Session reproducibly crashed the WHOLE app
-  with a redacted `KeyError` from `app.py`'s own top-level import, and
-  worse, could silently discard local saves that never reached GitHub.
-  Root-caused from the angler's own Streamlit Cloud server log:
-  `commit_and_push_data()` ran its `git commit` directly inside
-  `repo_root`, the same live checkout Streamlit Cloud watches for `main`
-  changes - that local commit alone (regardless of which branch it's
-  pushed to) was enough to trigger a real mid-request redeploy, which
-  corrupted the running process and discarded the commit before its push
-  to `data` completed. Fixed by moving `commit_and_push_data()`'s and
-  `push_pending_data()`'s actual git operations into an isolated git
-  worktree that never touches `repo_root`'s own HEAD. Verified offline
-  (pytest incl. 4 new regression tests, 8-page AppTest smoke, fresh
-  clone) and shipped to `main`. **Still needs a live Start Session/Cancel
-  Session re-test on the redeployed app** to confirm the crash is
-  actually gone and saves land on `git fetch origin data` - see entry 134.
-  Until that live check happens, keep treating any Spot Session save as
-  worth double-checking against the `data` branch.
+- (entry 133/135, punch-list #66 third pass) Replaced the `st.form()`
+  confirm buttons with `on_click=` callbacks - Streamlit's documented fix
+  for a widget whose action must fire on the exact interaction that
+  created it. **Live-confirmed fixed** (entry 135): once punch-list #67's
+  crash was out of the way, a real Cancel Session showed the confirm
+  dialog and completed on the very first click, no double-tap needed.
+- (entry 133/134/135, punch-list #67, FIXED and live-confirmed) Clicking
+  "Start Session" (or, per the angler's own screenshot, Cancel Session
+  too) on Spot Session reproducibly crashed the WHOLE app with a redacted
+  `KeyError` from `app.py`'s own top-level import, and worse, could
+  silently discard local saves that never reached GitHub. Root-caused
+  from the angler's own Streamlit Cloud server log: `commit_and_push_data()`
+  ran its `git commit` directly inside `repo_root`, the same live
+  checkout Streamlit Cloud watches for `main` changes - that local commit
+  alone (regardless of which branch it's pushed to) was enough to trigger
+  a real mid-request redeploy, which corrupted the running process and
+  discarded the commit before its push to `data` completed. Fixed by
+  moving `commit_and_push_data()`'s and `push_pending_data()`'s actual
+  git operations into an isolated git worktree that never touches
+  `repo_root`'s own HEAD. A routine push-triggered redeploy did NOT
+  actually pick up the fix on the first try (see entry 135 for why -
+  `repo_root`'s own git history had diverged too far from `origin/main`
+  after months of this bug); a manual "Reboot app" (Manage app menu, top
+  right) forced a truly fresh clone and resolved it. **Live-verified after
+  the reboot: a real Start Session and Cancel Session both completed with
+  zero crashes**, and `git fetch origin data` confirmed both commits
+  genuinely landed on GitHub. If a future code push to `main` ever again
+  seems not to take effect, try a manual reboot before assuming the fix
+  failed - see entry 135.
 
 ## Operating notes
 
