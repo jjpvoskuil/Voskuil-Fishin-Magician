@@ -317,10 +317,15 @@ this repo that can override it on this hosting.
   without saving anything. **"🗑️ Delete this session"** stays available either way
   (it has its own two-step confirmation, so it doesn't need Edit first) - confirm
   it, then it removes every
-  lure row (and every fish logged on them) for good. A few things stay read-only by
-  design: location (remapping a spot isn't part of this), and predicted score /
-  cloud-cover / wind-mph / pressure-trend / moon-phase, which stay exactly as
-  originally computed rather than being silently re-scored from an edit. Fish
+  lure row (and every fish logged on them) for good. Location is editable too
+  (punch-list #72) - a **"📍 Location"** picker in the edit form lets you correct a
+  session that was logged at the wrong spot, applied to every lure row in the
+  session at once, same as the other shared/session-level fields; changing it does
+  *not* auto-remap structure type or water clarity (both are already independently
+  editable in the same form), so a caption nudges you to double-check those too if
+  the new spot calls for different values. Predicted score / cloud-cover / wind-mph /
+  pressure-trend / moon-phase stay read-only by design, kept exactly as originally
+  computed rather than being silently re-scored from an edit. Fish
   weight displays as lb-oz (e.g. "3 lb 8 oz") everywhere on this page; type it that
   way or as a plain decimal ("3.5") when editing. The old wide `st.data_editor`
   grid, the "Edit this trip" handoff back to Spot Session, and this page's own
@@ -932,6 +937,38 @@ current quantity on hand. Two ways items get in:
   telling you to tap the flip/switch-camera icon before shooting, and the
   existing "still looks soft? try Upload a photo" guidance now also explains
   *why* - not just that it can happen.
+- **Persisted save/delete confirmations, and a photo-loss bug fixed (punch-list
+  #71)** - saving or deleting a lure here (manual add, the "Scan a lure"/"Search
+  Cabela's" confirm form, or an existing card's own Save/Delete) used to call
+  `st.success()`/`st.warning()` immediately before `st.rerun()` - Streamlit wipes
+  any message shown that way the instant the rerun happens, so the confirmation
+  was never actually visible; it *looked* like nothing had happened even though
+  the save succeeded. Fixed with the same persisted-banner pattern Spot Session
+  already uses (punch-list #64/#65): the confirmation text is stashed in
+  `session_state` right before the rerun and rendered at the top of the page on
+  the very next run, so "Added: ...", "Saved: ...", and "Removed: ..." banners
+  now actually show up. The "➕ Add a lure" section also now keeps itself open
+  after a successful add (it previously collapsed shut the moment the very
+  first item was ever added, since it had no explicit `key` for Streamlit to
+  remember its open/closed state by), so you can add several lures back to
+  back without re-expanding it each time.
+
+  A separate, more serious bug was found and fixed along the way: saved lure
+  photos were silently disappearing from the tackle box after being pushed to
+  GitHub, while the rest of that item's data (brand, description, price, etc.)
+  stayed intact. Root cause was in `core/storage.py`'s
+  `commit_and_push_data()` - its own docstring promised support for "files or
+  directories" in the list of paths to sync into the push worktree, but the
+  copy step only ever called `shutil.copy2()`, which raises `IsADirectoryError`
+  on a directory. Every write that included the whole `data/lure_images/`
+  directory (i.e. every photo save) hit that exception - caught elsewhere in
+  the push pipeline, so the CSV row still saved and pushed fine, but the actual
+  image file inside it silently never made it into the pushed commit. Fixed by
+  adding `_copy_into_worktree()`, which mirrors a directory with
+  `shutil.rmtree()` + `shutil.copytree()` (and a plain file the same
+  `copy2`/`unlink` way as before), covered by two new regression tests in
+  `tests/test_storage.py` confirmed to fail against the old code and pass
+  against the fix.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill

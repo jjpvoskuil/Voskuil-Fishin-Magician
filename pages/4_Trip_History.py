@@ -69,15 +69,20 @@ accidental-change guard editing does).
 This page is now the ONLY place a logged trip is edited - the old
 "Edit this trip" -> Spot Session handoff (and its query-param plumbing) is
 gone entirely (see pages/6_Spot_Session.py, punch-list #55). Editing a
-session covers: date, time-of-day window, angler, structure type, every
-observed condition (water temp/clarity/stain/stirred-up, wind, sky,
-precipitation, forage seen, fish/forage activity, fish depth), and per
-lure: lure/color/technique, trailer, notes, and the full per-fish catch
-list (add/edit/remove). A few things are deliberately OUT of scope, same
-spirit as the old grid's own documented limitations:
-  - Location (spot_id) stays read-only - remapping it would need to also
-    reconsider structure_type/water_clarity implications tied to the spot
-    itself, not something this round's ask covers.
+session covers: date, time-of-day window, angler, location, structure
+type, every observed condition (water temp/clarity/stain/stirred-up, wind,
+sky, precipitation, forage seen, fish/forage activity, fish depth), and
+per lure: lure/color/technique, trailer, notes, and the full per-fish
+catch list (add/edit/remove). A few things are deliberately OUT of scope,
+same spirit as the old grid's own documented limitations:
+  - Location (punch-list #72) is picked from the angler's current saved-
+    spot catalog (core.lake_spots), same source the Location filter/display
+    above already resolves against - every lure row in the session gets
+    the newly picked spot_id/spot_name uniformly, same as structure_type.
+    Deliberately does NOT auto-remap structure_type or water clarity to
+    match the new spot - both are already independently editable right
+    alongside it in this same form, so a genuine mismatch is a second,
+    deliberate edit, not a silent side effect of fixing the location.
   - predicted_score, and the informational-only avg_cloud_pct/avg_wind_mph/
     pressure_trend_24h/moon_phase readouts, stay exactly as originally
     recorded - they're what the forecast/scoring engine actually computed
@@ -594,7 +599,7 @@ def _render_session_view(session: dict):
     va1, va2 = st.columns(2)
     va1.write(f"**Angler:** {session['angler'] or 'Unspecified'}")
     va2.write(f"**Structure type:** {session['structure_type'] or 'Unspecified'}")
-    st.caption(f"📍 Location: **{session['location']}** (not editable here)")
+    st.write(f"**📍 Location:** {session['location']}")
 
     st.markdown("##### Conditions")
     cc1, cc2, cc3 = st.columns(3)
@@ -697,7 +702,42 @@ def _render_session_edit(session: dict, ns: str, ens: str):
     structure_default = session["structure_type"] if session["structure_type"] in STRUCTURE_TYPES else STRUCTURE_TYPES[0]
     edit_structure = ac2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ens}_structure")
 
-    st.caption(f"📍 Location: **{session['location']}** (not editable here)")
+    # Punch-list #72: "there is no ability to edit the location... in case
+    # that was entered incorrectly" - this used to be a fixed, deliberate
+    # boundary (see this module's own docstring, "Editing scope"), on the
+    # reasoning that remapping location also has structure_type/
+    # water_clarity implications. Both of those are already independently
+    # editable right here in this same form (Structure type just above,
+    # water clarity just below), so the angler can adjust either alongside
+    # a location fix if the new spot genuinely calls for it - this
+    # deliberately does NOT auto-remap either one for them, since a silent
+    # side effect on a field the angler didn't touch is exactly the kind of
+    # surprise a manual correction shouldn't carry.
+    edit_spot_options = get_lake_spots()
+    edit_spot_ids = [s["spot_id"] for s in edit_spot_options]
+    edit_spot_name_by_id = {s["spot_id"]: s["name"] for s in edit_spot_options}
+    edit_current_spot_id = first_row.get("spot_id") or ""
+    if edit_current_spot_id and edit_current_spot_id not in edit_spot_ids:
+        # The trip's own spot_id isn't in the current saved-spot catalog
+        # (a deleted pin, or a legacy row logged before this angler's
+        # saved-spot catalog existed) - keep it selectable as its own
+        # option (labeled with whatever name is already on record) rather
+        # than silently jumping the picker to some unrelated first spot.
+        edit_spot_ids = [edit_current_spot_id] + edit_spot_ids
+        edit_spot_name_by_id[edit_current_spot_id] = f"{session['location']} (no longer in your saved spots)"
+    edit_location_index = edit_spot_ids.index(edit_current_spot_id) if edit_current_spot_id in edit_spot_ids else 0
+    edit_spot_id = st.selectbox(
+        "📍 Location", edit_spot_ids, index=edit_location_index,
+        format_func=lambda sid: edit_spot_name_by_id.get(sid, "Unknown spot"),
+        key=f"{ens}_location",
+    )
+    edit_spot_name = edit_spot_name_by_id.get(edit_spot_id, session["location"])
+    if edit_spot_id != edit_current_spot_id:
+        st.caption(
+            "📍 Location changed - if the new spot's structure or typical water clarity is genuinely "
+            "different, adjust Structure type above (and Secchi depth/stain color below) too; they "
+            "aren't updated automatically."
+        )
 
     st.markdown("##### Conditions")
     cc1, cc2, cc3 = st.columns(3)
@@ -807,8 +847,14 @@ def _render_session_edit(session: dict, ns: str, ens: str):
                 new_cond["fish"] = le["fish"]
             raw_score = le["predicted_score"]
             entry = TripEntry(
-                trip_date=edit_date.isoformat(), segment=edit_segment, spot_id=le["spot_id"],
-                spot_name=le["spot_name"], structure_type=edit_structure, water_clarity=resolved_clarity,
+                # Punch-list #72: location is now a session-level edit, same
+                # as date/segment/structure/angler above - every lure row in
+                # the session gets the newly picked spot_id/spot_name, not
+                # each row's own original one (le["spot_id"]/le["spot_name"]
+                # below the session-level TripEntry fields are still each
+                # lure's OWN edited fields, unrelated to location).
+                trip_date=edit_date.isoformat(), segment=edit_segment, spot_id=edit_spot_id,
+                spot_name=edit_spot_name, structure_type=edit_structure, water_clarity=resolved_clarity,
                 lure_used=le["lure_used"], color_used=le["color_used"], technique_used=le["technique_used"],
                 fish_caught=le["fish_caught"], biggest_fish_lb=le["biggest_fish_lb"],
                 predicted_score=float(raw_score) if raw_score not in (None, "") and not pd.isna(raw_score) else None,

@@ -29,6 +29,22 @@ st.caption(
     "were tagged with a best guess; double-check/correct them below if one looks off."
 )
 
+# Punch-list #71: "when you ... enter the information and save, there is not
+# confirmation that it saved" - every save on this page used to call
+# st.success()/st.warning() and then st.rerun() in the very same script run.
+# Streamlit throws away whatever a run displayed the instant the NEXT run
+# starts, so that message rendered for a fraction of a second (if at all)
+# before the rerun wiped it - functionally invisible, especially on a phone
+# at the lake. Mirrors pages/6_Spot_Session.py's own
+# "session_action_banner" pattern (punch-list #64/#65): every save handler
+# below stores a small dict here and reruns; this pop-and-render, right at
+# the top of the page before anything else, is what actually shows it - and
+# it stays visible regardless of which expander is open/closed, since it
+# isn't nested inside any of them.
+_inv_banner = st.session_state.pop("inventory_action_banner", None)
+if _inv_banner:
+    (st.success if _inv_banner.get("kind") == "success" else st.warning)(_inv_banner["text"])
+
 CATEGORY_LABELS = ["Not categorized / other"] + [name for _, name in LURE_CATEGORY_OPTIONS]
 CATEGORY_KEYS = [""] + [key for key, _ in LURE_CATEGORY_OPTIONS]
 CATEGORY_NAME_BY_KEY = dict(LURE_CATEGORY_OPTIONS)
@@ -36,6 +52,15 @@ CATEGORY_NAME_BY_KEY = dict(LURE_CATEGORY_OPTIONS)
 
 def _category_index(category_key: str) -> int:
     return CATEGORY_KEYS.index(category_key) if category_key in CATEGORY_KEYS else 0
+
+
+def _set_action_banner(kind: str, text: str) -> None:
+    """Stash a message in `inventory_action_banner` for the pop-and-render
+    block at the top of the page to show after the st.rerun() every save
+    handler below calls right after this - see that block's own comment
+    for why a plain st.success()/st.warning() call here would never
+    actually be seen (punch-list #71)."""
+    st.session_state["inventory_action_banner"] = {"kind": kind, "text": text}
 
 
 def _render_candidate_grid(candidates: list, session_key: str, key_prefix: str) -> None:
@@ -140,12 +165,13 @@ def _render_confirm_form(selected: dict, form_key: str, source_label: str, clean
                 [INVENTORY_PATH], token, repo_slug(),
                 f"Add lure to inventory: {saved_desc}",
             )
-            (st.success if ok else st.warning)(msg)
+            _set_action_banner("success" if ok else "warning", f"✅ Added: {saved_desc}\n\n{msg}" if ok else msg)
         else:
-            st.success("Added locally.")
-            st.info(
-                "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
-                "to GitHub and won't survive an app restart. See README for how to add it."
+            _set_action_banner(
+                "success",
+                f"✅ Added: {saved_desc}\n\nNo GITHUB_TOKEN configured in Streamlit secrets, so this "
+                "entry wasn't pushed to GitHub and won't survive an app restart. See README for how "
+                "to add it.",
             )
         for key in cleanup_keys:
             st.session_state.pop(key, None)
@@ -336,7 +362,20 @@ with st.expander("🔍 Search Cabela's by description", expanded=False, key="tex
             ("text_search_candidates", "text_search_selected", "text_search_query"),
         )
 
-with st.expander("➕ Add a lure", expanded=len(items) == 0):
+with st.expander("➕ Add a lure", expanded=len(items) == 0, key="add_lure_expander"):
+    # Punch-list #71: "reset the page so it is ready to enter a new lure" -
+    # giving this a real `key` (like "scan_expander" above already has)
+    # means Streamlit remembers whether it's open across a rerun on its
+    # own; `expanded=` above only sets its very first default, before this
+    # key exists in session_state at all. Without a key, this expander used
+    # to silently collapse the instant `items` stopped being empty - i.e.
+    # right after adding the very first lure ever, exactly when a "ready
+    # for the next one" state matters most - since `expanded=len(items)==0`
+    # was being freshly re-evaluated (and losing) on every single rerun.
+    # Submitting the form below leaves this key's value alone (it's already
+    # True - the user had to have it open to reach the submit button in the
+    # first place), so it now simply stays open through the post-save
+    # rerun, ready for the next entry, with no extra code needed here.
     # Punch-list #40: the photo controls used to live INSIDE the st.form
     # below. Streamlit forms only rerun the script when their submit button
     # is clicked - a radio button changed inside a form doesn't trigger a
@@ -429,17 +468,22 @@ with st.expander("➕ Add a lure", expanded=len(items) == 0):
 
             token = github_token()
             paths = [INVENTORY_PATH, IMAGES_DIR] if photo_file is not None else [INVENTORY_PATH]
+            saved_desc = f"{item.brand} - {item.description[:50]}"
             if token:
                 ok, msg = commit_and_push_data(
                     paths, token, repo_slug(),
-                    f"Add lure to inventory: {item.brand} - {item.description[:50]}",
+                    f"Add lure to inventory: {saved_desc}",
                 )
-                (st.success if ok else st.warning)(msg)
+                _set_action_banner(
+                    "success" if ok else "warning",
+                    f"✅ Added: {saved_desc}\n\n{msg}" if ok else msg,
+                )
             else:
-                st.success("Added locally.")
-                st.info(
-                    "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
-                    "to GitHub and won't survive an app restart. See README for how to add it."
+                _set_action_banner(
+                    "success",
+                    f"✅ Added: {saved_desc}\n\nNo GITHUB_TOKEN configured in Streamlit secrets, so "
+                    "this entry wasn't pushed to GitHub and won't survive an app restart. See README "
+                    "for how to add it.",
                 )
             st.rerun()
 
@@ -532,6 +576,7 @@ else:
                             value=package_qty_val, key=f"pkgqty_{row['item_id']}",
                         )
                         ec1, ec2 = st.columns(2)
+                        item_desc = f"{row['brand']} - {row['description'][:50]}"
                         if ec1.button("Save", key=f"save_{row['item_id']}", width='stretch'):
                             new_category = CATEGORY_KEYS[CATEGORY_LABELS.index(new_category_choice)]
                             update_item(
@@ -541,18 +586,30 @@ else:
                             get_inventory.clear()
                             token = github_token()
                             if token:
-                                commit_and_push_data(
+                                ok, msg = commit_and_push_data(
                                     [INVENTORY_PATH], token, repo_slug(),
                                     f"Update lure inventory item {row['item_id']}",
                                 )
+                                _set_action_banner(
+                                    "success" if ok else "warning",
+                                    f"✅ Saved: {item_desc}" if ok else msg,
+                                )
+                            else:
+                                _set_action_banner("success", f"✅ Saved: {item_desc} (locally only - no GITHUB_TOKEN configured).")
                             st.rerun()
                         if ec2.button("Delete", key=f"del_{row['item_id']}", width='stretch'):
                             delete_item(row["item_id"])
                             get_inventory.clear()
                             token = github_token()
                             if token:
-                                commit_and_push_data(
+                                ok, msg = commit_and_push_data(
                                     [INVENTORY_PATH, IMAGES_DIR], token, repo_slug(),
                                     f"Remove lure inventory item {row['item_id']}",
                                 )
+                                _set_action_banner(
+                                    "success" if ok else "warning",
+                                    f"🗑️ Removed: {item_desc}" if ok else msg,
+                                )
+                            else:
+                                _set_action_banner("success", f"🗑️ Removed: {item_desc} (locally only - no GITHUB_TOKEN configured).")
                             st.rerun()

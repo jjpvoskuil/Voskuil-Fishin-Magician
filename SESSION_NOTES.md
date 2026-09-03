@@ -8762,6 +8762,92 @@ every real save.
     both real spoons in the tackle box are correctly tagged; punch-list #70
     logged as Done on the Development page.
 
+139. **Punch-list #71 (Tackle Box save confirmation + a real photo-loss bug)
+    and #72 (Trip History location editing).** User: "lets hit #71 and #72
+    next."
+
+    **#71 - "there is not confirmation that it saved... pictures of lures
+    disappearing from the tackle box page once they were saved."** Two
+    separate bugs, one cosmetic and one a real data-loss bug:
+
+    - *Invisible confirmations:* every save/delete path in
+      `pages/5_Lure_Inventory.py` (manual add, the Scan-a-lure/Search-Cabela's
+      confirm form, and an existing card's Save/Delete) called
+      `st.success()`/`st.warning()` immediately before `st.rerun()` -
+      Streamlit discards a message shown that way the instant the rerun
+      happens, so nothing was ever actually visible even though the save
+      genuinely succeeded. Fixed with the same persisted-banner pattern
+      already used on Spot Session (punch-list #64/#65): stash the
+      confirmation text in `session_state["inventory_action_banner"]` right
+      before the rerun, pop and render it at the top of the page on the next
+      run. Also gave the "➕ Add a lure" expander a real `key`
+      (`"add_lure_expander"`) - without one, Streamlit had no way to
+      remember its open/closed state, so it silently collapsed shut the
+      moment the very first item was ever added; now it stays open across
+      consecutive adds, same mechanism the "Scan a lure" section above it
+      already relies on in production.
+    - *Photos actually disappearing:* real data loss, not a UI illusion.
+      `core/storage.py`'s `commit_and_push_data()` docstring promises
+      support for "files or directories" in its `paths` list, but the copy
+      loop only ever called `shutil.copy2()`, which raises
+      `IsADirectoryError` on a directory. Every photo save passes the whole
+      `data/lure_images/` directory in `paths` - so every single one hit
+      that exception. It was caught elsewhere in the push pipeline (the CSV
+      row still saved and pushed fine), which is exactly why the bug looked
+      like "the picture vanished but the rest of the info was there": the
+      image file silently never made it into the pushed commit at all.
+      Fixed by adding `_copy_into_worktree()` (branches on `src.is_dir()`:
+      `shutil.rmtree()` + `shutil.copytree()` for a directory, the previous
+      `copy2`/`unlink` behavior unchanged for a plain file), with two new
+      regression tests in `tests/test_storage.py` confirmed to fail against
+      the pre-fix code and pass against the fix.
+
+    **#72 - "there is no ability to edit the location... I would like to
+    also be able to edit the location in case that was entered
+    incorrectly."** Trip History's edit form (`pages/4_Trip_History.py`)
+    previously showed location as a read-only caption
+    ("📍 Location: **X** (not editable here)"). Replaced it with a real
+    `st.selectbox("📍 Location", ...)` picker sourced from
+    `get_lake_spots()`, defaulting to the session's current spot (falling
+    back gracefully if that spot's `spot_id` no longer exists in the current
+    spot catalog - shows "(no longer in the spot catalog)" rather than
+    crashing). Location is session-level, same as date/time-of-day/angler/
+    structure type in this form, so a single edit applies to every lure row
+    in the session on Save, not just one. Deliberately did **not** auto-remap
+    structure type or water clarity when location changes - both are already
+    independently editable in the exact same form, so silently overwriting
+    one field's value as a side effect of changing another would be an
+    unrequested surprise; instead a caption nudges the angler to double-check
+    those two fields too if the new spot calls for different values.
+
+    **Verification:** `pytest tests/ -q` - 383 passed (2 new, both for
+    #71's `_copy_into_worktree()` fix). A full `AppTest` smoke test across
+    every page (home.py + all 7 `pages/*.py`) passed clean. Two targeted
+    scratch `AppTest` scripts proved both fixes live against real data: one
+    confirms a manual "Add a lure" submit shows a real persisted "Added: ..."
+    banner and the item is actually saved, plus that an existing card's Save
+    and Delete both show persisted banners and Delete actually removes the
+    row; the other swaps in the `data` branch's real `trip_log.csv`/
+    `lake_spots.csv`, drives a real session's Edit form through "🔍 See
+    Trips" -> Edit -> changing the Location picker -> "💾 Save changes", and
+    confirms the trip's `spot_id`/`spot_name` actually changed in the saved
+    file. (The expander-stays-open half of #71 couldn't be asserted
+    headlessly - AppTest doesn't register an `st.expander(key=...)`'s
+    open/closed state in `session_state` without a real frontend toggle
+    interaction, confirmed via an isolated minimal repro; same class of gap
+    already noted for punch-list #66.) Also re-verified end to end against a
+    fresh `git clone` of `main` with the change applied as a patch - same 383
+    passed. One incidental side effect caught and reverted before
+    committing, same as entries 137/138's own note - the smoke test's run of
+    `home.py` exercises the real `apply_freeze()` write path against
+    `main`'s frozen `data/segment_score_freeze.csv`.
+
+    **Net state:** Tackle Box saves/deletes now show a real, visible
+    confirmation and the "Add a lure" section stays open across consecutive
+    adds; lure photos no longer silently fail to push to GitHub; Trip
+    History sessions can have their location corrected after the fact.
+    Punch-list #71 and #72 logged as Done on the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

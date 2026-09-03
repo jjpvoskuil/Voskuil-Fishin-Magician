@@ -582,6 +582,82 @@ def test_commit_and_push_data_accepts_absolute_paths_like_production_does(tmp_pa
     assert "absolute path save" in on_data.stdout
 
 
+def test_commit_and_push_data_handles_a_whole_directory_in_paths(tmp_path, bare_and_seed):
+    """Punch-list #71: the real bug behind "pictures of lures disappearing
+    from the tackle box." Both of the Tackle Box page's photo-touching
+    saves (adding a lure with a photo, deleting one) pass
+    core.lure_inventory.IMAGES_DIR whole in `paths`, not a single file -
+    commit_and_push()'s own docstring has always promised "files or
+    directories" for exactly this reason. Before the fix, the worktree-copy
+    step used `shutil.copy2()` unconditionally, which raises a bare
+    IsADirectoryError the instant a directory shows up in `paths` -
+    confirmed live against this exact fixture shape before the fix existed.
+    That crash was caught by commit_and_push_data()'s own outer `except
+    Exception`, so the WHOLE save (not just the photo) silently came back
+    False - the new inventory row usually still made it to GitHub
+    eventually (a later, unrelated save with different `paths` carries
+    every locally-written row along regardless), but the actual photo file
+    never did, since nothing else ever references IMAGES_DIR - exactly "the
+    rest of the information was there but no picture" after a restart
+    re-synced data/ from the real committed history."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    images_dir = repo / "data" / "images"
+    images_dir.mkdir()
+    (images_dir / "existing.jpg").write_bytes(b"already-there photo")
+    _run(["git", "add", "data/images/existing.jpg"], cwd=repo)
+    _run(["git", "commit", "-m", "seed an existing photo"], cwd=repo)
+    _run(["git", "push", str(bare_and_seed), "HEAD:main"], cwd=repo)
+    _run(["git", "push", str(bare_and_seed), "HEAD:data"], cwd=repo)
+
+    # A new save: a new row in the CSV, plus a brand new photo file - the
+    # exact shape of a real "Add a lure" with a photo attached.
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,new lure added\n")
+    (images_dir / "new_photo.jpg").write_bytes(b"brand new photo bytes")
+
+    ok, msg = storage.commit_and_push_data(
+        [repo / "data" / "trip_log.csv", images_dir],
+        github_token="x", repo_slug="unused/unused",
+        commit_message="Add lure to inventory: Test Lure", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    check = tmp_path / "check"
+    _run(["git", "clone", "--branch", storage.DATA_BRANCH, str(bare_and_seed), str(check)], cwd=tmp_path)
+    assert (check / "data" / "images" / "new_photo.jpg").read_bytes() == b"brand new photo bytes"
+    # The pre-existing photo must survive untouched, not just the new one.
+    assert (check / "data" / "images" / "existing.jpg").read_bytes() == b"already-there photo"
+    assert "new lure added" in (check / "data" / "trip_log.csv").read_text()
+
+
+def test_commit_and_push_data_directory_mirror_reflects_a_local_deletion(tmp_path, bare_and_seed):
+    """The delete_item() side of punch-list #71: a file removed from
+    IMAGES_DIR locally (e.g. deleting a tackle box item that had a photo)
+    must actually disappear from the pushed data too, not linger as an
+    orphan because the worktree copy only ever adds, never removes."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    images_dir = repo / "data" / "images"
+    images_dir.mkdir()
+    (images_dir / "keep.jpg").write_bytes(b"keep me")
+    (images_dir / "remove_me.jpg").write_bytes(b"delete me")
+    _run(["git", "add", "data/images"], cwd=repo)
+    _run(["git", "commit", "-m", "seed two photos"], cwd=repo)
+    _run(["git", "push", str(bare_and_seed), "HEAD:main"], cwd=repo)
+    _run(["git", "push", str(bare_and_seed), "HEAD:data"], cwd=repo)
+
+    (images_dir / "remove_me.jpg").unlink()
+
+    ok, msg = storage.commit_and_push_data(
+        [images_dir], github_token="x", repo_slug="unused/unused",
+        commit_message="Remove lure inventory item", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+
+    check = tmp_path / "check"
+    _run(["git", "clone", "--branch", storage.DATA_BRANCH, str(bare_and_seed), str(check)], cwd=tmp_path)
+    remaining = sorted(p.name for p in (check / "data" / "images").iterdir())
+    assert remaining == ["keep.jpg"]
+
+
 def test_push_pending_data_reuses_the_worktree_commit_and_push_data_created(tmp_path, bare_and_seed):
     """push_pending_data() must retry against the SAME worktree a prior
     commit_and_push_data() call committed into, not create a second one -
