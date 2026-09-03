@@ -812,6 +812,8 @@ def sync_data_from_data_branch(
     repo_root: Path = REPO_ROOT,
     remote_url: Optional[str] = None,
     branch: str = DATA_BRANCH,
+    max_retries: int = 3,
+    retry_backoff_seconds: float = 1.0,
 ) -> tuple:
     """Punch-list #52: overlays repo_root's data/ directory with DATA_BRANCH's
     latest content, WITHOUT switching repo_root off of whatever branch it's
@@ -833,12 +835,38 @@ def sync_data_from_data_branch(
     Never raises, and treats every failure as a soft no-op rather than
     something that should block the app from booting: no token configured,
     the data branch not existing yet (the very first boot before the
-    one-time cutover), a transient network/auth error - any of these just
+    one-time cutover), a persistent network/auth error - any of these just
     means the app keeps running on whatever's already on disk, exactly as
     it did before this function existed.
 
+    Punch-list #73 (live incident - Trip History reverted to a last entry
+    date of 8/23, matching `main`'s own frozen data/trip_log.csv snapshot
+    to the row): the fetch step now retries a transient network failure
+    (dropped connection, DNS hiccup, GitHub's edge returning a 5xx - the
+    exact same `_is_transient_network_error()` check commit_and_push()'s own
+    retry loop already uses, punch-list #58) up to `max_retries` times with
+    a short backoff, instead of giving up after one attempt. This matters
+    specifically for this function because of HOW it's called: app.py's
+    `_sync_data_once()` wraps it in `st.cache_resource`, which runs it
+    exactly ONCE per process and permanently remembers that it ran - it does
+    NOT check whether the call actually succeeded. A single flaky moment
+    (very plausible right at cold boot, when a freshly started container's
+    outbound network may not be fully warmed up yet) used to mean that
+    process would serve `main`'s frozen data/ for its ENTIRE remaining
+    lifetime, with no automatic retry and nothing visibly wrong - exactly
+    what happened live after this session's own run of back-to-back
+    redeploys (#69/#70/#71/#72) made a boot-time fluke more likely to
+    actually land on one of them. A non-network failure (bad auth, the data
+    branch not existing yet) still returns immediately without retrying,
+    same as before - retrying those just burns the retry budget for a
+    result that won't change. See app.py's `_sync_data_once()` for the
+    other half of this fix: it now re-raises on a still-unsuccessful result
+    so `st.cache_resource` doesn't memoize the failure either, letting the
+    very next page interaction try again rather than being stuck forever.
+
     **A future coding session should know:** because app.py only calls this
-    ONCE per process boot, a change pushed straight to DATA_BRANCH from
+    ONCE per process boot (now: once per process boot that ends in success -
+    see punch-list #73 above), a change pushed straight to DATA_BRANCH from
     OUTSIDE a live running app - a hand-run data migration/backfill script,
     a manual CSV edit, anything committed and pushed the way a Claude
     coding session does it - will NOT be visible in the already-running
@@ -855,21 +883,46 @@ def sync_data_from_data_branch(
     """
     if not github_token:
         return False, "No GITHUB_TOKEN configured - using whatever data/ already has locally."
-    try:
-        remote = _resolve_remote_url(github_token, repo_slug, remote_url)
-        fetch = subprocess.run(
-            ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
-        )
-        if fetch.returncode != 0:
-            return False, (
-                f"Data branch sync skipped (fetch of '{branch}' failed - it may not exist yet): "
-                f"{fetch.stderr.strip()}"
+    remote = _resolve_remote_url(github_token, repo_slug, remote_url)
+    last_error = ""
+    for attempt in range(1, max_retries + 1):
+        try:
+            fetch = subprocess.run(
+                ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
             )
-        checkout = subprocess.run(
-            ["git", "checkout", "FETCH_HEAD", "--", "data"], cwd=repo_root, capture_output=True, text=True,
-        )
-        if checkout.returncode != 0:
-            return False, f"Data branch sync skipped (checkout failed): {checkout.stderr.strip()}"
-        return True, f"Synced data/ from the '{branch}' branch."
-    except Exception as e:
-        return False, f"Data branch sync skipped: {e}"
+            if fetch.returncode != 0:
+                stderr = fetch.stderr.strip()
+                last_error = stderr
+                transient = _is_transient_network_error(stderr)
+                if transient and attempt < max_retries:
+                    time.sleep(retry_backoff_seconds * attempt)
+                    continue
+                if transient:
+                    # Retries exhausted on a genuinely transient error - say
+                    # so plainly (matches commit_and_push()'s own
+                    # "after N attempts" retry-exhaustion phrasing) rather
+                    # than the misleading "may not exist yet" wording below,
+                    # which is meant for a real one-shot failure (bad auth,
+                    # the branch genuinely missing), not "kept timing out."
+                    return False, (
+                        f"Data branch sync skipped after {max_retries} attempts: {stderr}"
+                    )
+                return False, (
+                    f"Data branch sync skipped (fetch of '{branch}' failed - it may not exist yet): "
+                    f"{stderr}"
+                )
+            checkout = subprocess.run(
+                ["git", "checkout", "FETCH_HEAD", "--", "data"], cwd=repo_root, capture_output=True, text=True,
+            )
+            if checkout.returncode != 0:
+                # A checkout failure isn't a network hiccup - retrying the
+                # exact same checkout wouldn't change the outcome.
+                return False, f"Data branch sync skipped (checkout failed): {checkout.stderr.strip()}"
+            return True, f"Synced data/ from the '{branch}' branch."
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries:
+                time.sleep(retry_backoff_seconds * attempt)
+                continue
+            return False, f"Data branch sync skipped: {e}"
+    return False, f"Data branch sync skipped after {max_retries} attempts: {last_error}"

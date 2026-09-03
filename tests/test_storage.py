@@ -386,6 +386,93 @@ def test_sync_data_from_data_branch_no_token(tmp_path, bare_and_seed):
     assert "No GITHUB_TOKEN" in msg
 
 
+# --- Punch-list #73: sync_data_from_data_branch() must retry a transient ----
+# fetch failure instead of giving up after one attempt. Root-caused from a
+# real live incident: Trip History reverted to a last entry date of 8/23/2026
+# - exactly main's own frozen data/trip_log.csv snapshot, row for row -
+# because app.py's _sync_data_once() wraps this in st.cache_resource (runs
+# ONCE per process, remembers only that it ran, never whether it actually
+# succeeded) and the old version here gave up on the very first fetch
+# failure. A single flaky moment at cold boot (very plausible - a freshly
+# started container's outbound network may not be fully warmed up yet) used
+# to strand that process on stale/frozen data for its entire remaining
+# lifetime. These two tests cover the fix: a transient fetch failure now
+# gets retried (mirroring commit_and_push()'s own punch-list #58 transient-
+# retry tests just above/below this block), and a persistent one still gives
+# up cleanly (no crash, no infinite loop) after max_retries.
+
+def test_sync_data_from_data_branch_retries_transient_network_error_then_succeeds(
+    tmp_path, bare_and_seed, monkeypatch,
+):
+    cutover = _clone(bare_and_seed, tmp_path / "cutover")
+    _run(["git", "checkout", "-b", storage.DATA_BRANCH], cwd=cutover)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=cutover)
+
+    saver = _clone(bare_and_seed, tmp_path / "saver")
+    (saver / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,new catch\n")
+    ok, _ = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="new catch", repo_root=saver, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+
+    app_repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    fetch_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "fetch"]:
+            fetch_calls.append(args)
+            if len(fetch_calls) < 3:
+                return subprocess.CompletedProcess(
+                    args, returncode=128, stdout="",
+                    stderr="fatal: unable to access 'https://github.com/...': Could not resolve host: github.com",
+                )
+            return real_run(args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=app_repo, remote_url=str(bare_and_seed),
+        max_retries=5, retry_backoff_seconds=0,
+    )
+    assert ok is True, msg
+    assert "new catch" in (app_repo / "data" / "trip_log.csv").read_text()
+    assert len(fetch_calls) == 3  # two transient failures, then a real (unpatched) fetch succeeds
+
+
+def test_sync_data_from_data_branch_gives_up_after_max_retries_on_persistent_transient_error(
+    tmp_path, bare_and_seed, monkeypatch,
+):
+    cutover = _clone(bare_and_seed, tmp_path / "cutover")
+    _run(["git", "checkout", "-b", storage.DATA_BRANCH], cwd=cutover)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=cutover)
+
+    app_repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    before = (app_repo / "data" / "trip_log.csv").read_text()
+    fetch_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "fetch"]:
+            fetch_calls.append(args)
+            return subprocess.CompletedProcess(args, returncode=128, stdout="", stderr="fatal: Connection timed out")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=app_repo, remote_url=str(bare_and_seed),
+        max_retries=3, retry_backoff_seconds=0,
+    )
+    assert ok is False
+    assert "after 3 attempts" in msg
+    assert len(fetch_calls) == 3
+    # Never touched the working tree - a failed sync must be a pure no-op,
+    # same guarantee the pre-existing "no data branch yet" soft-noop test
+    # above already covers for a different failure reason.
+    assert (app_repo / "data" / "trip_log.csv").read_text() == before
+
+
 # --- Punch-list #58: transient-network retry + push_pending() ---------------
 # The session-loss investigation: a save that fails to push for a plain
 # transient reason (dropped connection, DNS hiccup, a GitHub 5xx - all
