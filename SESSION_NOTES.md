@@ -8990,6 +8990,78 @@ every real save.
     actual card instead of overflowing it once the page reflows on a narrow
     screen. Punch-list #74 logged as Done on the Development page.
 
+142. **Punch-list #75 - picking a lure/trailer from a dropdown cut off the
+    text on a phone.** User: "if I want to pick a lure and then a trailer
+    from the drop down the txt is cut off on the mobile version. It is fine
+    on a full scree computer, but not on my phone. Can you fix that and
+    look for any other instances where this is happening and can be fixed?"
+
+    **Root cause:** confirmed live, not just reasoned about, by running the
+    app with `streamlit run` and driving it with Playwright at a real phone
+    viewport (390x844) through the exact flow the user described (Spot
+    Session -> add a lure from the tackle box -> check "Used a trailer with
+    this lure" -> open the Trailer dropdown), reproducing the exact
+    reported symptom with a screenshot. Live DOM inspection showed this
+    Streamlit version (1.63.0) renders `st.selectbox`'s CLOSED value
+    through a React Aria ComboBox `<input role="combobox">` - a genuinely
+    different element from the `[data-baseweb="select"]` div punch-list
+    #33's existing mobile CSS targets (that CSS still correctly handles the
+    OPEN dropdown *list*, a different DOM subtree - this bug is only in the
+    closed field showing the current value). That input had no
+    `text-overflow`/`overflow` rule at all, so a long value (the Trailer
+    picker's "Brand - Product - Color, size" labels run 50-90+ characters,
+    the only selectbox in the app with labels that long - every other one
+    surveyed tops out around 29-34 chars) just hard-clipped mid-character
+    with no ellipsis.
+
+    **Fix:** `core.ui.inject_mobile_css()` now targets
+    `[data-testid="stSelectbox"] input[role="combobox"]` with
+    `overflow: hidden`, `text-overflow: ellipsis`, and `white-space:
+    nowrap` (applied everywhere, not just mobile, since it's a strict
+    improvement with no downside on a wide screen where it rarely if ever
+    triggers), plus a smaller `font-size` (12.5px vs. the default ~14px)
+    scoped inside the existing mobile media query so more of a long value
+    fits before truncating at all. All three of the first properties are
+    required together - confirmed live that `text-overflow: ellipsis` +
+    `overflow: hidden` alone did NOT work (the field still hard-clipped
+    with no dots) until `white-space: nowrap` was added too, since the
+    browser won't treat a wrapping value as "overflowing" the way ellipsis
+    needs. Also confirmed live that once genuinely fixed, the ellipsis only
+    paints after the field loses focus - normal, universal browser
+    behavior for every text input (a focused field scrolls to keep the
+    caret visible instead of showing the truncated view), not a bug or
+    something this CSS can or should override.
+
+    **Other instances checked (per the user's ask):** surveyed every
+    `st.selectbox`/`st.multiselect` call in the app for label length. The
+    Trailer picker (`pages/6_Spot_Session.py`) was the only genuinely
+    long-label offender; the rest (fish species, hit type, lure pickers,
+    saved-spot names, anglers, etc.) all run well under 35 characters and
+    were low-risk even before this fix. Because the fix lives in the one
+    shared `inject_mobile_css()` helper called on every page, every
+    selectbox app-wide is covered going forward, not just the Trailer
+    picker that reproduced the bug.
+
+    **Verification:** two new tests in `tests/test_ui.py`
+    (`test_inject_mobile_css_makes_selectbox_value_text_ellipsize`,
+    `test_inject_mobile_css_shrinks_selectbox_font_only_on_mobile`),
+    confirmed to fail against the pre-fix CSS and pass against the fix.
+    `pytest tests/ -q` - 389 passed (2 new). A full `AppTest` smoke test
+    across every page passed clean. Beyond unit tests, re-ran the live
+    Playwright repro against the fixed code at the same 390x844 viewport
+    and confirmed by direct DOM/computed-style inspection that the value
+    now renders with an actual "..." once the field blurs, instead of the
+    prior hard mid-character cut - the same standard this codebase already
+    holds CSS/DOM claims to (confirmed against the live rendered page, not
+    just the CSS source). Re-verified against a fresh `git clone` of `main`
+    with the diff applied - same 389 passed.
+
+    **Net state:** a selectbox's own closed value no longer hard-clips a
+    long lure/trailer label on a phone - it now truncates honestly with an
+    ellipsis, with a smaller mobile font fitting more of the value before
+    that's even needed. Punch-list #75 logged as Done on the Development
+    page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

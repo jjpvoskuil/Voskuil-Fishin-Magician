@@ -84,6 +84,28 @@ def inject_mobile_css():
        `st.pills` (see pages/6_Spot_Session.py), which has no popover to
        cut off at all; this CSS is general hardening for every other
        selectbox/multiselect in the app, not a substitute for that fix.
+    4. **A selectbox's own CLOSED value text no longer gets hard-clipped
+       with no ellipsis** (punch-list #75) - a different spot from #3
+       above, which is about the OPEN dropdown *list* of options; this is
+       about the *already-picked* value shown on the closed widget itself.
+       Reported live: picking a long inventory item as a trailer (e.g.
+       "Strike King - Rage Tail Craw Soft Bait - Fire Craw, 4\", 7-pack")
+       showed fine on a full-width desktop browser but was abruptly cut off
+       mid-word on a phone, with no visual indication more text existed.
+       Confirmed by inspecting the live rendered DOM directly (not just
+       reasoning about it): every `st.selectbox` in this Streamlit version
+       renders its current value into a real `<input role="combobox">`
+       (a React Aria ComboBox, not the older BaseWeb `<select>`-style div
+       punch-list #33 above was written against), and that input's
+       computed style was `overflow: clip; text-overflow: clip` - a hard
+       cut with no `...`, at a fixed 14px regardless of viewport. Fixed two
+       ways: `text-overflow: ellipsis` (with the `overflow: hidden` it
+       requires to actually render) so a truncated value at least *looks*
+       intentionally truncated instead of broken; and, only below the
+       mobile breakpoint, a smaller font-size for just these inputs so
+       more of a long value fits before the ellipsis kicks in. This is
+       scoped to `st.selectbox`'s own `input[role="combobox"]` specifically
+       (not every text input on the page) via `[data-testid="stSelectbox"]`.
     """
     st.markdown(
         f"""
@@ -112,6 +134,25 @@ def inject_mobile_css():
             overscroll-behavior: contain !important;
         }}
 
+        /* Punch-list #75: a selectbox's own CLOSED value text - not the
+           open dropdown list above - used to hard-clip with no ellipsis
+           (confirmed via the live DOM: overflow/text-overflow both
+           "clip"). Ellipsis applies everywhere, since it's a strict
+           improvement (an honest "..." beats an abrupt cut) with no
+           downside on a wide screen where it rarely if ever triggers.
+           `white-space: nowrap` is required too - without it the browser
+           never considers the single-line value to be "overflowing" in
+           the way text-overflow needs, so ellipsis silently does nothing
+           and the text still hard-clips (confirmed the same way: adding
+           text-overflow/overflow alone was NOT enough in a live re-test
+           after the first attempt at this fix - the value still cut off
+           with no "..." until nowrap was added too). */
+        [data-testid="stSelectbox"] input[role="combobox"] {{
+            text-overflow: ellipsis !important;
+            overflow: hidden !important;
+            white-space: nowrap !important;
+        }}
+
         @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
             [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)) {{
                 flex-wrap: wrap !important;
@@ -120,6 +161,13 @@ def inject_mobile_css():
                 > div[data-testid="stColumn"] {{
                 min-width: {MOBILE_COLUMN_MIN_WIDTH_PX}px !important;
                 flex: 1 1 {MOBILE_COLUMN_MIN_WIDTH_PX}px !important;
+            }}
+            /* Punch-list #75: a bit smaller than the normal 14px, only on
+               a narrow screen, so more of a long selected value (a lure/
+               trailer's full brand + description + size) fits before the
+               ellipsis above has to kick in at all. */
+            [data-testid="stSelectbox"] input[role="combobox"] {{
+                font-size: 12.5px !important;
             }}
         }}
         </style>

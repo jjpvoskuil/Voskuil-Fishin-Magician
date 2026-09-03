@@ -17,7 +17,19 @@ instead of squishing into unreadable slivers - see `core.ui.inject_mobile_css()`
 the top of every page. Trip History's punch-list #55 redesign replaced its old wide,
 sideways-swiping `st.data_editor` grid with a stack of collapsed session cards (plain
 widgets, same mobile-friendly pattern as Spot Session and the Development page) - no
-horizontal scrolling needed to browse or edit a trip from a phone anymore.
+horizontal scrolling needed to browse or edit a trip from a phone anymore. A long
+`st.selectbox` value (the Trailer picker's "Brand - Product - Color, size" labels run
+50-90+ characters) used to hard-clip mid-character on a narrow screen with no ellipsis -
+confirmed via live DOM inspection that Streamlit's selectbox renders its closed value through
+a React Aria `<input role="combobox">`, a different element from the dropdown-list CSS
+punch-list #33 already had in place, so that CSS never reached it. `inject_mobile_css()` now
+also gives that input `overflow: hidden`, `text-overflow: ellipsis`, and `white-space: nowrap`
+(all three are required - ellipsis alone silently does nothing without `nowrap`), plus a
+smaller font on a narrow screen so more of a long value fits before it has to truncate at all
+(punch-list #75). One normal, universal caveat confirmed live: like every native text input,
+the ellipsis only paints once the field loses focus (a focused input scrolls to keep the caret
+visible instead) - picking an option briefly shows the untruncated value until you tap
+elsewhere, exactly like any other text field.
 
 Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
 this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
