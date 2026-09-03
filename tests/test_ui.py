@@ -1,7 +1,7 @@
 import pandas as pd
 
 from core import ui
-from core.ui import render_line_chart, render_square_thumbnail
+from core.ui import inject_mobile_css, render_line_chart, render_square_thumbnail
 
 
 class _FakeCol:
@@ -103,3 +103,62 @@ def test_render_square_thumbnail_caps_width_instead_of_fixing_it(monkeypatch):
 def test_render_square_thumbnail_no_photo_renders_nothing():
     item = {"image_filename": "", "image_url": ""}
     assert render_square_thumbnail(item, size_px=160) is False
+
+
+# --- Punch-list #75: a selectbox's own closed-value text (not the open ---
+# dropdown list, which punch-list #33 already covers) must not hard-clip a
+# long lure/trailer label mid-character on a narrow screen. Real report: on
+# a phone, picking a trailer with a long "Brand - Product - Color, size"
+# label (e.g. "Strike King - Rage Tail Craw Soft Bait - Fire Craw, 4",
+# 7-pack") showed the text cut off mid-word with no ellipsis. Confirmed via
+# live Playwright/DOM inspection (not just reasoning about the CSS) that
+# Streamlit 1.63's st.selectbox renders through a React Aria ComboBox
+# <input role="combobox">, a genuinely different element from the
+# [data-baseweb="select"] div punch-list #33's CSS targets - so that
+# existing CSS doesn't reach this text at all. Also confirmed live that
+# text-overflow/overflow alone were NOT enough - white-space: nowrap is
+# required too, or the browser never treats the value as overflowing and
+# still hard-clips with no dots. (Confirmed separately, also live: the
+# ellipsis only paints once the field loses focus, since a focused native
+# input scrolls to keep the caret visible instead - that's normal, standard
+# browser behavior for every text input, not something this CSS can or
+# should override.)
+
+def test_inject_mobile_css_makes_selectbox_value_text_ellipsize(monkeypatch):
+    """The closed selectbox value must get overflow:hidden + ellipsis, and
+    critically white-space:nowrap too - without nowrap, ellipsis silently
+    does nothing on this input and it still hard-clips (confirmed live)."""
+    calls = []
+    monkeypatch.setattr(ui.st, "markdown", lambda html, **kw: calls.append(html))
+
+    inject_mobile_css()
+
+    assert len(calls) == 1
+    css = calls[0]
+    assert '[data-testid="stSelectbox"] input[role="combobox"]' in css
+    # Pull out just the block for that selector so the assertions below
+    # can't accidentally match some other unrelated rule.
+    block_start = css.index('[data-testid="stSelectbox"] input[role="combobox"]')
+    block = css[block_start:block_start + 400]
+    assert "text-overflow: ellipsis" in block
+    assert "overflow: hidden" in block
+    assert "white-space: nowrap" in block
+
+
+def test_inject_mobile_css_shrinks_selectbox_font_only_on_mobile(monkeypatch):
+    """The smaller selectbox font (so more of a long value fits before the
+    ellipsis kicks in) must be scoped inside the mobile media query, not
+    applied to every screen size."""
+    calls = []
+    monkeypatch.setattr(ui.st, "markdown", lambda html, **kw: calls.append(html))
+
+    inject_mobile_css()
+
+    css = calls[0]
+    media_start = css.index(f"@media (max-width: {ui.MOBILE_BREAKPOINT_PX}px)")
+    mobile_block = css[media_start:]
+    assert 'input[role="combobox"]' in mobile_block
+    assert "font-size: 12.5px" in mobile_block
+    # And it must NOT be sitting in the unconditional (pre-media-query) CSS.
+    unconditional_block = css[:media_start]
+    assert "font-size: 12.5px" not in unconditional_block
