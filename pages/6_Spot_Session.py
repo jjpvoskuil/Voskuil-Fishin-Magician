@@ -237,40 +237,93 @@ def _active_session_key(spot_id: str, angler: str) -> str:
 # the Python server, there's no offline-capable client code - so this is
 # the practical fix within that constraint: reconnecting picks up exactly
 # where the last successful save left off, rather than losing the session.
+#
+# Punch-list #69: this reconstruction (and the "is this angler already
+# mid-session here" check the picker uses) used to only look at rows whose
+# trip_date matched one specific date - "today" for the picker-exclusion
+# check, or whatever the "Session date" widget happened to show for the
+# actual reconnect. That's fine the moment a session starts, but an angler
+# who closes the app (loses their session_state AND the ?angler= query
+# param - e.g. relaunching from an iPhone home-screen icon, which opens the
+# bare URL) and comes back on a LATER calendar day found their own name no
+# longer flagged as "already active" (good), but reconnecting silently
+# failed anyway, because the reconstruction lookup was still only checking
+# TODAY's rows and their real open session was dated yesterday (or
+# earlier) - it simply vanished from every code path that could find it,
+# with no error shown. A real angler hit exactly this: their session
+# couldn't be reopened, and in the meantime (still the same day) their name
+# was excluded from the main picker with no obvious way back in besides the
+# little-used "Other" reclaim flow. Fixed by dropping the trip_date
+# equality check everywhere below - "does this angler have an open session
+# at this spot" and "reconnect to it" now both mean "is there ANY row here
+# without a lure_end_time yet," regardless of which day it was logged
+# under. A still-open session now stays reachable (and keeps blocking a
+# same-named fresh start, forcing a deliberate resume-then-End/Cancel
+# instead of silently orphaning it) no matter how many days pass before
+# someone gets back to a browser that remembers who they are.
 _PER_LURE_CONDITION_KEYS = {
     "lure_category", "trailer_used", "trailer_name", "trailer_color",
     "trailer_category", "lure_start_time", "lure_end_time", "fish", "source",
 }
 
 
-def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list, angler: str) -> list:
-    """Groups today's spot_session-sourced rows at this spot by their
-    shared session conditions["start_time"] (the same value every lure in
-    one session carries - captured once by Start Session, reused unchanged
-    by _add_lure_to_active_session() for every lure added after, so it's a
-    reliable session-grouping key even though no explicit "session id" is
-    stored anywhere), then returns the rows for whichever group still has
-    at least one lure without a lure_end_time yet (i.e. genuinely still in
-    progress - a properly "⏹ End Session"-ed group has every row's
-    lure_end_time stamped, retired or not) AND whose own conditions["angler"]
-    matches `angler` (punch-list #47) - so reconnecting always picks back up
-    THIS angler's own open session, never someone else's still-in-progress
-    one, even if theirs started more recently. Returns [] if nothing's open
-    for this angler - either nothing's been logged here today under this
-    name, or their own session logged here today has already been ended.
+def _session_group_key(t: dict, cond: dict):
+    """The key _open_session_rows()/_anglers_with_open_session() group rows
+    by. Prefers the real session_id (punch-list #55 - a fresh uuid stamped
+    once at Start Session, so it can never collide between two genuinely
+    different sessions). Falls back to trip_date + start_time + angler for
+    legacy rows logged before session_id existed (blank string there).
+
+    Punch-list #69: this fallback used to be JUST conditions["start_time"] -
+    a bare wall-clock time-of-day string with no date attached. Investigating
+    the reported stuck-session bug surfaced a real, separate corruption risk
+    that created: an angler who fishes the same spot at a habitual time (e.g.
+    "06:00:00" for a dawn start) ends up with MULTIPLE, completely unrelated
+    real sessions on different real dates sharing that exact string - grouping
+    on it alone silently merged three of one real angler's real past sessions
+    at one real spot into a single "session" here, purely because they all
+    started at the same clock time on different days. Reconnecting to
+    whichever one of those was still open would then have pulled in the
+    OTHER, already-properly-closed sessions' rows too, and hitting "⏹ End
+    Session" would have overwritten their real, already-correct end times.
+    Returns None (never groups) for a row with no start_time at all - same
+    as the original "not a real session row" skip."""
+    session_id = cond.get("session_id")
+    if session_id:
+        return session_id
+    start_time = cond.get("start_time")
+    if not start_time:
+        return None
+    return f"{t.get('trip_date')}|{start_time}|{cond.get('angler')}"
+
+
+def _open_session_rows(spot_id: str, trips_at_spot: list, angler: str) -> list:
+    """Groups this spot's spot_session-sourced rows (any trip_date - see
+    punch-list #69 note above) by _session_group_key() (real session_id
+    when present, else trip_date+start_time+angler - see that function's
+    own docstring for why a bare start_time alone isn't safe to group on),
+    then returns the rows for whichever group still has at least one lure
+    without a lure_end_time yet (i.e. genuinely still in progress - a
+    properly "⏹ End Session"-ed group has every row's lure_end_time
+    stamped, retired or not) AND whose own conditions["angler"] matches
+    `angler` (punch-list #47) - so reconnecting always picks back up THIS
+    angler's own open session, never someone else's still-in-progress one,
+    even if theirs started more recently. Returns [] if nothing's open for
+    this angler - either nothing's ever been logged here under this name,
+    or their own session(s) logged here have already all been ended.
     If, unusually, this angler has more than one group open at once (this
     page has no flow that starts a second session before ending the first
     under the same name, but a hand-edited CSV or an old bug could produce
     one), the most recently started of THEIR groups wins - the others are
     simply left alone rather than merged or discarded."""
     groups = {}
-    for t in trips_today:
-        if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
+    for t in trips_at_spot:
+        if t.get("spot_id") != spot_id:
             continue
         cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
-        key = cond.get("start_time")
+        key = _session_group_key(t, cond)
         if not key:
             continue
         groups.setdefault(key, []).append((t, cond))
@@ -286,23 +339,26 @@ def _open_session_rows(spot_id: str, session_date_iso: str, trips_today: list, a
     return sorted(open_groups[latest_key], key=lambda tc: tc[0].get("logged_at") or "")
 
 
-def _anglers_with_open_session(spot_id: str, session_date_iso: str, trips_today: list) -> list:
+def _anglers_with_open_session(spot_id: str, trips_at_spot: list) -> list:
     """Distinct angler names (first-seen order) who have their own still-
-    open spot_session at this spot on session_date_iso - every one of them,
-    unfiltered. Punch-list #59: the angler picker below uses this directly
-    to keep anyone from silently picking (or defaulting to) a name that's
-    already mid-session here, and to offer a choice of whose session to
-    watch when more than one is live. _other_anglers_with_open_session()
-    just below is a thin wrapper that excludes one name from this same
-    list, for the in-session "so-and-so also has a session going" caption."""
+    open spot_session at this spot - ANY date (punch-list #69 - see the
+    block comment above), not just today. Punch-list #59: the angler
+    picker below uses this directly to keep anyone from silently picking
+    (or defaulting to) a name that's already mid-session here, and to offer
+    a choice of whose session to watch when more than one is live.
+    _other_anglers_with_open_session() just below is a thin wrapper that
+    excludes one name from this same list, for the in-session "so-and-so
+    also has a session going" caption. Grouped by _session_group_key() -
+    see that function's docstring for why a bare start_time alone isn't a
+    safe grouping key (punch-list #69)."""
     groups = {}
-    for t in trips_today:
-        if t.get("spot_id") != spot_id or t.get("trip_date") != session_date_iso:
+    for t in trips_at_spot:
+        if t.get("spot_id") != spot_id:
             continue
         cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
-        key = cond.get("start_time")
+        key = _session_group_key(t, cond)
         if not key:
             continue
         groups.setdefault(key, []).append(cond)
@@ -320,7 +376,7 @@ def _anglers_with_open_session(spot_id: str, session_date_iso: str, trips_today:
     return anglers
 
 
-def _other_anglers_with_open_session(spot_id: str, session_date_iso: str, trips_today: list, my_angler: str) -> list:
+def _other_anglers_with_open_session(spot_id: str, trips_at_spot: list, my_angler: str) -> list:
     """_anglers_with_open_session() above, minus my_angler - punch-list #47,
     used purely to reassure whoever's looking at this page that starting/
     ending/canceling their own session never touches anyone else's (each
@@ -328,20 +384,21 @@ def _other_anglers_with_open_session(spot_id: str, session_date_iso: str, trips_
     _active_session_key()/_open_session_rows() above)."""
     my_slug = _angler_session_slug(my_angler)
     return [
-        a for a in _anglers_with_open_session(spot_id, session_date_iso, trips_today)
+        a for a in _anglers_with_open_session(spot_id, trips_at_spot)
         if _angler_session_slug(a) != my_slug
     ]
 
 
-def _reconstruct_active_session(spot: dict, structure_type: str, session_date_iso: str, trips_today: list, angler: str):
+def _reconstruct_active_session(spot: dict, structure_type: str, trips_at_spot: list, angler: str):
     """Rebuilds this angler's own active_session_{spot_id}_{angler} dict
     (see _active_session_key(), punch-list #47 - the same shape Start
     Session/_add_lure_to_active_session build live) from already-saved
     trip_log.csv rows, for the reconnect-after-a-session_state-loss case -
     see the block comment above. Returns None if there's no still-open
-    session for THIS angler logged here today (a different angler's own
-    still-open session at this same spot is left completely alone - see
-    _open_session_rows()). One thing a persisted row can't give back:
+    session for THIS angler logged here, on ANY date (punch-list #69 - a
+    different angler's own still-open session at this same spot is left
+    completely alone either way - see _open_session_rows()). One thing a
+    persisted row can't give back:
     `item_id` (which inventory item this lure is) was never itself written
     to disk, only the lure's display label - so a reconstructed lure's
     item_id is always None, which just means the "already added" dedup
@@ -353,7 +410,7 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
     build a "just watching" display of someone else's session - that call
     site never stores the result in st.session_state and never calls
     anything that writes to disk."""
-    rows = _open_session_rows(spot["spot_id"], session_date_iso, trips_today, angler)
+    rows = _open_session_rows(spot["spot_id"], trips_at_spot, angler)
     if not rows:
         return None
     lures = []
@@ -363,6 +420,7 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
     water_clarity = None
     start_time_iso = None
     session_id = None
+    session_date_iso = rows[0][0].get("trip_date") or lake_today().isoformat()
     for t, cond in rows:
         entry_kwargs = dict(
             trip_date=t.get("trip_date"),
@@ -420,22 +478,20 @@ def _reconstruct_active_session(spot: dict, structure_type: str, session_date_is
 
 
 @st.fragment(run_every=20)
-def _render_watch_view(spot: dict, structure_type: str, session_date_iso: str, watched_angler: str):
+def _render_watch_view(spot: dict, structure_type: str, watched_angler: str):
     """Punch-list #59: read-only, no-login 'just watching' view. Rebuilds
     the watched angler's session purely for DISPLAY via the same
     _reconstruct_active_session() the real angler's own reconnect flow
-    uses. This function never writes to st.session_state's active_session_*
-    key, never calls append_trip()/update_trip()/delete_trip(), and renders
-    no button that could touch the real session - a watcher can look, but
-    there is nothing here to tap that changes anything. Wrapped in a
-    20-second auto-refreshing fragment (same mechanism as the autosave
-    heartbeat below) so a new catch shows up without the watcher needing to
-    manually reload."""
-    trips_today = [
-        t for t in read_all_trips()
-        if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date_iso
-    ]
-    active = _reconstruct_active_session(spot, structure_type, session_date_iso, trips_today, watched_angler)
+    uses (punch-list #69: any date, not just today - see that function's
+    own docstring). This function never writes to st.session_state's
+    active_session_* key, never calls append_trip()/update_trip()/
+    delete_trip(), and renders no button that could touch the real session -
+    a watcher can look, but there is nothing here to tap that changes
+    anything. Wrapped in a 20-second auto-refreshing fragment (same
+    mechanism as the autosave heartbeat below) so a new catch shows up
+    without the watcher needing to manually reload."""
+    trips_at_spot = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+    active = _reconstruct_active_session(spot, structure_type, trips_at_spot, watched_angler)
     if active is None:
         st.info(f"👀 {watched_angler}'s session here has ended (or hasn't started). Nothing to watch right now.")
         return
@@ -457,18 +513,17 @@ def _render_watch_view(spot: dict, structure_type: str, session_date_iso: str, w
         st.caption(f"{total_fish} fish total so far this session.")
 
 
-# Anglers with a session open at this spot RIGHT NOW (today - not whatever
-# historical date the "Session date" field below might get changed to,
-# which is for logging past sessions, not for who's live at the moment).
-# Read once here, before the picker, so it can both keep anyone from
-# picking a name that's already mid-session and offer a "just watching"
-# option for it instead (punch-list #59).
-_today_iso = lake_today().isoformat()
-_todays_open_check_entries = [
-    t for t in read_all_trips()
-    if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == _today_iso
-]
-anglers_currently_active_today = _anglers_with_open_session(spot["spot_id"], _today_iso, _todays_open_check_entries)
+# Anglers with a session open at this spot RIGHT NOW - ANY date, not just
+# today (punch-list #69: a still-open session used to stop being findable
+# the moment its own start date wasn't "today" anymore, which both stranded
+# it unreachable and, while it WAS still today, excluded its angler's name
+# from the picker with no obvious way back in - see the block comment above
+# _open_session_rows() for the full story). Read once here, before the
+# picker, so it can both keep anyone from picking a name that's already
+# mid-session and offer a "just watching" option for it instead
+# (punch-list #59).
+_open_check_entries = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+anglers_with_open_session_here = _anglers_with_open_session(spot["spot_id"], _open_check_entries)
 
 
 # --- Angler picker (punch-list #26: lightweight multi-user support) --------
@@ -505,7 +560,7 @@ if not _identity_established and not _watching_established:
     _qp_watch = (st.query_params.get(watch_query_key) or "").strip()
     _qp_angler = (st.query_params.get(angler_query_key) or "").strip()
     if _qp_watch:
-        st.session_state[watch_key] = _qp_angler if _qp_angler in anglers_currently_active_today else ""
+        st.session_state[watch_key] = _qp_angler if _qp_angler in anglers_with_open_session_here else ""
         _watching_established = True
     elif _qp_angler:
         if _qp_angler in angler_roster:
@@ -527,7 +582,7 @@ if not _identity_established and not _watching_established:
     # to "Just watching" instead - read-only, no way to touch the real
     # session, with a picker of whose session to watch if more than one is
     # live right now.
-    _eligible_to_fish = [a for a in angler_roster if a not in anglers_currently_active_today]
+    _eligible_to_fish = [a for a in angler_roster if a not in anglers_with_open_session_here]
     _landing_options = [LANDING_PROMPT] + _eligible_to_fish + [ANGLER_OTHER_LABEL, WATCH_LABEL]
     st.info(
         "👋 New here, or a fresh link with no name attached. Pick your own name to start fishing, "
@@ -536,15 +591,15 @@ if not _identity_established and not _watching_established:
     _landing_choice = st.selectbox("🎣 Who's this?", _landing_options, key="spot_session_landing_choice")
 
     if _landing_choice == WATCH_LABEL:
-        if not anglers_currently_active_today:
+        if not anglers_with_open_session_here:
             st.caption("No one has a session in progress at this spot right now - nothing to watch yet.")
             st.stop()
-        if len(anglers_currently_active_today) > 1:
+        if len(anglers_with_open_session_here) > 1:
             _watch_target = st.selectbox(
-                "Whose session?", anglers_currently_active_today, key="spot_session_landing_watch_pick",
+                "Whose session?", anglers_with_open_session_here, key="spot_session_landing_watch_pick",
             )
         else:
-            _watch_target = anglers_currently_active_today[0]
+            _watch_target = anglers_with_open_session_here[0]
         st.session_state[watch_key] = _watch_target
         st.query_params[watch_query_key] = "1"
         st.query_params[angler_query_key] = _watch_target
@@ -552,7 +607,7 @@ if not _identity_established and not _watching_established:
 
     elif _landing_choice == ANGLER_OTHER_LABEL:
         _typed = (st.text_input("Name", key="spot_session_landing_other_name") or "").strip()
-        if _typed and _typed in anglers_currently_active_today:
+        if _typed and _typed in anglers_with_open_session_here:
             st.warning(
                 f"⚠️ \"{_typed}\" already has a session in progress here right now. If that's you "
                 "reconnecting (a dropped connection, a locked phone), confirm below to pick it back up. "
@@ -580,14 +635,14 @@ if not _identity_established and not _watching_established:
 
 if _watching_established:
     _watched = st.session_state.get(watch_key) or ""
-    if not _watched or _watched not in anglers_currently_active_today:
-        if anglers_currently_active_today:
-            if len(anglers_currently_active_today) > 1:
+    if not _watched or _watched not in anglers_with_open_session_here:
+        if anglers_with_open_session_here:
+            if len(anglers_with_open_session_here) > 1:
                 _watched = st.selectbox(
-                    "Whose session?", anglers_currently_active_today, key="spot_session_watch_pick_active",
+                    "Whose session?", anglers_with_open_session_here, key="spot_session_watch_pick_active",
                 )
             else:
-                _watched = anglers_currently_active_today[0]
+                _watched = anglers_with_open_session_here[0]
             st.session_state[watch_key] = _watched
             st.query_params[angler_query_key] = _watched
         else:
@@ -598,7 +653,7 @@ if _watching_established:
                 st.query_params.pop(angler_query_key, None)
                 st.rerun()
             st.stop()
-    _render_watch_view(spot, structure_type, _today_iso, _watched)
+    _render_watch_view(spot, structure_type, _watched)
     if st.button("Not watching anymore - let me pick a name and fish", key="spot_session_stop_watching"):
         st.session_state.pop(watch_key, None)
         st.query_params.pop(watch_query_key, None)
@@ -613,7 +668,7 @@ if _watching_established:
 # own session still works normally).
 angler_options = [
     a for a in angler_roster
-    if a not in anglers_currently_active_today or a == st.session_state.get(angler_key)
+    if a not in anglers_with_open_session_here or a == st.session_state.get(angler_key)
 ] + [ANGLER_OTHER_LABEL]
 if st.session_state.get(angler_key) not in angler_options:
     # The previously-picked name now collides with someone else's session
@@ -694,10 +749,15 @@ _wind_help = "\n".join(
     for lo, hi, label, detail in WIND_BANDS
 )
 
-todays_entries = [
-    t for t in read_all_trips()
-    if t.get("spot_id") == spot["spot_id"] and t.get("trip_date") == session_date.isoformat()
-]
+# All logged rows at this spot, any date - the base list for punch-list
+# #69's date-independent "is there still an open session under this
+# angler's name" reconnect check just below. todays_entries (the "already
+# logged for this spot on <date>" caption right here, and the trip_date
+# every NEW row gets stamped with) stays scoped to whatever the "Session
+# date" widget shows, same as always - only the open-session lookup itself
+# needed to stop caring which date a row landed on.
+entries_at_spot = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+todays_entries = [t for t in entries_at_spot if t.get("trip_date") == session_date.isoformat()]
 if todays_entries:
     summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
     st.caption(f"📋 Already logged for this spot on {session_date.isoformat()}: {', '.join(summary_bits)}")
@@ -846,19 +906,38 @@ def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime,
     """Shared scoring path for both a live setup preview (using "right now"
     as at_time/segment) and edit mode (using that trip's own logged time/
     segment) - one formula, one place, instead of the old page's separate
-    "cond may or may not exist yet" branches."""
+    "cond may or may not exist yet" branches.
+
+    Every field is read with .get() + the same fallback this page's own
+    Conditions form widgets default to elsewhere, rather than assuming
+    cond_values is always fully populated. Punch-list #69: this is also now
+    called (via the "🔄 Conditions changed?" mid-session panel) against a
+    RECONSTRUCTED session's base_conditions - which, since that panel only
+    ever asks about fish/forage activity, wind, and sky (punch-list #49),
+    relies entirely on whatever the original Start Session actually saved
+    for secchi_ft/water_temp_f/precipitation. A legacy row or one logged
+    via "Log this session" without ever filling in Conditions (punch-list
+    #42) can genuinely lack these - direct dict indexing here used to raise
+    a bare KeyError and crash the whole page the moment such a session
+    became reconnectable, instead of falling back the same way the live
+    form's own widgets already do."""
+    secchi_ft = cond_values.get("secchi_ft", 2.5)
+    water_temp_f = cond_values.get("water_temp_f", 85.0)
+    light_condition = cond_values.get("light_condition") or LIGHT_CONDITIONS[2]
+    wind_band_choice = cond_values.get("wind_band") or WIND_BAND_LABELS[1]
+    precipitation = cond_values.get("precipitation") or PRECIPITATION_OPTIONS[0]
     water_clarity = resolve_water_clarity(
-        cond_values["secchi_ft"], cond_values.get("stain_color"), cond_values.get("stirred_up", False),
+        secchi_ft, cond_values.get("stain_color"), cond_values.get("stirred_up", False),
     )
-    season = season_stage(session_date.timetuple().tm_yday, cond_values["water_temp_f"])
-    avg_cloud_pct = cloud_proxy_for_light_condition(cond_values["light_condition"])
-    avg_wind_mph = wind_mph_for_band(cond_values["wind_band"])
-    total_precip_in, max_precip_prob_pct = precipitation_proxy(cond_values["precipitation"])
+    season = season_stage(session_date.timetuple().tm_yday, water_temp_f)
+    avg_cloud_pct = cloud_proxy_for_light_condition(light_condition)
+    avg_wind_mph = wind_mph_for_band(wind_band_choice)
+    total_precip_in, max_precip_prob_pct = precipitation_proxy(precipitation)
     rt = realtime_context_from_bundle(bundle, segment_name, session_date, at_time=at_time)
     score_result = manual_segment_score(
         segment_name, season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
         pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
-        water_temp_f=cond_values["water_temp_f"], water_clarity=water_clarity,
+        water_temp_f=water_temp_f, water_clarity=water_clarity,
         forage_present=bool(cond_values.get("forage_seen")),
     )
     return water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result
@@ -1904,12 +1983,17 @@ active = st.session_state.get(active_session_key)
 
 if active is None:
     # Punch-list #29 - see the block comment above _reconstruct_active_session()
-    # for the full story. Reuses todays_entries (already read above for the
-    # "Already logged for this spot" caption) rather than a second
-    # read_all_trips() call. Punch-list #47: scoped to resolved_angler, so
-    # this only ever reconnects THIS angler's own still-open session at this
-    # spot, never someone else's - see _open_session_rows()'s own docstring.
-    active = _reconstruct_active_session(spot, structure_type, session_date.isoformat(), todays_entries, resolved_angler)
+    # for the full story. Reuses entries_at_spot (already read above for the
+    # "Already logged for this spot" caption's own todays_entries) rather
+    # than a second read_all_trips() call. Punch-list #47: scoped to
+    # resolved_angler, so this only ever reconnects THIS angler's own
+    # still-open session at this spot, never someone else's - see
+    # _open_session_rows()'s own docstring. Punch-list #69: deliberately
+    # NOT scoped to session_date.isoformat() (the "Session date" widget,
+    # which defaults to today) - an open session from an earlier date needs
+    # to be found here too, or it becomes permanently unreachable the
+    # moment that widget isn't pointed at the exact day it started.
+    active = _reconstruct_active_session(spot, structure_type, entries_at_spot, resolved_angler)
     if active is not None:
         st.session_state[active_session_key] = active
 
@@ -1918,12 +2002,12 @@ if active is None:
 # this same spot right now - each angler's own session (start/add-lure/log
 # fish/end/cancel) is fully independent of everyone else's.
 _other_open_anglers = _other_anglers_with_open_session(
-    spot["spot_id"], session_date.isoformat(), todays_entries, resolved_angler,
+    spot["spot_id"], entries_at_spot, resolved_angler,
 )
 if _other_open_anglers:
     st.caption(
         f"🎣 {', '.join(_other_open_anglers)} also "
-        f"{'has' if len(_other_open_anglers) == 1 else 'have'} an active session here today - "
+        f"{'has' if len(_other_open_anglers) == 1 else 'have'} an active session here - "
         "starting, ending, or canceling your own session never affects theirs."
     )
 
@@ -2099,7 +2183,14 @@ if active is not None:
             st.warning(warn)
 
         mid_rec = recommend(
-            mid_season, mid_cond.get("water_temp_f"), _mid_segment, mid_rt["pressure_trend_24h"],
+            # Punch-list #69: mid_cond.get("water_temp_f", 85.0) - not just
+            # .get("water_temp_f") - for the same reason _compute_scoring()
+            # above now defaults it: a reconstructed session's base_conditions
+            # can genuinely lack this (a legacy row, or one logged via "Log
+            # this session" without ever filling in Conditions - punch-list
+            # #42), and recommend() does an unguarded `<= 68` comparison on
+            # it that crashes outright on None.
+            mid_season, mid_cond.get("water_temp_f", 85.0), _mid_segment, mid_rt["pressure_trend_24h"],
             structure_type=active["structure_type"], water_clarity=mid_water_clarity,
             fish_depth_ft=mid_cond.get("fish_depth_ft"), forage=mid_cond.get("forage_seen"),
             inventory=get_inventory(), trip_history=get_trip_history(), spot_id=spot["spot_id"],

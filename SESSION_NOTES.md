@@ -8598,6 +8598,103 @@ every real save.
     branch; the underlying write-race is fixed and pressure-tested app-
     wide; punch-list #68 logged as Done on the Development page.
 
+137. **Punch-list #69 - a still-open Spot Session became permanently
+    unreachable once its `trip_date` was no longer "today," recovered and
+    fixed, plus a more serious latent grouping bug found and fixed along
+    the way.** User: "Session in progress cannot be reaccessed after the
+    app close and the angler can't start a new one because his name is no
+    longer an option. We need to see if we can recover his session and
+    then end it properly."
+
+    **Root cause:** `pages/6_Spot_Session.py`'s reconnect logic
+    (`_open_session_rows`, `_anglers_with_open_session`,
+    `_other_anglers_with_open_session`, `_reconstruct_active_session`, and
+    the watch-view helper) all took a `session_date_iso` (today's date) and
+    filtered every "is there an open session here" check to that one date.
+    An angler's session stays open forever until "⏹ End Session" is
+    clicked - so once the app was closed on a day the session was never
+    ended, the very next day's fresh visit no longer saw it as open: the
+    angler's name dropped off the "who's fishing" picker entirely (that
+    picker only offers anglers with *no* open session at the spot), with no
+    path back to it and no way to end it.
+
+    **Fix:** dropped the date filter from every one of those helpers -
+    reconnect now finds *any* open session for that angler at that spot,
+    regardless of how many days have passed, matching a "🔄 Refresh from
+    GitHub"-adjacent expectation that state persists until explicitly
+    closed. `todays_entries` (used only for the same-day "already logged"
+    caption) is still date-scoped separately, so that display is unchanged.
+
+    **A second, more serious bug found while building the fix's own test:**
+    sessions were grouped purely by `cond.get("start_time")`, a bare
+    "HH:MM:SS" string with no date attached. Once reconnect could reach
+    across days, real production data showed multiple unrelated real
+    sessions on different dates sharing the same start-time string (e.g.
+    several 06:00:00 starts for the same angler at the same spot, weeks
+    apart) - a live risk of "End Session" silently stamping
+    `lure_end_time`/`session_end_time` onto the wrong historical rows.
+    Added `_session_group_key()`: prefers the row's real `session_id`
+    (punch-list #55) when present, falling back to a
+    `trip_date|start_time|angler` compound key for older pre-#55 rows -
+    groups can no longer cross sessions. Also hardened `_compute_scoring()`
+    and the mid-session "Conditions changed?" panel's `recommend()` call
+    with `.get(..., default)` fallbacks (previously bare dict indexing /
+    `None`-passing), since reconnection now reaches older rows that may be
+    missing a field a same-day session always had.
+
+    **Data recovery:** on the real `data` branch, found 9 rows across 6
+    real abandoned sessions (2 anglers - John and Matthew - across 3 spots)
+    still open. Closed them out using each session's own last real
+    `logged_at` timestamp (converted to lake-local time) as the end time,
+    not "now" - an honest "this is when real activity actually stopped,"
+    not a false claim the session ran for days. Every row in each session
+    got `session_end_time` stamped (matching what a live "⏹ End Session"
+    click does to every row, retired or not); `lure_end_time` was only
+    added to rows that didn't already have one, leaving already-retired
+    lures' real earlier end times untouched. Verified via diff that exactly
+    the intended 13 field-level row updates landed (136 rows total,
+    unchanged) and confirmed live on GitHub via a fresh `git fetch origin
+    data`. Committed and pushed straight to `data` (no `main` involvement -
+    this is real fishing data, not code).
+
+    **A testing trap worth recording:** `main`'s own `data/trip_log.csv` is
+    a frozen pre-#55 snapshot with no `session_id` column, while current
+    code's `FIELDNAMES` includes it - writing a synthetic test row directly
+    against `main`'s file with `csv.DictWriter` silently produces
+    column-shifted garbage, since the writer uses `FIELDNAMES`'s order
+    regardless of the file's own stale header. Not a bug in the app (the
+    deployed app always overlays real `data/` from the `data` branch before
+    serving a request) but a real trap for local verification - worked
+    around by swapping in a copy of the `data` branch's own `trip_log.csv`
+    as the test's base, always restored afterward.
+
+    **Verification:** `pytest tests/ -q` - 381 passed, unchanged. A
+    targeted scratch `AppTest` script proved all three legs live: (1) a
+    fresh visit to the spot correctly excludes the angler while their
+    old, differently-dated session is still open; (2) reconnecting via
+    `?angler=` reconstructs that exact old session ("Session in progress" +
+    "Reconnected" both shown), regardless of the date gap; (3) clicking
+    "⏹ End Session" on the reconstructed old-day session stamps
+    `lure_end_time` on the *original* row without altering its `trip_date`
+    - no new today-dated row gets created. A full `AppTest` smoke test
+    across every page (home.py + all 7 `pages/*.py`, weather mocked per
+    `tests/test_scoring.py`'s `_fake_bundle()` shape) also passed clean.
+    One incidental side effect caught and reverted before committing -
+    same as entry 136's own note - running the smoke test locally
+    exercises the real `apply_freeze()` write path against `main`'s frozen
+    `data/segment_score_freeze.csv`; `git checkout --` that file before
+    committing the real fix.
+
+    **Net state:** the real abandoned sessions are recovered and closed out
+    on the `data` branch; the date-scoping bug and the start-time grouping
+    bug are both fixed on `main`; punch-list #69 logged as Done on the
+    Development page. Two new items were noticed on the `data` branch's
+    `dev_tasks.csv` (added by the angler mid-session, not yet worked):
+    **#71** (Tackle Box manual-add save has no confirmation/reset, and
+    saved lure photos have disappeared while the rest of the item's data
+    stayed intact) and **#72** (Trip History can edit a logged trip's
+    details but not its location).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

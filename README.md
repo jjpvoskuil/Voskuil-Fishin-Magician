@@ -264,6 +264,18 @@ this repo that can override it on this hosting.
   where it left off ("Reconnected - picked this session back up..."). This app
   still needs a live connection to do anything - it can't work with zero
   signal - but a dropped-and-restored connection won't cost you your place.
+  **This reconnect now works no matter how much time has passed (punch-list
+  #69).** It used to only look for an open session dated *today* - so a
+  session abandoned by a closed app/browser tab became permanently stuck
+  open once the calendar rolled over: the angler's name would stop showing
+  up as an option on that spot at all (the picker only offers anglers with
+  no open session there), and there was no way to reach it and properly end
+  it. Reconnect logic is no longer date-scoped - it finds *any* open session
+  for that angler at that spot, however old - and it now groups a session's
+  lures by its real `session_id` (falling back to date + start time + angler
+  for older rows) instead of by a bare start-time string, so two unrelated
+  sessions on different days that happened to start at the same clock time
+  can never be mistaken for one another.
 - **Trip History (punch-list #55 redesign)** - one record per fishing *session*,
   not one per lure. A Spot Session run (▶ Start Session through ⏹ End Session,
   including any lure added mid-session) writes one trip-log row per lure fished, all
