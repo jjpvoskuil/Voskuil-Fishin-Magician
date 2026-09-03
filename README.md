@@ -1131,6 +1131,13 @@ biology (upward strike bias, etc.) that was already there:
    itself, not just in this README - previously-first-choice generic picks that aren't
    contradicted by any of this stay on as second choices rather than being dropped, so
    proven techniques aren't lost just because a given source didn't happen to mention them.
+   A third category, **Spoon** (punch-list #70), was added later so the tackle box could
+   properly tag a couple of real jigging/flutter spoons the angler already owned - it's
+   fully selectable and scoreable everywhere in the app (Tackle Box, Trip History,
+   Leaderboard, lure history) the moment it's actually fished, but deliberately isn't in
+   any season's first/second-choice list yet, unlike Drop Shot/Soft Swimbait above -
+   there's no cited, Nolin-specific spoon pattern on hand to back a proactive suggestion
+   with, so it waits for one rather than guessing.
 
 2. **Your own catch history, in similar situations.** `core.lure_history.
    lure_track_records()` (called from `recommend()` via a new `trip_history`/`spot_id`
