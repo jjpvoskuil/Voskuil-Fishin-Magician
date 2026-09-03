@@ -8940,6 +8940,56 @@ every real save.
     (bypasses the once-per-boot cache entirely, per punch-list #61/#119),
     independent of any code deploy.
 
+141. **Punch-list #74 - a Tackle Box thumbnail overlapping the next card on
+    a narrow screen.** User (with a screenshot): "can we fix the picture
+    size to not overlap the other lure info...."
+
+    **Root cause:** every square photo thumbnail app-wide - the Tackle Box
+    inventory grid (the exact card in the screenshot), the Scan-a-lure/
+    Search-Cabela's candidate cards, and Spot Session's lure picker - all go
+    through one shared helper, `core.ui.render_square_thumbnail()`. It
+    renders a raw HTML `<div>` with a hardcoded pixel `width`/`height` (e.g.
+    160px for the Tackle Box grid) wrapping an `<img style="object-fit:
+    cover">` to crop-and-fit any photo to a consistent square - added
+    originally to fix `st.image(width='stretch')` blurring/upscaling small
+    photos. That fixed size never shrinks, unlike every other element on the
+    page: `core.ui.inject_mobile_css()` (punch-list #33-era mobile
+    hardening) reflows a wide card grid into narrower columns once the
+    screen drops below `MOBILE_BREAKPOINT_PX` (700px), down to
+    `MOBILE_COLUMN_MIN_WIDTH_PX` (120px) - well under every real thumbnail
+    size this helper is ever called with (64, 90, 110, 160). Once a card's
+    actual column got narrower than its thumbnail's fixed pixel size, the
+    image spilled straight out of its own card's border and overlapped the
+    next one - exactly what the screenshot showed (a 160px-wide Tackle Box
+    thumbnail overlapping the neighboring "No photo yet" card).
+
+    **Fix:** `render_square_thumbnail()`'s wrapper `<div>` now uses
+    `width:100%` (shrinks with its real container, same as every other
+    Streamlit element) capped at `max-width:{size_px}px` (so it still never
+    exceeds the intended size on a normal-width screen), with
+    `aspect-ratio:1` keeping the box square at whatever width it actually
+    ends up rendering at, since height can no longer be pinned to a fixed
+    px value once width is allowed to shrink. One shared function, so every
+    caller (all three listed above) is fixed at once.
+
+    **Verification:** two new tests in `tests/test_ui.py`
+    (`test_render_square_thumbnail_caps_width_instead_of_fixing_it`,
+    `test_render_square_thumbnail_no_photo_renders_nothing`), confirmed to
+    fail against the pre-fix code (asserting on the exact old
+    `width:160px;height:160px` shape being gone) and pass against the fix.
+    `pytest tests/ -q` - 387 passed (2 new). A full `AppTest` smoke test
+    across every page passed clean. Also ran the real Tackle Box page
+    through `AppTest` directly and confirmed the actual rendered markup for
+    a real inventory item's card now contains
+    `max-width:160px;aspect-ratio:1` (55 cards matched) instead of the old
+    fixed-size shape - not just the isolated unit test, the real page output
+    too. Re-verified against a fresh `git clone` of `main` with the diff
+    applied - same 387 passed.
+
+    **Net state:** every photo thumbnail app-wide now shrinks to fit its
+    actual card instead of overflowing it once the page reflows on a narrow
+    screen. Punch-list #74 logged as Done on the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
