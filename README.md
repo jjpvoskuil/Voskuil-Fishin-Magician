@@ -1306,6 +1306,24 @@ its own independent HEAD, so a data save can no longer disturb the app's own
 running checkout at all. Again, nothing to configure for this - handled
 entirely inside `core/storage.py`.
 
+**...and the once-per-boot data sync has to actually succeed, not just run
+once (punch-list #73).** A live incident: Trip History reverted to a last
+entry date of 8/23/2026 - exactly `main`'s own frozen `data/trip_log.csv`
+snapshot from the punch-list #52 cutover, row for row. The once-per-boot sync
+above is guarded by `st.cache_resource`, which remembers that the sync
+function *ran*, not that it *succeeded* - a single failed attempt (plausible
+right at cold boot, before a freshly started container's network has
+necessarily finished warming up) used to strand that process on stale/frozen
+data for its entire remaining life, with nothing retrying it and no visible
+sign anything was wrong. Fixed two ways: the sync itself now retries a
+transient network failure a few times with a short backoff before giving up
+(same retry philosophy `commit_and_push()` already uses for a save's own
+push, punch-list #58); and a still-unsuccessful result is no longer cached as
+"done," so the very next page load tries again instead of being stuck for
+good. If you're looking at stale data on the live app right now, the existing
+"🔄 Refresh from GitHub" button (Trip History or Tackle Box) still fixes it
+immediately, independent of any code deploy.
+
 ## Project layout
 
 ```

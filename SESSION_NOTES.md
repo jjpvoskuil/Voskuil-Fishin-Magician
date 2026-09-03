@@ -8848,6 +8848,98 @@ every real save.
     History sessions can have their location corrected after the fact.
     Punch-list #71 and #72 logged as Done on the Development page.
 
+140. **Punch-list #73 - Trip History reverted to a last entry date of
+    8/23/2026 again, right after this session's #71/#72 redeploys.** User:
+    "We had a issue a few sessions ago where the trip history reverts to a
+    last entry date of 8/23/2026. This is happening again. After the punch
+    list items we completed during this session, the dates reverted back.
+    Is there some kind of regression test we can put in place to prevent
+    this and fix the issue?"
+
+    **Root-caused first, before writing anything:** fetched the real `data`
+    branch fresh and confirmed it was completely fine - 136 rows,
+    real activity through 2026-09-02/09-03, no corruption, no lost commits
+    (this alone ruled out anything like punch-list #68's actual data-loss
+    mechanism recurring). Then checked `main`'s own frozen
+    `data/trip_log.csv` (the file `git clone`d code sees, per punch-list
+    #52's cutover) and found the smoking gun: **exactly 73 rows, last date
+    2026-08-23** - matching the reported symptom precisely, row for row.
+    The live app was serving `main`'s frozen snapshot, not the real
+    `data`-branch content.
+
+    **Why:** `app.py`'s `_sync_data_once()` overlays `data/` with the
+    `data` branch's latest content once per process boot, wrapped in
+    `st.cache_resource` so it only ever runs once. The old code called
+    `sync_data_from_data_branch()` and unconditionally returned `True`
+    regardless of whether that call actually succeeded - `st.cache_resource`
+    remembers that the function RAN, not that the sync WORKED. A single
+    failed sync attempt (very plausible right at cold boot, before a
+    freshly started container's outbound network has necessarily finished
+    warming up) permanently stranded that process on `main`'s frozen data
+    for its entire remaining lifetime, with nothing automatically retrying
+    and nothing visibly wrong. This session's own back-to-back redeploys
+    (#69/#70/#71/#72, each triggered by a `main` push) made hitting exactly
+    this fluke on one of those boots far more likely than on a quiet day
+    with one deploy a week.
+
+    **Fix, two parts:** (1) `sync_data_from_data_branch()`
+    (`core/storage.py`) now retries a transient network failure (dropped
+    connection, DNS hiccup, a GitHub 5xx) up to 3 times with a short
+    backoff before giving up, reusing the exact same
+    `_is_transient_network_error()` check `commit_and_push()`'s own
+    punch-list #58 retry logic already relies on - a non-network failure
+    (bad auth, the branch not existing yet) still returns immediately, same
+    as before. (2) `app.py`'s `_sync_data_once()` now raises instead of
+    silently returning `True` when the sync still didn't succeed after
+    those retries, so `st.cache_resource` does NOT memoize a failed attempt
+    as "done" - a try/except around the call catches that (so one bad boot
+    doesn't crash the whole app - it just keeps running on whatever `data/`
+    already has locally for that one page load) while leaving the cache
+    empty, so the very next page interaction (this file's top level
+    re-executes on every rerun) tries the sync again instead of being stuck
+    for the rest of that process's life.
+
+    **Verification:** two new regression tests in `tests/test_storage.py`
+    (`test_sync_data_from_data_branch_retries_transient_network_error_then_succeeds`,
+    `test_sync_data_from_data_branch_gives_up_after_max_retries_on_persistent_transient_error`),
+    modeled directly on the existing punch-list #58 transient-retry tests
+    for `commit_and_push()` - both confirmed to fail against the pre-fix
+    code (`TypeError: unexpected keyword argument 'max_retries'`, since the
+    parameter didn't exist yet) and pass against the fix. `pytest tests/ -q`
+    - 385 passed (2 new). A full `AppTest` smoke test across every page,
+    plus a direct `AppTest` run of `app.py` itself, both passed clean. Also
+    re-verified against a fresh `git clone` of `main` with the diff applied
+    - same 385 passed. `app.py`'s own `st.cache_resource`-driven behavior
+    (does a failed boot sync actually get retried on the very next rerun,
+    while a successful one still only runs once) isn't something a plain
+    core/storage.py unit test can reach - mirrored the exact scratch-script
+    approach already used and documented for this same guard back at
+    punch-list #52 (see that entry above): ran `app.py` itself through
+    `AppTest` with `core.appstate.github_token` and
+    `core.storage.sync_data_from_data_branch` mocked (2 failures then a
+    success), and drove 4 consecutive `.run()` calls. Confirmed all four
+    properties at once: a failed sync doesn't crash the app; a failed sync
+    IS retried on the next rerun (the actual #73 fix); the retry
+    eventually succeeds; and - critically - a SUCCESSFUL sync still only
+    ever runs once, so this fix doesn't regress punch-list #52's original
+    "never re-fetch from GitHub on every click" guarantee. Verified this
+    scratch script fails against the pre-fix `app.py`/`core/storage.py`
+    (`git stash` on just those two files) with the exact predicted
+    signature - "expected a 2nd attempt on the 2nd run, got 1 total calls"
+    - and passes clean against the fix. Not ported into a permanent test
+    file, same as punch-list #52's own equivalent scratch script (per this
+    codebase's standing no-scratch-scripts-committed rule).
+
+    **Net state:** a boot-time sync failure can no longer permanently
+    strand a live process on stale/frozen `main` data - it retries on its
+    own, both within one boot (transient network) and across boots (a
+    still-unsuccessful attempt isn't cached as done). Punch-list #73 logged
+    as Done on the Development page. Anyone looking at the live app while
+    this fix was rolling out could still immediately unstick it right then
+    via the existing "🔄 Refresh from GitHub" button on Trip History
+    (bypasses the once-per-boot cache entirely, per punch-list #61/#119),
+    independent of any code deploy.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
