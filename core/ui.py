@@ -203,25 +203,44 @@ def render_line_chart(col, series, y_domain: tuple | None = None):
 
 
 def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
-    """Render one inventory item's photo (if it has one) as a fixed-size,
-    center-cropped square via inline HTML/CSS (object-fit: cover). Returns
-    False (renders nothing) if the item has no usable photo, so callers can
-    fall back to a "no photo" caption.
+    """Render one inventory item's photo (if it has one) as a center-cropped
+    square, capped at `size_px` but shrinking to fit a narrower container,
+    via inline HTML/CSS (object-fit: cover). Returns False (renders nothing)
+    if the item has no usable photo, so callers can fall back to a "no
+    photo" caption.
 
-    st.image(..., width='stretch') - the previous approach - stretched every
+    st.image(..., width='stretch') - the original approach - stretched every
     photo to fill its full column width, which (a) blurs any photo whose
     native resolution is smaller than that column (upscaling), and (b) left
     each thumbnail a different height, since it just scales width and lets
-    height follow the source photo's own aspect ratio. Cropping to a fixed
-    square here fixes both: every thumbnail is the same size, and the
-    on-screen size no longer depends on the surrounding layout, so a modest,
-    consistently-sized image never gets stretched past its real resolution.
+    height follow the source photo's own aspect ratio. Cropping to a square
+    here fixes both: every thumbnail is the same shape, and the on-screen
+    size no longer depends on the source photo's own aspect ratio.
+
+    Punch-list #74: that fix's own first version pinned both `width` and
+    `height` to a bare `{size_px}px`, which - unlike everything else in a
+    Streamlit column - does not shrink when its actual container gets
+    narrower than that. Every card grid this renders into (the Tackle Box
+    inventory grid, the Scan-a-lure/Search-Cabela's candidate grid, Spot
+    Session's lure picker) sits inside `st.columns(...)`, and
+    `inject_mobile_css()` above reflows those into narrower columns below
+    `MOBILE_BREAKPOINT_PX` - down to `MOBILE_COLUMN_MIN_WIDTH_PX` (120px),
+    well under every real `size_px` this function is ever called with (96,
+    120, 160). A fixed-pixel thumbnail wider than its own column spills out
+    of its card's border and overlaps the next card - confirmed live via a
+    real screenshot (a 160px Tackle Box thumbnail overlapping the "No photo
+    yet" card next to it). Fixed by making the box `width:100%` (so it
+    shrinks with its real container, exactly like every other Streamlit
+    element already does) capped at `max-width:{size_px}px` (so it still
+    never exceeds the intended size on a wide screen), with `aspect-ratio:1`
+    keeping it square at whatever width it actually ends up - since height
+    is no longer pinned to a fixed px value once width can shrink.
     """
     src = image_data_uri_or_url(resolve_image_source(item))
     if not src:
         return False
     st.markdown(
-        f'<div style="width:{size_px}px;height:{size_px}px;overflow:hidden;'
+        f'<div style="width:100%;max-width:{size_px}px;aspect-ratio:1;overflow:hidden;'
         f'border-radius:6px;margin:0 auto;background:#eee;">'
         f'<img src="{src}" style="width:100%;height:100%;object-fit:cover;display:block;" />'
         f'</div>',

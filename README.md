@@ -969,6 +969,18 @@ current quantity on hand. Two ways items get in:
   `copy2`/`unlink` way as before), covered by two new regression tests in
   `tests/test_storage.py` confirmed to fail against the old code and pass
   against the fix.
+- **Thumbnails no longer overflow their card on a narrow screen (punch-list
+  #74)** - every square photo thumbnail app-wide (this page's inventory grid,
+  the Scan-a-lure/Search-Cabela's candidate cards, Spot Session's lure picker)
+  is rendered at a fixed size via `core.ui.render_square_thumbnail()`. Its
+  first version pinned both width and height to a bare pixel value, which -
+  unlike everything else on the page - doesn't shrink when its actual column
+  gets narrower than that, so on a narrow/phone-width screen (where
+  `inject_mobile_css()` reflows a wide card grid into narrower columns) a
+  thumbnail could render wider than its own card and visibly overlap the
+  next one. Fixed by capping the thumbnail at its intended size
+  (`max-width`) while letting it shrink to `100%` of its real container,
+  with `aspect-ratio: 1` keeping it square at whatever width it ends up at.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
