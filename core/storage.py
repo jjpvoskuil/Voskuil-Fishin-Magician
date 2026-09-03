@@ -643,6 +643,48 @@ def _ensure_data_worktree(repo_root: Path, remote: str, branch: str) -> tuple:
     return worktree, None
 
 
+def _copy_into_worktree(src: Path, dest: Path) -> None:
+    """Mirrors one `paths` entry (commit_and_push_data()'s copy-into-
+    worktree step) from repo_root's own copy at `src` to the worktree's
+    matching location at `dest`. `dest`'s own parent is assumed to already
+    exist (the caller creates it) - this only ever touches `dest` itself.
+
+    Punch-list #71: `src` can genuinely be a directory - both of the Tackle
+    Box page's photo-touching saves (adding a lure with a photo, deleting
+    one) pass core.lure_inventory.IMAGES_DIR whole, not a single file, and
+    commit_and_push()'s own docstring above has always promised "files or
+    directories" - this just never actually implemented that for the
+    worktree-copy step `commit_and_push_data()` added on top. Before this
+    fix, `shutil.copy2(a_directory, dest)` raised a bare `IsADirectoryError`
+    the instant a save touched IMAGES_DIR (confirmed live - see
+    SESSION_NOTES.md punch-list #71) - caught by commit_and_push_data()'s
+    own outer `except Exception`, so the WHOLE save (not just the photo)
+    silently failed to push: `data/lure_inventory.csv`'s new row usually
+    still made it to GitHub eventually (any later, unrelated save that
+    didn't happen to touch IMAGES_DIR - e.g. editing another item's
+    quantity - carries every locally-written row along, images or not), but
+    the actual photo file never did, since only these two call sites ever
+    reference IMAGES_DIR at all. A restart re-syncing data/ from the `data`
+    branch (core.storage.sync_data_from_data_branch()) would then show the
+    row with its `image_filename` intact but no matching file on disk -
+    exactly "the rest of the information was there but no picture."
+
+    A directory is mirrored as a full, fresh copy (delete-then-copytree)
+    rather than a merge, so a file removed from `src` since the last save
+    (e.g. delete_item() removing one lure's photo) is correctly reflected
+    as removed in the worktree copy too, not left behind as an orphan the
+    next `git add` on that same directory would never notice.
+    """
+    if src.is_dir():
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+    elif src.exists():
+        shutil.copy2(src, dest)
+    elif dest.exists():
+        dest.unlink()
+
+
 def commit_and_push_data(
     paths: list,
     github_token: str,
@@ -679,7 +721,14 @@ def commit_and_push_data(
     a freshly-booted process briefly alive together across a redeploy) could
     copy into and `git commit` the same worktree at the same time - exactly
     the mechanism confirmed behind a real corruption incident (see
-    SESSION_NOTES.md punch-list #68)."""
+    SESSION_NOTES.md punch-list #68).
+
+    Punch-list #71: the copy step genuinely supports "files or directories"
+    now, matching what commit_and_push()'s own docstring above always
+    promised - it silently didn't for a whole directory (e.g.
+    core.lure_inventory.IMAGES_DIR, passed whole by both of the Tackle Box
+    page's "Add a lure with a photo" and "Delete" call sites) until this
+    fix. See _copy_into_worktree() below."""
     if not github_token:
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
     try:
@@ -703,10 +752,7 @@ def commit_and_push_data(
                     rel = p
                 dest = worktree / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                if src.exists():
-                    shutil.copy2(src, dest)
-                elif dest.exists():
-                    dest.unlink()
+                _copy_into_worktree(src, dest)
                 dest_paths.append(str(rel))
 
             return commit_and_push(
