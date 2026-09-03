@@ -828,6 +828,152 @@ def test_is_transient_network_error_matches_common_flaky_connection_phrasing():
     assert not storage._is_transient_network_error("! [rejected] main -> main (non-fast-forward)")
 
 
+# --- Punch-list #76: no git subprocess call had a timeout, so a stalled ---
+# network call (weak/dropped cell signal - real, expected conditions for an
+# app used standing at a lake) could hang the underlying `git` process, and
+# with it the entire synchronous Streamlit script run that called it,
+# indefinitely. Live report: an angler mid-Spot-Session tapped a lure to log
+# a catch and got no response at all. These simulate a hang by making a
+# mocked subprocess.run() raise subprocess.TimeoutExpired directly (the same
+# thing a real timeout= produces once it fires) rather than actually waiting
+# out a real timeout, which would make the suite painfully slow.
+
+def test_run_git_or_timeout_converts_a_hang_into_an_already_recognized_transient_failure(monkeypatch):
+    """The core mechanism _push_with_retries()'s push/fetch/rebase calls all
+    go through now: a raised TimeoutExpired must come back as an ordinary
+    failed result (never propagate as an exception) whose stderr is already
+    recognized by _is_transient_network_error() - that's what makes a timed-
+    out push/fetch automatically retry with zero changes to the retry logic
+    itself."""
+    args = ["git", "push", "origin", "HEAD:data"]
+
+    def fake_run(a, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=a, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    result = storage._run_git_or_timeout(args, "/tmp", timeout=20)
+    assert result.returncode != 0
+    assert storage._is_transient_network_error(result.stderr)
+
+
+def test_commit_and_push_retries_when_push_hangs_then_succeeds(tmp_path, bare_and_seed, monkeypatch):
+    """Same scenario as test_commit_and_push_retries_transient_network_error_
+    then_succeeds above, but the failure is a genuine hang (subprocess.run
+    raising TimeoutExpired) instead of a fast error response - proving a
+    stalled push gets the same automatic retry a fast-failing one already
+    did, not a frozen/uncaught-exception app."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    (repo / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n")
+
+    push_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "push"]:
+            push_calls.append(args)
+            if len(push_calls) < 3:
+                raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout"))
+            return real_run(args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+        max_push_retries=5, retry_backoff_seconds=0,
+    )
+    assert ok is True, msg
+    assert "Saved and pushed" in msg
+    assert len(push_calls) == 3  # two hangs, then a real (unpatched) push succeeds
+
+
+def test_commit_and_push_config_call_hanging_is_a_clean_failure_not_an_uncaught_crash(
+    tmp_path, bare_and_seed, monkeypatch,
+):
+    """Before this fix, `git config` (a check=True call) had no timeout= at
+    all, and commit_and_push()'s except clause only caught
+    subprocess.CalledProcessError - a raised TimeoutExpired from a hang would
+    propagate straight out of commit_and_push() uncaught, crashing whatever
+    Streamlit script run called it instead of returning the normal (False,
+    message) failure shape every other error here produces."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "config"]:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout"))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.commit_and_push(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="add trip", repo_root=repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is False
+    assert "push failed" in msg.lower()
+
+
+def test_sync_data_from_data_branch_retries_when_fetch_hangs_then_succeeds(tmp_path, bare_and_seed, monkeypatch):
+    """Mirrors test_sync_data_from_data_branch_retries_transient_network_
+    error_then_succeeds, but with a genuine hang (TimeoutExpired) instead of
+    a fast error - this function's existing try/except Exception retry loop
+    (punch-list #73) needed no changes at all to handle this correctly, once
+    the fetch call itself passes timeout=."""
+    cutover = _clone(bare_and_seed, tmp_path / "cutover")
+    _run(["git", "checkout", "-b", storage.DATA_BRANCH], cwd=cutover)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=cutover)
+
+    saver = _clone(bare_and_seed, tmp_path / "saver")
+    (saver / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,new catch\n")
+    ok, _ = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="new catch", repo_root=saver, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+
+    app_repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    fetch_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "fetch"]:
+            fetch_calls.append(args)
+            if len(fetch_calls) < 3:
+                raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout"))
+            return real_run(args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=app_repo, remote_url=str(bare_and_seed),
+        max_retries=5, retry_backoff_seconds=0,
+    )
+    assert ok is True, msg
+    assert "new catch" in (app_repo / "data" / "trip_log.csv").read_text()
+    assert len(fetch_calls) == 3  # two hangs, then a real (unpatched) fetch succeeds
+
+
+def test_ensure_data_worktree_falls_back_to_local_branch_when_fetch_hangs(tmp_path, bare_and_seed, monkeypatch):
+    """A fetch that HANGS while setting up the data worktree for the first
+    time in a process must fall back to creating a local branch (same as an
+    ordinary fast fetch failure already did), not fail the whole save
+    outright - a local commit can still happen and be pushed later by the
+    autosave retry heartbeat."""
+    repo = _clone(bare_and_seed, tmp_path / "repoA")
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "fetch"]:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout"))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+
+    worktree, err = storage._ensure_data_worktree(repo, str(bare_and_seed), storage.DATA_BRANCH)
+    assert worktree is not None, f"expected a local-branch fallback, got error: {err}"
+    assert (worktree / ".git").exists()
+
+
 def test_parse_conditions_returns_the_dict_for_a_normal_row():
     row = {"conditions_json": '{"lure_category": "football_jig", "avg_wind_mph": 6}'}
     assert storage.parse_conditions(row) == {"lure_category": "football_jig", "avg_wind_mph": 6}

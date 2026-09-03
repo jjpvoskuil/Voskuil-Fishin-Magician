@@ -97,6 +97,46 @@ sync_data_from_data_branch() (below) was already safe by this same
 standard before this fix existed - it only ever does a scoped `git
 checkout FETCH_HEAD -- data`, which updates working-tree files without
 moving repo_root's HEAD or creating any commit, so it was left as-is.
+
+--- Every git subprocess call has a timeout now - punch-list #76 ---
+Live incident: an angler mid-Spot-Session tapped a lure to log a catch and
+got no response at all - the whole app appeared frozen, not just that one
+click. Root cause: every single `subprocess.run(["git", ...])` call in this
+file - fetch, push, commit, add, worktree setup, all of it - had NO
+timeout. This app is used standing at a lake, often on weak or dropping
+cell signal, which is exactly the condition that makes a network call
+stall (not fail - just never come back) rather than error out cleanly. A
+stalled `git fetch`/`git push` subprocess call blocks whatever Python
+thread called `subprocess.run()`, and since every interaction in this app
+is a live, synchronous round trip through one Streamlit script run (no
+background/async work exists here), that one stalled call froze the
+ENTIRE page - any button, not just the one that happened to trigger the
+network call - for as long as the connection stayed down, which could be
+indefinitely.
+
+The fix: every git subprocess call now passes `timeout=` (see
+`_GIT_LOCAL_TIMEOUT_SECONDS`/`_GIT_NETWORK_TIMEOUT_SECONDS` below, right
+after `_is_transient_network_error()`) so a hang always resolves into an
+ordinary failure within a bounded number of seconds instead of never
+resolving at all. Two ways that failure gets folded back into logic this
+file already had, so nothing else needed to change: (1) for the manually-
+returncode-checked calls (push, fetch, rebase - the ones inspected by
+`_is_transient_network_error()`), `_run_git_or_timeout()` turns a timeout
+into a synthetic failed result whose stderr contains "operation timed
+out", already one of that function's recognized markers - so a timed-out
+push/fetch is automatically retried exactly like any other flaky-
+connection failure, zero changes to the retry logic itself; (2) for the
+check=True calls (`git config`/`git add`/`git commit` in
+commit_and_push()) and `sync_data_from_data_branch()`'s own fetch/checkout
+(already inside a `try/except Exception` retry loop from punch-list #73),
+a raised `subprocess.TimeoutExpired` is caught by widening the existing
+except clauses from `subprocess.CalledProcessError` to its parent
+`subprocess.SubprocessError` (which TimeoutExpired is also a subclass of)
+- or, for #73's loop, needed no change at all, since it already caught
+every exception generically. This app still can't do anything about a
+connection that's ACTUALLY down for the whole timeout window - the fix
+isn't "always succeed on bad signal," it's "never just sit there with no
+feedback and no way for anything else on the page to respond."
 """
 from __future__ import annotations
 import csv
@@ -362,6 +402,61 @@ def _is_transient_network_error(stderr: str) -> bool:
     return any(marker in lowered for marker in _TRANSIENT_ERROR_MARKERS)
 
 
+# Punch-list #76 (live incident - the whole app froze mid-Spot-Session; an
+# angler tapped a lure to log a catch and got no response at all): every
+# git subprocess call in this module used to have NO timeout whatsoever. A
+# stalled network call - a weak or dropped connection, exactly the
+# conditions this app is actually used in, standing at a lake on cell
+# signal - could make the underlying `git` process hang indefinitely, and
+# with it the ENTIRE Streamlit script run that called it: this app has no
+# background/async work, every click is a live, synchronous round trip
+# through the Python server, so one hung subprocess call froze the whole
+# page, not just the action that triggered it. Confirmed by inspecting
+# every subprocess.run() call site in this file - none passed timeout=.
+#
+# Two timeouts: a short one for git operations that never touch the
+# network (config/add/commit/diff/status/rev-parse/worktree bookkeeping/
+# rebase) - generous for even a slow disk, short enough that a stuck local
+# git lock still fails fast rather than hanging just as badly as a network
+# call would; a longer one for the two operations that actually reach
+# GitHub (fetch, push) - generous enough for a genuinely slow-but-working
+# connection to still succeed, short enough that a dead one gives up well
+# within what an angler would sit and wait for mid-session.
+_GIT_LOCAL_TIMEOUT_SECONDS = 15
+_GIT_NETWORK_TIMEOUT_SECONDS = 20
+
+
+def _run_git_or_timeout(args: list, cwd, timeout: float) -> subprocess.CompletedProcess:
+    """subprocess.run() wrapper for every git call below that inspects
+    .returncode/.stderr itself rather than using check=True (see
+    commit_and_push()'s own timeout= additions for the check=True call
+    sites, which don't need this - a raised subprocess.TimeoutExpired
+    there just propagates to that function's own except clause, widened to
+    catch it, same as any other git failure).
+
+    A subprocess.TimeoutExpired here is turned into an ordinary FAILED
+    CompletedProcess (returncode 1, an explanatory message in stderr)
+    instead of being allowed to propagate as an exception - critically,
+    that message contains "operation timed out", already one of
+    _is_transient_network_error()'s recognized markers above, so a
+    push/fetch that times out is automatically retried exactly like any
+    other flaky-connection failure (a dropped connection, a DNS hiccup) -
+    zero changes needed to any of the retry/rebase/fallback logic that
+    already inspects .returncode/.stderr, just a guarantee that a hang
+    always resolves into an ordinary, already-handled failure within
+    `timeout` seconds instead of never resolving at all."""
+    try:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=args, returncode=1, stdout="",
+            stderr=(
+                f"git operation timed out after {timeout:g}s with no response "
+                "(usually a weak/dropped connection, not a real git error)"
+            ),
+        )
+
+
 def _push_with_retries(
     remote: str,
     branch: str,
@@ -390,9 +485,8 @@ def _push_with_retries(
     """
     last_error = ""
     for attempt in range(1, max_push_retries + 1):
-        push = subprocess.run(
-            ["git", "push", remote, f"HEAD:{branch}"],
-            cwd=repo_root, capture_output=True, text=True,
+        push = _run_git_or_timeout(
+            ["git", "push", remote, f"HEAD:{branch}"], repo_root, _GIT_NETWORK_TIMEOUT_SECONDS,
         )
         if push.returncode == 0:
             return True, "Saved and pushed to GitHub."
@@ -411,8 +505,8 @@ def _push_with_retries(
             break
 
         if rejected:
-            fetch = subprocess.run(
-                ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+            fetch = _run_git_or_timeout(
+                ["git", "fetch", remote, branch], repo_root, _GIT_NETWORK_TIMEOUT_SECONDS,
             )
             if fetch.returncode != 0:
                 if _is_transient_network_error(fetch.stderr or ""):
@@ -424,11 +518,11 @@ def _push_with_retries(
                     continue
                 return False, f"Saved locally, but push failed and the retry fetch also failed: {fetch.stderr.strip()}"
 
-            rebase = subprocess.run(
-                ["git", "rebase", "FETCH_HEAD"], cwd=repo_root, capture_output=True, text=True,
+            rebase = _run_git_or_timeout(
+                ["git", "rebase", "FETCH_HEAD"], repo_root, _GIT_LOCAL_TIMEOUT_SECONDS,
             )
             if rebase.returncode != 0:
-                subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+                subprocess.run(["git", "rebase", "--abort"], cwd=repo_root, timeout=_GIT_LOCAL_TIMEOUT_SECONDS)
                 return False, (
                     "Saved locally, but another device's save conflicted with this one "
                     "and couldn't be auto-merged - please retry the save."
@@ -503,10 +597,21 @@ def commit_and_push(
         return False, "No GITHUB_TOKEN configured - saved locally only for this session."
     try:
         remote = _resolve_remote_url(github_token, repo_slug, remote_url)
-        subprocess.run(["git", "config", "user.email", "fishin-magician@bot.local"], cwd=repo_root, check=True)
-        subprocess.run(["git", "config", "user.name", "Fishin' Magician Bot"], cwd=repo_root, check=True)
-        subprocess.run(["git", "add"] + [str(p) for p in paths], cwd=repo_root, check=True)
-        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo_root)
+        subprocess.run(
+            ["git", "config", "user.email", "fishin-magician@bot.local"],
+            cwd=repo_root, check=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Fishin' Magician Bot"],
+            cwd=repo_root, check=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+        )
+        subprocess.run(
+            ["git", "add"] + [str(p) for p in paths],
+            cwd=repo_root, check=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+        )
+        diff = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=repo_root, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+        )
         if diff.returncode == 0:
             # Punch-list #64 (live-app investigation): this exact message,
             # with nothing more, is what an angler has been seeing on every
@@ -532,17 +637,26 @@ def commit_and_push(
             # path, not on every save.
             status = subprocess.run(
                 ["git", "status", "--porcelain"] + [str(p) for p in paths],
-                cwd=repo_root, capture_output=True, text=True,
+                cwd=repo_root, capture_output=True, text=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
             )
             branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root, capture_output=True, text=True,
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_root, capture_output=True, text=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
             )
             status_bit = status.stdout.strip() or "(git sees these path(s) as completely unmodified)"
             branch_bit = branch.stdout.strip() or "unknown"
             return True, f"No changes to commit. [diag: HEAD={branch_bit!r}, git status={status_bit!r}]"
-        subprocess.run(["git", "commit", "-m", commit_message], cwd=repo_root, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", commit_message], cwd=repo_root, check=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+        )
         return _push_with_retries(remote, branch, repo_root, max_push_retries, retry_backoff_seconds)
-    except subprocess.CalledProcessError as e:
+    except subprocess.SubprocessError as e:
+        # Punch-list #76: widened from subprocess.CalledProcessError (a
+        # non-zero exit) to its parent class, which also covers
+        # subprocess.TimeoutExpired (a git call above that hung past its
+        # timeout=) - both are "couldn't run this git command" failures,
+        # and this message reads fine for either (TimeoutExpired's own
+        # str() already says plainly that it timed out).
         return False, f"Saved locally, but push failed: {e}"
 
 
@@ -576,7 +690,9 @@ def push_pending(
     try:
         remote = _resolve_remote_url(github_token, repo_slug, remote_url)
         return _push_with_retries(remote, branch, repo_root, max_push_retries, retry_backoff_seconds)
-    except subprocess.CalledProcessError as e:
+    except subprocess.SubprocessError as e:
+        # Punch-list #76: see commit_and_push()'s matching except clause -
+        # widened the same way, for the same reason.
         return False, f"Push failed: {e}"
 
 
@@ -623,20 +739,32 @@ def _ensure_data_worktree(repo_root: Path, remote: str, branch: str) -> tuple:
     # before trying to create a new one there, so a leftover registration
     # from an already-deleted worktree directory can't make `git worktree
     # add` fail with a spurious "already exists".
-    subprocess.run(["git", "worktree", "prune"], cwd=repo_root, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "worktree", "prune"], cwd=repo_root, capture_output=True, text=True,
+        timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
+    )
     worktree.parent.mkdir(parents=True, exist_ok=True)
-    fetch = subprocess.run(
-        ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+    # Punch-list #76: routed through _run_git_or_timeout() rather than a
+    # bare subprocess.run() specifically so a fetch that TIMES OUT (a weak/
+    # dropped connection right when a save is trying to set up the
+    # worktree for the very first time this process) falls through to the
+    # exact same "-B branch, based on local HEAD" fallback below that an
+    # ordinary fetch failure already used - the save can still commit
+    # locally and be pushed later by the autosave retry heartbeat, instead
+    # of failing outright just because the network happened to be down at
+    # that moment.
+    fetch = _run_git_or_timeout(
+        ["git", "fetch", remote, branch], repo_root, _GIT_NETWORK_TIMEOUT_SECONDS,
     )
     if fetch.returncode == 0:
         add = subprocess.run(
             ["git", "worktree", "add", "--detach", str(worktree), "FETCH_HEAD"],
-            cwd=repo_root, capture_output=True, text=True,
+            cwd=repo_root, capture_output=True, text=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
         )
     else:
         add = subprocess.run(
             ["git", "worktree", "add", "-B", branch, str(worktree), "HEAD"],
-            cwd=repo_root, capture_output=True, text=True,
+            cwd=repo_root, capture_output=True, text=True, timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
         )
     if add.returncode != 0:
         return None, (add.stderr or add.stdout).strip()
@@ -889,6 +1017,7 @@ def sync_data_from_data_branch(
         try:
             fetch = subprocess.run(
                 ["git", "fetch", remote, branch], cwd=repo_root, capture_output=True, text=True,
+                timeout=_GIT_NETWORK_TIMEOUT_SECONDS,
             )
             if fetch.returncode != 0:
                 stderr = fetch.stderr.strip()
@@ -913,6 +1042,7 @@ def sync_data_from_data_branch(
                 )
             checkout = subprocess.run(
                 ["git", "checkout", "FETCH_HEAD", "--", "data"], cwd=repo_root, capture_output=True, text=True,
+                timeout=_GIT_LOCAL_TIMEOUT_SECONDS,
             )
             if checkout.returncode != 0:
                 # A checkout failure isn't a network hiccup - retrying the
@@ -920,6 +1050,11 @@ def sync_data_from_data_branch(
                 return False, f"Data branch sync skipped (checkout failed): {checkout.stderr.strip()}"
             return True, f"Synced data/ from the '{branch}' branch."
         except Exception as e:
+            # Punch-list #76: this already-broad except (existed before that
+            # fix) also catches subprocess.TimeoutExpired now that both git
+            # calls above pass timeout= - a fetch/checkout that hangs past
+            # its timeout retries with backoff exactly like any other
+            # exception here always has, no changes needed to this clause.
             last_error = str(e)
             if attempt < max_retries:
                 time.sleep(retry_backoff_seconds * attempt)
