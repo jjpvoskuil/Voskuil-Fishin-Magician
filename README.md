@@ -663,6 +663,25 @@ this actually does. A genuinely dropped connection at the exact moment you're mi
 limitations" below and entry 90 in `SESSION_NOTES.md` - this app has no offline queue,
 by Streamlit's own live-round-trip architecture.
 
+**When the whole app froze instead of just showing a warning (punch-list #76).** A live
+report: mid-Spot-Session, tapping a lure to log a catch got no response at all - not an
+error, not a slow spinner, the whole page just stopped responding. Root cause: every
+single `git` command this app runs in the background - fetch, push, all of it - had no
+timeout. Weak or dropped cell signal (standing at a lake, exactly how this app gets
+used) doesn't always fail a network call fast; sometimes it just never comes back. And
+since every interaction here is a live, synchronous round trip through one Streamlit
+script run (no background/async work exists in this app), one `git` process stuck
+waiting on a dead connection froze the entire page - any button, not just the one that
+happened to trigger the network call - for as long as the connection stayed down, which
+could be indefinitely. Every git call now has a real timeout, so a stalled connection
+fails within a bounded number of seconds instead of hanging forever - and a timed-out
+push/fetch is retried automatically, exactly like any other flaky-connection failure
+above, not treated as a hard error. This can't make a genuinely dead connection succeed;
+it makes sure the app always comes back and tells you what happened instead of just
+sitting there. Nothing you'd already logged before a freeze like this was ever at risk -
+see "reconnecting after a dropped session" above - reloading the page always recovers
+exactly where the last successful save left off.
+
 **"Is this actually reaching GitHub right now?" (punch-list #62).** A missing or bad
 `GITHUB_TOKEN` has always failed silently by design - every save still "succeeds"
 locally either way, with only a `st.toast()` to say whether it also reached GitHub

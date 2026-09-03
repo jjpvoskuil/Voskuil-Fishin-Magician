@@ -9062,6 +9062,90 @@ every real save.
     that's even needed. Punch-list #75 logged as Done on the Development
     page.
 
+143. **Punch-list #76 - the whole app froze mid-Spot-Session, no response
+    at all clicking a lure to log a catch.** User (live, actively fishing):
+    "I set everything up for a session this morning and started to fish.
+    When I click on a lure to enter a fish I caught I got no response. It
+    seems frozen...". Immediate guidance given while root-causing: nothing
+    already logged was at risk (every catch already saves to local disk
+    immediately, before any network push, and Spot Session rebuilds its
+    "session in progress" view from what's on disk, not browser memory -
+    punch-list #29/#69), and reloading the page recovered the in-progress
+    session exactly as expected - user confirmed ("reloaded the page and it
+    reset. I had to go to trip history to edit and add the fish I caught.
+    That is correct").
+
+    **Root cause:** inspected every `subprocess.run(["git", ...])` call in
+    `core/storage.py` - fetch, push, commit, add, worktree setup, all of it
+    - and found none of them passed `timeout=`. This app is used standing
+    at a lake, often on weak or dropping cell signal - exactly the
+    condition that makes a network call stall (never come back) rather
+    than fail cleanly. Since every interaction in this app is a live,
+    synchronous round trip through one Streamlit script run (no
+    background/async work exists here), one stalled `git fetch`/`git push`
+    subprocess call blocked that whole run - freezing the entire page, not
+    just the action that happened to trigger the network call - for as
+    long as the connection stayed down, which could be indefinitely.
+    Confirmed as the mechanism by reasoning through the exact call path a
+    lure click goes through (Spot Session's `_autosave_heartbeat()`/
+    `_handle_lure_add_click()` both reach `core.storage`'s git plumbing)
+    rather than live-reproducing a real dropped connection, which isn't
+    practically reproducible from a coding session with no access to the
+    live deployment's actual network conditions - the code evidence (a
+    guaranteed-hang code path, no timeout anywhere) is unambiguous on its
+    own.
+
+    **Fix:** every git subprocess call in `core/storage.py` now passes a
+    real `timeout=` (`_GIT_LOCAL_TIMEOUT_SECONDS` = 15s for calls that
+    never touch the network - config/add/commit/diff/status/rev-parse/
+    worktree bookkeeping/rebase; `_GIT_NETWORK_TIMEOUT_SECONDS` = 20s for
+    the two that actually reach GitHub - fetch, push). A new
+    `_run_git_or_timeout()` helper wraps every manually-returncode-checked
+    call (push, fetch, rebase - the ones `_is_transient_network_error()`
+    already inspects) and turns a `subprocess.TimeoutExpired` into an
+    ordinary failed result whose stderr contains "operation timed out" -
+    already one of that function's recognized markers - so a timed-out
+    push/fetch is automatically retried exactly like any other flaky-
+    connection failure, with zero changes needed to the retry logic
+    itself. The `check=True` calls in `commit_and_push()` (git config x2,
+    git add, git commit) and `push_pending()` needed their `except
+    subprocess.CalledProcessError` widened to `except
+    subprocess.SubprocessError` (TimeoutExpired's parent class) so a
+    timeout there returns the normal `(False, message)` failure shape
+    instead of crashing out uncaught. `sync_data_from_data_branch()`'s
+    fetch/checkout (punch-list #73's retry loop) needed no logic changes
+    at all - its existing `except Exception` already caught anything,
+    including a timeout, once the calls themselves gained `timeout=`.
+    `_ensure_data_worktree()`'s first-ever-fetch-in-a-process now falls
+    back to a local branch (same as an ordinary fetch failure already did)
+    when the fetch specifically times out, rather than failing the save
+    outright - a local commit can still happen and be pushed later by the
+    autosave retry heartbeat.
+
+    **Verification:** five new tests in `tests/test_storage.py` (a direct
+    unit test of `_run_git_or_timeout()`'s conversion, a push-hang retry
+    test mirroring the existing transient-network-error test but raising
+    `subprocess.TimeoutExpired` instead of returning a fast error, a
+    `git config` hang proving a clean failure instead of an uncaught
+    crash, a `sync_data_from_data_branch()` fetch-hang retry test, and an
+    `_ensure_data_worktree()` fetch-hang-falls-back-to-local-branch test),
+    confirmed via a targeted `git stash` of only `core/storage.py` that 4
+    of the 5 fail against the pre-fix code (the 5th - the sync retry test -
+    correctly PASSES pre-fix too, since punch-list #73's retry loop already
+    handled arbitrary exceptions generically; this fix just makes a real
+    timeout actually reach it) and all 5 pass post-fix. `pytest tests/ -q`
+    - 394 passed (5 new). A full `AppTest` smoke test across every page
+    passed clean. Not live-reproduced against a real dropped connection
+    (impractical from here, see Root cause above) - the fix is verified at
+    the unit level against simulated hangs, which exercise the exact same
+    code path a real timeout would.
+
+    **Net state:** a weak or dropped connection while saving now degrades
+    gracefully - the app fails a stuck push/fetch within a bounded number
+    of seconds and retries automatically, instead of freezing the entire
+    page indefinitely with no feedback. Punch-list #76 logged as Done on
+    the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
