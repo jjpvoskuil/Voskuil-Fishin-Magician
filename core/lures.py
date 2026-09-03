@@ -187,6 +187,38 @@ LURE_PROFILES = {
         "depth_range_ft": (0, 20), "depth_style": "lift-and-fall (yo-yo), bottom to mid-depth",
         "presentation": "Let it sink to bottom on semi-slack line, then lift-and-fall (yo-yo) vertically or on a slow retrieve - the vibration comes on the fall, so stay in contact for subtle bites.",
     },
+    "spoon": {
+        # Punch-list #70: "Need to add a lure category 'Spoon'... categorized
+        # as a spoon" - the angler's own tackle box has real jigging/flutter
+        # spoons (e.g. Nichols Lures Lake Fork Flutter Spoon) with nowhere to
+        # be tagged before this. Tagged "column" (not "bottom") like
+        # blade_bait just above, the closest existing analog in this file -
+        # both are metal baits worked with a vertical/near-vertical
+        # lift-and-fall over deep structure or schooling/suspended fish,
+        # where strikes mostly come on the flutter of the fall rather than
+        # bottom contact, so the same "target 1-2 ft above the marked fish"
+        # up-bias guidance applies. Deliberately NOT added to any season's
+        # first/second-choice picks below (unlike blade_bait) - every one of
+        # those picks is backed by a real, cited Nolin-specific or
+        # Nolin-adjacent source (see the block comment above the season
+        # if/elif chain), and there's no such source on hand for a spoon
+        # pattern specifically on this lake yet; it's fully selectable and
+        # scoreable via the tackle box/Trip History/Leaderboard the moment
+        # it's fished, just not proactively suggested until a real pattern
+        # is documented.
+        "name": "Spoon",
+        "video_key": "spoon",
+        "vertical_style": "column",
+        "colors": {
+            "Clear": ["Silver/nickel shad", "Chrome/blue"],
+            "Green stained": ["Gold/chartreuse", "Gold shad"],
+            "Brown stained": ["Gold/craw", "Copper"],
+            "Muddy": ["Chartreuse/gold", "Chartreuse/black"],
+        },
+        "trailer": None,
+        "depth_range_ft": (10, 30), "depth_style": "vertically jigged over deep structure or schooling/suspended fish",
+        "presentation": "Drop it to the marked depth on semi-slack line, then work a lift-and-fall (yo-yo) rhythm - a sharp upward snap of the rod tip followed by a controlled fall on a semi-slack line so it flutters instead of dropping straight down. Most strikes come on the flutter fall, so stay in contact for a subtle tap rather than a hard thump.",
+    },
     "lipless_crankbait": {
         "name": "Lipless Crankbait",
         "video_key": "lipless_crankbait",
@@ -1283,6 +1315,7 @@ _CATEGORY_KEYWORD_RULES = [
         "dives to 8", "dives to 9", "dives to 10", "dives to 12",
     ]),
     ("blade_bait", ["blade bait"]),
+    ("spoon", ["spoon"]),  # punch-list #70 - "flutter spoon", "jigging spoon", "Duh Spoon", etc. all contain "spoon"
     ("suspending_jerkbait", ["jerkbait", "jerk bait"]),
     ("spinnerbait", ["spinnerbait", "spinner bait"]),
     ("drop_shot", ["drop shot", "dropshot", "drop-shot"]),  # punch-list #37

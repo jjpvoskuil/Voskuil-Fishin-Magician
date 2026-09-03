@@ -8695,6 +8695,73 @@ every real save.
     stayed intact) and **#72** (Trip History can edit a logged trip's
     details but not its location).
 
+138. **Punch-list #70 - added a "Spoon" lure category and categorized the
+    real spoons already in the tackle box.** User: "Need to add a lure
+    category 'Spoon' and also make sure this lure in the tackle box is
+    categorized as a spoon: Nichols Lures Lake Fork Flutter Spoon - Silver
+    Scale - 4\" - 3/4 oz."
+
+    Added `LURE_PROFILES["spoon"]` (core/lures.py) - colors by water
+    clarity, a 10-30 ft depth range, and lift-and-fall/yo-yo presentation
+    guidance - modeled on the existing `blade_bait` entry, the closest
+    analog already in the file (both are metal baits worked with a
+    vertical/near-vertical lift-and-fall, strikes mostly coming on the
+    flutter of the fall). Adding any key to `LURE_PROFILES` automatically
+    makes it a selectable Tackle Box category (`LURE_CATEGORY_OPTIONS` is
+    derived from it) with no other wiring needed. Also added a `"spoon"`
+    keyword rule to `_CATEGORY_KEYWORD_RULES` so any future item with
+    "spoon" in its name auto-tags on import/scan, the same as every other
+    category.
+
+    While looking for the named item on the `data` branch's real
+    `lure_inventory.csv`, found a SECOND real spoon already in the tackle
+    box that the punch-list text hadn't mentioned - "Nichols Duh Spoon UV
+    Morning Dawn 1 3/4oz" (added 2026-08-31, manually, no category) -
+    recategorized both rather than leaving one behind, since the entire
+    point of the new category is correct ownership matching.
+
+    Deliberately did NOT add "spoon" to any season's first/second-choice
+    picks in `recommend()` - every existing pick there is backed by a real,
+    cited Nolin-specific source (Omnia Fishing/KDFWR/a first-hand angler
+    forum report - see "Where the lure recommendations actually come from"
+    in README.md), and there's no such source on hand for a spoon pattern
+    on this lake specifically. Rather than guess, left it fully usable
+    (selectable, scoreable, tracked in Trip History/Leaderboard/lure
+    history the moment it's actually fished) but not proactively suggested,
+    same treatment as several other existing categories
+    (`finesse_shaky_head`, `drop_shot`, `soft_swimbait`, etc. all have real
+    video/keyword support with no guaranteed situational placement either).
+
+    A second gap surfaced while adding the category: `tests/
+    test_cabelas_picks_cache.py`'s existing coverage-guard test
+    (`test_real_cache_file_has_two_picks_for_every_lure_profile_category`)
+    immediately caught that the new category had zero curated Cabela's
+    fallback picks in `data/cabelas_picks_cache.csv` - exactly the kind of
+    silent coverage loss that test exists to catch. This sandbox's own live
+    Cabela's/Coveo lookup fails the same way the deployed app's does (see
+    punch-list #21/#22), so a live capture wasn't possible; used `WebSearch`
+    + `WebFetch` against real basspro.com product pages instead and added 2
+    genuinely real, verified products - Bass Pro Shops RealImage Jigging
+    Spoon ($5.49, SKU 3852197) and Cotton Cordell CC Spoon ($4.99, SKU
+    3474739) - with real prices and the same `assets.basspro.com` image URL
+    format already used throughout the rest of that file (each product
+    page returned that exact CDN URL pattern keyed to its own SKU, so this
+    wasn't guessed).
+
+    **Verification:** `pytest tests/ -q` - 381 passed (including the
+    now-satisfied coverage-guard test). A full `AppTest` smoke test across
+    every page passed clean. A targeted scratch check confirmed
+    `guess_category_from_text()` correctly auto-tags both real tackle-box
+    product names (and the two new cache products' names) as `"spoon"`,
+    `get_cached_picks("Spoon")` returns exactly the 2 real products above,
+    and - rendering the real Lure Inventory page via `AppTest` - "Spoon"
+    actually appears as a selectable option in every real Category
+    dropdown on that page, not just in the underlying data structures.
+
+    **Net state:** Spoon exists as a first-class lure category app-wide;
+    both real spoons in the tackle box are correctly tagged; punch-list #70
+    logged as Done on the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
