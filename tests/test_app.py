@@ -89,6 +89,67 @@ def test_sync_data_once_clears_stale_trip_history_cache_once_it_succeeds(monkeyp
         )
 
 
+def test_sync_data_once_retries_after_its_ttl_expires_even_without_a_process_restart(monkeypatch):
+    """Punch-list #80's real, final root cause (a THIRD live recurrence of
+    the 8/23 reversion, after #73 and #79 had already both landed): a
+    Streamlit Cloud "redeploy" doesn't always restart the Python process -
+    sometimes it just updates the running process's code via a git-level
+    checkout update. That silently resets data/'s working tree back to
+    main's own frozen copy (sync_data_from_data_branch() only ever touches
+    the working tree, never commits) while leaving st.cache_resource's
+    memoized "already succeeded" state fully intact - so _sync_data_once()
+    never even gets called again to retry anything, no matter how good its
+    own retry budget is. Proven live via core.storage.last_boot_sync_status
+    showing the EXACT SAME timestamp across two redeploys that nonetheless
+    had different data/ contents on disk.
+
+    Fixed by giving _sync_data_once() a bounded ttl instead of an unbounded
+    cache, so it re-attempts periodically regardless of an earlier success
+    in the SAME process - exactly the scenario this test simulates: no
+    process restart, no failure, just time passing past the ttl.
+
+    Streamlit's cache_resource ttl is measured via cache_utils.TTLCACHE_TIMER
+    (time.monotonic by default) - patched here to a fake, fully-controllable
+    clock so this test doesn't have to actually sleep past the real ttl.
+    """
+    from streamlit.runtime.caching import cache_utils
+
+    fake_clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(cache_utils, "TTLCACHE_TIMER", lambda: fake_clock["t"])
+
+    sync_calls = {"n": 0}
+
+    def fake_sync(token, slug):
+        sync_calls["n"] += 1
+        return True, "Synced data/ from the 'data' branch."
+
+    with mock.patch("core.appstate.github_token", return_value="fake-token"), \
+         mock.patch("core.storage.sync_data_from_data_branch", side_effect=fake_sync):
+        at = AppTest.from_file(APP_PATH, default_timeout=30)
+
+        at.run()  # 1st boot: syncs once.
+        assert not at.exception, f"1st run raised: {at.exception}"
+        assert sync_calls["n"] == 1
+
+        at.run()  # A same-process rerun moments later - still cached, no reason to re-sync yet.
+        assert not at.exception, f"2nd run raised: {at.exception}"
+        assert sync_calls["n"] == 1, (
+            "re-synced on every rerun instead of caching - would hit GitHub on every click"
+        )
+
+        # Simulate a "redeploy" that updates this SAME running process's code
+        # without restarting Python (the actual discovered mechanism) - no
+        # exception, no process restart, just time passing past the ttl.
+        fake_clock["t"] += 130
+        at.run()
+        assert not at.exception, f"3rd run raised: {at.exception}"
+        assert sync_calls["n"] == 2, (
+            "did not re-attempt the sync once its ttl expired - this is exactly the bug that let "
+            "a same-process redeploy's silently-reverted data/ go unnoticed for the rest of the "
+            "process's life, with nothing ever automatically retrying it"
+        )
+
+
 def test_sync_data_once_does_not_clear_caches_on_a_failed_attempt(monkeypatch):
     """The clear must be gated on success, not run unconditionally on every
     attempt - clearing on a FAILED attempt would just throw away a
