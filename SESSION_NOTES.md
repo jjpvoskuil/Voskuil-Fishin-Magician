@@ -9495,6 +9495,143 @@ every real save.
     retry-budget-only writeup that turned out to be necessary but not
     sufficient.
 
+147. **Punch-list #81 - calibration rewritten to fish-per-hour, plus a new
+    location x time-of-day adjustment.** Angler feedback, in four connected
+    parts: (1) forecast scores since the earlier scoring rebalance were
+    running "generally significantly lower" than felt right most days; (2)
+    the success metric calibration used "seems it should be something like
+    fish caught/hr over the session time," not whatever it actually was;
+    (3) rather than correct a whole period like "dawn," look at fish/hr
+    *within* that window and what changed day to day (moon phase, water
+    temp, etc.) to drive it; (4) season should be a *relative* baseline
+    ("a good morning in spring might always be better than one in summer,
+    but what about the day and parameters changed in that day") rather than
+    a flat offset.
+
+    Investigated all four with real data before changing anything. Fetched
+    the actual live production weather via the browser tools (this
+    sandbox's own network to Open-Meteo is blocked) and reproduced an exact
+    live score by hand against `core.scoring.score_day()`'s real code,
+    confirming the reported "today at dusk is a 3.1" score down to the
+    individual weight contributions. Confirmed the calibration success
+    metric really was a bare `fish_caught > 0` binary, exactly the crude
+    metric the angler suspected - a single fish in a 4-hour slog and five
+    fish in a 45-minute blitz both just counted as "1 success." Pulled all
+    143 real logged trips off the `data` branch and validated the angler's
+    own day-to-day methodology directly: over the stretch where morning
+    fishing was reported improving each day, real fish/hour-by-day
+    tracked deepening pressure-trend closely, while water temp and moon
+    were both trending in the model's "worse" direction over that same
+    stretch - concrete evidence the "look at what changed within the
+    window" instinct was right and the old whole-period correction
+    approach was the wrong shape of fix.
+
+    Along the way, the angler also caught and I verified two scoring-math
+    issues unrelated to calibration itself: a segment score actually can
+    reach 12.8 with everything maximally positive (confirmed via real code
+    execution, not estimation) and the floor is 1.0, not 0 as first
+    guessed - both correct, no fix needed, just confirmed. Angler also
+    asked whether clamping the final score or bounding the *adjustment
+    factors themselves* made more sense; talked through the tradeoff
+    (clamping keeps every factor's marginal contribution consistent and
+    debuggable; pre-bounding each factor to guarantee in-range sums either
+    requires re-deriving every weight against every other, or a similar
+    equivalent-but-hidden clamp - it doesn't actually remove the clamp, it
+    just moves where it happens) and the angler chose to keep clamping.
+
+    Presented four options with real data behind each and got two explicit
+    go-aheads to build: "yes, lets work to rewrite this to better iterate
+    scoring and a cleaner success rate," with the caveat that a lot of
+    historical session data is "a little sketchy" (batch-reconstructed
+    after the fact - see punch-list #57/#67-69) and a request to add a
+    location adjustment, since the majority of sessions happen at one spot
+    (Stripe Island Point). Asked a clarifying question about how to handle
+    the untrustworthy-duration data specifically (best-effort with a
+    plausibility filter now, vs. wait for a "logged live" flag, vs. a
+    stricter recency-only filter); angler picked the best-effort-now
+    option and added a key correction: Stripe Island Point and Midnight
+    Point's apparent difference isn't a flat per-spot thing at all - Stripe
+    Island tends to be better in the mornings, Midnight Point in the
+    evenings, i.e. a location x time-of-day interaction.
+
+    **Built**, in `core/calibration.py` (full rewrite - see the file's own
+    module docstring for the detailed reasoning):
+    - `trip_fish_per_hour(row)` - a real fish-per-hour rate computed per
+      logged lure entry from its own `lure_start_time`/`lure_end_time`
+      window (each row already scopes `fish_caught` to just that window,
+      confirmed directly from the CSV shape - no session-level
+      aggregation needed). Applies a 5-minute-6-hour plausibility filter
+      and returns `None` (excluded, not zeroed) for anything outside that
+      range or missing timing entirely, since there's no field anywhere
+      distinguishing a live-timed entry from a batch-reconstructed one
+      (checked directly - every row says `"source": "spot_session"`
+      regardless).
+    - `calibrate_weights()` rewritten to bucket on median fish/hour
+      (median, not mean, chosen specifically because of a real observed
+      outlier in the live data - 17 fish logged in one 1-hour window)
+      instead of the old binary success flag, normalized against the
+      overall median fish/hour across all trustworthy-duration trips.
+      Falls back to the unchanged `DEFAULT_WEIGHTS` untouched if there's
+      no trustworthy-duration data yet at all. Same +/-35%-of-default cap
+      and 4-per-side minimum sample as before.
+    - New `location_adjustments()` - scores each `(spot_id, segment)` cell
+      against that SAME segment's median rate everywhere else (not the
+      spot's own overall average), so the Stripe Island/Midnight Point
+      time-of-day interaction the angler described is exactly the shape
+      of thing this can represent. Requires >=4 trustworthy trips in the
+      cell itself AND >=4 trustworthy trips in that segment overall before
+      saying anything. Applies empirical-Bayes-style shrinkage
+      (`n / (n + 6)`) so a cell right at the minimum sample count is
+      damped to 40% of its raw estimate, while a well-sampled cell
+      approaches the full estimate - a thin-sample spot can't swing the
+      score around on noise the way a flat, unshrunk bonus would.
+    - `calibration_summary()` extended with a `trustworthy_duration_trips`
+      count so the Trip History page's calibration-status view can show
+      how much of the logged history is actually usable, not just the raw
+      trip count.
+
+    Wired end-to-end: `core/scoring.py`'s `_segment_score()`/
+    `manual_segment_score()` gained `location_adjustment`/
+    `location_adjustment_n` params that add a capped points adjustment
+    plus a new **"Location"** line to the score breakdown
+    ("Outperforms/Underperforms other spots at this time of day, per your
+    own trip log (based on N logged trips here)."). `core/appstate.py`
+    gained a cached `get_location_adjustments()` (5-minute TTL, mirroring
+    `get_calibrated_weights()`) with matching `.clear()` calls added
+    everywhere the existing calibration cache was already being cleared
+    (Trip History, Spot Session, Leaderboard - 5 call sites). Spot Session
+    now looks up `(spot_id, segment_name)` and passes the result into
+    `manual_segment_score()` at all 3 of its scoring call sites.
+
+    **Verified:** 12 new tests in `tests/test_calibration.py`
+    (`trip_fish_per_hour()`'s timing/plausibility-filter behavior,
+    `calibrate_weights()` staying at defaults with no trustworthy data and
+    moving on fish/hour even when binary success is identical either way,
+    `calibration_summary()`'s new count, and `location_adjustments()`'s
+    reward/minimum-sample/shrinkage behavior - including a deliberately
+    large baseline population in the shrinkage test so the dominant spot's
+    own volume doesn't itself skew the segment baseline it's being
+    compared against) plus 2 new tests in `tests/test_scoring.py` for the
+    new score breakdown line, all confirmed to exercise genuinely new
+    behavior that didn't exist pre-rewrite. Full suite: `pytest tests/ -q`
+    - 411 passed. Full `AppTest` smoke test across every page - only
+    `1_7_Day_Forecast.py` fails, on this sandbox's already-known blocked
+    network to Open-Meteo (unrelated to this change, same as every prior
+    smoke test this session).
+
+    **Still open, not done in this pass:** part 4 of the original
+    feedback - making the season adjustment relative to the current
+    season's own baseline instead of today's flat seasonal offset - was
+    investigated and data-validated but not implemented; worth a future
+    session's explicit scope check with the angler before folding into
+    this same punch-list item or opening a new one. Also worth watching:
+    current per-spot/per-segment sample sizes are still thin enough that
+    the specific Stripe Island/Midnight Point pattern described isn't yet
+    statistically provable from logged data alone - the mechanism is
+    correct and in place, but the angler should expect the "Location" line
+    to stay quiet on some cells for a while yet, not read that as the
+    feature being broken.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
@@ -9506,9 +9643,12 @@ every real save.
   `core/lures.py` are intentionally not a black box; every weight/rule has
   an inline comment explaining the fishing-knowledge rationale.
 - **Trip logging + lightweight self-calibration** - `core/calibration.py`
-  compares catch-success rates between trips where a factor was present vs.
+  compares fish-per-hour rates (punch-list #81 - previously a cruder
+  catch/no-catch binary) between trips where a factor was present vs.
   absent, nudging default weights within a capped range only once enough
-  samples exist per side (`MIN_SAMPLES_PER_SIDE=4`, `MAX_NUDGE_FRACTION=0.35`).
+  samples exist per side (`MIN_SAMPLES_PER_SIDE=4`, `MAX_NUDGE_FRACTION=0.35`),
+  plus a shrinkage-damped location x time-of-day adjustment on the same
+  basis.
 - **Git-based persistence, no external database** - trip logs and now
   Quickdraw survey CSVs are committed straight into the repo so Streamlit
   Cloud restarts don't lose data.
@@ -9857,6 +9997,19 @@ every real save.
   "should" isn't "can never happen again" for a family of bugs this
   subtle) - and recover from git history the same way entry 136 did
   before assuming the data is gone for good.
+- (punch-list #81, entry 147) Season is still a flat, fixed adjustment,
+  not relative to the current season's own baseline - the angler's own
+  framing was "a good morning in spring might always be better than one
+  in summer, but what about the day and parameters changed in that day."
+  Investigated and data-validated but intentionally not built in this
+  pass; needs an explicit scope check with the angler before it's picked
+  up. Separately, `core.calibration.location_adjustments()`'s per-spot/
+  per-segment sample sizes are still thin - the specific Stripe Island
+  Point (mornings) / Midnight Point (evenings) pattern the angler
+  described isn't yet statistically provable from logged data alone, so
+  don't be surprised if the Spot Session "Location" line stays quiet on
+  some cells for a while; that's the minimum-sample guard working as
+  intended, not a bug.
 
 ## Operating notes
 

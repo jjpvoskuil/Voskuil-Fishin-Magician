@@ -7,7 +7,7 @@ import streamlit as st
 
 from core.appstate import (
     get_lake_spots, get_inventory, get_weather_bundle, get_anglers, get_trip_history,
-    get_calibrated_weights, github_token, repo_slug, github_connection_status,
+    get_calibrated_weights, get_location_adjustments, github_token, repo_slug, github_connection_status,
 )
 from core.anglers import add_angler, ANGLERS_PATH, OTHER_LABEL as ANGLER_OTHER_LABEL
 from core.lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE, split_bottom_structure
@@ -902,7 +902,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
     }
 
 
-def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime, segment_name: str):
+def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime, segment_name: str, spot_id: str = None):
     """Shared scoring path for both a live setup preview (using "right now"
     as at_time/segment) and edit mode (using that trip's own logged time/
     segment) - one formula, one place, instead of the old page's separate
@@ -920,7 +920,14 @@ def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime,
     #42) can genuinely lack these - direct dict indexing here used to raise
     a bare KeyError and crash the whole page the moment such a session
     became reconnectable, instead of falling back the same way the live
-    form's own widgets already do."""
+    form's own widgets already do.
+
+    Punch-list #81: `spot_id`, when given, looks up this spot's own
+    (spot_id, segment_name) entry from core.appstate.get_location_
+    adjustments() - how much this specific spot has historically over/
+    under-performed at this specific time of day, relative to that same
+    time of day everywhere else. Optional (defaults to None/no adjustment)
+    since not every caller necessarily has a resolved spot yet."""
     secchi_ft = cond_values.get("secchi_ft", 2.5)
     water_temp_f = cond_values.get("water_temp_f", 85.0)
     light_condition = cond_values.get("light_condition") or LIGHT_CONDITIONS[2]
@@ -934,11 +941,14 @@ def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime,
     avg_wind_mph = wind_mph_for_band(wind_band_choice)
     total_precip_in, max_precip_prob_pct = precipitation_proxy(precipitation)
     rt = realtime_context_from_bundle(bundle, segment_name, session_date, at_time=at_time)
+    loc_entry = get_location_adjustments().get((spot_id, segment_name)) if spot_id else None
     score_result = manual_segment_score(
         segment_name, season, avg_cloud_pct, avg_wind_mph, total_precip_in, max_precip_prob_pct,
         pressure_trend_24h=rt["pressure_trend_24h"], solunar_overlap=rt["solunar_overlap"], at_time=at_time,
         water_temp_f=water_temp_f, water_clarity=water_clarity,
         forage_present=bool(cond_values.get("forage_seen")),
+        location_adjustment=loc_entry["adjustment"] if loc_entry else 0.0,
+        location_adjustment_n=loc_entry["n"] if loc_entry else None,
     )
     return water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result
 
@@ -1539,6 +1549,7 @@ def _push_or_toast(paths, commit_message, local_message):
         # rather than a clear() call repeated at each of the 7 call sites.
         get_trip_history.clear()
         get_calibrated_weights.clear()
+        get_location_adjustments.clear()
     token = github_token()
     if token:
         ok, msg = commit_and_push_data(paths, token, repo_slug(), commit_message)
@@ -2163,7 +2174,7 @@ if active is not None:
         _mid_now = lake_now_naive()
         _mid_segment = _guess_segment(_mid_now.hour, _mid_now)
         mid_water_clarity, mid_season, mid_avg_cloud_pct, mid_avg_wind_mph, mid_rt, mid_score_result = _compute_scoring(
-            mid_cond, session_date, bundle, _mid_now, _mid_segment,
+            mid_cond, session_date, bundle, _mid_now, _mid_segment, spot_id=spot["spot_id"],
         )
 
         st.divider()
@@ -2331,7 +2342,7 @@ else:
     _preview_now = lake_now_naive()
     _preview_segment = _guess_segment(_preview_now.hour, _preview_now)
     water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
-        cond_values, session_date, bundle, _preview_now, _preview_segment,
+        cond_values, session_date, bundle, _preview_now, _preview_segment, spot_id=spot["spot_id"],
     )
 
     st.divider()
@@ -2431,7 +2442,7 @@ else:
         at_time = datetime.combine(session_date, start_time)
         segment_name = _guess_segment(at_time.hour, at_time)
         water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
-            cond_values, session_date, bundle, at_time, segment_name,
+            cond_values, session_date, bundle, at_time, segment_name, spot_id=spot["spot_id"],
         )
         base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler=resolved_angler)
         # Punch-list #55: a real session_id, stamped once here and reused by

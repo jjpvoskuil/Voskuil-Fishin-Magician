@@ -242,6 +242,7 @@ def _segment_score(
     max_precip_prob: float, weights: dict,
     water_temp_f: Optional[float] = None, water_clarity: Optional[str] = None,
     forage_present: Optional[bool] = None,
+    location_adjustment: float = 0.0, location_adjustment_n: Optional[int] = None,
 ) -> tuple:
     """The actual 1-10 scoring formula for one time-of-day segment, factored
     out of score_day() so it can be driven either by real hourly/daily
@@ -260,6 +261,18 @@ def _segment_score(
     when someone is standing at the water, with no equivalent forecast-API
     estimate to fall back on. Both still default to None, so a caller that
     doesn't pass them behaves exactly as if they didn't exist.
+
+    `location_adjustment` (punch-list #81) is a pre-computed points value
+    from core.calibration.location_adjustments() - how much this specific
+    spot has historically over/under-performed at this specific segment,
+    relative to that same segment everywhere else. Computed outside this
+    function (same pattern as `weights` itself) since it needs a full trip
+    log and a spot_id to look up, neither of which this function otherwise
+    needs. Manual-entry-path-only, same reasoning as water_clarity/forage -
+    score_day()/score_week() forecast a whole lake, not one spot, so they
+    never have a spot_id to look one up with. Defaults to 0.0 (no
+    adjustment), exactly like a spot/segment with too little data yet
+    behaves in core.calibration.location_adjustments()'s own output.
 
     Returns (score, notes, breakdown) - `notes` is the existing plain-
     language bullet list used elsewhere in the app; `breakdown` is a new
@@ -381,6 +394,18 @@ def _segment_score(
         d = w["forage_present_bonus"]
         note = "Forage observed nearby - active bait often means active predators."
         score += d; notes.append(note); breakdown.append(("Forage", d, note))
+
+    # Location (punch-list #81) - manual-entry-only, see docstring above.
+    # Already a signed points value (positive = this spot/segment combo
+    # outperforms, negative = underperforms), so it's added directly rather
+    # than looked up from `weights` like every other factor above.
+    if location_adjustment:
+        n_part = f" (based on {location_adjustment_n} logged trips here)" if location_adjustment_n else ""
+        note = (
+            f"{'Outperforms' if location_adjustment > 0 else 'Underperforms'} "
+            f"other spots at this time of day, per your own trip log{n_part}."
+        )
+        score += location_adjustment; notes.append(note); breakdown.append(("Location", location_adjustment, note))
 
     return round(_clamp(score), 1), notes, breakdown
 
@@ -517,6 +542,8 @@ def manual_segment_score(
     water_temp_f: Optional[float] = None,
     water_clarity: Optional[str] = None,
     forage_present: Optional[bool] = None,
+    location_adjustment: float = 0.0,
+    location_adjustment_n: Optional[int] = None,
 ) -> ManualScoreResult:
     """Same 1-10 activity score as score_day()/score_week(), but driven by
     conditions someone reports by hand while standing at the water (the
@@ -548,7 +575,12 @@ def manual_segment_score(
     additional factors score_day()/score_week() have no equivalent input
     for - passing them in lets this manual path go "beyond pressure trend
     and moon phase" and actually use the rest of what the angler entered
-    (see _segment_score()'s docstring for exactly how each one scores)."""
+    (see _segment_score()'s docstring for exactly how each one scores).
+    `location_adjustment`/`location_adjustment_n` (punch-list #81) are a
+    pre-computed points value + sample count from core.calibration.
+    location_adjustments(), looked up by the caller's own (spot_id,
+    segment_name) - see _segment_score()'s docstring for why this function
+    doesn't compute it itself."""
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     moon = moon or astro.moon_phase(at_time or lake_now_naive())
 
@@ -556,6 +588,7 @@ def manual_segment_score(
         segment_name, pressure_trend_24h, moon, solunar_overlap, avg_cloud_pct, avg_wind_mph,
         season, total_precip_in, max_precip_prob_pct, w,
         water_temp_f=water_temp_f, water_clarity=water_clarity, forage_present=forage_present,
+        location_adjustment=location_adjustment, location_adjustment_n=location_adjustment_n,
     )
 
     warnings = []

@@ -816,6 +816,50 @@ update never requires scrolling past a full lure list you didn't ask to see.
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
 History** page in the app for calibration status.
 
+**Calibration now uses fish-per-hour, not a bare catch/no-catch flag, and adds a
+location adjustment (punch-list #81).** Real angler feedback: forecast scores were
+running lower than felt right, and the underlying "success" metric calibration compared
+was just `fish_caught > 0` - a single fish in a 4-hour slog and five fish in a 45-minute
+blitz both just counted as "1 success," throwing away almost everything a session
+actually reports. `core.calibration.trip_fish_per_hour()` computes a real fish-per-hour
+rate per logged lure entry from its own `lure_start_time`/`lure_end_time` window (each
+row already scopes `fish_caught` to just that window, so no session-level aggregation is
+needed) - but that duration data isn't fully trustworthy, since a lot of historical
+sessions were reconstructed after the fact in a batch during past data-recovery work
+(see punch-list #57/#67-69) with no field distinguishing a live-timed entry from a
+reconstructed one. Rather than trust every logged duration equally, it applies a 5
+minute - 6 hour plausibility filter and *excludes* (not zeroes) anything outside that
+range or missing a duration entirely - best-effort against what already exists, per the
+angler's own explicit call, instead of waiting on a "logged live" flag that doesn't
+exist yet. Both `calibrate_weights()` and the new `location_adjustments()` compare the
+*median* fish/hour within each bucket, not the mean, specifically so one
+implausibly-productive-but-still-inside-the-filter outlier (a real one in the live data:
+17 fish logged in a single 1-hour window) can't single-handedly swing a factor's
+calibration.
+
+The majority of logged sessions happen at one spot, Stripe Island Point, which the
+angler flagged as consistently good - but pointed out the effect isn't a flat per-spot
+bonus: Stripe Island Point tends to fish better in the mornings and Midnight Point the
+other way around, a location x time-of-day interaction, not a location-only one. New
+`location_adjustments()` scores each `(spot, time-of-day segment)` cell against that
+*same segment's* baseline everywhere else (not the spot's overall average), with
+empirical-Bayes-style shrinkage (`n / (n + 6)`) so a cell with only a handful of logged
+trips gets damped hard rather than swinging the score around on noise. Wired into Spot
+Session scoring (`manual_segment_score()`/`_segment_score()`) as a new **"Location"**
+line in the score breakdown once a spot/segment cell has at least 4 trustworthy-duration
+trips logged, on both sides (the cell itself and enough same-segment trips elsewhere to
+have a baseline to compare against) - a cell without enough data simply doesn't show a
+Location line yet, the same way any other under-sampled calibration factor stays silent
+rather than guessing. Current sample sizes are still thin enough that the specific
+Stripe Island/Midnight Point pattern the angler described isn't statistically provable
+yet from logged data alone, but the mechanism is now in place to pick it up as more
+trips accumulate at each spot/segment.
+
+Still open from that same round of feedback, not yet implemented: making the *season*
+adjustment relative to the current season's own baseline (a good morning in spring
+being scored against other spring mornings, not one flat year-round offset) rather than
+today's flat seasonal adjustment.
+
 **Every reader of a trip's saved conditions is hardened against a malformed row now
 (punch-list #60).** `conditions_json` is free-text JSON, not schema-validated - a
 hand-edited CSV, a legacy row, or a future bug elsewhere could in principle leave
@@ -1504,7 +1548,8 @@ core/
                            engine's structure-type vocabulary for Spot Session
   storage.py              Trip log read/write + git commit-back (generic - reused by
                            lure_inventory.py and lake_spots.py too)
-  calibration.py          Weight calibration from logged trips
+  calibration.py          Weight + location calibration from logged trips, on a
+                           fish-per-hour basis (punch-list #81)
   lure_inventory.py       Tackle inventory read/write + photo storage (category field
                            links each item to a core.lures lure type)
   lure_vision.py           Photo -> brand/product-name read via Claude's vision API,

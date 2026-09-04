@@ -39,7 +39,7 @@ import pandas as pd
 import streamlit as st
 
 from core.appstate import (
-    get_lake_spots, get_trip_history, get_calibrated_weights, get_anglers, github_token, repo_slug,
+    get_lake_spots, get_trip_history, get_calibrated_weights, get_location_adjustments, get_anglers, github_token, repo_slug,
 )
 from core.lures import LURE_PROFILES
 from core.activity_log import format_weight_lb_oz
@@ -77,6 +77,7 @@ if _refresh_col.button(
         _ok, _msg = sync_data_from_data_branch(_token, repo_slug())
         get_trip_history.clear()
         get_calibrated_weights.clear()
+        get_location_adjustments.clear()
         (st.success if _ok else st.warning)(_msg)
     else:
         st.info("No GitHub token configured here - nothing to refresh.")
