@@ -78,12 +78,14 @@ force pointless, unrelated re-fetches on every process boot.
 """
 import streamlit as st
 
+from datetime import datetime, timezone
+
 from core.appstate import (
     github_token, repo_slug,
     get_trip_history, get_calibrated_weights, get_inventory, get_lake_spots,
     get_dev_tasks, get_anglers, get_water_quality_log, get_spots,
 )
-from core.storage import sync_data_from_data_branch
+from core.storage import sync_data_from_data_branch, last_boot_sync_status
 
 # Punch-list #79: every core.appstate getter that reads a file under data/ -
 # sync_data_from_data_branch() overlays the whole directory, not just
@@ -102,6 +104,13 @@ def _sync_data_once():
     token = github_token()
     if token:
         ok, msg = sync_data_from_data_branch(token, repo_slug())
+        # Punch-list #80: record every attempt's real outcome (see
+        # core.storage.last_boot_sync_status's own comment) so a live
+        # incident is diagnosable from the Development page directly,
+        # instead of guessing from symptoms the way this one had to be.
+        last_boot_sync_status["ok"] = ok
+        last_boot_sync_status["message"] = msg
+        last_boot_sync_status["attempted_at"] = datetime.now(timezone.utc).isoformat()
         if not ok:
             # Punch-list #73: don't let st.cache_resource memoize a failed
             # sync as "done" - see the module docstring above. Raising here

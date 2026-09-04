@@ -30,7 +30,7 @@ from core.dev_tasks import (
     DEV_TASKS_COUNTER_PATH, DEV_TASKS_PATH, PAGE_OPTIONS, STATUS_DONE,
     append_task, delete_task, mark_done, reopen_task, update_task,
 )
-from core.storage import commit_and_push_data
+from core.storage import commit_and_push_data, last_boot_sync_status
 from core.ui import inject_mobile_css
 
 st.set_page_config(page_title="Development - Nolin Lake", page_icon="🛠️", layout="wide")
@@ -67,6 +67,21 @@ with st.expander(f"🔌 GitHub connection: {'connected' if _gh_configured else '
         with st.spinner("Checking against GitHub..."):
             _test_ok, _test_msg = test_github_push_access(github_token(), repo_slug())
         (st.success if _test_ok else st.error)(_test_msg)
+
+    # Punch-list #80: this process's own most recent boot-time data-branch
+    # sync attempt (app.py's _sync_data_once()) - not to be confused with
+    # "Test connection now" above, which is a live, on-demand check that
+    # doesn't touch data/ at all. Shows None/None until the first attempt of
+    # this process's life; once "Test connection now" alone isn't enough
+    # info to diagnose a live "data looks stale" report, this is what
+    # actually ran and what it actually returned.
+    st.caption("Most recent automatic boot-time data sync (this running process):")
+    if last_boot_sync_status["attempted_at"] is None:
+        st.caption("Not attempted yet this process - no GITHUB_TOKEN, or still starting up.")
+    else:
+        (st.success if last_boot_sync_status["ok"] else st.warning)(
+            f"{last_boot_sync_status['attempted_at']} - {last_boot_sync_status['message']}"
+        )
 
 COMMIT_PATHS = [DEV_TASKS_PATH, DEV_TASKS_COUNTER_PATH]
 

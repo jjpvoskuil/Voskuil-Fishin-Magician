@@ -158,6 +158,20 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIP_LOG_PATH = REPO_ROOT / "data" / "trip_log.csv"
 
+# Punch-list #80 diagnostics: a process-global record of the boot-time data
+# sync's most recent outcome. Written only by app.py's _sync_data_once()
+# (never imported there directly - app.py's own top-level st.navigation()/
+# pg.run() calls make it unsafe to import as a module from anywhere else);
+# read (never written) by pages/7_Development.py's "GitHub connection"
+# panel. Exists because the #80 live incident (the 8/23 reversion
+# recurring a third time right after a redeploy) could only be diagnosed by
+# guessing from user-visible symptoms - the manual "Refresh from GitHub"
+# button succeeding instantly, right after the automatic boot sync had
+# apparently failed, ruled out a lot but never showed the real error text
+# the automatic attempt actually hit. This makes that error visible on the
+# very next occurrence instead of needing another round of guess-and-check.
+last_boot_sync_status = {"ok": None, "message": None, "attempted_at": None}
+
 
 def _data_lock_path(repo_root: Path = REPO_ROOT) -> Path:
     """Same keying scheme as _data_worktree_dir() below (a hash of
