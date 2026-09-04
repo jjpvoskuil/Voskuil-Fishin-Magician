@@ -154,7 +154,7 @@ import pandas as pd
 import streamlit as st
 
 from core.appstate import (
-    get_lake_spots, get_weather_bundle, get_anglers, get_trip_history, get_calibrated_weights,
+    get_lake_spots, get_weather_bundle, get_anglers, get_trip_history, get_calibrated_weights, get_location_adjustments,
     github_token, repo_slug,
 )
 from core.storage import (
@@ -206,6 +206,7 @@ if _refresh_col.button(
         _ok, _msg = sync_data_from_data_branch(_token, repo_slug())
         get_trip_history.clear()
         get_calibrated_weights.clear()
+        get_location_adjustments.clear()
         (st.success if _ok else st.warning)(_msg)
     else:
         st.info("No GitHub token configured here - nothing to refresh.")
@@ -928,6 +929,7 @@ def _render_session_edit(session: dict, ns: str, ens: str):
             # shows up elsewhere right away instead of up to 5 minutes later.
             get_trip_history.clear()
             get_calibrated_weights.clear()
+            get_location_adjustments.clear()
             st.toast(f"Saved {len(saved_ids)} lure row(s).", icon="✅")
         if missing_ids:
             st.toast("Couldn't save some rows - they may have been deleted elsewhere.", icon="⚠️")
@@ -978,6 +980,7 @@ def _render_session_card(session: dict):
                 _push([TRIP_LOG_PATH], f"Delete session {session['session_key']} via Trip History ({sum(deleted)} row(s))")
                 get_trip_history.clear()
                 get_calibrated_weights.clear()
+                get_location_adjustments.clear()
                 st.toast("Session deleted.", icon="✅")
             else:
                 st.toast("Couldn't find that session - it may have already been removed.", icon="⚠️")

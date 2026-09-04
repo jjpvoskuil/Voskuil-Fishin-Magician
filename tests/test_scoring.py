@@ -436,7 +436,23 @@ def test_manual_segment_score_without_the_new_extras_is_unaffected():
     # them, same as before they existed.
     result = manual_segment_score("Dawn", "summer_peak", 40, 7)
     labels = {label for label, _, _ in result.breakdown}
-    assert not labels & {"Water temperature", "Water clarity", "Forage"}
+    assert not labels & {"Water temperature", "Water clarity", "Forage", "Location"}
+
+
+def test_manual_segment_score_location_adjustment_punch_list_81():
+    # core.calibration.location_adjustments() hands this function an
+    # already-signed points value (positive = this spot/segment historically
+    # outperforms, negative = underperforms) - _segment_score() just adds it
+    # directly, same as every other breakdown line.
+    boosted = manual_segment_score("Dawn", "summer_peak", 40, 7, location_adjustment=0.6, location_adjustment_n=12)
+    penalized = manual_segment_score("Dawn", "summer_peak", 40, 7, location_adjustment=-0.4, location_adjustment_n=8)
+    neither = manual_segment_score("Dawn", "summer_peak", 40, 7)
+    assert boosted.score > neither.score
+    assert penalized.score < neither.score
+    assert round(boosted.score - neither.score, 3) == 0.6
+    loc_note = next(note for label, _, note in boosted.breakdown if label == "Location")
+    assert "12 logged trips" in loc_note
+    assert not any(label == "Location" for label, _, _ in neither.breakdown)
 
 
 def test_manual_segment_score_light_rain_gives_a_small_bonus_short_of_storm():

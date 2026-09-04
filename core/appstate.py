@@ -11,7 +11,7 @@ from .cabelas_lookup import search_lures
 from .cabelas_picks_cache import get_cached_picks
 from .spots import load_spots
 from .storage import read_all_trips
-from .calibration import calibrate_weights
+from .calibration import calibrate_weights, location_adjustments
 from .lure_inventory import read_all_items
 from .lake_spots import read_all_spots
 from .dev_tasks import read_all_tasks as read_all_dev_tasks
@@ -94,6 +94,20 @@ def get_cabelas_suggestions(query: str, num_results: int = 2):
 def get_calibrated_weights():
     trips = read_all_trips()
     return calibrate_weights(trips), len(trips)
+
+
+# Punch-list #81: a per-(spot_id, segment) points adjustment from
+# core.calibration.location_adjustments() - same cache shape/TTL reasoning
+# as get_calibrated_weights() above (both derive from the same
+# read_all_trips() call, but are separate cache entries since callers want
+# different return shapes and this one is Spot-Session-only, not needed on
+# every page get_calibrated_weights() already is). See core/calibration.py's
+# module docstring and core.scoring._segment_score()'s docstring for what
+# this represents and why it's manual-entry-path-only.
+@st.cache_data(ttl=60 * 5)
+def get_location_adjustments():
+    trips = read_all_trips()
+    return location_adjustments(trips)
 
 
 # Punch-list #37: core.lures.recommend()'s personal-history lure boost
