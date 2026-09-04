@@ -49,11 +49,52 @@ whatever data/ already has locally for this one page load, but leaves the
 cache empty so the very next page interaction (this file's top level
 re-executing) tries the sync again, instead of never trying again for the
 rest of this process's life.
+
+Punch-list #77 (live report - the 8/23 reversion "happens on every update
+we do" even after #73): #73 fixed the sync itself retrying, but missed a
+SEPARATE layer of caching sitting on top of it. core.appstate's cached
+getters (get_trip_history(), get_calibrated_weights(), etc.) are their own
+independent st.cache_data caches, up to 5 minutes for the trip-related
+ones - completely unaware of whether the file underneath them just got
+overlaid by a sync. If any page render happened to call one of these
+BEFORE this process's sync had succeeded (the exact window #73 already
+made much smaller but can't make zero - e.g. a page rendering during a
+still-in-progress retry), that stale read gets memoized and keeps being
+served for its own full TTL, regardless of the sync catching up moments
+later on a subsequent retry. That's what made a manual "🔄 Refresh from
+GitHub" still necessary sometimes even though the underlying file was
+already correct - that button's real effect was never really "re-fetch
+the file" (which #73's automatic retry already did on its own), it was
+clearing these getters' caches, which nothing else ever did automatically.
+Fixed by clearing every getter in core.appstate that reads a file under
+data/ the instant a sync actually succeeds (below) - not on every sync
+ATTEMPT (that would defeat the point of caching), only the one real
+success per process, exactly when st.cache_resource's guard means this
+function body actually runs its course. Deliberately NOT clearing
+get_weather_bundle()/get_lake_level()/get_surface_water_quality()/
+get_cabelas_suggestions() - those wrap live external API calls with
+nothing to do with the data branch sync, and clearing them here would just
+force pointless, unrelated re-fetches on every process boot.
 """
 import streamlit as st
 
-from core.appstate import github_token, repo_slug
+from core.appstate import (
+    github_token, repo_slug,
+    get_trip_history, get_calibrated_weights, get_inventory, get_lake_spots,
+    get_dev_tasks, get_anglers, get_water_quality_log, get_spots,
+)
 from core.storage import sync_data_from_data_branch
+
+# Punch-list #77: every core.appstate getter that reads a file under data/ -
+# sync_data_from_data_branch() overlays the whole directory, not just
+# trip_log.csv, so a stale read of any of these can outlive a successful
+# sync exactly the same way get_trip_history() could. Listed here, once,
+# rather than scattered .clear() calls, so a future new data-backed getter
+# in core.appstate is an easy one-line addition to notice and add.
+_DATA_BACKED_CACHES = (
+    get_trip_history, get_calibrated_weights, get_inventory, get_lake_spots,
+    get_dev_tasks, get_anglers, get_water_quality_log, get_spots,
+)
 
 
 @st.cache_resource(show_spinner=False)
@@ -68,6 +109,12 @@ def _sync_data_once():
             # cached, so the very next rerun retries it instead of this
             # process being stuck on stale/frozen data for its whole life.
             raise RuntimeError(msg)
+        # Punch-list #77: a real, successful sync just happened - clear
+        # every cache that might already be holding a read from BEFORE it,
+        # so the very next rerun sees fresh data immediately instead of
+        # waiting out each getter's own TTL (up to 5 minutes).
+        for cache in _DATA_BACKED_CACHES:
+            cache.clear()
     return True
 
 

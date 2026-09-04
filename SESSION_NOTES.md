@@ -9146,6 +9146,80 @@ every real save.
     page indefinitely with no feedback. Punch-list #76 logged as Done on
     the Development page.
 
+144. **Punch-list #77 - the 8/23 reversion "happens on every update we do,"
+    even after punch-list #73.** User: "why does it revert to everything
+    from 8/23/26 on back? Happens on every update we do. What is special
+    about 8/23/26??" Asked to fix it properly rather than band-aid it:
+    "If there is a way to fix the main branch split that causes this
+    without making things worse, that seems like the real fix instead of
+    the bandaid."
+
+    **Root cause:** #73 fixed the boot-time sync itself (retrying instead
+    of getting permanently stuck), but missed a SEPARATE layer of caching
+    sitting on top of it. `core.appstate`'s cached getters
+    (`get_trip_history()`, `get_calibrated_weights()`, `get_inventory()`,
+    `get_lake_spots()`, `get_dev_tasks()`, `get_anglers()`,
+    `get_water_quality_log()`, `get_spots()` - every getter that reads a
+    file under `data/`) are their own independent `st.cache_data` caches,
+    up to 5 minutes for the trip-related ones, with no idea whether the
+    file underneath them just changed. If any page render happened to call
+    one of these during the narrow window before this process's sync had
+    succeeded (a window #73 already shrank a lot, via retries, but
+    couldn't shrink to zero), that stale read got memoized and kept being
+    served for its own full TTL - regardless of the sync catching up
+    moments later on its own next retry. That's what the manual "🔄
+    Refresh from GitHub" button was really fixing in that moment: not
+    re-pulling the file (the automatic retry already did that on its own),
+    but clearing these getters' caches, which nothing else ever did
+    automatically.
+
+    **On "is there a real fix to the branch split itself":** considered
+    and explicitly rejected removing `main`'s frozen `data/*.csv` snapshot
+    entirely (e.g. untracking `data/*.csv` from `main` so there's nothing
+    to "revert" to). That would trade a now-mostly-fixed cosmetic staleness
+    issue for a worse failure shape: on the rare occasion a sync genuinely
+    fails at boot (now rarer still after punch-list #76's timeouts), the
+    app would show a completely EMPTY dataset instead of a stale-but-
+    populated one. The two-branch split itself (`main`=code, `data`=data)
+    is also not something to unwind - it's the only way to stop Streamlit
+    Cloud's own redeploy-on-push-to-`main` behavior from wiping every
+    connected angler's session the instant real data landed on `main` the
+    old way (confirmed by real usage logs at the time of punch-list #52).
+    Concluded the cache-invalidation gap IS the real, complete fix, not a
+    band-aid on top of an unfixed root cause - once it's closed, the
+    frozen snapshot on `main` goes back to being what it was always meant
+    to be: an invisible, harmless fallback, not something a user should
+    ever actually see.
+
+    **Fix:** `app.py`'s `_sync_data_once()` now clears every
+    `core.appstate` getter that reads a file under `data/` immediately
+    after a successful sync (a new `_DATA_BACKED_CACHES` tuple, listed once
+    so a future new data-backed getter is an easy one-line addition to
+    notice) - gated on success, not run on every attempt, so a failing
+    sync doesn't pointlessly throw away a perfectly good cached read.
+    Deliberately does NOT clear `get_weather_bundle()`/`get_lake_level()`/
+    `get_surface_water_quality()`/`get_cabelas_suggestions()` - those wrap
+    live external API calls with nothing to do with the data branch sync.
+
+    **Verification:** two new tests in a new `tests/test_app.py`, using
+    Streamlit's `AppTest` (the same tool already used, as an uncommitted
+    scratch script, to verify punch-list #73's own fix - committed this
+    time so this exact class of bug has durable regression coverage): one
+    drives `app.py` through a failed-then-successful sync and confirms
+    `get_trip_history()` picks up the fresh row count the moment the sync
+    succeeds instead of keeping its stale pre-success read (confirmed to
+    fail against the pre-fix `app.py` and pass against the fix); the other
+    confirms a still-FAILING sync attempt does NOT clear the cache
+    pointlessly (passes both before and after - a non-regression guard).
+    `pytest tests/ -q` - 396 passed (2 new). A full `AppTest` smoke test
+    across every page passed clean.
+
+    **Net state:** a fresh deploy now shows current data immediately once
+    its sync succeeds, instead of needing a manual "🔄 Refresh from GitHub"
+    click or a wait of up to 5 minutes - the 8/23 reversion should no
+    longer be visible in ordinary use. Punch-list #77 logged as Done on
+    the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

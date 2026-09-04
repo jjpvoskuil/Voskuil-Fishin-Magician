@@ -1367,6 +1367,33 @@ good. If you're looking at stale data on the live app right now, the existing
 "🔄 Refresh from GitHub" button (Trip History or Tackle Box) still fixes it
 immediately, independent of any code deploy.
 
+**...and even a successful sync used to leave a SEPARATE cache stale for up
+to 5 more minutes (punch-list #77).** A live follow-up report: the 8/23
+reversion above "happens on every update we do," even after punch-list #73.
+Root cause: `core.appstate`'s cached getters (`get_trip_history()`,
+`get_calibrated_weights()`, and the rest) are a second, independent layer of
+caching sitting on top of the synced files, each with their own TTL (up to 5
+minutes for the trip-related ones). If any page render happened to read one
+of these during the narrow window before this process's sync had succeeded -
+exactly the window #73 already shrank a lot but couldn't shrink to zero -
+that stale read got memoized and kept being served for its own full TTL,
+completely unaware that the underlying file had already caught up moments
+later. That's what the "🔄 Refresh from GitHub" button was really fixing in
+that moment - not re-pulling the file (the automatic retry already did
+that), but clearing these getters' caches, which nothing else ever did.
+Fixed by clearing every `core.appstate` getter that reads a file under
+`data/` the instant the boot-time sync actually succeeds (`app.py`'s
+`_sync_data_once()`) - not on every attempt, only the one real success per
+process, so a fresh deploy shows current data immediately instead of needing
+a manual refresh or a 5-minute wait. This is the actual fix, not a band-aid
+on top of the branch split: the two-branch architecture itself (`main` for
+code, `data` for real data) stays exactly as it is, because it's solving a
+real, separate problem - Streamlit Cloud redeploying the whole app, wiping
+every connected angler's session, the instant real data landed on `main` the
+old way. `main`'s frozen `data/*.csv` snapshot is a deliberate fallback (so
+a boot with a genuinely failed sync still shows something instead of a blank
+app), not a mistake to remove.
+
 ## Project layout
 
 ```
