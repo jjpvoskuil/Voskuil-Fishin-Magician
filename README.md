@@ -1408,6 +1408,24 @@ old way. `main`'s frozen `data/*.csv` snapshot is a deliberate fallback (so
 a boot with a genuinely failed sync still shows something instead of a blank
 app), not a mistake to remove.
 
+**...and a THIRD time, right after the very next redeploy (punch-list #80).**
+Live-reproduced directly: a fresh boot's automatic sync failed again, and
+clicking "🔄 Refresh from GitHub" moments later - calling the exact same
+function with the exact same arguments - succeeded immediately. That ruled
+out the network/auth/repo path itself and pointed at the retry budget being
+too short: `max_retries=3` with a 1-second backoff gives a fast-failing
+transient error (DNS not resolved yet, connection refused - as opposed to a
+genuinely hung connection, which already gets its own per-attempt timeout
+via punch-list #76) only about 3 seconds of total backoff before that whole
+script run gives up, and a real Streamlit Community Cloud cold boot's
+outbound network can apparently take longer than that to fully warm up.
+Raised to `max_retries=6` with a 2-second backoff (~30 seconds of total
+retry window) - still bounded, so a genuinely, persistently down connection
+still gives up and renders on stale data rather than hanging forever, just
+later than 3 seconds in. This only affects the transient-retry path; a
+non-transient failure (bad auth, a missing branch) still fails fast exactly
+as before.
+
 ## Project layout
 
 ```

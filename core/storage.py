@@ -940,8 +940,8 @@ def sync_data_from_data_branch(
     repo_root: Path = REPO_ROOT,
     remote_url: Optional[str] = None,
     branch: str = DATA_BRANCH,
-    max_retries: int = 3,
-    retry_backoff_seconds: float = 1.0,
+    max_retries: int = 6,
+    retry_backoff_seconds: float = 2.0,
 ) -> tuple:
     """Punch-list #52: overlays repo_root's data/ directory with DATA_BRANCH's
     latest content, WITHOUT switching repo_root off of whatever branch it's
@@ -1008,6 +1008,28 @@ def sync_data_from_data_branch(
     to `main` (triggers a redeploy, which reboots and re-syncs), or (2) use
     the manual "🔄 Refresh from GitHub" button on Trip History (entry 119),
     which calls this function directly, bypassing the once-per-boot guard.
+
+    Punch-list #80 (live incident, THIRD occurrence of the 8/23 reversion -
+    after #73 added retries and #79 closed the separate appstate-cache gap,
+    the user reported it again right after this session's next redeploy):
+    live-reproduced directly against the just-redeployed app and confirmed
+    the automatic boot sync was still losing the race. `max_retries=3` with
+    `retry_backoff_seconds=1.0` gives a fast-failing transient error (DNS
+    not resolving yet, connection refused - as opposed to a hung connection,
+    which already gets a real per-attempt timeout via punch-list #76) only
+    about 3 seconds of total backoff before giving up for that whole script
+    run - clicking "🔄 Refresh from GitHub" moments later called this exact
+    function with identical arguments and succeeded immediately, proving
+    the network/auth/repo path itself was fine and this was purely a
+    too-short retry window, not a real failure. Raised to `max_retries=6`,
+    `retry_backoff_seconds=2.0` (backoff sequence 2/4/6/8/10s, ~30s total)
+    - a real Streamlit Community Cloud cold boot's outbound network can
+    apparently take longer to fully warm up than the original budget
+    assumed. This only widens the window for the TRANSIENT retry path
+    (a non-transient failure - bad auth, missing branch - still returns
+    immediately, unaffected); the worst case for a genuinely, persistently
+    down connection is a ~30s delay before that one script run gives up and
+    renders on stale data, same as before just later, not indefinitely.
     """
     if not github_token:
         return False, "No GITHUB_TOKEN configured - using whatever data/ already has locally."

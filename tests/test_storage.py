@@ -473,6 +473,59 @@ def test_sync_data_from_data_branch_gives_up_after_max_retries_on_persistent_tra
     assert (app_repo / "data" / "trip_log.csv").read_text() == before
 
 
+# --- Punch-list #80: the DEFAULT retry budget itself was too short for a ----
+# real cold-boot cold-start - a third live occurrence of the 8/23 reversion,
+# right after a redeploy, with the manual "Refresh from GitHub" button (same
+# function, same arguments) succeeding immediately moments later. That
+# proved the network/auth/repo path was fine and the automatic boot sync
+# just wasn't retrying long enough to survive it. This test pins the actual
+# defaults (unlike the #73 tests above, which all pass explicit
+# max_retries=/retry_backoff_seconds= overrides and would stay green no
+# matter what the real defaults were) - confirmed to fail against the
+# pre-fix defaults (max_retries=3) and pass against the fix (max_retries=6).
+def test_sync_data_from_data_branch_default_retry_budget_survives_five_transient_failures(
+    tmp_path, bare_and_seed, monkeypatch,
+):
+    cutover = _clone(bare_and_seed, tmp_path / "cutover")
+    _run(["git", "checkout", "-b", storage.DATA_BRANCH], cwd=cutover)
+    _run(["git", "push", str(bare_and_seed), f"HEAD:{storage.DATA_BRANCH}"], cwd=cutover)
+
+    saver = _clone(bare_and_seed, tmp_path / "saver")
+    (saver / "data" / "trip_log.csv").write_text("trip_id,notes\n1,first\n2,new catch\n")
+    ok, _ = storage.commit_and_push_data(
+        ["data/trip_log.csv"], github_token="x", repo_slug="unused/unused",
+        commit_message="new catch", repo_root=saver, remote_url=str(bare_and_seed),
+    )
+    assert ok is True
+
+    app_repo = _clone(bare_and_seed, tmp_path / "app_repo")
+    fetch_calls = []
+    real_run = subprocess.run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "fetch"]:
+            fetch_calls.append(args)
+            if len(fetch_calls) < 6:
+                return subprocess.CompletedProcess(
+                    args, returncode=128, stdout="",
+                    stderr="fatal: unable to access 'https://github.com/...': Could not resolve host: github.com",
+                )
+            return real_run(args, **kwargs)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    monkeypatch.setattr(storage.time, "sleep", lambda seconds: None)  # keep the test fast
+    # Deliberately NOT passing max_retries=/retry_backoff_seconds= - this is
+    # the whole point: it exercises whatever this function's real defaults
+    # are, the same way app.py's actual boot-time call does.
+    ok, msg = storage.sync_data_from_data_branch(
+        github_token="x", repo_slug="unused/unused", repo_root=app_repo, remote_url=str(bare_and_seed),
+    )
+    assert ok is True, msg
+    assert "new catch" in (app_repo / "data" / "trip_log.csv").read_text()
+    assert len(fetch_calls) == 6  # five transient failures, then a real (unpatched) fetch succeeds
+
+
 # --- Punch-list #58: transient-network retry + push_pending() ---------------
 # The session-loss investigation: a save that fails to push for a plain
 # transient reason (dropped connection, DNS hiccup, a GitHub 5xx - all
