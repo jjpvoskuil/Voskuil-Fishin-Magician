@@ -9146,7 +9146,7 @@ every real save.
     page indefinitely with no feedback. Punch-list #76 logged as Done on
     the Development page.
 
-144. **Punch-list #77 - the 8/23 reversion "happens on every update we do,"
+144. **Punch-list #79 - the 8/23 reversion "happens on every update we do,"
     even after punch-list #73.** User: "why does it revert to everything
     from 8/23/26 on back? Happens on every update we do. What is special
     about 8/23/26??" Asked to fix it properly rather than band-aid it:
@@ -9217,7 +9217,7 @@ every real save.
     **Net state:** a fresh deploy now shows current data immediately once
     its sync succeeds, instead of needing a manual "🔄 Refresh from GitHub"
     click or a wait of up to 5 minutes - the 8/23 reversion should no
-    longer be visible in ordinary use. Punch-list #77 logged as Done on
+    longer be visible in ordinary use. Punch-list #79 logged as Done on
     the Development page.
 
 ## Key design decisions & rationale

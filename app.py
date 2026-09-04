@@ -50,7 +50,7 @@ cache empty so the very next page interaction (this file's top level
 re-executing) tries the sync again, instead of never trying again for the
 rest of this process's life.
 
-Punch-list #77 (live report - the 8/23 reversion "happens on every update
+Punch-list #79 (live report - the 8/23 reversion "happens on every update
 we do" even after #73): #73 fixed the sync itself retrying, but missed a
 SEPARATE layer of caching sitting on top of it. core.appstate's cached
 getters (get_trip_history(), get_calibrated_weights(), etc.) are their own
@@ -85,7 +85,7 @@ from core.appstate import (
 )
 from core.storage import sync_data_from_data_branch
 
-# Punch-list #77: every core.appstate getter that reads a file under data/ -
+# Punch-list #79: every core.appstate getter that reads a file under data/ -
 # sync_data_from_data_branch() overlays the whole directory, not just
 # trip_log.csv, so a stale read of any of these can outlive a successful
 # sync exactly the same way get_trip_history() could. Listed here, once,
@@ -109,7 +109,7 @@ def _sync_data_once():
             # cached, so the very next rerun retries it instead of this
             # process being stuck on stale/frozen data for its whole life.
             raise RuntimeError(msg)
-        # Punch-list #77: a real, successful sync just happened - clear
+        # Punch-list #79: a real, successful sync just happened - clear
         # every cache that might already be holding a read from BEFORE it,
         # so the very next rerun sees fresh data immediately instead of
         # waiting out each getter's own TTL (up to 5 minutes).
