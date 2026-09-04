@@ -9392,13 +9392,40 @@ every real save.
     passed (1 new). A full `AppTest` smoke test across every page passed
     clean.
 
+    **Follow-up, same item:** live-testing the widened retry budget alone
+    gave an inconclusive result at first - Trip History was still stale
+    across ~2 minutes and multiple fresh page loads after the redeploy it
+    shipped in, then a manual "🔄 Refresh from GitHub" click fixed it
+    instantly. That was a real finding, but not proof the automatic path
+    was still broken: Trip History reads `data/trip_log.csv` uncached
+    straight off disk (punch-list #61), so once ANY sync (manual or
+    automatic) writes fresh data, every later read shows it regardless of
+    whether the automatic path itself ever succeeded on its own - meaning
+    that manual click could have been masking, not fixing, an automatic
+    path still failing every time. Guessing further from symptoms alone
+    wasn't productive, so added a small permanent diagnostic instead of
+    more speculation: `core.storage.last_boot_sync_status`, a process-
+    global record of `_sync_data_once()`'s most recent real attempt (ok/
+    message/timestamp), written on every attempt and surfaced on the
+    Development page's "GitHub connection" panel - so this exact ambiguity
+    can't recur next time. Redeployed again with the diagnostic in place
+    and checked the Development page WITHOUT touching the manual refresh
+    button at all: it showed a genuine automatic success ("Synced data/
+    from the 'data' branch"), and Trip History independently confirmed the
+    correct, current date range on the same clean check. This is real
+    evidence the widened retry budget worked on this occasion, not just an
+    inference from a manual workaround.
+
     **Net state:** a single page load's automatic sync now survives roughly
     10x longer of a cold-start network hiccup (~30s vs ~3s) before giving
-    up for that script run - meant to make the THIRD live occurrence of
-    this be the last one, though (as already noted honestly in #73's own
-    writeup) a real live network condition can't be fully reproduced from a
-    coding session, only reasoned about from the evidence a live incident
-    leaves behind. Punch-list #80 logged as Done on the Development page.
+    up for that script run, confirmed working end-to-end on a live redeploy
+    with no manual intervention. Whether this is the actual last occurrence
+    can't be guaranteed from a coding session - a real live network
+    condition can only be reasoned about from the evidence an incident
+    leaves behind, same honest caveat as #73's own writeup - but if it
+    happens a fourth time, `last_boot_sync_status` now means the real error
+    text is visible immediately instead of another round of guessing from
+    symptoms. Punch-list #80 logged as Done on the Development page.
 
 ## Key design decisions & rationale
 
