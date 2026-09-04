@@ -9220,6 +9220,103 @@ every real save.
     longer be visible in ordinary use. Punch-list #79 logged as Done on
     the Development page.
 
+145. **Punch-list #77/#78 - Trip History's "Date range" filter on a
+    phone.** Two user reports logged directly through the Development page
+    while this session was mid-fix on something else (see entry 144 -
+    those two reports took the #77/#78 numbers first, which is why entry
+    144's own fix landed as #79 instead): "In the trip history date range
+    field the txt ends up being too long and cut off on the phone app.
+    Could we either give more room to see it all, or maybe change the date
+    format from yyyy-mm-dd to mm-dd-yy" (#77), and "when selecting a date
+    range in the trip history filter, I would also like to just pick a
+    single date, include todays date, but trying to select just todays
+    date does not work with a click or a double click" (#78).
+
+    **Investigation:** live-reproduced both directly against the real
+    deployed app (`https://voskuil-fishin-magician.streamlit.app`) via the
+    browser DOM in a 375x812 mobile viewport, not just reasoned about -
+    same standard this session already held #74/#75 to.
+
+    **#77 root cause:** "Date range" shared a 3-column `st.columns(3)` row
+    with "Time of day" and "Location". Punch-list #75's own mobile-reflow
+    CSS packs a 3+-column row down to ~120px-wide columns below the phone
+    breakpoint - workable for a short dropdown value, nowhere near enough
+    for a full "YYYY/MM/DD - YYYY/MM/DD" range (23+ characters). Confirmed
+    via live DOM inspection that this widget is a React Aria `DateField` -
+    a row of individually-focusable year/month/day `<span>`s, not a plain
+    text input - sitting inside a container with `overflow-x: auto`, so
+    the missing end date was technically one sideways scroll away, but
+    nothing about a plain gray box suggests that on a phone; it read
+    exactly like the report, a hard cutoff. Tried a CSS-only fix first
+    (forcing that one column to `flex-basis: 100%` via a `:has()` selector,
+    live-injected and confirmed working - `[data-testid="stColumn"]:has([data-testid="stDateInput"])`
+    needed the exact specificity of punch-list #75's own existing 3-column
+    rule to actually win the cascade, confirmed by measuring the live
+    column's `getBoundingClientRect()` before/after), but chose a plainer
+    fix instead: just take "Date range" out of the `st.columns(3)` split
+    entirely and let it render on its own full-width row like any other
+    un-columned element - no CSS specificity fight needed, and it can't
+    regress if a future change reorders the CSS. "Time of day"/"Location"
+    now share their own 2-column row underneath it; "Angler"/"Lure
+    type"/"Specific lure" are unchanged.
+
+    **#78 root cause:** live-clicked through the actual calendar popover
+    DOM. A range-style `st.date_input` genuinely needs two clicks on the
+    same date to produce a single-day range (click 1 sets the new range's
+    start, shown mid-selection as "2026/09/03-yyyy/mm/dd"; click 2 on the
+    same date sets the end and closes the popover) - confirmed this
+    mechanic itself works correctly by dispatching two separate `.click()`
+    calls against the same calendar cell and watching the widget's value
+    go from a range to `("2026/09/03", "2026/09/03")`. Not a broken
+    picker, but an easy miss, and a well-known mobile-web gotcha: two
+    quick real taps on the same small element risk the browser's own
+    double-tap-to-zoom gesture stealing the second tap before it ever
+    reaches the calendar. (Side finding while reproducing this: today's
+    own calendar date DOES correctly show as available and selectable -
+    what looked like "today is disabled" on first inspection was really
+    `lake_today()` correctly returning the lake's own Central-time calendar
+    day, one date earlier than this UTC sandbox's own "today" at that
+    moment - confirmed against `tests/test_weather.py`'s existing
+    `lake_today() == datetime.now(ZoneInfo("America/Chicago")).date()`
+    assertion, so this is punch-list #38's intentional design working as
+    built, not a new bug.)
+
+    **Fix:** rather than depend on getting a real double-tap exactly right,
+    added a one-tap "📅 Today only" button directly under the date field.
+    Clicking it sets a one-shot `st.session_state` flag and calls
+    `st.rerun()`; on the next run that flag (popped, not just read, so it
+    only fires once) overrides the date_input's initial value to
+    `(lake_today(), lake_today())` for that run only - the calendar's own
+    two-click mechanic is untouched and still works exactly as before for
+    picking any other single day.
+
+    **Verification:** two new tests in a new `tests/test_trip_history_page.py`
+    (this page had zero dedicated test coverage before this - `build_sessions()`/
+    `_session_matches()`-level logic is covered elsewhere via `core.appstate`,
+    but nothing exercised the page's own widget tree until now), both
+    confirmed to fail against the pre-fix page and pass against the fix:
+    one asserts the date_input widget is not nested inside any
+    `st.columns()` split (regression guard for #77 - pre-fix it lived
+    inside one of the 3-column row's own columns) and that "Time of
+    day"/"Location" now each get a column to themselves; the other clicks
+    the new "Today only" button and confirms the date_input's value
+    becomes a single day equal to `core.weather.lake_today()`, using
+    trip data whose default range is confirmed NOT already single-day so
+    the assertion is actually meaningful. `pytest tests/ -q` - 398 passed
+    (2 new). A full `AppTest` smoke test across every page passed clean.
+    Re-verified visually: the "give it more room" layout change was
+    confirmed live (before implementing the plainer non-CSS version) by
+    injecting the equivalent CSS into the real deployed page and screen-
+    shotting the result - the full "2026/08/01 - 2026/09/03" range render-
+    ed on one line with room to spare, and "Today only"'s logic was
+    verified against the actual live app's own `lake_today()` value.
+
+    **Net state:** on a phone, the Date range filter now always shows its
+    full value without needing to scroll sideways, and picking "just
+    today" is one tap instead of a precisely-timed double-tap on a small
+    calendar cell. Punch-list #77 and #78 logged as Done on the
+    Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

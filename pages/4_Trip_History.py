@@ -109,6 +109,44 @@ separate filter entry per historical name. Falls back to the row's stored
 `spot_name` for trips whose `spot_id` no longer matches any saved spot
 (a deleted pin, or a legacy row logged against core.spots's separate
 reference-spot list).
+
+Punch-list #77/#78 (both user-reported, both about the "Date range" filter
+on a phone): confirmed live against the real deployed app in a mobile
+viewport (375x812) via the browser DOM, not just reasoned about.
+
+#77 - the date range text got cut off on a phone. Root cause: this widget
+renders as a React Aria DateField (a row of individually-focusable
+year/month/day spans, not a plain text input - confirmed via the live DOM),
+inside a container with `overflow-x: auto` - so a full "YYYY/MM/DD -
+YYYY/MM/DD" range (23+ characters) technically stays reachable by scrolling
+sideways, but that's not remotely discoverable on a phone, and it looked
+exactly like the report: an abrupt cutoff after the first few characters of
+the end date. The real driver was layout, not the widget itself: "Date
+range" used to share a 3-column row with "Time of day" and "Location" (an
+`st.columns(3)` split), and punch-list #75's own mobile-reflow CSS packs
+that down to ~120px-wide columns below 700px - nowhere near enough room for
+the widest single value in the whole Filters section. Fixed by giving it
+its own full-width row instead - the simplest form of "give it more room",
+and the more we could verify would still work at every column width rather
+than tuning yet another font-size/ellipsis rule for React Aria's segmented
+spans (which don't behave like a single text input's overflow at all).
+
+#78 - "trying to select just today's date does not work with a click or a
+double click." Live-reproduced clicking through the actual calendar popover
+DOM: clicking today's date once correctly starts a new range at today
+(shown as "2026/09/03-yyyy/mm/dd" mid-selection) - a real single-day range
+needs a SECOND click on that same date to close it out, which is standard
+for any range-style date picker but easy to miss, especially on a phone
+where two quick taps on the same small calendar cell risk the browser's own
+double-tap-to-zoom gesture stealing the second tap instead of it reaching
+the calendar (a well-known mobile web gotcha for double-tap interactions in
+general). Rather than depend on getting that double-tap exactly right,
+added a one-tap "Today only" button right under the date field that jumps
+the filter straight to a single-day range on today - the angler's actual
+ask ("just pick a single date, include today's date") without needing the
+calendar's two-click range mechanic at all. The calendar itself still
+supports picking any other single day the same two-click way it always
+has - this is an addition, not a replacement.
 """
 from datetime import datetime, time as dtime
 
@@ -363,13 +401,29 @@ _today = lake_today()
 max_pickable_date = max(max_date, _today) if max_date else _today
 min_pickable_date = min(min_date, _today) if min_date else _today
 
-f1, f2, f3 = st.columns(3)
-date_range = f1.date_input(
-    "Date range", value=(min_date, max_date) if min_date else (_today, _today),
+# Punch-list #77: "Date range" gets its own full-width row instead of
+# sharing a 3-column split with Time of day/Location - by far the widest
+# value in this section (a full "YYYY/MM/DD - YYYY/MM/DD" range), so it's
+# the one filter that genuinely needs the room. Punch-list #78: a one-tap
+# "Today only" jump under it, so picking just today doesn't depend on the
+# calendar's own two-click same-day range mechanic (see module docstring).
+if st.session_state.pop("trip_history_jump_to_today", False):
+    _date_range_value = (_today, _today)
+else:
+    _date_range_value = (min_date, max_date) if min_date else (_today, _today)
+date_range = st.date_input(
+    "Date range", value=_date_range_value,
     min_value=min_pickable_date, max_value=max_pickable_date,
-    help="Pick a single date, or a start and end date for a range.",
+    help=(
+        "Pick a single date, or a start and end date for a range. "
+        "Use \"Today only\" below to jump straight to just today."
+    ),
 )
+if st.button("📅 Today only", help="Set the date range to just today, in one tap."):
+    st.session_state["trip_history_jump_to_today"] = True
+    st.rerun()
 
+f2, f3 = st.columns(2)
 segment_options = sorted({s["segment"] for s in sessions if s["segment"]})
 segments = f2.multiselect(
     "Time of day", segment_options, default=[],

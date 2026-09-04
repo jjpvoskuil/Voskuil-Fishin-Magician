@@ -31,6 +31,20 @@ the ellipsis only paints once the field loses focus (a focused input scrolls to 
 visible instead) - picking an option briefly shows the untruncated value until you tap
 elsewhere, exactly like any other text field.
 
+Trip History's "Date range" filter had two related phone-specific reports, both confirmed live
+against the real deployed app (punch-list #77/#78). It used to share a 3-column row with "Time
+of day" and "Location" - fine on desktop, but squeezed to about 120px wide below the phone
+breakpoint, nowhere near enough for a full "YYYY/MM/DD - YYYY/MM/DD" range (confirmed via live
+DOM inspection: it renders as a React Aria date field, a row of individually-focusable
+year/month/day segments in a horizontally-scrollable box, not a plain text input - so the
+missing text was technically one sideways scroll away, but nothing on screen suggested that).
+Fixed by giving it its own full-width row - the other filters reflow underneath it exactly as
+before. Separately, picking "just today" needed two clicks on the same calendar date (standard
+for a range picker, but an easy miss, and an easy target for a phone's own double-tap-to-zoom
+gesture to swallow the second tap before it reaches the calendar). Added a one-tap "📅 Today
+only" button under the date field that jumps straight to a single day on today, without
+depending on getting a double-tap exactly right.
+
 Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
 this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
 iframe under its own wrapper page, and that wrapper page - not this repo - owns the `<head>`
