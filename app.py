@@ -75,6 +75,43 @@ get_weather_bundle()/get_lake_level()/get_surface_water_quality()/
 get_cabelas_suggestions() - those wrap live external API calls with
 nothing to do with the data branch sync, and clearing them here would just
 force pointless, unrelated re-fetches on every process boot.
+
+Punch-list #80 (live incident, a THIRD occurrence of the 8/23 reversion -
+reported again right after the punch-list #77/#78 redeploy, and again
+right after a follow-up redeploy that ONLY widened sync_data_from_data_
+branch()'s retry budget): that retry-budget fix turned out to be treating
+the wrong mechanism, discovered by adding core.storage.last_boot_sync_
+status (a process-global record of this function's most recent real
+attempt, surfaced on the Development page) and comparing it across two
+consecutive redeploys. The SAME timestamp showed up both times, even
+though Trip History's actual on-disk data had reverted back to `main`'s
+frozen snapshot in between - proof `_sync_data_once()` was NOT being
+re-attempted at all on that second redeploy, meaning Streamlit Cloud's
+"redeploy" for this app does NOT always mean a truly fresh process:
+sometimes it appears to update the existing running process's code (a
+`git`-level update to the checkout) without restarting Python itself,
+which leaves `st.cache_resource`'s memoized "already succeeded" state
+fully intact - while that same git-level update silently resets data/'s
+working tree back to whatever main's own tracked (frozen) copy is,
+since sync_data_from_data_branch() deliberately only ever modifies the
+working tree, never commits. The retry-budget widening from the previous
+fix still helps the genuine "cold start network hasn't warmed up yet"
+case and was left in place, but it can't help THIS case at all, because
+the function never even gets called again to retry anything - the cache
+itself is the thing standing in the way, not a failure being encountered.
+
+Fixed by giving _sync_data_once() a `ttl` instead of caching it forever:
+a bounded cache lifetime means this re-attempts periodically regardless
+of whether an earlier attempt in this same process already succeeded, so
+a redeploy that silently reverts the working tree behind the cache's back
+gets caught and corrected on the next expiry instead of requiring a full
+process restart or a manual "🔄 Refresh from GitHub" click to ever notice.
+Chose 2 minutes: short enough that a normal session recovers quickly
+after a redeploy, long enough that an actively-used app isn't re-fetching
+from GitHub on every single click (this function still only runs when
+its cache is empty/expired AND a page interaction happens to trigger a
+rerun while that's true - an idle app between real reruns costs nothing
+extra either way).
 """
 import streamlit as st
 
@@ -98,8 +135,15 @@ _DATA_BACKED_CACHES = (
     get_dev_tasks, get_anglers, get_water_quality_log, get_spots,
 )
 
+# Punch-list #80: a bounded TTL instead of an unbounded cache - see the
+# module docstring above for why an unbounded one can get permanently
+# stuck "succeeded" while a redeploy silently reverts data/'s working tree
+# behind its back. 2 minutes: short enough to recover from that quickly,
+# long enough not to hit GitHub on every single page interaction.
+_SYNC_RETRY_TTL_SECONDS = 120
 
-@st.cache_resource(show_spinner=False)
+
+@st.cache_resource(show_spinner=False, ttl=_SYNC_RETRY_TTL_SECONDS)
 def _sync_data_once():
     token = github_token()
     if token:

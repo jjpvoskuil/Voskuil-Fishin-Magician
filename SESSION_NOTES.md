@@ -9318,7 +9318,10 @@ every real save.
     Development page.
 
 146. **Punch-list #80 - the 8/23 reversion, a THIRD time, right after the
-    very next redeploy.** User: "So after this last fix, I went to check
+    very next redeploy. (Final root cause found in the "Follow-up #2"
+    section below - a same-process redeploy silently reverting `data/`
+    behind an already-succeeded sync's cache.)** User: "So after this last
+    fix, I went to check
     and trip history is again reverting to the latest date of 8/23/26. It
     appears this is still not fixed." Immediately concerning - this is the
     exact same symptom #73 and #79 both already targeted, recurring right
@@ -9416,16 +9419,81 @@ every real save.
     evidence the widened retry budget worked on this occasion, not just an
     inference from a manual workaround.
 
-    **Net state:** a single page load's automatic sync now survives roughly
-    10x longer of a cold-start network hiccup (~30s vs ~3s) before giving
-    up for that script run, confirmed working end-to-end on a live redeploy
-    with no manual intervention. Whether this is the actual last occurrence
-    can't be guaranteed from a coding session - a real live network
-    condition can only be reasoned about from the evidence an incident
-    leaves behind, same honest caveat as #73's own writeup - but if it
-    happens a fourth time, `last_boot_sync_status` now means the real error
-    text is visible immediately instead of another round of guessing from
-    symptoms. Punch-list #80 logged as Done on the Development page.
+    **Follow-up #2, same item (the actual final root cause):** the previous
+    "real evidence the widened retry budget worked" turned out to be a
+    coincidence, not proof - a subsequent redeploy (a docs-only commit, no
+    code change at all) had Trip History revert to the stale 8/23 range yet
+    again. Checked `last_boot_sync_status` on the Development page instead
+    of guessing, and it showed the **exact same timestamp** as the previous
+    "genuine automatic success" check - meaning `_sync_data_once()` had not
+    been invoked at all on this redeploy, let alone failed. That single
+    fact rules out every theory tried so far (a slow-to-warm-up network, a
+    too-short retry budget, a stale downstream cache) - none of them can
+    explain the sync function never even being called again.
+
+    The only explanation that fits: Streamlit Community Cloud's "redeploy"
+    does not always mean a fresh Python process. Sometimes it updates the
+    already-running process's code via a git-level checkout update without
+    restarting Python at all. That leaves `st.cache_resource`'s memoized
+    "this already ran and succeeded" state fully intact across the
+    redeploy (exactly matching the identical timestamp observed), while the
+    same git-level checkout update silently resets `data/`'s working tree
+    back to whatever `main` has frozen and tracked there -
+    `sync_data_from_data_branch()` deliberately only ever modifies the
+    working tree and never commits, by design (see the "Two branches"
+    section above), so it has no way to notice or defend against its own
+    prior work being reverted out from under it by something else entirely.
+    Both the original #73 fix and this item's own earlier retry-budget
+    widening were addressing the wrong mechanism: neither one can help when
+    the sync function is never even called again to retry anything - the
+    *cache* is what's standing in the way this time, not a failure being
+    encountered.
+
+    **Real fix:** changed `_sync_data_once()`'s decorator from an unbounded
+    `@st.cache_resource(show_spinner=False)` to
+    `@st.cache_resource(show_spinner=False, ttl=120)` (`app.py`) - a bounded
+    2-minute cache lifetime instead of "cached forever once it succeeds
+    even once." This means the sync now re-attempts periodically regardless
+    of whether an earlier attempt in this exact same process already
+    succeeded, so a same-process redeploy that silently reverts `data/`'s
+    working tree behind the cache's back gets noticed and corrected within
+    about two minutes on its own, with no manual "🔄 Refresh from GitHub"
+    click and no process restart required. Chose 2 minutes as short enough
+    to recover quickly, long enough that a normal, actively-used session
+    isn't re-hitting GitHub on every single click (this function still only
+    actually runs when its cache is both expired AND a page interaction
+    happens to trigger a rerun while that's true).
+
+    **Verification:** added
+    `test_sync_data_once_retries_after_its_ttl_expires_even_without_a_process_restart`
+    to `tests/test_app.py`. Streamlit's `cache_resource` ttl is timed via
+    `streamlit.runtime.caching.cache_utils.TTLCACHE_TIMER` (`time.monotonic`
+    by default) - the test patches that to a fake, fully-controllable clock
+    so it can simulate time passing past the ttl without an actual 2-minute
+    sleep, and simulates exactly the discovered scenario: no failure, no
+    process restart, just enough simulated time passing. Confirmed to FAIL
+    against the pre-fix code (an unbounded cache never re-attempts no
+    matter how much simulated time passes - proving this exact test would
+    have caught the real bug) and PASS against the fix (a second sync
+    attempt happens once the fake clock crosses the 2-minute mark, while an
+    immediate rerun with no time passing correctly stays cached and does
+    NOT re-sync, confirming normal usage still isn't hitting GitHub on
+    every click). `pytest tests/ -q` - 400 passed (1 new). A full `AppTest`
+    smoke test across every page passed clean (the 7-Day Forecast page's
+    own external weather-API call fails in this sandbox for unrelated
+    network-egress reasons - confirmed unrelated to this fix, since it
+    fails identically before and after this change).
+
+    **Net state:** this is now believed to be the actual, final root cause
+    of all three 8/23-reversion occurrences - #73 fixed a failed sync being
+    memoized as done, #79 fixed a stale downstream cache surviving a
+    successful sync, and this fix closes the remaining gap where a
+    same-process "redeploy" can silently revert `data/` behind an already-
+    succeeded sync's cache without ever triggering a retry. Punch-list #80's
+    description on the Development page has been corrected in place to
+    describe this actual root cause and fix, replacing the earlier
+    retry-budget-only writeup that turned out to be necessary but not
+    sufficient.
 
 ## Key design decisions & rationale
 

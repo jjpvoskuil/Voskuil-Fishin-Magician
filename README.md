@@ -1409,31 +1409,50 @@ a boot with a genuinely failed sync still shows something instead of a blank
 app), not a mistake to remove.
 
 **...and a THIRD time, right after the very next redeploy (punch-list #80).**
-Live-reproduced directly: a fresh boot's automatic sync failed again, and
-clicking "🔄 Refresh from GitHub" moments later - calling the exact same
-function with the exact same arguments - succeeded immediately. That ruled
-out the network/auth/repo path itself and pointed at the retry budget being
-too short: `max_retries=3` with a 1-second backoff gives a fast-failing
-transient error (DNS not resolved yet, connection refused - as opposed to a
-genuinely hung connection, which already gets its own per-attempt timeout
-via punch-list #76) only about 3 seconds of total backoff before that whole
-script run gives up, and a real Streamlit Community Cloud cold boot's
-outbound network can apparently take longer than that to fully warm up.
-Raised to `max_retries=6` with a 2-second backoff (~30 seconds of total
-retry window) - still bounded, so a genuinely, persistently down connection
-still gives up and renders on stale data rather than hanging forever, just
-later than 3 seconds in. This only affects the transient-retry path; a
-non-transient failure (bad auth, a missing branch) still fails fast exactly
-as before.
+First theory: a fresh boot's automatic sync failed, and clicking "🔄 Refresh
+from GitHub" moments later - calling the exact same function with the exact
+same arguments - succeeded immediately, which looked like too-short a retry
+budget (`max_retries=3`, 1-second backoff - only ~3 seconds of total backoff
+before a real cold boot's outbound network had necessarily finished warming
+up). Raised to `max_retries=6` with a 2-second backoff (~30 seconds total).
+This is a real improvement for a genuinely slow cold boot and was kept, but
+live-testing it afterward was inconclusive - Trip History looked correct
+again, but since Trip History reads its file directly off disk, uncached
+(punch-list #61), *any* successful sync (automatic or a manual refresh)
+fixes what it shows, so that alone didn't prove the automatic path itself
+was actually working.
 
-Also added a small permanent diagnostic while confirming this: the
-Development page's "GitHub connection" panel now shows this running
-process's most recent automatic boot-time sync attempt (success or
-failure, with the real error text) - visible directly instead of having to
-infer what happened from whether Trip History looks stale. Live-verified
-end to end on the next redeploy with no manual refresh involved: the panel
-showed a genuine automatic success, and Trip History independently showed
-the correct, current date range on the same check.
+Rather than keep guessing from symptoms, added a small permanent
+diagnostic: the Development page's "GitHub connection" panel shows this
+running process's most recent automatic boot-time sync attempt (success or
+failure, with the real error text and a timestamp). The next redeploy's
+diagnostic showed a genuine automatic success - but the redeploy *after*
+that (triggered by a docs-only commit) reverted Trip History to stale data
+again, while the diagnostic showed the **exact same timestamp** as before,
+proving `_sync_data_once()` had not even been called again, let alone
+failed.
+
+That was the real root cause: Streamlit Community Cloud's "redeploy"
+doesn't always restart the Python process - sometimes it just updates the
+already-running process's code via a git-level checkout update. That
+leaves `st.cache_resource`'s memoized "already succeeded" state fully
+intact (explaining the identical timestamp), while the same git-level
+update silently resets `data/`'s working tree back to `main`'s own frozen,
+tracked copy (`sync_data_from_data_branch()` deliberately only ever
+modifies the working tree, never commits). Neither the original #73 fix
+nor the retry-budget widening above could ever catch this, because the
+sync function was never even being invoked again to retry anything - the
+cache itself, not a failure, was standing in the way.
+
+Fixed by giving `_sync_data_once()` a bounded 2-minute `ttl` instead of an
+unbounded cache, so it re-attempts periodically regardless of whether an
+earlier attempt in the *same* process already succeeded - short enough
+that a session recovers from a same-process redeploy within about two
+minutes without a manual refresh, long enough that an actively-used app
+isn't re-hitting GitHub on every click. Covered by a regression test that
+simulates exactly this scenario (a fake, controllable clock standing in
+for Streamlit's own cache-ttl timer, with no failure and no process
+restart) and fails against the pre-fix code.
 
 ## Project layout
 
