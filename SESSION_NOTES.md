@@ -9317,6 +9317,89 @@ every real save.
     calendar cell. Punch-list #77 and #78 logged as Done on the
     Development page.
 
+146. **Punch-list #80 - the 8/23 reversion, a THIRD time, right after the
+    very next redeploy.** User: "So after this last fix, I went to check
+    and trip history is again reverting to the latest date of 8/23/26. It
+    appears this is still not fixed." Immediately concerning - this is the
+    exact same symptom #73 and #79 both already targeted, recurring right
+    after the #77/#78 deploy (which touched an unrelated page, Trip
+    History's own filter UI - not the sync path at all).
+
+    **Live-reproduced directly**, same standard as every other fix this
+    session: navigated to the real deployed app right after the redeploy
+    and confirmed Date range's default value was `2026/08/09 - 2026/08/23`
+    - `main`'s frozen snapshot, exactly like the first two occurrences.
+    Clicked "🔄 Refresh from GitHub" and it fixed the page INSTANTLY,
+    showing the real `2026/08/01 - 2026/09/03` range. That one observation
+    rules out a lot at once: the GitHub token, the repo slug, the `data`
+    branch, and the network path itself are all fine RIGHT NOW, because the
+    manual button calls the exact same `sync_data_from_data_branch()`
+    function with the exact same arguments as the automatic boot sync does,
+    and it worked on the very next attempt. So this isn't a new instance of
+    #73's original bug (a failed sync getting memoized as "done" forever -
+    already fixed and confirmed still working via `st.cache_resource`'s own
+    exception-doesn't-get-cached behavior, re-verified directly in a
+    throwaway script this session), and it isn't #79's bug either (Trip
+    History reads via the uncached `read_all_trips()`, punch-list #61 - it
+    was never subject to the `core.appstate` cache-staleness #79 fixed at
+    all). The disk file itself was genuinely still stale, meaning the
+    automatic boot sync's OWN attempt(s) were failing outright, not being
+    served from a stale cache on top of a successful sync.
+
+    **Root cause:** `sync_data_from_data_branch()`'s retry budget
+    (`max_retries=3`, `retry_backoff_seconds=1.0`) gives a FAST-failing
+    transient error (DNS not resolved yet, connection refused - distinct
+    from a genuinely HUNG connection, which already gets a real per-attempt
+    timeout via punch-list #76) only about 3 seconds of total backoff sleep
+    before that whole script run gives up on it. A real Streamlit Community
+    Cloud cold boot's outbound network apparently sometimes needs longer
+    than 3 seconds to fully come up - this is the third live confirmation
+    of that exact assumption (first surfaced in #73's own writeup), just
+    now with hard evidence that the existing retry window specifically
+    wasn't wide enough, rather than reasoning about it in the abstract.
+
+    **Fix:** raised the defaults to `max_retries=6`,
+    `retry_backoff_seconds=2.0` (backoff sequence 2/4/6/8/10s between
+    attempts, ~30 seconds of total retry window instead of ~3). Deliberately
+    left the non-transient path untouched - a real one-shot failure (bad
+    auth, the data branch genuinely missing) still returns immediately
+    without burning any of this budget, exactly as before. Considered (and
+    rejected, at least for now) a more invasive fix - having `app.py`
+    itself auto-retry via `st.rerun()` a bounded number of times so even a
+    single page load self-heals without any user interaction at all - in
+    favor of this smaller, lower-risk change first: it directly targets the
+    evidence gathered (a fast-failing error, not a hung one, giving up too
+    soon), doesn't risk a visible reload flicker on a normal boot, and
+    every real user interaction (a filter change, a button click, a page
+    switch) already re-triggers the boot sync per #73's existing design, so
+    normal usage keeps getting additional free retries beyond this budget
+    regardless.
+
+    **Verification:** confirmed via `st.cache_resource` in this exact
+    Streamlit version (1.63.0) does NOT memoize a raised exception - a
+    throwaway script confirmed a function raising twice then succeeding
+    gets called exactly 3 times, never re-raising a cached exception, which
+    rules out a Streamlit-level caching bug as an alternative explanation.
+    Added `test_sync_data_from_data_branch_default_retry_budget_survives_five_transient_failures`
+    to `tests/test_storage.py` - unlike every existing #73-era retry test
+    (which all pass explicit `max_retries=`/`retry_backoff_seconds=`
+    overrides and would stay green regardless of what the real defaults
+    are), this one deliberately calls the function with NO overrides, the
+    same way `app.py`'s real boot-time call does, and asserts it survives
+    five straight transient failures before a sixth (real) attempt
+    succeeds - confirmed to fail against the pre-fix default of
+    `max_retries=3` and pass against the fix. `pytest tests/ -q` - 399
+    passed (1 new). A full `AppTest` smoke test across every page passed
+    clean.
+
+    **Net state:** a single page load's automatic sync now survives roughly
+    10x longer of a cold-start network hiccup (~30s vs ~3s) before giving
+    up for that script run - meant to make the THIRD live occurrence of
+    this be the last one, though (as already noted honestly in #73's own
+    writeup) a real live network condition can't be fully reproduced from a
+    coding session, only reasoned about from the evidence a live incident
+    leaves behind. Punch-list #80 logged as Done on the Development page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
