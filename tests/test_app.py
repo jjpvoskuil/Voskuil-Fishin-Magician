@@ -1,12 +1,12 @@
 """Tests for app.py's boot-time data sync (_sync_data_once()) - the home of
-punch-list #52/#73/#77. Uses Streamlit's AppTest (streamlit.testing.v1)
+punch-list #52/#73/#79. Uses Streamlit's AppTest (streamlit.testing.v1)
 rather than a plain `import app`, since app.py's own st.navigation()/
 pg.run() calls at module level need a real Streamlit script-run context to
 execute at all - the same tool already used (as a one-off, uncommitted
 scratch script) to verify punch-list #73's fix. Committing it here gives
 this exact class of bug (a boot-time sync going stale - whether because
 the sync itself never retries, #73, or because a downstream cache never
-learns the sync succeeded, #77) durable regression coverage instead of
+learns the sync succeeded, #79) durable regression coverage instead of
 relying on a scratch script someone has to remember to re-run by hand.
 """
 from pathlib import Path
@@ -40,7 +40,7 @@ def _reset_resource_cache():
 
 
 def test_sync_data_once_clears_stale_trip_history_cache_once_it_succeeds(monkeypatch):
-    """Punch-list #77 - the actual live bug: a page render that happens to
+    """Punch-list #79 - the actual live bug: a page render that happens to
     call get_trip_history() BEFORE this process's sync has succeeded (very
     plausible right at cold boot, or during a still-in-progress retry) must
     NOT keep serving that stale read for its own 5-minute TTL once the sync

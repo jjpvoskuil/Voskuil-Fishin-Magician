@@ -1368,7 +1368,7 @@ good. If you're looking at stale data on the live app right now, the existing
 immediately, independent of any code deploy.
 
 **...and even a successful sync used to leave a SEPARATE cache stale for up
-to 5 more minutes (punch-list #77).** A live follow-up report: the 8/23
+to 5 more minutes (punch-list #79).** A live follow-up report: the 8/23
 reversion above "happens on every update we do," even after punch-list #73.
 Root cause: `core.appstate`'s cached getters (`get_trip_history()`,
 `get_calibrated_weights()`, and the rest) are a second, independent layer of
