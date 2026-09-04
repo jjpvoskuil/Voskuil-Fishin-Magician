@@ -1426,6 +1426,15 @@ later than 3 seconds in. This only affects the transient-retry path; a
 non-transient failure (bad auth, a missing branch) still fails fast exactly
 as before.
 
+Also added a small permanent diagnostic while confirming this: the
+Development page's "GitHub connection" panel now shows this running
+process's most recent automatic boot-time sync attempt (success or
+failure, with the real error text) - visible directly instead of having to
+infer what happened from whether Trip History looks stale. Live-verified
+end to end on the next redeploy with no manual refresh involved: the panel
+showed a genuine automatic success, and Trip History independently showed
+the correct, current date range on the same check.
+
 ## Project layout
 
 ```
