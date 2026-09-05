@@ -10330,6 +10330,46 @@ every real save.
     `pytest tests/ -q` - 460 passed (459 + 1 new). `git status --short
     data/` confirmed no real data files were touched.
 
+    **Follow-up fix #2 (same day): the real remaining bug, found by the
+    angler watching a live screen-shared reproduction.** After 2 manual
+    "Reboot app"s didn't fix "still doing the same thing," a direct live
+    walkthrough (built-in browser, Gar Bank, adding real tackle-box items,
+    never clicking Start Session for real) showed the popup itself WAS
+    reopening correctly for every add, 1 through 4 - the follow-up-fix-#1
+    key change above genuinely worked. But the angler, watching closely,
+    caught what actually still felt like the reported bug: after each
+    "Add more lures" click, the page returned to a "➕ Add from tackle
+    box" expander that had silently collapsed shut again, requiring an
+    extra manual click just to reopen it before the next lure could even
+    be picked - exactly backwards from the whole point of this popup
+    (add lure after lure with no extra navigation, then hit Start Session
+    from the last one's own popup). Root cause: `st.expander`'s
+    `expanded=` argument only sets its INITIAL state on first mount - a
+    manual open/close toggle lives purely in the frontend and does not
+    survive a script rerun, so without something re-asserting
+    `expanded=True` on the next render, it snaps back to its `False`
+    default on literally every `st.rerun()` (which every add and every
+    popup button on this page triggers). Fixed with a new session_state
+    flag, `_tackle_box_expander_open_key(spot_id, seq)`, set `True` the
+    moment a lure actually lands in the pending list - covers the
+    tackle-box picker, manual entry, quick-add, and the trailer dialog's
+    own "Add lure" confirm, since all of them funnel through the same
+    `_handle_lure_add_click()`/`_trailer_dialog()` - and read back as the
+    `expanded=` value for both this expander and the sibling "Suggestions
+    for right now" expander (which has the identical quick-add-triggered
+    collapse bug), so either one stays open for the rest of the session
+    build once used, without touching punch-list #33's own "starts
+    collapsed on a fresh page load" behavior. **Verified live** by
+    directly reproducing the exact broken sequence against the deployed
+    app before writing the fix, then added
+    `test_tackle_box_expander_stays_open_across_add_more_lures_cycles()`
+    (asserts the expander's own `proto.expanded` is `False` on first load,
+    flips `True` after the first add, and stays `True` across two
+    "Add more lures" cycles) - this test reads the actual expander state
+    Streamlit reports, so unlike follow-up fix #1's regression test, this
+    one genuinely fails against the pre-fix code and passes after. Full
+    suite `pytest tests/ -q` - 461 passed (460 + 1 new).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

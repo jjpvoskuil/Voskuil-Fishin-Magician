@@ -1107,6 +1107,33 @@ def _pending_lures_key(spot_id: str, seq: int) -> str:
     return f"pending_session_lures_{spot_id}_{seq}"
 
 
+def _tackle_box_expander_open_key(spot_id: str, seq: int) -> str:
+    """Punch-list #87 follow-up #2: the angler watched a live reproduction
+    of the add-3-lures sequence and pointed out the actual remaining
+    annoyance - the popup itself DOES reopen correctly for every add (the
+    len(pending_lures)-keyed widget fix from the first follow-up works),
+    but "Add more lures" dumps you back onto a page where the "Add from
+    tackle box" expander has silently collapsed back shut, so every single
+    add after the first needs an extra manual click just to reopen it
+    before you can even see the picker again - exactly backwards from the
+    "add lure after lure with no extra navigation" the popup was built for.
+    Root cause: st.expander's `expanded=` argument only sets its INITIAL
+    state - a manual open/close toggle lives purely in the frontend and
+    does not survive a script rerun (st.rerun(), which every add and every
+    popup button here triggers), so without something re-asserting
+    `expanded=True` on the next render, it snaps back to its default
+    (False) every single time. This session_state flag is that something:
+    set True the moment a lure actually lands in the pending list (see
+    _handle_lure_add_click() and _trailer_dialog()'s own "Add lure"
+    confirm, both of which cover the tackle-box picker, the manual-entry
+    field, and quick-add - anything that can add a lure while building a
+    NEW session), so the expander stays visibly open for the rest of this
+    session build once the angler has used it at all. Scoped to
+    (spot_id, seq), same as everything else here, so a fresh session_build_seq
+    (a new build, after Start Session or Cancel) starts collapsed again."""
+    return f"tackle_box_expander_open_{spot_id}_{seq}"
+
+
 def _add_lure_to_pending(spot_id: str, seq: int, lure: dict):
     key = _pending_lures_key(spot_id, seq)
     pending = st.session_state.setdefault(key, [])
@@ -1183,6 +1210,12 @@ def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_tra
             # there's no "start the session" action to offer once one's
             # already running.
             st.session_state[_lure_added_popup_key(spot_id, seq)] = True
+            # Punch-list #87 follow-up #2: also keep the "Add from tackle
+            # box" expander open from here on for this session build - see
+            # _tackle_box_expander_open_key()'s own docstring for why this
+            # is needed at all (st.expander forgets a manual open/close
+            # toggle across every st.rerun()).
+            st.session_state[_tackle_box_expander_open_key(spot_id, seq)] = True
         else:
             _add_lure_to_active_session(spot_id, lure_stub, angler)
         st.rerun()
@@ -1227,6 +1260,9 @@ def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str, angler: 
             # Punch-list #87 - see the matching comment in
             # _handle_lure_add_click()'s non-trailer branch above.
             st.session_state[_lure_added_popup_key(spot_id, seq)] = True
+            # Punch-list #87 follow-up #2 - see the matching comment in
+            # _handle_lure_add_click()'s non-trailer branch above.
+            st.session_state[_tackle_box_expander_open_key(spot_id, seq)] = True
         else:
             _add_lure_to_active_session(spot_id, final_lure, angler)
         # Clears the checkbox/selection back to blank for the NEXT time this
@@ -2484,8 +2520,18 @@ else:
     # Punch-list #33: starts collapsed now (was expanded=True) - the angler's
     # own ask, so the score/lure-suggestion block doesn't take up the whole
     # screen above the actual "Lures for this session" picker every time this
-    # page loads; still one tap away whenever it's actually wanted.
-    with st.expander("Suggestions for right now", expanded=False):
+    # page loads; still one tap away whenever it's actually wanted. Punch-list
+    # #87 follow-up #2: still starts collapsed on a fresh page load (the flag
+    # below is only ever set once a lure has actually been added via this
+    # exact quick-add path in THIS session build - see
+    # _tackle_box_expander_open_key()'s docstring), but stays open across
+    # "Add more lures" cycles once the angler's used it, matching the
+    # tackle-box picker's own fix for the same st.expander-forgets-its-open-
+    # state-across-st.rerun() root cause.
+    with st.expander(
+        "Suggestions for right now",
+        expanded=st.session_state.get(_tackle_box_expander_open_key(spot["spot_id"], session_build_seq), False),
+    ):
         m1, m2 = st.columns([1, 2])
         m1.metric(
             f"{_preview_segment} activity score", f"{score_result.score}/10",
@@ -2568,7 +2614,10 @@ else:
     else:
         st.caption("No lures selected yet - use the suggestions above or the tackle box below.")
 
-    with st.expander("➕ Add from tackle box"):
+    with st.expander(
+        "➕ Add from tackle box",
+        expanded=st.session_state.get(_tackle_box_expander_open_key(spot["spot_id"], session_build_seq), False),
+    ):
         _multi_lure_picker(
             inventory_items, key_prefix=f"session_lure_picker_{spot['spot_id']}_{session_build_seq}",
             spot_id=spot["spot_id"], seq=session_build_seq,

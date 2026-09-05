@@ -872,6 +872,19 @@ folding `len(pending_lures)` (which increases by 1 every time this popup opens) 
 both keys, giving every occurrence a genuinely fresh key so the popup can be reopened
 and dismissed repeatedly.
 
+**Follow-up fix #2, same day:** even after the fix above, the angler (watching a live
+screen-shared reproduction) caught the actual remaining problem: the popup itself was
+reopening fine, but "Add more lures" kept dumping back onto a page where the "Add from
+tackle box" expander had silently collapsed shut again, needing an extra manual click
+before the next lure could even be picked. `st.expander`'s `expanded=` argument only
+sets its initial state - a manual open/close toggle doesn't survive a script rerun, so
+without something re-asserting it, the expander snaps shut on every single add/popup
+click. Fixed with a session_state flag set the moment a lure actually lands in the
+pending list, read back as `expanded=` for both this expander and the sibling
+"Suggestions for right now" quick-add expander, so either one stays open for the rest
+of the session build once used - without touching either expander's "starts collapsed
+on a fresh page load" behavior.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
