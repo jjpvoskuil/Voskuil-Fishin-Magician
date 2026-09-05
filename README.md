@@ -880,10 +880,13 @@ before the next lure could even be picked. `st.expander`'s `expanded=` argument 
 sets its initial state - a manual open/close toggle doesn't survive a script rerun, so
 without something re-asserting it, the expander snaps shut on every single add/popup
 click. Fixed with a session_state flag set the moment a lure actually lands in the
-pending list, read back as `expanded=` for both this expander and the sibling
-"Suggestions for right now" quick-add expander, so either one stays open for the rest
-of the session build once used - without touching either expander's "starts collapsed
-on a fresh page load" behavior.
+pending list, read back as this expander's own `expanded=` value, so it stays open for
+the rest of the session build once used - without touching punch-list #33's own
+"starts collapsed on a fresh page load" behavior. A first version of this fix also
+drove the sibling "Suggestions for right now" quick-add expander from the same flag,
+but the angler asked for that one to stay untouched ("should only open if I
+deliberately uncollapse it"), so it stays a bare `expanded=False` regardless of
+anything added during the session build.
 
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at

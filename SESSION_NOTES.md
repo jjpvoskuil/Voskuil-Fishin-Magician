@@ -10354,12 +10354,10 @@ every real save.
     moment a lure actually lands in the pending list - covers the
     tackle-box picker, manual entry, quick-add, and the trailer dialog's
     own "Add lure" confirm, since all of them funnel through the same
-    `_handle_lure_add_click()`/`_trailer_dialog()` - and read back as the
-    `expanded=` value for both this expander and the sibling "Suggestions
-    for right now" expander (which has the identical quick-add-triggered
-    collapse bug), so either one stays open for the rest of the session
-    build once used, without touching punch-list #33's own "starts
-    collapsed on a fresh page load" behavior. **Verified live** by
+    `_handle_lure_add_click()`/`_trailer_dialog()` - and read back as this
+    expander's own `expanded=` value, so it stays open for the rest of the
+    session build once used, without touching punch-list #33's own
+    "starts collapsed on a fresh page load" behavior. **Verified live** by
     directly reproducing the exact broken sequence against the deployed
     app before writing the fix, then added
     `test_tackle_box_expander_stays_open_across_add_more_lures_cycles()`
@@ -10369,6 +10367,22 @@ every real save.
     Streamlit reports, so unlike follow-up fix #1's regression test, this
     one genuinely fails against the pre-fix code and passes after. Full
     suite `pytest tests/ -q` - 461 passed (460 + 1 new).
+
+    **Correction (same day):** the first version of this fix also drove
+    the sibling "Suggestions for right now" expander from the same flag
+    (it has the identical quick-add-triggered collapse bug, so it seemed
+    like the consistent thing to do). The angler caught this immediately
+    after trying it live: "Better, but the suggestions for right now
+    should stay collapsed. That section should only open if I
+    deliberately uncollapse it." Reverted - "Suggestions for right now"
+    is back to a bare `expanded=False` (punch-list #33's original intent,
+    with no exception for an in-progress session build) and no longer
+    reads `_tackle_box_expander_open_key()` at all; only "Add from tackle
+    box" (the section actually involved in the reported bug) stays open
+    across a session build. Added
+    `test_suggestions_expander_stays_collapsed_even_after_adding_lures()`
+    to guard specifically against this regression. Full suite
+    `pytest tests/ -q` - 462 passed (461 + 1 new).
 
 ## Key design decisions & rationale
 

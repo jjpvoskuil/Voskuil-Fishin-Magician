@@ -2521,17 +2521,16 @@ else:
     # own ask, so the score/lure-suggestion block doesn't take up the whole
     # screen above the actual "Lures for this session" picker every time this
     # page loads; still one tap away whenever it's actually wanted. Punch-list
-    # #87 follow-up #2: still starts collapsed on a fresh page load (the flag
-    # below is only ever set once a lure has actually been added via this
-    # exact quick-add path in THIS session build - see
-    # _tackle_box_expander_open_key()'s docstring), but stays open across
-    # "Add more lures" cycles once the angler's used it, matching the
-    # tackle-box picker's own fix for the same st.expander-forgets-its-open-
-    # state-across-st.rerun() root cause.
-    with st.expander(
-        "Suggestions for right now",
-        expanded=st.session_state.get(_tackle_box_expander_open_key(spot["spot_id"], session_build_seq), False),
-    ):
+    # #87 follow-up #2 briefly also drove this expander's `expanded=` from
+    # _tackle_box_expander_open_key() (same as "Add from tackle box" below),
+    # but the angler explicitly asked for this one to stay untouched - "the
+    # suggestions for right now should stay collapsed. That section should
+    # only open if I deliberately uncollapse it" - so it's back to a bare
+    # `expanded=False` and does NOT track that flag; only "Add from tackle
+    # box" (the section the angler was actually complaining about, since
+    # that's where the "Add more lures" cycle lives) stays open across a
+    # session build.
+    with st.expander("Suggestions for right now", expanded=False):
         m1, m2 = st.columns([1, 2])
         m1.metric(
             f"{_preview_segment} activity score", f"{score_result.score}/10",
