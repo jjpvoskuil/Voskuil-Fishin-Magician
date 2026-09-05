@@ -63,9 +63,9 @@ st.caption(
 )
 if inventory:
     st.caption(
-        "🧰 Lure blocks below are checked against your Tackle Box - ones you already own are "
-        "flagged and bubble to the top of each list; the rest are still shown as suggestions worth "
-        "picking up."
+        "🧰 Lure setups below show your top 3 best-fit owned lures for each window, checked against "
+        "your Tackle Box - anything else well-suited but not in your tackle box shows up in a separate "
+        "'gaps' section instead of being mixed in."
     )
 
 cols = st.columns(len(week))
@@ -127,11 +127,20 @@ for day in week:
             # "structure type" is a general Lake Setup selection, not a specific
             # spot (Spot Session's own call to recommend() passes spot_id too,
             # for the strongest possible match).
+            # Punch-list #82: pass this day's real average wind (score_day()
+            # itself already uses the same day-level average for every
+            # segment's score - see core.scoring.score_day()'s own avg_wind
+            # comment - so this is exactly consistent, not a finer-grained
+            # value than the score already reflects) so recommend()'s
+            # wind-driven reaction-bait promotion can actually fire here.
+            # Before this fix it never could - this page never passed
+            # wind_mph at all, so a genuinely windy forecast day never
+            # changed the lure pick the way a windy Spot Session already did.
             rec = recommend(eff_season, eff_water_temp, seg.name, seg.pressure_trend_24h, structure, clarity,
                              fish_depth_ft=lake_setup.fish_depth_ft, forage=lake_setup.forage,
-                             inventory=inventory, trip_history=trip_history)
+                             inventory=inventory, trip_history=trip_history, wind_mph=ws["avg_wind_mph"])
             with st.expander(
                 f"{seg.name} ({seg.start.strftime('%-I:%M %p')}-{seg.end.strftime('%-I:%M %p')}) - score {seg.score}/10",
                 expanded=(seg.name == best_name),
             ):
-                render_lure_recommendation(rec)
+                render_lure_recommendation(rec, inventory=inventory)

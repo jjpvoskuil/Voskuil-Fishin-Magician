@@ -240,15 +240,25 @@ this repo that can override it on this hosting.
   inputs. Made a mistake on a past trip, or just want to fix it up? Corrections now
   happen entirely on the **Trip History** page itself (punch-list #55) - see that
   section below - rather than through a handoff back to this page.
-- **Per-lure recommendation blocks** - each recommended lure (first choice, then a
-  second-choice section) gets its own self-contained block: specific colors for that
-  lure, trailer type/color if one applies, depth to run, presentation style, and a
-  couple of how-to videos - all in one place. Depth guidance accounts for the fact that
-  bass are upward-biased sight feeders (narrow binocular vision cone above/in front of
-  the snout, blind below/behind, upward-hinging jaw) - reaction/"column" lures (crankbaits,
-  jerkbaits, spinnerbaits, etc.) get a target running depth 1-2 ft *above* the depth
-  you're marking fish at, while bottom-contact baits (jigs, Carolina rigs, etc.) get
-  count-down-to-depth guidance instead.
+- **Per-lure recommendation blocks, curated to the top 3 you own + a separate gaps
+  section (punch-list #82)** - each recommended lure gets its own self-contained
+  block: specific colors for that lure, trailer type/color if one applies, depth to
+  run, presentation style, and a couple of how-to videos - all in one place. Depth
+  guidance accounts for the fact that bass are upward-biased sight feeders (narrow
+  binocular vision cone above/in front of the snout, blind below/behind, upward-hinging
+  jaw) - reaction/"column" lures (crankbaits, jerkbaits, spinnerbaits, etc.) get a
+  target running depth 1-2 ft *above* the depth you're marking fish at, while
+  bottom-contact baits (jigs, Carolina rigs, etc.) get count-down-to-depth guidance
+  instead. `core.lures.recommend()` still reasons over every situationally-relevant
+  lure (season/structure/pressure/forage/depth/activity/wind/your own trip history),
+  but `core.lures.curate_recommendation()` narrows what's actually shown to the top 3
+  lures you already own, ranked for today's exact situation - real angler feedback was
+  that the old "first choice"/"second choice" dump (often 6-9 cards, mixing owned and
+  not-owned) "always seem[ed] to be the same regardless of the situation" and was
+  simply too much. Anything well-ranked but NOT in your tackle box now shows in a
+  separate, collapsed "🧰 Tackle box gaps worth a look" section instead of being mixed
+  in - a real alternative worth considering, not a generic shopping list, since it's
+  only ever drawn from lures the situational engine already put in play today.
 - **Lake Setup Options sidebar** (7-Day Forecast page) - a compact, two-column layout
   so it fits without scrolling. Two required, direct inputs since Nolin has no live
   feed for either: your water surface temp reading (pre-filled from the forecast's
@@ -589,8 +599,16 @@ plausible day/segment combinations, with the tails far more balanced).
   depth/cover layer to the map (behind an opt-in toggle, not the always-on checkboxes
   it used to have) would be a deliberate follow-up, not something this round did.
 - Instructional videos (`core/videos.py`): a curated table of real, verified YouTube
-  links per lure/technique. A couple of techniques without a confidently-verified direct
-  link fall back to a live YouTube search link instead of a guessed URL.
+  links per lure/technique. As of punch-list #82, every `core.lures.LURE_PROFILES`
+  category (all 23 - the full set the recommendation engine and tackle-box categorization
+  can ever surface) has at least one curated entry - a real gap check found 6 categories
+  (Spoon, Lipless Crankbait, Medium-Diving Crankbait, Finesse Shaky Head, Drop Shot, Soft
+  Swimbait) were silently falling back to a generic search link every time they were
+  recommended; `tests/test_videos.py::test_every_lure_profile_video_key_has_curated_
+  videos` locks this in so a future new lure category can't regress it silently. A small
+  number of free-text technique names outside that closed set (used only by the
+  unused-in-app `get_videos_for()` helper) still fall back to a live YouTube search
+  link instead of a guessed URL.
 - Summer/normal pool elevation used for the map context: 515 ft, ~5,795 surface acres
   (confirmed against USACE data), vs. ~2,890 acres at winter pool.
 - Thermocline depth (`core/thermocline.py`): no longer wired into any page's UI (both
@@ -1298,10 +1316,11 @@ biology (upward strike bias, etc.) that was already there:
    own card (⬤ "Your own history: N of M similar trips landed fish...") rather than
    being buried, so you can judge the strength of the signal yourself before trusting it.
 
-3. **Live fish/forage activity and wind, on Spot Session only (punch-list #49).** Spot
-   Session's own condition form already asked for "Fish activity" and "Forage activity"
-   (five-point sliders, both running least active to most active - Inactive/Sluggish/
-   Moderate/Active/Very active, and None seen/Sparse/Moderate/Active-schooling/Frenzied-
+3. **Live fish/forage activity and wind, on Spot Session; wind alone on the Forecast
+   page too (punch-list #49, wind wiring fixed under #82).** Spot Session's own
+   condition form already asked for "Fish activity" and "Forage activity" (five-point
+   sliders, both running least active to most active - Inactive/Sluggish/Moderate/
+   Active/Very active, and None seen/Sparse/Moderate/Active-schooling/Frenzied-
    busting-bait) and a wind reading - these used to be recorded to the trip log and
    otherwise ignored. They now feed
    `recommend()` directly: "Very active"/"Active" fish, "Active / schooling"/"Frenzied
@@ -1314,10 +1333,29 @@ biology (upward strike bias, etc.) that was already there:
    toward a slower finesse presentation (finesse shaky head, drop shot, wacky rig
    senko, or football jig) - the same style of nudge the existing pressure-trend
    rationale already used, just driven by what you actually observe on the water
-   instead of a barometer reading. This is Spot-Session-only on purpose - the 7-Day
-   Forecast page is a genuine forecast, and has no way to know whether fish will be
-   schooling three days from now, so these three inputs default to unused there and
-   change nothing about its picks.
+   instead of a barometer reading. Fish/forage activity stay Spot-Session-only on
+   purpose - the 7-Day Forecast page is a genuine forecast, with no way to know
+   whether fish will be schooling three days from now. Wind is different: a real gap
+   found under punch-list #82 was that the Forecast page never passed `wind_mph` into
+   `recommend()` at all, even though `core.scoring.score_day()` already computes a
+   real per-day average wind for the score itself - so a genuinely windy forecast day
+   never got the same reaction-bait promotion a windy Spot Session already did. Fixed
+   by passing that same day-level average (`day.weather_summary["avg_wind_mph"]`)
+   through - exactly consistent with what the 1-10 score for that day already used,
+   not a finer-grained value invented for this.
+
+4. **A strong, situation-matched track record can lead the whole recommendation, not
+   just get a footnote (punch-list #82).** The personal-history signal above (#2) used
+   to only ever tag a note onto whichever tier the season pattern already sorted a
+   lure into. Real feedback was that recommendations should be "specific to ... our
+   past history" - so when a lure clears a stricter bar than the base 2-trip gate
+   (`core.lures.STRONG_HISTORY_MIN_TRIPS=3` similar trips, `STRONG_HISTORY_CATCH_RATE
+   =0.6` catch rate), it's promoted all the way to the #1 recommendation, ahead of the
+   season/structure pattern's own top pick - your own best-proven option for this
+   exact situation actually leading, not buried behind a documented pattern you've
+   never tried at this spot. Still purely additive/never-destructive like the rest of
+   this section: at most one lure ever gets promoted this way, and everything else
+   stays in the plan, just reordered.
 
 ### Why this lure and this color (punch-list #49)
 

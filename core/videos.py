@@ -7,6 +7,20 @@ couple of techniques didn't turn up a confidently-verifiable direct link
 in that search pass, so they fall back to a live YouTube search URL
 instead - that always works and always shows current results, it just
 isn't hand-picked.
+
+Punch-list #82: the angler specifically asked for "at least one [video]
+for every true lure ... in our tackle box" - a real gap check found 6 of
+core.lures.LURE_PROFILES' 23 categories (spoon, lipless_crankbait,
+medium_diving_crankbait, finesse_shaky_head, drop_shot, soft_swimbait)
+had no curated entry here at all and were silently falling back to a
+generic search link every time they were recommended. Filled in below via
+the same web-search-and-verify process as every other entry - real,
+found-in-results youtube.com/watch URLs, not guessed. See
+tests/test_videos.py's test_every_lure_profile_video_key_has_curated_
+videos for the regression test that keeps this true going forward (any
+future core.lures.LURE_PROFILES addition that forgets a video_key entry
+here now fails a test instead of silently shipping a search-link-only
+lure).
 """
 from __future__ import annotations
 from urllib.parse import quote_plus
@@ -76,6 +90,32 @@ VIDEO_LIBRARY = {
         {"title": "Basics of Frog Fishing and How to Fish Hollow-Body Frog Lures", "url": "https://www.youtube.com/watch?v=czTtqyDKDcA"},
         {"title": "Hollow Body Frog Bass Fishing | Key Rods and Frogs", "url": "https://www.youtube.com/watch?v=EvbWaO8SNNs"},
     ],
+    # Punch-list #82: the six entries below close the coverage gap described
+    # in the module docstring above.
+    "spoon": [
+        {"title": "How to Fish Jigging Spoons - Full Tutorial", "url": "https://www.youtube.com/watch?v=jp8M4ruKZW4"},
+        {"title": "How To Fish a Jigging Spoon for Late Summer Bass (Bait School)", "url": "https://www.youtube.com/watch?v=hNW8bMwqrFI"},
+    ],
+    "lipless_crankbait": [
+        {"title": "How to Fish Lipless Crankbaits - Bass Fishing", "url": "https://www.youtube.com/watch?v=Qhw4BlOJsCs"},
+        {"title": "Lipless Crankbaits - Everything You Need To Know (Beginner To Advanced)", "url": "https://www.youtube.com/watch?v=0bhRq6t1N3E"},
+    ],
+    "medium_diving_crankbait": [
+        {"title": "Learn How to Master All Medium Diving Crankbaits", "url": "https://www.youtube.com/watch?v=Jmhvojczf1Q"},
+        {"title": "Crankbaits For Beginners | How To | Bass Fishing", "url": "https://www.youtube.com/watch?v=c2KUZgv6dHo"},
+    ],
+    "finesse_shaky_head": [
+        {"title": "How to Fish a Shaky Head - Bass Fishing", "url": "https://www.youtube.com/watch?v=alUOqhOlziY"},
+        {"title": "How To Fish A Shaky Head - Everything You Need To Know (Beginner To Advanced)", "url": "https://www.youtube.com/watch?v=woo-Edy43Pg"},
+    ],
+    "drop_shot": [
+        {"title": "How-To Rig a Drop Shot - The Most Productive Finesse Technique in Bass Fishing", "url": "https://www.youtube.com/watch?v=I0aMto_cTQI"},
+        {"title": "How to Fish the Drop Shot Rig 2 Ways - Bass Fishing", "url": "https://www.youtube.com/watch?v=Lk9vCW7rvcg"},
+    ],
+    "soft_swimbait": [
+        {"title": "Paddle Tail Swimbaits - Bass Fishing", "url": "https://www.youtube.com/watch?v=bPXPFPxGcXc"},
+        {"title": "Best Paddle Tail Swimbait Tips for Bass Fishing (These Work!)", "url": "https://www.youtube.com/watch?v=WR3ogOkdWZ8"},
+    ],
 }
 
 # Ordered longest/most-specific substring first so e.g. "suspending jerkbait"
@@ -85,11 +125,15 @@ _KEYWORD_MAP = [
     ("suspending jerkbait", "suspending_jerkbait"),
     ("jerkbait", "suspending_jerkbait"),
     ("blade bait", "blade_bait"),
+    ("spoon", "spoon"),  # punch-list #82
     ("chatterbait", "chatterbait"),
     ("squarebill", "squarebill_crankbait"),
     ("deep-diving crankbait", "deep_diving_crankbait"),
     ("deep diving crankbait", "deep_diving_crankbait"),
-    ("lipless crankbait", None),  # no confidently-verified direct link - falls through to search
+    ("medium-diving crankbait", "medium_diving_crankbait"),  # punch-list #82
+    ("medium diving crankbait", "medium_diving_crankbait"),  # punch-list #82
+    ("lipless crankbait", "lipless_crankbait"),  # punch-list #82 (used to fall through to search)
+    ("lipless", "lipless_crankbait"),  # punch-list #82
     ("texas-rigged", "texas_rig"),
     ("texas rig", "texas_rig"),
     ("wacky-rigged senko", "wacky_rig_senko"),
@@ -97,8 +141,15 @@ _KEYWORD_MAP = [
     ("senko", "wacky_rig_senko"),
     ("weightless soft plastic", "weightless_soft_plastic"),
     ("fluke", "weightless_soft_plastic"),
+    ("drop shot", "drop_shot"),  # punch-list #82 (VIDEO_LIBRARY now has a real entry)
+    ("drop-shot", "drop_shot"),  # punch-list #82
+    ("dropshot", "drop_shot"),  # punch-list #82
     ("spinnerbait", "spinnerbait"),
     ("swim jig", "swim_jig"),
+    ("soft swimbait", "soft_swimbait"),  # punch-list #82
+    ("paddle tail", "soft_swimbait"),  # punch-list #82
+    ("paddle-tail", "soft_swimbait"),  # punch-list #82
+    ("swimbait", "soft_swimbait"),  # punch-list #82
     ("carolina-rigged", "carolina_rig"),
     ("carolina rig", "carolina_rig"),
     ("buzzbait", "buzzbait"),
@@ -106,8 +157,8 @@ _KEYWORD_MAP = [
     ("popper", "popper"),
     ("hollow-body frog", "hollow_body_frog"),
     ("frog", "hollow_body_frog"),
-    ("shaky head", None),  # no confidently-verified direct link - falls through to search
-    ("finesse worm", None),
+    ("shaky head", "finesse_shaky_head"),  # punch-list #82 (used to fall through to search)
+    ("finesse worm", "finesse_shaky_head"),  # punch-list #82
     ("jig", "football_jig"),  # generic jig fallback (e.g. "Jig + craw trailer")
     ("crankbait", "squarebill_crankbait"),  # generic crankbait fallback
 ]
