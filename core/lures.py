@@ -704,15 +704,23 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
     matched, off_color = _split_owned_by_color(owned_items, colors) if owned_items else ([], [])
     # Punch-list #88: rank owned, color-matched items by real catch success
     # (median fish/hour for this EXACT product, punch-list #88's
-    # item_fish_per_hour()) rather than just quantity on hand - this is what
-    # fixes the "why is the KVD Blade Minnow ranked #1 ahead of the Zoom
-    # Super Fluke, which has actually caught more fish" complaint, since
-    # quantity alone can't tell two same-category, same-quantity products
-    # apart. A specific item with no trustworthy track record yet (returns
-    # None - new to the tackle box, never logged, or below the min-trips
-    # floor) still shows up, just ranked below anything with a real proven
-    # rate, and ties among no-track-record items still fall back to
-    # quantity on hand, same as before this change.
+    # item_fish_per_hour()) - this is what fixes the "why is the KVD Blade
+    # Minnow ranked #1 ahead of the Zoom Super Fluke, which has actually
+    # caught more fish" complaint, since quantity alone can't tell two
+    # same-category, same-quantity products apart. A specific item with no
+    # trustworthy track record yet (returns None - new to the tackle box,
+    # never logged, or below the min-trips floor) still shows up, just
+    # ranked below anything with a real proven rate.
+    #
+    # Deliberately does NOT fall back to quantity on hand for untested
+    # items (an earlier version of this fix did, and the angler explicitly
+    # flagged that as wrong: "the qty on hand is irrelevant for this" -
+    # stock level says nothing about whether a lure catches fish, so it
+    # has no business influencing this ranking even as a tiebreaker).
+    # Items with no rate simply keep whatever order they arrived in
+    # (`sort()` is stable, and that incoming order is _group_owned_by_
+    # category()'s own inventory-row order) rather than being reordered by
+    # a signal that isn't actually about catch success.
     for it in matched:
         it["_item_fish_per_hour"] = (
             item_fish_per_hour(trip_history, situation, _item_label(it))
@@ -722,7 +730,6 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
         key=lambda it: (
             it["_item_fish_per_hour"] is not None,
             it["_item_fish_per_hour"] or 0.0,
-            it.get("quantity") or 0,
         ),
         reverse=True,
     )

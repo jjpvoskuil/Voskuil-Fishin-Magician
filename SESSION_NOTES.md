@@ -10104,17 +10104,39 @@ every real save.
     `core.lures` and risking the same class of circular import this
     change itself had to fix - see below). Every color-matched owned item
     now gets `it["_item_fish_per_hour"]` computed and stashed on it, and
-    the sort key became
-    `(rate is not None, rate or 0.0, quantity or 0)` descending - a proven
-    item always outranks an unproven one regardless of stock, and quantity
-    remains the fallback/tiebreaker for items with no track record yet
-    (verified this exactly matches prior behavior when no trip history is
-    passed at all - existing quantity-sort tests still pass unmodified).
+    the sort key became `(rate is not None, rate or 0.0)` descending - a
+    proven item always outranks an unproven one regardless of stock.
+    Quantity on hand is deliberately **not** part of the ranking at all,
+    not even as a fallback for untested items (see the follow-up
+    correction immediately below) - items with no track record simply
+    keep whatever order they arrived in (`sort()`'s own stability,
+    against `_group_owned_by_category()`'s inventory-row order).
     `core.ui.render_lure_block()` now shows the actual fish/hour number
     next to each ranked item ("📈 X.X fish/hr (your history)") when one
     exists - "show your work," the same principle behind
     `track_record_note()`'s raw-number phrasing - rather than silently
     reordering with no visible reason.
+
+    **Follow-up correction (same day, after this was first shipped):** the
+    first version of this fix used `(rate is not None, rate or 0.0,
+    quantity or 0)` as the sort key - i.e. quantity on hand still broke
+    ties between two items with no track record yet, exactly matching
+    pre-#88 behavior for that specific case. The angler caught this
+    immediately: "Does the ranking use qty in stock at all? If it does, it
+    shouldn't. The qty on hand is irrelevant for this." Correct - stock
+    level says nothing about whether a lure catches fish, so it has no
+    business influencing this ranking even as a last-resort tiebreaker.
+    Removed `quantity` from the sort key entirely; untested items now keep
+    stable/original order instead. This changed two existing punch-list #8
+    tests whose whole premise was "rank by quantity when nothing else is
+    known" - `test_owned_items_are_capped_at_top_2_ranked_by_quantity` and
+    `test_owned_items_tie_on_quantity_keeps_original_order` were renamed
+    (`..._in_original_order_when_no_track_record` /
+    `..._with_no_track_record_and_equal_quantity_keep_original_order`) and
+    their expected orderings updated to match; a new punch-list #88 test
+    (`test_owned_items_without_track_record_do_not_rank_by_quantity`) was
+    also corrected the same way. Full suite still 456 passed (no tests
+    added or removed, three updated in place).
 
     **Bug caught and fixed mid-implementation:** adding
     `from .calibration import trip_fish_per_hour` at module load time to

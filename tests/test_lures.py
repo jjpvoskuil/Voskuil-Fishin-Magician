@@ -327,11 +327,18 @@ def test_only_color_matched_owned_items_are_shown_others_dropped():
     assert block.owned_items[0]["description"] == "300 Green Shad"
 
 
-def test_owned_items_are_capped_at_top_2_ranked_by_quantity():
+def test_owned_items_are_capped_at_top_2_in_original_order_when_no_track_record():
     # Punch-list #8: "only show the top 2 recommendations in each category...
     # with a #1 and a #2 choice" - even with 3 color-matched items on hand,
-    # only the 2 with the most quantity in reserve should come back, most
-    # in-stock first.
+    # only 2 should come back. Punch-list #88: with no trip_history passed
+    # (as here), none of these items has a catch-success rate, so there's
+    # no signal to rank them by - quantity on hand is deliberately NOT used
+    # as a fallback (real angler feedback: "the qty on hand is irrelevant
+    # for this"), so ties simply keep the order they arrived in
+    # (inventory's own row order), regardless of how much of each is in
+    # stock - note "most stock"/"low stock" in the descriptions below are
+    # red herrings, kept from this test's original quantity-ranked version,
+    # deliberately NOT reflected in the expected order.
     inventory = [
         {"brand": "Strike King", "description": "3XD Chartreuse Shad - low stock",
          "category": "medium_diving_crankbait", "quantity": "1", "sku": "a"},
@@ -344,10 +351,14 @@ def test_owned_items_are_capped_at_top_2_ranked_by_quantity():
                      inventory=inventory)
     block = next(b for b in rec.first_choice + rec.second_choice if b.key == "medium_diving_crankbait")
     assert len(block.owned_items) == 2
-    assert [it["sku"] for it in block.owned_items] == ["b", "c"]
+    assert [it["sku"] for it in block.owned_items] == ["a", "b"]
 
 
-def test_owned_items_tie_on_quantity_keeps_original_order():
+def test_owned_items_with_no_track_record_and_equal_quantity_keep_original_order():
+    # Same-quantity items used to be an explicit tie-on-quantity case; now
+    # that quantity isn't part of the ranking at all (punch-list #88), this
+    # is really just another no-track-record tie - kept as its own test
+    # since equal quantity was the original reported scenario.
     inventory = [
         {"brand": "Strike King", "description": "3XD Chartreuse Shad - first",
          "category": "medium_diving_crankbait", "quantity": "2", "sku": "a"},
@@ -412,10 +423,12 @@ def test_owned_items_rank_by_catch_success_ahead_of_quantity():
     assert block.owned_items[1]["_item_fish_per_hour"] == 1.0
 
 
-def test_owned_items_without_track_record_fall_back_to_quantity():
-    # No trip_history/situation passed at all - same as every recommend()
-    # call before punch-list #88 - so nothing should change: quantity is
-    # still the tiebreaker/fallback ranking.
+def test_owned_items_without_track_record_do_not_rank_by_quantity():
+    # No trip_history/situation passed at all - no item has a catch-success
+    # rate, so nothing distinguishes them for ranking purposes. Real angler
+    # feedback: "the qty on hand is irrelevant for this" - so even though
+    # "b" has 5x the stock of "a", quantity must NOT decide the order;
+    # items should simply keep the order they arrived in.
     from core.lures import _build_block
     owned = [
         {"brand": "Strike King", "description": "3XD Chartreuse Shad - low stock",
@@ -424,7 +437,7 @@ def test_owned_items_without_track_record_fall_back_to_quantity():
          "quantity": 5, "sku": "b", "item_id": "b", "image_url": "", "image_filename": ""},
     ]
     block = _build_block("medium_diving_crankbait", "Green stained", owned_items=owned)
-    assert [it["sku"] for it in block.owned_items] == ["b", "a"]
+    assert [it["sku"] for it in block.owned_items] == ["a", "b"]
     assert all(it["_item_fish_per_hour"] is None for it in block.owned_items)
 
 
