@@ -829,6 +829,20 @@ opening it, and "🔄 Update conditions" sits right below the score rather than 
 that sub-section, so a quick "just log this new reading, keep fishing what I've got"
 update never requires scrolling past a full lure list you didn't ask to see.
 
+**Weight and length are plain dropdowns now, not sliders (punch-list #86).**
+The "📷 Log a fish" popup used to size a catch with a 1-oz-increment weight
+slider and a whole-inch length slider (plus manual text fields kept in sync
+with each, from punch-list #31) - reported as too sensitive to drag precisely
+on a phone, and since every new fish gets a blank form, the length slider's
+own default position (its lowest bucket, "<13 in") meant length had to be
+manually readjusted from a 12"-equivalent starting point for every single
+fish. Replaced with plain dropdowns: "Weight - lb" (0-10, plus a "10+" option
+for a true outlier) and "oz" (0-15) side by side, defaulting to 0 lb 8 oz; a
+single "Length (in)" dropdown (a "Under 12 in" catch-all, 12-26 in one-inch
+steps, a "26+ in" catch-all), defaulting to 12 in. A dropdown opens your
+phone's native picker wheel - tap once, scroll, tap again - instead of
+dragging a slider handle to aim at a precise position.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip

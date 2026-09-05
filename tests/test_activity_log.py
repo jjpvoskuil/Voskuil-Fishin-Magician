@@ -3,9 +3,11 @@ from core.activity_log import (
     OTHER_LABEL, DEPTH_MODES, FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS,
     HIT_TYPE_OPTIONS, LENGTH_SLIDER_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
     WEIGHT_SLIDER_OPTIONS, WEIGHT_SLIDER_TOP_LB,
+    WEIGHT_LB_OPTIONS, WEIGHT_OZ_OPTIONS, LENGTH_OPTIONS,
     inventory_item_label, length_in_for_slider_option, lure_can_take_trailer, lure_picker_options,
     format_weight_lb_oz, parse_weight_lb_oz, weight_lb_for_slider_option,
     nearest_weight_slider_option, nearest_length_slider_option,
+    weight_lb_for_dropdown, length_in_for_dropdown,
 )
 
 
@@ -246,3 +248,56 @@ def test_parse_weight_lb_oz_blank_or_unparseable_returns_none():
 def test_format_and_parse_weight_round_trip_on_whole_ounces():
     for lb in (0.0625, 0.5, 1.0, 3.5, 4.0, 7.9375):
         assert parse_weight_lb_oz(format_weight_lb_oz(lb)) == lb
+
+
+# --- Punch-list #86: plain lb/oz/length dropdowns replacing the sliders ------
+def test_weight_lb_options_and_oz_options_cover_the_expected_ranges():
+    assert WEIGHT_LB_OPTIONS[0] == 0
+    assert WEIGHT_LB_OPTIONS[10] == 10
+    assert WEIGHT_LB_OPTIONS[-1] == "10+"
+    assert WEIGHT_OZ_OPTIONS == list(range(16))
+
+
+def test_length_options_cover_the_expected_range():
+    assert LENGTH_OPTIONS[0] == "<12"
+    assert LENGTH_OPTIONS[1] == 12
+    assert LENGTH_OPTIONS[-2] == 26
+    assert LENGTH_OPTIONS[-1] == "26+"
+
+
+def test_weight_lb_for_dropdown_combines_lb_and_oz():
+    assert weight_lb_for_dropdown(0, 8) == 0.5
+    assert weight_lb_for_dropdown(3, 0) == 3.0
+    assert weight_lb_for_dropdown(4, 15) == round(4 + 15 / 16, 4)
+
+
+def test_weight_lb_for_dropdown_ten_plus_ignores_oz():
+    # A "10+" pick is a single open-ended bucket, same convention as the
+    # old slider's "+5 lb" - whatever oz happens to be selected alongside
+    # it is ignored, not added on top.
+    assert weight_lb_for_dropdown("10+", 0) == 10.5
+    assert weight_lb_for_dropdown("10+", 15) == 10.5
+
+
+def test_weight_lb_for_dropdown_handles_garbage_input():
+    assert weight_lb_for_dropdown(None, None) == 0.0
+    assert weight_lb_for_dropdown("not a number", "also not") == 0.0
+
+
+def test_length_in_for_dropdown_concrete_values():
+    assert length_in_for_dropdown(12) == 12.0
+    assert length_in_for_dropdown(26) == 26.0
+    assert length_in_for_dropdown("15") == 15.0
+
+
+def test_length_in_for_dropdown_catch_all_buckets():
+    # Real historical trip_log entries as small as 5 in confirm a genuine
+    # sub-12" catch does happen occasionally - "<12" must still resolve to
+    # a real, storable value rather than blocking entry.
+    assert length_in_for_dropdown("<12") == 11.0
+    assert length_in_for_dropdown("26+") == 27.0
+
+
+def test_length_in_for_dropdown_handles_garbage_input():
+    assert length_in_for_dropdown(None) == 0.0
+    assert length_in_for_dropdown("not a length") == 0.0
