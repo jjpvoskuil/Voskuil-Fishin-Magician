@@ -10297,6 +10297,39 @@ every real save.
     `pytest tests/ -q` - 459 passed (456 + 3 new). `AppTest` smoke test
     clean across every page reachable without live network access.
 
+    **Follow-up fix (same day, after this popup first shipped):** the
+    angler reported, from the real deployed app, "I like it but after I
+    add 2 lures, it doesn't toggle to let me add more." The first "Add
+    more lures" click (1 lure -> picking a 2nd) worked; the second one
+    (after the 2nd lure landed, trying to pick a 3rd) silently did
+    nothing. Root cause: `_lure_added_dialog()`'s two button keys were
+    scoped only to `(spot_id, session_build_seq)` - constant across every
+    reopening of this same popup within one session build, so the 2nd
+    (and every later) occurrence reused the exact same widget keys as the
+    1st. A manual `AppTest` reproduction of the exact failing sequence
+    (add1 -> Add more lures -> add2 -> Add more lures -> add3) actually
+    passed cleanly even with the OLD, buggy key scheme - the opposite gap
+    from the trailer-dialog finding above: this harness turned out to be
+    MORE lenient than a real browser about reusing an identical
+    `st.dialog` widget key across separate open/close cycles, so the fix
+    had to be reasoned from Streamlit dialog-widget-key best practices
+    (give every dialog occurrence a genuinely unique key) rather than
+    confirmed via a failing-then-passing test. Fixed by folding
+    `len(pending_lures)` - which increases by exactly 1 every time this
+    popup opens, since it only ever opens right after an add - into both
+    button keys via a new `_popup_key_suffix` variable, so every
+    occurrence of the popup gets a fresh, never-before-seen key.
+    **Verified:** updated the 3 existing tests' hardcoded key assertions
+    to the new `..._spot1_0_1` format, and added a new
+    `test_add_more_lures_can_be_used_twice_in_a_row()` that drives the
+    add1/more/add2/more/add3 sequence and explicitly asserts the second
+    "Add more lures" click uses a different key than the first - a
+    regression guard against the key ever going constant again, even
+    though (per the AppTest-leniency gap just described) this specific
+    test could not have caught the original bug on its own. Full suite
+    `pytest tests/ -q` - 460 passed (459 + 1 new). `git status --short
+    data/` confirmed no real data files were touched.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

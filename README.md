@@ -863,6 +863,15 @@ This popup only ever appears while building a NEW session (`mode == "pending"`) 
 one's already running, there's no "start the session" action to offer, so adding a lure
 mid-session (`_add_lure_to_active_session()`) deliberately does not trigger it.
 
+**Follow-up fix, same day:** the angler reported that after adding 2 lures, "Add more
+lures" stopped toggling the popup back open. The popup's two buttons were keyed only by
+`(spot_id, session_build_seq)` - constant across every reopening within one session
+build, so the 2nd (and every later) occurrence of the popup reused the identical widget
+keys as the 1st, which a real browser's `st.dialog` handling doesn't tolerate. Fixed by
+folding `len(pending_lures)` (which increases by 1 every time this popup opens) into
+both keys, giving every occurrence a genuinely fresh key so the popup can be reopened
+and dismissed repeatedly.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip
