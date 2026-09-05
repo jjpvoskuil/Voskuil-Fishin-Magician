@@ -843,6 +843,26 @@ steps, a "26+ in" catch-all), defaulting to 12 in. A dropdown opens your
 phone's native picker wheel - tap once, scroll, tap again - instead of
 dragging a slider handle to aim at a precise position.
 
+**Adding a lure while building a session now confirms itself with a popup, instead of
+requiring a scroll down to check (punch-list #87).** Angler's own ask, verbatim: "each
+lure I add to the session should be followed by a pop up the shows what lure have been
+added so far and an option to either add more lures or start the session." Every "+ Add"
+path while a NEW session is still being built - the tackle-box picker, the "Suggestions
+for right now" quick-add buttons, a manually-typed lure name, and the trailer popup's
+own "Add lure" confirm - now opens a small dialog right after the add: the running list
+of everything queued for this session so far, plus "➕ Add more lures" (closes the popup,
+back to picking) and "▶ Start Session" (starts the session immediately, right from the
+popup, without needing to scroll down to the button at the bottom of the page). The
+always-visible "Lures for this session" list below is unchanged and still there - this
+popup is an additional, immediate confirmation, not a replacement for it. The actual
+Start Session logic (locking in the time/score/conditions snapshot, writing one
+trip_log row per queued lure) was pulled out of the page-bottom button's own inline
+handler into a shared `_start_pending_session()` function so both the popup's button and
+the real one at the bottom trigger the exact same flow rather than two copies of it.
+This popup only ever appears while building a NEW session (`mode == "pending"`) - once
+one's already running, there's no "start the session" action to offer, so adding a lure
+mid-session (`_add_lure_to_active_session()`) deliberately does not trigger it.
+
 `core/calibration.py` compares catch outcomes between trips where a given factor (e.g.
 "falling pressure") was present vs. absent, and nudges that factor's weight - capped at
 +/-35% of its default - once you've logged at least 4 trips on each side. See the **Trip

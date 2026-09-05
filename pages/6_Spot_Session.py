@@ -1176,6 +1176,13 @@ def _handle_lure_add_click(spot_id: str, seq: int, lure_stub: dict, item_for_tra
     else:
         if mode == "pending":
             _add_lure_to_pending(spot_id, seq, lure_stub)
+            # Punch-list #87: flag a one-shot "lure added" confirmation
+            # popup for the very next render - see _lure_added_popup_key()/
+            # _lure_added_dialog() and the trigger check right after
+            # pending_lures is computed below. Only for "pending" mode -
+            # there's no "start the session" action to offer once one's
+            # already running.
+            st.session_state[_lure_added_popup_key(spot_id, seq)] = True
         else:
             _add_lure_to_active_session(spot_id, lure_stub, angler)
         st.rerun()
@@ -1217,6 +1224,9 @@ def _trailer_dialog(spot_id: str, seq: int, lure_stub: dict, mode: str, angler: 
         final_lure["trailer"] = trailer
         if mode == "pending":
             _add_lure_to_pending(spot_id, seq, final_lure)
+            # Punch-list #87 - see the matching comment in
+            # _handle_lure_add_click()'s non-trailer branch above.
+            st.session_state[_lure_added_popup_key(spot_id, seq)] = True
         else:
             _add_lure_to_active_session(spot_id, final_lure, angler)
         # Clears the checkbox/selection back to blank for the NEXT time this
@@ -1938,6 +1948,152 @@ def _keep_session(cancel_pending_key: str):
     st.session_state.pop(cancel_pending_key, None)
 
 
+def _start_pending_session(
+    spot: dict, cond_values: dict, session_date, bundle, structure_type: str, resolved_angler: str,
+    pending_lures: list, session_build_seq: int, session_build_seq_key: str, active_session_key: str,
+):
+    """The actual "▶ Start Session" flow - locks in the exact time/score/
+    conditions snapshot, writes one trip_log row per queued lure, and
+    stashes the new active-session dict in session_state. Extracted out of
+    the inline button handler it used to be (punch-list #87) so both the
+    real "▶ Start Session" button below AND the new post-add confirmation
+    popup's own "Start Session" option (_lure_added_dialog()) can trigger
+    the exact same flow instead of duplicating it."""
+    start_time = lake_now_naive().time()
+    at_time = datetime.combine(session_date, start_time)
+    segment_name = _guess_segment(at_time.hour, at_time)
+    water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
+        cond_values, session_date, bundle, at_time, segment_name, spot_id=spot["spot_id"],
+    )
+    base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler=resolved_angler)
+    # Punch-list #55: a real session_id, stamped once here and reused by
+    # every lure this session ever writes (including ones added later
+    # via _add_lure_to_active_session()) - lets Trip History group every
+    # lure/fish from one outing into a single record. Rows written
+    # before this existed have no session_id; Trip History treats those
+    # as their own single-lure "session" rather than guessing at
+    # grouping from date/spot/timestamp proximity (see that page's own
+    # docstring for why).
+    session_id = str(uuid.uuid4())[:8]
+
+    active_lures = []
+    for lure in pending_lures:
+        trailer = lure.get("trailer")
+        lure_conditions = dict(base_conditions)
+        lure_conditions.update({
+            "lure_category": lure.get("category"),
+            "trailer_used": trailer is not None,
+            "trailer_name": trailer.get("label") if trailer else None,
+            "trailer_color": trailer.get("color") if trailer else None,
+            "trailer_category": trailer.get("category") if trailer else None,
+            "lure_start_time": start_time.isoformat(),
+            "lure_end_time": None,
+            "fish": [],
+            "source": "spot_session",
+        })
+        entry_kwargs = dict(
+            trip_date=session_date.isoformat(),
+            segment=segment_name,
+            spot_id=spot["spot_id"],
+            spot_name=spot["name"],
+            structure_type=structure_type,
+            water_clarity=water_clarity,
+            lure_used=lure["label"],
+            color_used="",
+            technique_used="",
+            fish_caught=0,
+            biggest_fish_lb=None,
+            predicted_score=score_result.score,
+            conditions=lure_conditions,
+            notes="",
+            session_id=session_id,
+        )
+        entry = TripEntry(**entry_kwargs)
+        append_trip(entry)
+        active_lures.append({
+            "trip_id": entry.trip_id, "logged_at": entry.logged_at, "label": lure["label"],
+            "item_id": lure.get("item_id"), "entry_kwargs": entry_kwargs, "fish": [], "retired": False,
+        })
+
+    st.session_state[active_session_key] = {
+        "spot_name": spot["name"],
+        "session_date": session_date.isoformat(),
+        "start_time": start_time.isoformat(),
+        "segment_name": segment_name,
+        "structure_type": structure_type,
+        "water_clarity": water_clarity,
+        "predicted_score": score_result.score,
+        # Reused unchanged by _add_lure_to_active_session() for every
+        # lure added after Start Session - this session's conditions
+        # snapshot/time window are locked in once, not re-captured per
+        # lure.
+        "base_conditions": base_conditions,
+        "lures": active_lures,
+        "session_id": session_id,
+    }
+    st.session_state[session_build_seq_key] = session_build_seq + 1
+    # Punch-list #53: this build is no longer "pending" - it's active
+    # and durably saved to disk/data branch below, so the draft that
+    # was only ever a stand-in for that isn't needed anymore. Leaving
+    # it would also risk a stale seq lingering in the URL indefinitely.
+    _clear_pending_draft()
+    _push_paths = [TRIP_LOG_PATH]
+    if _save_new_angler_if_needed():
+        _push_paths.append(ANGLERS_PATH)
+    _push_or_toast(
+        _push_paths, f"Start spot session ({spot['name']}, {len(active_lures)} lure(s))",
+        "Session started locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+    st.rerun()
+
+
+def _lure_added_popup_key(spot_id: str, seq: int) -> str:
+    return f"show_lure_added_popup_{spot_id}_{seq}"
+
+
+@st.dialog("Lure added")
+def _lure_added_dialog(
+    spot: dict, cond_values: dict, session_date, bundle, structure_type: str, resolved_angler: str,
+    pending_lures: list, session_build_seq: int, session_build_seq_key: str, active_session_key: str,
+):
+    """Punch-list #87, the angler's own direct ask: "each lure I add to the
+    session should be followed by a pop up that shows what lure have been
+    added so far and an option to either add more lures or start the
+    session." Opened once per add (see _lure_added_popup_key() - set right
+    after a lure actually lands in the pending list, whether that happened
+    through the plain "+ Add" path or the trailer dialog's own "Add lure"
+    button) rather than leaving the angler to scroll down to the
+    always-visible "Lures for this session" list to confirm the add
+    actually took. Only ever shown while building a NEW session (mode ==
+    "pending") - there's no "start the session" action once one's already
+    running, so adding a lure mid-session (_add_lure_to_active_session)
+    deliberately does not trigger this."""
+    st.success(f"Added! {len(pending_lures)} lure{'s' if len(pending_lures) != 1 else ''} queued for this session so far:")
+    for lure in pending_lures:
+        trailer = lure.get("trailer")
+        trailer_bit = f" + {trailer['label']} trailer" if trailer else ""
+        st.write(f"🎣 {lure['label']}{trailer_bit}")
+    dc1, dc2 = st.columns(2)
+    if dc1.button("➕ Add more lures", width='stretch', key=f"lure_added_popup_more_{spot['spot_id']}_{session_build_seq}"):
+        # Explicitly closes the popup - see the trigger check's own comment
+        # for why this can't just rely on the flag having already been
+        # "consumed": the flag is deliberately NOT popped there (a plain
+        # pop-on-render would close this dialog the instant IT renders,
+        # before either of its own buttons ever gets a chance to be
+        # clicked - the dialog function has to be reachable again on every
+        # rerun ITS OWN widgets trigger, same as _trailer_dialog above).
+        st.session_state.pop(_lure_added_popup_key(spot["spot_id"], session_build_seq), None)
+        st.rerun()
+    if dc2.button(
+        "▶ Start Session", type="primary", width='stretch',
+        key=f"lure_added_popup_start_{spot['spot_id']}_{session_build_seq}",
+    ):
+        _start_pending_session(
+            spot, cond_values, session_date, bundle, structure_type, resolved_angler,
+            pending_lures, session_build_seq, session_build_seq_key, active_session_key,
+        )
+
+
 # _PER_LURE_CONDITION_KEYS, _open_session_rows(), _other_anglers_with_open_
 # session() and _reconstruct_active_session() now live up near the angler
 # picker (punch-list #59 needed them earlier than this point, to check for
@@ -2354,6 +2510,25 @@ else:
     st.divider()
     st.markdown("#### Lures for this session")
     pending_lures = st.session_state.get(_pending_lures_key(spot["spot_id"], session_build_seq), [])
+    # Punch-list #87: a lure was just added (from the suggestions quick-add,
+    # the tackle-box picker, manual entry, or the trailer dialog - see
+    # _lure_added_popup_key()) - show the confirmation popup, right now,
+    # before anything else on this rerun renders. Deliberately a plain
+    # `.get()`, NOT a `.pop()`: an `@st.dialog` function has to be reachable
+    # on every rerun ITS OWN widgets trigger (e.g. just re-rendering while
+    # open) or Streamlit has nothing left to show once the user interacts
+    # with anything inside it - a one-shot pop-on-render would close this
+    # popup the instant it first renders, before either of its own buttons
+    # ever got a chance to be clicked. The flag is cleared explicitly
+    # instead, by whichever of _lure_added_dialog()'s two buttons actually
+    # dismisses it ("Add more lures" pops it directly; "Start Session"
+    # advances session_build_seq, so this exact key - scoped to the OLD
+    # seq - simply stops matching on the very next render).
+    if st.session_state.get(_lure_added_popup_key(spot["spot_id"], session_build_seq), False):
+        _lure_added_dialog(
+            spot, cond_values, session_date, bundle, structure_type, resolved_angler,
+            pending_lures, session_build_seq, session_build_seq_key, active_session_key,
+        )
     # Punch-list #53: keep the URL's draft in sync with wherever this build
     # actually is right now - conditions form values plus whatever lures
     # are queued so far - every render, so a reconnect at any point (even
@@ -2402,91 +2577,9 @@ else:
         "▶ Start Session", type="primary", width='stretch', disabled=not pending_lures,
         key=f"start_session_{spot['spot_id']}_{session_build_seq}",
     ):
-        start_time = lake_now_naive().time()
-        at_time = datetime.combine(session_date, start_time)
-        segment_name = _guess_segment(at_time.hour, at_time)
-        water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
-            cond_values, session_date, bundle, at_time, segment_name, spot_id=spot["spot_id"],
+        _start_pending_session(
+            spot, cond_values, session_date, bundle, structure_type, resolved_angler,
+            pending_lures, session_build_seq, session_build_seq_key, active_session_key,
         )
-        base_conditions = _build_base_conditions(cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler=resolved_angler)
-        # Punch-list #55: a real session_id, stamped once here and reused by
-        # every lure this session ever writes (including ones added later
-        # via _add_lure_to_active_session()) - lets Trip History group every
-        # lure/fish from one outing into a single record. Rows written
-        # before this existed have no session_id; Trip History treats those
-        # as their own single-lure "session" rather than guessing at
-        # grouping from date/spot/timestamp proximity (see that page's own
-        # docstring for why).
-        session_id = str(uuid.uuid4())[:8]
-
-        active_lures = []
-        for lure in pending_lures:
-            trailer = lure.get("trailer")
-            lure_conditions = dict(base_conditions)
-            lure_conditions.update({
-                "lure_category": lure.get("category"),
-                "trailer_used": trailer is not None,
-                "trailer_name": trailer.get("label") if trailer else None,
-                "trailer_color": trailer.get("color") if trailer else None,
-                "trailer_category": trailer.get("category") if trailer else None,
-                "lure_start_time": start_time.isoformat(),
-                "lure_end_time": None,
-                "fish": [],
-                "source": "spot_session",
-            })
-            entry_kwargs = dict(
-                trip_date=session_date.isoformat(),
-                segment=segment_name,
-                spot_id=spot["spot_id"],
-                spot_name=spot["name"],
-                structure_type=structure_type,
-                water_clarity=water_clarity,
-                lure_used=lure["label"],
-                color_used="",
-                technique_used="",
-                fish_caught=0,
-                biggest_fish_lb=None,
-                predicted_score=score_result.score,
-                conditions=lure_conditions,
-                notes="",
-                session_id=session_id,
-            )
-            entry = TripEntry(**entry_kwargs)
-            append_trip(entry)
-            active_lures.append({
-                "trip_id": entry.trip_id, "logged_at": entry.logged_at, "label": lure["label"],
-                "item_id": lure.get("item_id"), "entry_kwargs": entry_kwargs, "fish": [], "retired": False,
-            })
-
-        st.session_state[active_session_key] = {
-            "spot_name": spot["name"],
-            "session_date": session_date.isoformat(),
-            "start_time": start_time.isoformat(),
-            "segment_name": segment_name,
-            "structure_type": structure_type,
-            "water_clarity": water_clarity,
-            "predicted_score": score_result.score,
-            # Reused unchanged by _add_lure_to_active_session() for every
-            # lure added after Start Session - this session's conditions
-            # snapshot/time window are locked in once, not re-captured per
-            # lure.
-            "base_conditions": base_conditions,
-            "lures": active_lures,
-            "session_id": session_id,
-        }
-        st.session_state[session_build_seq_key] = session_build_seq + 1
-        # Punch-list #53: this build is no longer "pending" - it's active
-        # and durably saved to disk/data branch below, so the draft that
-        # was only ever a stand-in for that isn't needed anymore. Leaving
-        # it would also risk a stale seq lingering in the URL indefinitely.
-        _clear_pending_draft()
-        _push_paths = [TRIP_LOG_PATH]
-        if _save_new_angler_if_needed():
-            _push_paths.append(ANGLERS_PATH)
-        _push_or_toast(
-            _push_paths, f"Start spot session ({spot['name']}, {len(active_lures)} lure(s))",
-            "Session started locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
-        )
-        st.rerun()
     if not pending_lures:
         st.caption("Select at least one lure above before starting the session.")

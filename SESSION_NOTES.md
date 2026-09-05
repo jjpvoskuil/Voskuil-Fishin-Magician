@@ -10187,6 +10187,116 @@ every real save.
     unrelated pre-existing sandbox limitation, not a result of this
     change).
 
+155. **Punch-list #87 (FIXED): a post-add confirmation popup while
+    building a new Spot Session.** Angler's own ask, verbatim: "When I get
+    to adding lures in spot session, each lure I add to the session should
+    be followed by a pop up the shows what lure have been added so far and
+    an option to either add more lures or start the session."
+
+    Before this, adding a lure while building a new session (any of: the
+    tackle-box picker's "+ Add", the "Suggestions for right now"
+    quick-add buttons, a manually-typed lure name, or the trailer popup's
+    own "Add lure" confirm) silently updated the always-visible "Lures for
+    this session" list further down the page with no immediate
+    confirmation - on a phone, that list is easy to scroll past, leaving
+    real doubt about whether the tap actually registered.
+
+    Added `_lure_added_dialog()`, a new `@st.dialog("Lure added")` opened
+    right after any of those four add paths succeeds: shows the running
+    "Added! N lure(s) queued for this session so far" list, plus two
+    buttons - "➕ Add more lures" (closes the popup, back to picking) and
+    "▶ Start Session" (starts the session immediately from the popup,
+    skipping the scroll to the page-bottom button). Triggered by a new
+    session_state flag, `_lure_added_popup_key(spot_id, seq)`, set to
+    `True` right after `_add_lure_to_pending()` succeeds in both
+    `_handle_lure_add_click()`'s direct-add branch and `_trailer_dialog()`'s
+    own "Add lure" confirm - and checked once, right after `pending_lures`
+    is computed in the page body, before anything else on that render.
+
+    Extracted the entire "▶ Start Session" button's inline handler (lock
+    in the time/score/conditions snapshot, write one trip_log row per
+    queued lure, stash the new active-session dict) into a standalone
+    `_start_pending_session()` function, unchanged in behavior, so both
+    the real button at the bottom of the page and the new popup's own
+    "Start Session" button call the exact same flow instead of maintaining
+    two copies of it.
+
+    Deliberately scoped to `mode == "pending"` only (building a NEW
+    session) - there's no "start the session" action to offer once one's
+    already running, so adding a lure mid-session
+    (`_add_lure_to_active_session()`) does not trigger this popup.
+
+    **Bug caught and fixed mid-implementation, via manual AppTest
+    verification (no permanent test existed yet):** the first version
+    checked the trigger flag with `st.session_state.pop(...)` - a one-shot
+    read that seemed natural ("show it once, right after the add"), and it
+    DID render the popup correctly on the very next page render. But
+    neither of the popup's own two buttons could then ever be clicked
+    successfully: on the FOLLOWING script run (the one clicking either
+    button inside the popup itself triggers), the flag had already been
+    consumed on the prior render, so the top-level page code no longer
+    told Streamlit to re-invoke `_lure_added_dialog()` at all on this new
+    run - there was nothing left for that click to attach to. Root cause:
+    unlike the page's own top-level widgets, a `@st.dialog`-decorated
+    function has to be reachable again on every subsequent rerun ITS OWN
+    widgets trigger, or the dialog (and everything inside it) simply stops
+    being shown. Fixed by making the flag check a plain `.get()` (never
+    popped implicitly) and clearing it EXPLICITLY only at the two real
+    dismissal points instead: "Add more lures" pops it directly before its
+    own `st.rerun()`; "Start Session" doesn't need to pop it at all, since
+    `_start_pending_session()` already advances `session_build_seq` as
+    part of starting - the flag's key is scoped to the OLD seq, so it
+    simply stops matching anything on the very next render once that
+    happens. Caught and fixed before ever being committed, via a throwaway
+    manual `AppTest`-driven script (mocking `core.appstate`'s cached
+    getters and `core.storage.append_trip`/`commit_and_push_data`) that
+    drove the actual click sequence end-to-end - the same kind of targeted
+    manual verification punch-list #84's dialog fix used, cleaned up
+    afterward per that same precedent, but this time promoted into a real
+    committed test file (see below) once it proved the flow could
+    genuinely be driven this way.
+
+    **Known, accepted gap:** the trailer-dialog path (a trailer-eligible
+    lure's "+ Add" opens `_trailer_dialog()` first; THIS popup should then
+    open after ITS "Add lure" button, not the plain "+ Add" click) could
+    not be verified end-to-end under `AppTest` - `_trailer_dialog()` is
+    opened inline, directly from a click handler, with no sticky
+    session_state flag of its own re-checked by top-level page code every
+    render (unlike the new popup here). It very likely relies on real
+    Streamlit's own internal "keep re-rendering the last-opened dialog"
+    runtime behavior to stay interactive across its own checkbox/selectbox
+    reruns in a real deployed app - `AppTest` has no equivalent of that
+    internal mechanism, so a click on a button living inside a dialog that
+    was opened that way can't be driven any further once the harness
+    re-executes the script. This is the exact same class of gap already
+    documented for punch-list #84/#85's dialogs (no committed dialog
+    interaction test existed anywhere in this suite before this session).
+    Verified this ONE path (add a trailer-eligible lure via the trailer
+    dialog's "Add lure" confirm, with no trailer picked) manually/by direct
+    source inspection instead: the one-line addition inside
+    `_trailer_dialog()`'s "Add lure" handler (setting the exact same
+    `_lure_added_popup_key()` flag, in the exact same place relative to
+    `_add_lure_to_pending()` and `st.rerun()`) is architecturally identical
+    to the already-proven-working non-trailer path, so it's expected to
+    behave the same in the real app even though this harness can't confirm
+    it directly.
+
+    **Verified:** new `tests/test_spot_session_page.py` (3 tests, the
+    first committed `AppTest`-based coverage of ANY dialog interaction on
+    this page) - the popup shows the right lure and both buttons after an
+    add; clicking "Start Session" from the popup actually starts the
+    session (asserting the "🎣 Session in progress" header appears and
+    `append_trip()` was called); clicking "Add more lures" closes the
+    popup and a second add still works, reopening it with both lures
+    listed. Every real file write and every `core.appstate` cached getter
+    is mocked - confirmed via `git status` that the real `data/*.csv`
+    files were untouched (a manual verification pass before these tests
+    existed briefly did write a fake row to the real `data/trip_log.csv`
+    via an unmocked `append_trip()` - caught immediately and reverted with
+    `git restore` before anything else touched it). Full suite
+    `pytest tests/ -q` - 459 passed (456 + 3 new). `AppTest` smoke test
+    clean across every page reachable without live network access.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
