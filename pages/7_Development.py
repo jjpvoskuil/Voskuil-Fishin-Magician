@@ -36,6 +36,34 @@ from core.ui import inject_mobile_css
 st.set_page_config(page_title="Development - Nolin Lake", page_icon="🛠️", layout="wide")
 inject_mobile_css()
 st.title("🛠️ Development")
+
+# Punch-list #85: every action on this page (Add/Done-toggle/Edit/Delete)
+# used to either show its st.success()/st.warning() immediately before an
+# st.rerun() in the very same script run (Streamlit wipes anything shown
+# that way the instant the next run starts - functionally invisible, the
+# exact bug already fixed elsewhere via punch-list #71), or - for Done-
+# toggle/Edit/Delete - throw away _push()'s (ok, msg) return value
+# entirely and show an unconditional st.toast("...saved.") no matter
+# whether the GitHub push actually succeeded. Root-caused after an angler
+# report: added a punch-list item twice, saw what looked like normal
+# success each time, then a "Reboot app" (which redeploys from a fresh
+# clone) showed neither had ever actually landed on GitHub - with no
+# error ever having been visible, there was no way to know the push had
+# failed instead of just "saving locally as normal." Fixed with the same
+# persisted-banner pattern Tackle Box/Spot Session already use: every
+# handler below stashes its REAL result here and this pop-and-render
+# block (right at the top, before anything else) shows it on the next
+# run - and every handler now actually inspects _push()'s (ok, msg)
+# instead of assuming success.
+_dev_banner = st.session_state.pop("dev_tasks_action_banner", None)
+if _dev_banner:
+    (st.success if _dev_banner.get("kind") == "success" else st.warning)(_dev_banner["text"])
+
+
+def _set_dev_action_banner(kind: str, text: str) -> None:
+    st.session_state["dev_tasks_action_banner"] = {"kind": kind, "text": text}
+
+
 st.caption(
     "Your punch list for this app. Jot down anything you want adjusted or fixed as soon as "
     "you notice it - each item gets its own number. Next session, just reference a number "
@@ -110,12 +138,13 @@ with st.expander("➕ Add an item", expanded=True):
             get_dev_tasks.clear()
             ok, msg = _push(f"Add dev punch-list item #{task.task_no}: {task.description[:50]}")
             if msg:
-                (st.success if ok else st.warning)(f"#{task.task_no} added. {msg}")
+                _set_dev_action_banner("success" if ok else "warning", f"#{task.task_no} added. {msg}")
             else:
-                st.success(f"#{task.task_no} added locally.")
-                st.info(
-                    "No GITHUB_TOKEN configured in Streamlit secrets, so this entry wasn't pushed "
-                    "to GitHub and won't survive an app restart. See README for how to add it."
+                _set_dev_action_banner(
+                    "warning",
+                    f"#{task.task_no} added locally only - no GITHUB_TOKEN configured in Streamlit "
+                    "secrets, so this entry wasn't pushed to GitHub and won't survive an app restart "
+                    "or reboot. See README for how to add it.",
                 )
             st.rerun()
 
@@ -153,11 +182,22 @@ for row in visible:
         body_col.caption(f"Page: {row['page']}" + (f" · Completed {row['completed_at'][:10]}" if row.get("completed_at") else ""))
 
         if new_done != is_done:
-            ok = mark_done(task_no) if new_done else reopen_task(task_no)
-            if ok:
+            found = mark_done(task_no) if new_done else reopen_task(task_no)
+            if found:
                 get_dev_tasks.clear()
-                _push(f"Mark dev punch-list item #{task_no} as {'Done' if new_done else 'Open'}")
-                st.toast(f"#{task_no} marked {'Done' if new_done else 'Open'}.", icon="✅")
+                new_status_label = "Done" if new_done else "Open"
+                push_ok, push_msg = _push(f"Mark dev punch-list item #{task_no} as {new_status_label}")
+                if push_msg:
+                    _set_dev_action_banner(
+                        "success" if push_ok else "warning",
+                        f"#{task_no} marked {new_status_label}. {push_msg}",
+                    )
+                elif push_ok:
+                    _set_dev_action_banner(
+                        "warning",
+                        f"#{task_no} marked {new_status_label} locally only - no GITHUB_TOKEN "
+                        "configured, so this won't survive an app restart or reboot.",
+                    )
             st.rerun()
 
         with st.expander("✏️ Edit or delete"):
@@ -175,8 +215,15 @@ for row in visible:
                 else:
                     update_task(task_no, description=edit_desc.strip(), page=edit_page)
                     get_dev_tasks.clear()
-                    _push(f"Edit dev punch-list item #{task_no}")
-                    st.toast(f"#{task_no} saved.", icon="✅")
+                    push_ok, push_msg = _push(f"Edit dev punch-list item #{task_no}")
+                    if push_msg:
+                        _set_dev_action_banner("success" if push_ok else "warning", f"#{task_no} saved. {push_msg}")
+                    elif push_ok:
+                        _set_dev_action_banner(
+                            "warning",
+                            f"#{task_no} saved locally only - no GITHUB_TOKEN configured, so this "
+                            "won't survive an app restart or reboot.",
+                        )
                     st.rerun()
 
             delete_pending_key = f"dev_task_delete_confirm_{task_no}"
@@ -190,12 +237,19 @@ for row in visible:
                 if confirm_col.button("Yes, delete it", key=f"confirm_delete_{task_no}", type="primary", width="stretch"):
                     if delete_task(task_no):
                         get_dev_tasks.clear()
-                        _push(f"Delete dev punch-list item #{task_no}")
+                        push_ok, push_msg = _push(f"Delete dev punch-list item #{task_no}")
                         st.session_state.pop(delete_pending_key, None)
-                        st.toast(f"#{task_no} deleted.", icon="✅")
+                        if push_msg:
+                            _set_dev_action_banner("success" if push_ok else "warning", f"#{task_no} deleted. {push_msg}")
+                        elif push_ok:
+                            _set_dev_action_banner(
+                                "warning",
+                                f"#{task_no} deleted locally only - no GITHUB_TOKEN configured, so "
+                                "this won't survive an app restart or reboot.",
+                            )
                     else:
                         st.session_state.pop(delete_pending_key, None)
-                        st.toast("Couldn't find that item - it may have already been removed.", icon="⚠️")
+                        _set_dev_action_banner("warning", "Couldn't find that item - it may have already been removed.")
                     st.rerun()
                 if cancel_col.button("Cancel", key=f"cancel_delete_{task_no}", width="stretch"):
                     st.session_state.pop(delete_pending_key, None)

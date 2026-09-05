@@ -1451,6 +1451,24 @@ Deleting an item never reuses its number for anything added later - see
 out) and committed back to GitHub like every other data file when a `GITHUB_TOKEN`
 is configured.
 
+**Every action here now honestly reports whether it actually reached GitHub
+(punch-list #85).** An angler added an item twice, saw nothing that looked
+like an error either time, then a "Reboot app" showed neither had actually
+landed on GitHub. Root cause: "Add an item" showed its result with
+`st.success()`/`st.warning()` immediately before `st.rerun()` in the same
+script run - Streamlit wipes anything shown that way the instant the next
+run starts, so it was never actually visible on the real deployed app (the
+same class of bug already fixed on Tackle Box/Spot Session via punch-list
+#71, just not yet applied here); worse, the Done-toggle/Edit-save/Delete
+actions didn't even check whether the GitHub push succeeded - they always
+showed a blind "saved" toast regardless. Fixed with the same persisted-
+banner pattern used elsewhere (a message stashed in `session_state` and
+rendered on the very next run) for all four actions, and every one of them
+now actually reports the real result: a genuine success, a real push
+failure with its actual error text, or an explicit "no GITHUB_TOKEN
+configured, this won't survive a restart or reboot" warning when nothing
+was pushed at all.
+
 ## Running locally
 
 ```bash

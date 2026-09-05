@@ -9922,6 +9922,76 @@ every real save.
     only on `update_item()`/`delete_item()` being called correctly). Full
     `AppTest` smoke test clean across every page.
 
+152. **Punch-list #85 (FIXED): Development page's Add/Done/Edit/Delete now
+    honestly report whether the GitHub push actually succeeded.** Angler
+    report: added a punch-list item on the live Development page twice, saw
+    nothing that looked like an error either time, then a "Reboot app" (a
+    real Streamlit Cloud redeploy from a fresh clone) showed neither had
+    ever actually landed on GitHub. Investigated by re-syncing `data/` from
+    the real `data` branch and confirming, live, that no "Add dev
+    punch-list item" commit existed anywhere in its history around the
+    time of the report - the adds genuinely never reached GitHub, not just
+    a display glitch.
+
+    Reading `pages/7_Development.py` found two distinct, compounding bugs,
+    neither previously covered by this page's own (otherwise solid)
+    persistent-connection-status panel:
+    - "Add an item" called `st.success()`/`st.warning()`/`st.info()`
+      directly, immediately before `st.rerun()` in the very same script
+      run - Streamlit discards anything shown that way the instant the
+      next run starts, so on a real running server this was never
+      actually visible. This is the exact class of bug already fixed on
+      Tackle Box (entry "Persisted save/delete confirmations" above) and
+      Spot Session via punch-list #71/#64/#65 - it just hadn't been
+      applied to this page.
+    - Worse: the Done-toggle checkbox, the Edit "Save changes" button, and
+      the Delete confirm button all called `_push()` (the page's own
+      `commit_and_push_data()` wrapper) and threw away its `(ok, msg)`
+      return value entirely, always showing an unconditional
+      `st.toast("...saved.")` regardless of whether the push actually
+      succeeded. A genuine GitHub push failure on any of these three
+      actions was therefore completely indistinguishable from success -
+      there was no way to ever notice a change hadn't survived until a
+      restart or reboot silently reverted it, exactly matching what was
+      reported.
+
+    **Fix:** added the same persisted-banner mechanism (a `session_state`
+    key plus a pop-and-render block at the very top of the page, before
+    anything else) already established on Tackle Box/Spot Session, and
+    rewrote all four handlers (Add, Done-toggle/reopen, Edit-save, Delete)
+    to actually inspect `_push()`'s real result: a genuine success names
+    the real confirmation text; a real push failure shows its actual error
+    message as a warning (not a success); no `GITHUB_TOKEN` configured
+    shows an explicit "...added/saved/deleted locally only - this won't
+    survive a restart or reboot" warning instead of a bare success. Left
+    the still-genuinely-open question of *why* the original two pushes
+    failed (a real GitHub/network hiccup on the deployed container at that
+    moment, never reproduced or root-caused beyond this) explicitly
+    unresolved - what's fixed is that the app will now always say so
+    honestly, on this page, the next time it happens.
+
+    **Verified:** 4 new tests in `tests/test_dev_tasks_page.py`, all using
+    Streamlit's `AppTest` (since the bug is specifically about what the
+    rendered page shows, not about `core/dev_tasks.py`'s own read/write
+    logic, already covered by `test_dev_tasks.py`) with
+    `core.dev_tasks.append_task`/`core.appstate.get_dev_tasks`/
+    `core.appstate.github_token`/`core.storage.commit_and_push_data` all
+    mocked so the suite never touches the real `data/dev_tasks.csv` or
+    attempts a real network call: a mocked push failure on Add shows a
+    warning naming the real error (never a plain success); a mocked push
+    success shows an honest success naming the real confirmation; no token
+    configured shows the local-only warning; and a mocked push failure
+    while marking an item Done shows the same real warning instead of the
+    old blind toast. (Note captured in that test file's own docstring:
+    `AppTest.run()` silently follows a script's own `st.rerun()` to a
+    fully-settled state, so it can't distinguish the fixed persisted-banner
+    timing from the original immediate-message-then-rerun bug the way a
+    real running server could - what these tests actually guard is the
+    second, more serious, fully-automatable bug: that the banner's content
+    honestly reflects the real push result instead of being blind/assumed
+    success.) Full suite `pytest tests/ -q` - 436 passed (432 + 4 new).
+    Full `AppTest` smoke test clean across every page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
