@@ -9632,6 +9632,116 @@ every real save.
     to stay quiet on some cells for a while yet, not read that as the
     feature being broken.
 
+148. **Punch-list #82 - lure recommendations curated to top-3-owned + a
+    separate tackle-box-gaps section; personal history and wind get real
+    teeth.** Angler feedback, four connected points in one message: (1)
+    "the recommendations always seem to be the same regardless of the
+    situation"; (2) "there are too many recommendations. Lets limit it to
+    the top three"; (3) "the recommendations should be for only lure we
+    have, with a separate section that calls out gaps in our tackle box
+    that might be better alternatives"; (4) "it would be great to have at
+    least one [video] for every true lure ... in our tackle box that also
+    carries over to the recommendations."
+
+    Investigated before changing anything. `core.lures.recommend()` was
+    already a real, well-sourced situational engine (season/structure/
+    pressure/forage/depth/activity/wind/personal-history nudges, all with
+    inline Nolin-specific citations - see entry 37/49's own writeups) - the
+    "always the same" complaint traced to what actually reached the screen,
+    not the reasoning itself: (a) both pages render EVERY lure
+    `recommend()` puts in play, first choice AND second choice, with no cap
+    at all - often 6-9 cards mixed owned/not-owned in one flat list; (b)
+    the 7-Day Forecast page renders this for every segment of every day (up
+    to ~35 calls at once), and since season/structure/inventory/history
+    stay constant across a whole week, the top 3 picks barely visibly
+    change day to day even though the underlying score genuinely does; (c)
+    a concrete, real bug: the Forecast page's `recommend()` call never
+    passed `wind_mph` at all, so the wind-driven reaction-bait promotion
+    (a real, existing feature, and the single most visible day-to-day
+    "conditions changed the pick" signal) could only ever fire on Spot
+    Session, never on the Forecast page, even on a genuinely windy
+    forecast day; (d) personal history (entry 37) only ever tagged a note
+    onto whatever tier the season pattern already sorted a lure into - it
+    could never actually change what led the list, so "specific to our
+    past history" wasn't really true yet; (e) a real gap check on
+    `core/videos.py` found 6 of 23 `LURE_PROFILES` categories (Spoon,
+    Lipless Crankbait, Medium-Diving Crankbait, Finesse Shaky Head, Drop
+    Shot, Soft Swimbait) had no curated video at all and silently fell back
+    to a generic YouTube search link every time they were recommended.
+
+    **Built**, deliberately as an ADDITIVE layer on top of `recommend()`
+    rather than a rewrite of its well-tested reasoning (every one of the
+    421 pre-existing tests, including ~140 in `tests/test_lures.py` alone,
+    still passes unchanged against this - `recommend()`'s own
+    `first_choice`/`second_choice`/`why`/`note` contract is untouched):
+    - New `core.lures.curate_recommendation(rec, inventory)` -> a
+      `CuratedRecommendation` with `recommended` (top
+      `MAX_RECOMMENDED_DISPLAY=3` OWNED lures, in the exact rank order
+      `recommend()` already produced) and `gaps` (top `MAX_GAP_DISPLAY=3`
+      NOT-owned lures, same ranking) - "owned" deliberately reuses
+      `find_inventory_gaps()`'s own color-agnostic definition (own ANY
+      item in that category, any color) rather than the stricter
+      color-matched-to-today `LureBlock.owned` - a lure you own in the
+      wrong color is still a real thing in your tackle box, not a gap.
+      Only ever draws from categories `recommend()` already put in contention
+      for the exact situation - never all 23 categories - so a gap
+      suggestion is always something the situational engine genuinely
+      ranked well today, not a generic "you're missing a frog" notice.
+    - `core.ui.render_lure_recommendation()` and Spot Session's
+      `_render_recommendation_with_quick_add()` both rewritten to render
+      the CURATED view instead of the old flat first/second-choice dump -
+      top picks shown directly, gaps in a separate, collapsed "🧰 Tackle
+      box gaps worth a look" expander (still gets the video + a real
+      Cabela's suggestion, same rendering `render_lure_block()` already
+      did for any not-owned lure).
+    - `pages/1_7_Day_Forecast.py`'s `recommend()` call now passes
+      `wind_mph=day.weather_summary["avg_wind_mph"]` - exactly the same
+      day-level average `core.scoring.score_day()` already uses for every
+      segment's own score (confirmed by reading `score_day()` - wind was
+      never computed per-segment even for the real 1-10 score, so this is
+      not a finer-grained value than the score already reflects, just
+      finally wiring an existing real number through).
+    - New `STRONG_HISTORY_MIN_TRIPS=3`/`STRONG_HISTORY_CATCH_RATE=0.6` bar
+      (stricter than `core.lure_history.MIN_SIMILAR_TRIPS=2`, the bar for a
+      track record to be shown at all) - a lure clearing it gets promoted
+      all the way to the front of first choice, ahead of the season/
+      structure pattern's own top pick, tagged "Promoted to your top pick"
+      in both its note and its why. Only ever promotes one lure, never
+      removes anything else from the plan, and never relabels a lure
+      already at the front as "promoted" (nothing moved, so nothing to
+      announce).
+    - `core/videos.py`: added real, web-search-verified curated entries for
+      all 6 missing `LURE_PROFILES` categories, plus matching
+      `_KEYWORD_MAP` entries for the free-text lookup path.
+
+    **Verified:** 8 new tests in `tests/test_lures.py` (curation
+    ownership/capping/ranking behavior, including the "off-color still
+    counts as owned, not a gap" case; strong-history promotion firing only
+    above both thresholds, and never mislabeling a lure that was already
+    first) and 2 new tests in `tests/test_videos.py` (every `LURE_PROFILES`
+    video_key has a curated entry; `get_videos_by_key()` never falls back
+    to search for a real lure) - confirmed the new tests genuinely fail
+    pre-fix (an import error against the old `core.lures`, since
+    `curate_recommendation` didn't exist yet) and pass post-fix. Full
+    suite: `pytest tests/ -q` - 421 passed (411 + 10 new). Full `AppTest`
+    smoke test clean across every page (only `1_7_Day_Forecast.py` fails,
+    on this sandbox's already-known blocked network to Open-Meteo).
+    Additionally ran `recommend()` + `curate_recommendation()` end-to-end
+    against the REAL production `data/lure_inventory.csv` (65 rows) and
+    `data/trip_log.csv` (143 rows) across several real season/segment/
+    structure/water-clarity combinations - confirmed no crashes, a
+    genuinely different top-3 per situation, every recommended lure
+    carrying a real curated video (never a search-link fallback), and
+    every gap lure correctly carrying zero owned items.
+
+    **Net state:** the angler's four points are addressed - (1)/(2)/(3) by
+    the curation layer plus the wind-wiring fix (a real, previously-silent
+    gap in "reacts to conditions"), (4) by the video-coverage fill-in. Not
+    yet touched: the angler's related idea (raised the same session, before
+    #81) that season itself should be a relative-to-current-season
+    baseline rather than a flat pattern - still open, same as noted in
+    entry 147, and a separate concern from this lure-recommendation work.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

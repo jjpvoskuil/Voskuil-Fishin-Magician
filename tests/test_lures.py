@@ -3,6 +3,8 @@ import json
 from core.lures import (
     recommend, STRUCTURE_TYPES, WATER_CLARITY_OPTIONS, LURE_PROFILES, guess_category_from_text,
     is_trailer_eligible, TRAILER_ELIGIBLE_CATEGORIES, find_inventory_gaps,
+    curate_recommendation, MAX_RECOMMENDED_DISPLAY, MAX_GAP_DISPLAY,
+    STRONG_HISTORY_MIN_TRIPS, STRONG_HISTORY_CATCH_RATE,
 )
 
 
@@ -714,3 +716,111 @@ def test_no_activity_or_wind_params_leaves_picks_unchanged():
                                fish_activity=None, forage_activity=None, wind_mph=None)
     assert [b.key for b in baseline.first_choice] == [b.key for b in explicit_none.first_choice]
     assert [b.key for b in baseline.second_choice] == [b.key for b in explicit_none.second_choice]
+
+
+# --- Punch-list #82: strong personal history can promote the #1 pick ---------
+# Winter's own picks: first = [suspending_jerkbait, medium_diving_crankbait,
+# football_jig], second = [soft_swimbait, blade_bait, deep_diving_crankbait] -
+# carolina_rig is in neither, so it's a clean case to prove a strong track
+# record can promote a lure the season pattern never even considered.
+
+def test_strong_personal_history_promotes_lure_to_the_very_top():
+    history = [_history_trip("carolina_rig", structure_type="Creek channel / ledge",
+                              spot_id="spot1", fish_caught=1)] * STRONG_HISTORY_MIN_TRIPS
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert rec.first_choice[0].key == "carolina_rig"
+    assert "promoted" in rec.first_choice[0].note.lower()
+    assert any("promoted" in reason.lower() for reason in rec.first_choice[0].why)
+
+
+def test_personal_history_below_strong_trip_count_does_not_promote():
+    # One trip short of STRONG_HISTORY_MIN_TRIPS - still gets injected as a
+    # second-choice option (existing punch-list #37 behavior) but shouldn't
+    # jump to the very front of first choice.
+    history = [_history_trip("carolina_rig", structure_type="Creek channel / ledge",
+                              spot_id="spot1", fish_caught=1)] * (STRONG_HISTORY_MIN_TRIPS - 1)
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert rec.first_choice[0].key != "carolina_rig"
+    assert any(b.key == "carolina_rig" for b in rec.second_choice)
+
+
+def test_personal_history_below_strong_catch_rate_does_not_promote():
+    # Enough trips, but well under STRONG_HISTORY_CATCH_RATE - a real but
+    # weak signal, injected as a second-choice option, not promoted to #1.
+    history = (
+        [_history_trip("carolina_rig", structure_type="Creek channel / ledge", spot_id="spot1", fish_caught=1)]
+        + [_history_trip("carolina_rig", structure_type="Creek channel / ledge", spot_id="spot1", fish_caught=0)] * 2
+    )
+    assert len(history) >= STRONG_HISTORY_MIN_TRIPS
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert rec.first_choice[0].key != "carolina_rig"
+
+
+def test_strong_history_already_in_top_spot_is_not_relabeled_as_promoted():
+    # suspending_jerkbait is already winter's own #1 pick - a strong record
+    # on it shouldn't be reworded as "promoted" since nothing moved.
+    history = [_history_trip("suspending_jerkbait", structure_type="Creek channel / ledge",
+                              spot_id="spot1", fish_caught=1)] * STRONG_HISTORY_MIN_TRIPS
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear",
+                     trip_history=history, spot_id="spot1")
+    assert rec.first_choice[0].key == "suspending_jerkbait"
+    assert "promoted" not in rec.first_choice[0].note.lower()
+    assert f"{STRONG_HISTORY_MIN_TRIPS} of {STRONG_HISTORY_MIN_TRIPS}" in rec.first_choice[0].note
+
+
+# --- Punch-list #82: curate_recommendation() (top-3 owned + gaps) ------------
+
+def test_curate_recommendation_splits_owned_vs_gaps_and_caps_each():
+    # Own only football_jig (a first-choice pick) and deep_diving_crankbait
+    # (a second-choice pick) - curation should keep both of those, in their
+    # original relative rank order, as `recommended`, and the top
+    # MAX_GAP_DISPLAY non-owned keys (in rank order) as `gaps`.
+    inventory = [
+        {"brand": "Strike King", "description": "Hack Attack Jig", "category": "football_jig", "quantity": "1"},
+        {"brand": "Storm", "description": "Wiggle Wart", "category": "deep_diving_crankbait", "quantity": "1"},
+    ]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    curated = curate_recommendation(rec, inventory)
+    assert [b.key for b in curated.recommended] == ["football_jig", "deep_diving_crankbait"]
+    assert [b.key for b in curated.gaps] == ["suspending_jerkbait", "medium_diving_crankbait", "soft_swimbait"]
+    assert len(curated.recommended) <= MAX_RECOMMENDED_DISPLAY
+    assert len(curated.gaps) <= MAX_GAP_DISPLAY
+
+
+def test_curate_recommendation_caps_recommended_even_when_everything_is_owned():
+    owned_keys = ["suspending_jerkbait", "medium_diving_crankbait", "football_jig",
+                  "soft_swimbait", "blade_bait", "deep_diving_crankbait"]
+    inventory = [{"brand": "B", "description": "D", "category": k, "quantity": "1"} for k in owned_keys]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    curated = curate_recommendation(rec, inventory)
+    assert len(curated.recommended) == MAX_RECOMMENDED_DISPLAY
+    assert [b.key for b in curated.recommended] == ["suspending_jerkbait", "medium_diving_crankbait", "football_jig"]
+    assert curated.gaps == []
+
+
+def test_curate_recommendation_with_no_inventory_is_all_gaps():
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear")
+    curated = curate_recommendation(rec, inventory=None)
+    assert curated.recommended == []
+    assert [b.key for b in curated.gaps] == ["suspending_jerkbait", "medium_diving_crankbait", "football_jig"]
+
+
+def test_curate_recommendation_treats_off_color_ownership_as_owned_not_a_gap():
+    # Own a football_jig, but in a color that doesn't match "Clear" water's
+    # suggested colors - LureBlock.owned is False (wrong color for TODAY),
+    # but you still genuinely own the lure TYPE, so curation should treat it
+    # as "in your tackle box" (recommended), not a gap - see
+    # find_inventory_gaps()'s own color-agnostic definition of "owned".
+    inventory = [
+        {"brand": "Strike King", "description": "Firetiger Football Jig", "category": "football_jig", "quantity": "1"},
+    ]
+    rec = recommend("winter", 45, "Midday", 0.0, "Creek channel / ledge", "Clear", inventory=inventory)
+    jig_block = next(b for b in rec.first_choice if b.key == "football_jig")
+    assert jig_block.owned is False
+    assert jig_block.owned_off_color_items
+    curated = curate_recommendation(rec, inventory)
+    assert "football_jig" in [b.key for b in curated.recommended]
+    assert "football_jig" not in [b.key for b in curated.gaps]

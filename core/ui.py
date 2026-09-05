@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import streamlit as st
 
-from .lures import LureBlock, STRUCTURE_TYPES, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK
+from .lures import LureBlock, STRUCTURE_TYPES, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK, curate_recommendation
 from .lure_inventory import resolve_image_source, image_data_uri_or_url
 from .lake_spots import LOCATION_TYPE_TO_STRUCTURE_TYPE
 from .appstate import get_lake_spots, get_cabelas_suggestions
@@ -438,14 +438,40 @@ def render_lure_block(block: LureBlock):
         st.caption(f"📺 {video_links}")
 
 
-def render_lure_recommendation(rec, first_label: str = "First choice", second_label: str = "Second choice"):
-    st.markdown(f"**{first_label}**")
-    for block in rec.first_choice:
-        render_lure_block(block)
-    if rec.second_choice:
-        st.markdown(f"**{second_label}**")
-        for block in rec.second_choice:
+def render_lure_recommendation(
+    rec, inventory: list = None,
+    recommended_label: str = "🎣 Top picks from your tackle box",
+    gap_label: str = "🧰 Tackle box gaps worth a look",
+):
+    """Punch-list #82: renders the CURATED view of a LureRecommendation - up
+    to 3 owned lures ranked for today's exact situation, plus a separate,
+    collapsed "gaps" section for well-ranked lures not currently in the
+    tackle box (own the wrong color? still counts as owned - see
+    core.lures.curate_recommendation's docstring). Replaces the old flat
+    "First choice"/"Second choice" dump of everything recommend() considered
+    (often 6-9 cards at once) with what the angler actually asked to see.
+    `inventory` should be the same list passed into core.lures.recommend()
+    - pass None only when recommend() itself was also called without
+    inventory (curate_recommendation() then treats every category as a
+    gap)."""
+    curated = curate_recommendation(rec, inventory)
+    if curated.recommended:
+        st.markdown(f"**{recommended_label}**")
+        for block in curated.recommended:
             render_lure_block(block)
+    else:
+        st.info(
+            "Nothing in your tackle box is a strong fit for this exact situation yet - "
+            "see the tackle box gaps below for what would rank well."
+        )
+    if curated.gaps:
+        with st.expander(f"{gap_label} ({len(curated.gaps)})", expanded=False):
+            st.caption(
+                "Not in your tackle box today, but ranked among the best-fit lures for this exact "
+                "situation - real alternatives worth considering, not a generic shopping list."
+            )
+            for block in curated.gaps:
+                render_lure_block(block)
     if rec.rationale:
         st.caption(" · ".join(rec.rationale))
 

@@ -831,6 +831,19 @@ FINESSE_BAIT_KEYS = ["finesse_shaky_head", "drop_shot", "wacky_rig_senko", "foot
 # WATER_CLARITY_OPTIONS, so the reverse import would be circular).
 WIND_REACTION_THRESHOLD_MPH = 10.0
 
+# Punch-list #82: how strong a situation-matched personal track record has to
+# be before it can promote its lure all the way to the #1 recommendation,
+# ahead of the season/structure pattern's own top pick - not just tag a note
+# on whatever tier it already landed in (core.lure_history.MIN_SIMILAR_TRIPS=2
+# is the much lower bar for a track record to be SHOWN at all). Deliberately
+# a higher bar than that base gate: the angler's own ask was for
+# recommendations "specific to ... our past history," which this app can only
+# make good on on the rare occasions the data actually supports it - a real,
+# repeatable pattern (several similar trips, most of them landing fish), not
+# a single lucky catch clearing the minimum-sample floor.
+STRONG_HISTORY_MIN_TRIPS = 3
+STRONG_HISTORY_CATCH_RATE = 0.6
+
 
 def _promote_reaction_bait(first_keys: list, second_keys: list, key_why: dict, reason: str, low_light: bool):
     """Punch-list #49: makes sure a reaction/moving bait (REACTION_BAIT_KEYS)
@@ -1246,6 +1259,37 @@ def recommend(
             second_keys_unique.insert(0, rec.lure_category)
             history_notes[rec.lure_category] = track_record_note(rec, in_plan_already=False)
 
+        # Punch-list #82: a genuinely strong, situation-matched track record
+        # (see STRONG_HISTORY_MIN_TRIPS/STRONG_HISTORY_CATCH_RATE above) can
+        # promote its lure all the way to the front of first choice - the
+        # angler's own best-proven option for this exact situation leading
+        # the list, not buried behind season/structure picks that have never
+        # actually been tried here. Only ever moves ONE lure (the strongest
+        # qualifying record) and only if it isn't already leading; never
+        # removes anything else from the plan, just reorders it forward -
+        # same "add a signal, never override the underlying picks" contract
+        # as the rest of this section.
+        strong_candidates = [
+            (key, rec) for key, rec in records.items()
+            if rec.similar_trips >= STRONG_HISTORY_MIN_TRIPS and rec.catch_rate >= STRONG_HISTORY_CATCH_RATE
+        ]
+        if strong_candidates and first_keys_unique:
+            best_key, best_rec = max(strong_candidates, key=lambda kv: (kv[1].catch_rate, kv[1].similar_trips))
+            if first_keys_unique[0] != best_key:
+                if best_key in first_keys_unique:
+                    first_keys_unique.remove(best_key)
+                elif best_key in second_keys_unique:
+                    second_keys_unique.remove(best_key)
+                first_keys_unique.insert(0, best_key)
+                key_why.setdefault(best_key, []).append(
+                    "Promoted to your top pick - the strongest situation-matched track record in your trip "
+                    "log right now."
+                )
+                history_notes[best_key] = (
+                    f"📈 Promoted to your top pick: {best_rec.trips_with_fish} of {best_rec.similar_trips} "
+                    f"similar trips landed fish - your strongest real track record for this exact situation."
+                )
+
     # --- Tackle-box inventory: annotate + surface what you actually have --------
     # This never adds/removes/reorders-by-situation which lures are recommended -
     # season/structure/pressure/forage/depth/history above already decided that.
@@ -1272,6 +1316,73 @@ def recommend(
         second_choice.sort(key=lambda b: not b.owned)
 
     return LureRecommendation(first_choice=first_choice, second_choice=second_choice, rationale=rationale)
+
+
+# Punch-list #82: real angler feedback - "the recommendations always seem to
+# be the same regardless of the situation ... there are too many
+# recommendations. Lets limit it to the top three recommendations. The
+# recommendations should be for only lure we have, with a separate section
+# that calls out gaps in our tackle box." recommend() above still does the
+# full situational reasoning (season/structure/pressure/forage/depth/
+# activity/wind/personal history) and still returns EVERY lure it considered
+# in play, in first_choice/second_choice, with full "why" reasoning on each -
+# that contract is unchanged, and every existing test of recommend() itself
+# still passes against it. What changed is what actually reaches the
+# screen: curate_recommendation() below takes that full, reasoned list and
+# narrows it to what the angler asked to see - the top MAX_RECOMMENDED
+# lures they already OWN, plus a separate, capped list of the top-ranked
+# lures they DON'T own (the "gaps" - real alternatives worth considering,
+# not just an arbitrary shopping list).
+MAX_RECOMMENDED_DISPLAY = 3
+MAX_GAP_DISPLAY = 3
+
+
+@dataclass
+class CuratedRecommendation:
+    recommended: list        # list[LureBlock] - top MAX_RECOMMENDED_DISPLAY owned lures, ranked for today
+    gaps: list                # list[LureBlock] - top MAX_GAP_DISPLAY NOT-owned lures, same ranking
+    rationale: list = field(default_factory=list)
+
+
+def curate_recommendation(rec: LureRecommendation, inventory: list = None) -> CuratedRecommendation:
+    """Narrows a full LureRecommendation down to what's actually worth
+    showing: the angler's own best-fit owned lures (capped at
+    MAX_RECOMMENDED_DISPLAY), and a separate, capped list of well-ranked
+    lures they don't currently own at all (MAX_GAP_DISPLAY) - real
+    alternatives, not a generic "here's everything you're missing" dump.
+
+    Ranking is exactly the order recommend() already produced -
+    first_choice then second_choice, in that order - since that already
+    reflects every situational signal (season/structure/pressure/forage/
+    depth/activity/wind/personal history, including the punch-list #82
+    strong-track-record promotion above). This function only decides which
+    of those already-ranked lures are worth displaying, never re-scores or
+    reorders them itself.
+
+    "Owned" here deliberately matches core.lures.find_inventory_gaps()'s own
+    definition - own ANY item in that category, in ANY color - not just
+    color-matched-to-today's-suggestion (LureBlock.owned, which
+    render_lure_block already uses to decide whether to show an off-color
+    note). A lure you own in the wrong color is still a real thing in your
+    tackle box, not a tackle-box gap - it belongs in `recommended` (where
+    render_lure_block will show the honest "own it, wrong color" note and a
+    right-color shopping suggestion), not in `gaps` (which implies you have
+    nothing at all in that category).
+
+    Only ever draws from the categories recommend() already put in play for
+    this exact situation - not all 23 LURE_PROFILES categories - so a gap
+    suggestion is always something the situational engine actually ranked
+    highly today, never a generic, out-of-season "you're missing a frog"
+    notice."""
+    ranked_keys = list(dict.fromkeys(
+        [b.key for b in rec.first_choice] + [b.key for b in rec.second_choice]
+    ))
+    blocks_by_key = {b.key: b for b in rec.first_choice + rec.second_choice}
+    gap_keys = set(find_inventory_gaps(inventory))
+
+    recommended = [blocks_by_key[k] for k in ranked_keys if k not in gap_keys][:MAX_RECOMMENDED_DISPLAY]
+    gaps = [blocks_by_key[k] for k in ranked_keys if k in gap_keys][:MAX_GAP_DISPLAY]
+    return CuratedRecommendation(recommended=recommended, gaps=gaps, rationale=rec.rationale)
 
 
 # (key, display name) pairs for every lure category the recommendation engine

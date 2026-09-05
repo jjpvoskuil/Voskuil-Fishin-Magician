@@ -28,7 +28,7 @@ from core.activity_log import (
     weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
     nearest_weight_slider_option, nearest_length_slider_option,
 )
-from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible
+from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, curate_recommendation
 from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
 from core.storage import (
     TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, push_pending_data,
@@ -1283,33 +1283,55 @@ def _multi_lure_picker(inventory_items: list, key_prefix: str, spot_id: str, seq
                         }, item, mode, angler)
 
 
-def _render_recommendation_with_quick_add(rec, spot_id: str, seq: int, key_prefix: str, mode: str = "pending", angler: str = ""):
-    """Displays the lure recommendation (reusing core.ui.render_lure_block
-    unchanged, so this stays in sync with the 7-Day Forecast page's own
-    display) with a "+ Add to session" button under each color-matched
-    owned item, so a suggested lure can be added to this session with one
-    click instead of having to go find it again in the tackle-box picker
-    below. Punch-list #46: blocks for a trailer-eligible category (see
+def _render_recommendation_with_quick_add(
+    rec, spot_id: str, seq: int, key_prefix: str, inventory: list = None, mode: str = "pending", angler: str = "",
+):
+    """Displays the CURATED lure recommendation (punch-list #82 -
+    core.lures.curate_recommendation: top 3 owned lures ranked for today's
+    situation, plus a separate "gaps" section for well-ranked lures not in
+    the tackle box) with a "+ Add to session" button under each
+    color-matched owned item, so a suggested lure can be added to this
+    session with one click instead of having to go find it again in the
+    tackle-box picker below. Gap lures never have owned_items (that's what
+    makes them gaps), so they get no quick-add button - they're shown for
+    awareness/shopping, not one-click session logging. Punch-list #46:
+    blocks for a trailer-eligible category (see
     core.lures.TRAILER_ELIGIBLE_CATEGORIES) get a quick-add button too, same
     as any other category - those baits can be fished standalone, matching
     _multi_lure_picker below no longer excluding them either."""
     added_ids = _added_lure_item_ids(spot_id, seq, mode, angler)
-    for label, blocks in (("First choice", rec.first_choice), ("Second choice", rec.second_choice)):
-        if not blocks:
-            continue
-        st.markdown(f"**{label}**")
-        for block in blocks:
-            render_lure_block(block)
-            for item in block.owned_items:
-                item_id = item.get("item_id")
-                if not item_id:
-                    continue
-                is_added = item_id in added_ids
-                btn_label = "✓ Added to session" if is_added else f"+ Add {item.get('brand', '')} - {item.get('description', '')}"[:60]
-                if st.button(btn_label, key=f"{key_prefix}_{block.key}_{item_id}", disabled=is_added):
-                    _handle_lure_add_click(spot_id, seq, {
-                        "item_id": item_id, "label": inventory_item_label(item), "category": block.key,
-                    }, {"category": block.key}, mode, angler)
+    curated = curate_recommendation(rec, inventory)
+
+    def _render_block_with_quick_add(block):
+        render_lure_block(block)
+        for item in block.owned_items:
+            item_id = item.get("item_id")
+            if not item_id:
+                continue
+            is_added = item_id in added_ids
+            btn_label = "✓ Added to session" if is_added else f"+ Add {item.get('brand', '')} - {item.get('description', '')}"[:60]
+            if st.button(btn_label, key=f"{key_prefix}_{block.key}_{item_id}", disabled=is_added):
+                _handle_lure_add_click(spot_id, seq, {
+                    "item_id": item_id, "label": inventory_item_label(item), "category": block.key,
+                }, {"category": block.key}, mode, angler)
+
+    if curated.recommended:
+        st.markdown("**🎣 Top picks from your tackle box**")
+        for block in curated.recommended:
+            _render_block_with_quick_add(block)
+    else:
+        st.info(
+            "Nothing in your tackle box is a strong fit for this exact situation yet - "
+            "see the tackle box gaps below for what would rank well."
+        )
+    if curated.gaps:
+        with st.expander(f"🧰 Tackle box gaps worth a look ({len(curated.gaps)})", expanded=False):
+            st.caption(
+                "Not in your tackle box today, but ranked among the best-fit lures for this exact "
+                "situation - real alternatives worth considering, not a generic shopping list."
+            )
+            for block in curated.gaps:
+                render_lure_block(block)
     if rec.rationale:
         st.caption(" · ".join(rec.rationale))
 
@@ -2193,6 +2215,7 @@ if active is not None:
         for warn in mid_score_result.warnings:
             st.warning(warn)
 
+        mid_inventory = get_inventory()
         mid_rec = recommend(
             # Punch-list #69: mid_cond.get("water_temp_f", 85.0) - not just
             # .get("water_temp_f") - for the same reason _compute_scoring()
@@ -2204,12 +2227,12 @@ if active is not None:
             mid_season, mid_cond.get("water_temp_f", 85.0), _mid_segment, mid_rt["pressure_trend_24h"],
             structure_type=active["structure_type"], water_clarity=mid_water_clarity,
             fish_depth_ft=mid_cond.get("fish_depth_ft"), forage=mid_cond.get("forage_seen"),
-            inventory=get_inventory(), trip_history=get_trip_history(), spot_id=spot["spot_id"],
+            inventory=mid_inventory, trip_history=get_trip_history(), spot_id=spot["spot_id"],
             fish_activity=mid_fish_activity, forage_activity=mid_forage_activity,
             wind_mph=wind_mph_for_band(mid_wind_band),
         )
         with st.expander("🎣 See updated lure suggestions", expanded=False):
-            render_lure_recommendation(mid_rec)
+            render_lure_recommendation(mid_rec, inventory=mid_inventory)
 
         if st.button(
             "🔄 Update conditions", key=f"{mc_ns}_apply", type="primary",
@@ -2385,7 +2408,10 @@ else:
             fish_activity=cond_values.get("fish_activity"), forage_activity=cond_values.get("forage_activity"),
             wind_mph=wind_mph_for_band(cond_values.get("wind_band")),
         )
-        _render_recommendation_with_quick_add(rec, spot["spot_id"], session_build_seq, key_prefix=f"quickadd_{spot['spot_id']}_{session_build_seq}")
+        _render_recommendation_with_quick_add(
+            rec, spot["spot_id"], session_build_seq, key_prefix=f"quickadd_{spot['spot_id']}_{session_build_seq}",
+            inventory=inventory_items,
+        )
 
     st.divider()
     st.markdown("#### Lures for this session")
