@@ -9742,6 +9742,84 @@ every real save.
     baseline rather than a flat pattern - still open, same as noted in
     entry 147, and a separate concern from this lure-recommendation work.
 
+149. **Add 3 lures from the angler's live Cabela's cart to the tackle box;
+    found and fixed an unrelated `data`-branch drift bug along the way.**
+    Angler asked to add whatever was sitting in their real Cabela's cart to
+    the tackle box, then (mid-session) to also add a plain "White" color
+    variant of one of them as a manual duplicate, same photo, no SKU.
+
+    Claude in Chrome wasn't reachable this session (browser extension not
+    connected) - used the built-in browser pane instead, after the angler
+    confirmed it was signed into their Cabela's account. Read the live cart
+    directly (2 items: Zoom Salty Super Fluke - Albino - 6", SKU 4523099,
+    $6.99; Zoom Salty Super Fluke - White Pearl - 5-1/4", SKU 389648,
+    $5.29) and pulled each item's real product-image URL straight from the
+    cart page's own DOM via a JS query (`document.querySelectorAll('img')`
+    filtered on alt text) rather than `core.cabelas_lookup.search_lures()`
+    - the Coveo search API is still unreachable from this sandbox's own
+    server-side network (confirmed again - same standing limitation noted
+    throughout this log), so a live product-photo URL was only reachable
+    through the browser session itself this round.
+
+    Before adding anything, synced local `data/` from the real `data`
+    branch (`core.storage.sync_data_from_data_branch()`) rather than
+    trusting `main`'s own stale copy of `data/lure_inventory.csv` - this
+    surfaced that a DIFFERENT Claude session (a separate session id, using
+    live browser automation against the deployed app earlier the same
+    day) had already attempted this exact request once, got confused
+    between White/White Pearl/Albino's real sizes, added two wrong/
+    duplicate rows, and those had since been removed via the live app
+    itself (git author `Fishin' Magician Bot` - the deployed app's own
+    commit identity when `GITHUB_TOKEN` pushes a save) before this session
+    started, leaving a clean slate. Worth knowing if a future report
+    mentions the tackle box briefly showing a wrong-sized/wrong-SKU Super
+    Fluke entry that "wasn't there a minute later" - that was this, not
+    data loss.
+
+    That same real-`data`-branch sync surfaced a second, wholly unrelated
+    real bug: punch-list #70 (9/3) added a new "Spoon" lure category and 2
+    matching curated picks to `data/cabelas_picks_cache.csv`, but that
+    commit landed on `main`, not `data` - the branch the live app actually
+    boots from - so the real deployed app has been silently missing Spoon's
+    fallback picks since 9/3 (`tests/test_cabelas_picks_cache.py`'s
+    coverage-guard test only ever catches this against genuinely synced
+    data, which nothing in this session's own baseline `pytest` run before
+    the sync was exercising). Fixed by copying `main`'s 2 already-correct
+    Spoon rows into the `data` branch's copy too - a data-branch backfill,
+    not a code change, so no test file needed updating, just the data
+    itself.
+
+    **Built:** 3 new `data/lure_inventory.csv` rows via
+    `core.lure_inventory.append_item()` - Albino (SKU 4523099, $6.99),
+    White Pearl (SKU 389648, $5.29), and a manual "White" duplicate of
+    White Pearl per the angler's follow-up (no SKU, same image_url, same
+    $5.29 price) - all three `package_qty=10` per the angler's explicit
+    correction mid-session (the general pattern this app already uses for
+    soft-plastic multi-packs).
+
+    **Verified:** full suite `pytest tests/ -q` - 421 passed (including
+    the newly-fixed Spoon cache test). Full `AppTest` smoke test across all
+    8 pages (Home through Development, via `at.switch_page()` - an earlier
+    pass in this same round used `at.query_params["page"] = ...` instead,
+    which silently re-ran Home every time and would have reported a false
+    "OK" for every page; caught by checking the Tackle Box page's own
+    "N lure(s) shown" caption came back empty on that pass, redone with
+    `switch_page()` before trusting any of it) - zero exceptions anywhere,
+    Tackle Box page's own item-count caption ("68 lure(s) shown...")
+    confirms all 3 new items render. 7-Day Forecast needed
+    `core.appstate.fetch_forecast` patched specifically (not
+    `core.weather.fetch_forecast` - `core/appstate.py` imports the name
+    directly, so patching the origin module doesn't rebind appstate's
+    already-bound reference) with the same `_fake_bundle()` fixture
+    `test_scoring.py` already uses, same as every prior round, since this
+    sandbox still has no outbound network access to Open-Meteo. Pushed to
+    `data` via `commit_and_push_data()`/`push_pending_data()`; the first
+    push attempt hit this sandbox's own git-proxy 403 (not a GitHub auth
+    error), worked around with `env -u https_proxy -u HTTPS_PROXY` for
+    just that command, per this project's own operating notes. Confirmed
+    both changes live on GitHub via a fresh `git clone` + `git show
+    origin/data:...` afterward.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
