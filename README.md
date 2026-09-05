@@ -1113,6 +1113,16 @@ current quantity on hand. Two ways items get in:
   next one. Fixed by capping the thumbnail at its intended size
   (`max-width`) while letting it shrink to `100%` of its real container,
   with `aspect-ratio: 1` keeping it square at whatever width it ends up at.
+- **Edit now opens as a popup, not a cramped in-card expander (punch-list
+  #84)** - each card in the grid below is only about 1/6 of the page's width
+  (6 per row), and the old "Edit" `st.expander` was stuck at that same
+  narrow width - its Save/Delete buttons, squeezed into two half-width
+  columns, were easy to miss or mis-tap. Clicking "✏️ Edit" now opens the
+  same quantity/price/category/package-qty fields in a centered popup
+  dialog instead (the same `st.dialog` pattern Spot Session already uses
+  for its own trailer/log-a-fish popups), sized independently of the grid
+  so Save and Delete always have real room, on a phone or otherwise.
+  Nothing about what gets saved, or the GitHub push behavior, changed.
 
 **Category** is what links a tackle item to the forecast engine's lure suggestions - it's
 one of the same lure types `core/lures.py` recommends (Football Jig, Squarebill
@@ -1123,9 +1133,9 @@ anything that looks off - a wrong category just means that item won't get matche
 right forecast suggestion, not a real error. Items left "Not categorized / other" simply
 don't participate in the ownership matching described below.
 
-Quantity, price, and category can be edited (or the item deleted) from each card. Like
-trip logs, inventory changes are committed and pushed back to GitHub when a
-`GITHUB_TOKEN` is configured, so they survive Streamlit Cloud restarts.
+Quantity, price, category, and package qty can be edited (or the item deleted) from each
+card's "✏️ Edit" popup. Like trip logs, inventory changes are committed and pushed back
+to GitHub when a `GITHUB_TOKEN` is configured, so they survive Streamlit Cloud restarts.
 
 ### Fill your tackle gaps
 
