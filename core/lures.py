@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 
 from .videos import get_videos_by_key
 from .thermocline import thermocline_caveat
-from .lure_history import lure_track_records, track_record_note
+from .lure_history import lure_track_records, track_record_note, item_fish_per_hour
 
 # Base stain color the angler picks (Nolin runs greenish-brown, leaning brown,
 # under normal conditions - "Brown stained" is the default). A separate
@@ -672,8 +672,24 @@ def _split_owned_by_color(owned_items: list, suggested_colors: list) -> tuple:
     return matched, unmatched
 
 
+def _item_label(it: dict) -> str:
+    """Deliberately duplicates core.activity_log.inventory_item_label()'s
+    tiny "Brand - Description" join rather than importing it - core.
+    activity_log itself imports this module's LURE_PROFILES-adjacent bits
+    indirectly via other pages, and importing core.activity_log here risks
+    the same class of circular import already documented in core.
+    lure_history's module docstring (and just hit/fixed for punch-list
+    #88). This is exactly the kind of small, deliberate duplication that
+    precedent already accepts."""
+    brand = (it.get("brand") or "").strip()
+    description = (it.get("description") or "").strip()
+    label = " - ".join(p for p in (brand, description) if p)
+    return label or it.get("item_id") or ""
+
+
 def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note: str = "",
-                  owned_items: list = None, why: list = None) -> "LureBlock":
+                  owned_items: list = None, why: list = None,
+                  trip_history: list = None, situation: dict = None) -> "LureBlock":
     profile = LURE_PROFILES[key]
     colors = profile["colors"].get(water_clarity, profile["colors"][DEFAULT_BASE_STAIN])
     trailer = None
@@ -686,7 +702,30 @@ def _build_block(key: str, water_clarity: str, fish_depth_ft: float = None, note
     # lure type on hand, just not today's suggested color) - see
     # LureBlock.owned_off_color_items below for why the split matters.
     matched, off_color = _split_owned_by_color(owned_items, colors) if owned_items else ([], [])
-    matched.sort(key=lambda it: -(it.get("quantity") or 0))
+    # Punch-list #88: rank owned, color-matched items by real catch success
+    # (median fish/hour for this EXACT product, punch-list #88's
+    # item_fish_per_hour()) rather than just quantity on hand - this is what
+    # fixes the "why is the KVD Blade Minnow ranked #1 ahead of the Zoom
+    # Super Fluke, which has actually caught more fish" complaint, since
+    # quantity alone can't tell two same-category, same-quantity products
+    # apart. A specific item with no trustworthy track record yet (returns
+    # None - new to the tackle box, never logged, or below the min-trips
+    # floor) still shows up, just ranked below anything with a real proven
+    # rate, and ties among no-track-record items still fall back to
+    # quantity on hand, same as before this change.
+    for it in matched:
+        it["_item_fish_per_hour"] = (
+            item_fish_per_hour(trip_history, situation, _item_label(it))
+            if trip_history and situation else None
+        )
+    matched.sort(
+        key=lambda it: (
+            it["_item_fish_per_hour"] is not None,
+            it["_item_fish_per_hour"] or 0.0,
+            it.get("quantity") or 0,
+        ),
+        reverse=True,
+    )
     # Punch-list #49: `why` (recommend()'s key_why.get(key), the lure-
     # selection reason(s)) plus a color reason always appended here, since
     # this is the one place that actually knows which colors got picked for
@@ -1234,15 +1273,20 @@ def recommend(
     # if they're not part of this situation's seasonal pattern and even if
     # they're not in your tackle box today - the exact "before I decide to go
     # out and buy that lure" case the angler described.
+    # Built unconditionally (not just when trip_history is present) so
+    # _build_block() below can always pass it through to item_fish_per_hour()
+    # (punch-list #88) - that function already handles an empty/None
+    # trip_history the same fail-soft way every other lookup in this section
+    # does, so there's no behavior change here when there's no history yet.
+    situation = {
+        "spot_id": spot_id,
+        "structure_type": structure_type,
+        "water_clarity": water_clarity,
+        "low_light": low_light,
+        "water_temp_f": water_temp_f,
+    }
     history_notes = {}
     if trip_history:
-        situation = {
-            "spot_id": spot_id,
-            "structure_type": structure_type,
-            "water_clarity": water_clarity,
-            "low_light": low_light,
-            "water_temp_f": water_temp_f,
-        }
         records = lure_track_records(trip_history, situation)
         already_picked = set(first_keys_unique) | set(second_keys_unique)
         for key in already_picked:
@@ -1302,12 +1346,14 @@ def recommend(
 
     first_choice = [
         _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""),
-                     owned_items=owned_by_category.get(k), why=key_why.get(k))
+                     owned_items=owned_by_category.get(k), why=key_why.get(k),
+                     trip_history=trip_history, situation=situation)
         for k in first_keys_unique
     ]
     second_choice = [
         _build_block(k, water_clarity, fish_depth_ft, note=history_notes.get(k, ""),
-                     owned_items=owned_by_category.get(k), why=key_why.get(k))
+                     owned_items=owned_by_category.get(k), why=key_why.get(k),
+                     trip_history=trip_history, situation=situation)
         for k in second_keys_unique
     ]
 

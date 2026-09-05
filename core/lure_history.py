@@ -33,6 +33,7 @@ imports this module, not the other way around) so this stays a small,
 easily-testable, storage-format-only module.
 """
 from __future__ import annotations
+import statistics
 from dataclasses import dataclass
 from typing import Optional
 
@@ -197,3 +198,67 @@ def track_record_note(record: LureTrackRecord, in_plan_already: bool) -> str:
         f"a top seasonal pick, but a personally-proven option worth considering even if it's not in your "
         f"tackle box yet."
     )
+
+
+# Punch-list #88: per-SPECIFIC-lure catch-rate signal, real angler ask after
+# seeing a KVD Blade Minnow ranked #1 in the tackle box ahead of a Zoom
+# Super Fluke (roughly the same color) that had actually been the better
+# producer. Root cause: lure_track_records() above is blended across every
+# lure sharing one LURE_PROFILES *category* - a KVD Blade Minnow and a Zoom
+# Super Fluke are both tagged "weightless_soft_plastic," so a catch on
+# either one contributes to the SAME category-wide "13 of 21" stat; neither
+# core.lures._build_block()'s owned-item ordering (a plain sort by quantity
+# on hand) nor that blended stat can tell the two products apart. This adds
+# a second, finer-grained signal - median fish-per-hour for one EXACT logged
+# lure, matched by its lure_used label, the same "Brand - Description" text
+# core.activity_log.inventory_item_label() always builds it from (that
+# format is deterministic, so an exact string match is reliable for
+# anything logged from the tackle box - manual/typed lure_used entries
+# simply won't match any current inventory row and fall back to no rate,
+# same as an item with no track record at all).
+#
+# Reuses core.calibration.trip_fish_per_hour() (the angler's own explicitly
+# requested "fish caught per hour used" metric, already used to calibrate
+# score weights) and the same median-not-mean convention that module
+# already established, for the same reason: one outlier trip (a real
+# example already on file: 17 fish in a 1-hour window) shouldn't single-
+# handedly decide which specific lure wins.
+ITEM_FISH_PER_HOUR_MIN_TRIPS = 2
+
+
+def item_fish_per_hour(trip_rows: list, situation: dict, lure_label: str,
+                        min_trips: int = ITEM_FISH_PER_HOUR_MIN_TRIPS) -> Optional[float]:
+    """Median fish-per-hour across every situation-matched (same location
+    gate as lure_track_records() above - same spot, or same structure type
+    when no spot is known) trip_log row whose own lure_used exactly matches
+    lure_label. Returns None - never 0 - when there are fewer than
+    min_trips such rows with a trustworthy duration
+    (core.calibration.trip_fish_per_hour() can itself return None for a
+    missing/implausible duration; those rows don't count toward min_trips
+    at all), so a lure with no real track record yet is told apart from one
+    that's been tried and came up empty."""
+    if not lure_label or not (trip_rows and situation):
+        return None
+    # Deferred/lazy import, not a module-level one: core.calibration imports
+    # core.scoring -> core.onwater -> core.lures -> core.lure_history (this
+    # module), so importing trip_fish_per_hour at module load time creates a
+    # circular import the moment anything imports core.lures (i.e. almost
+    # the whole app). Importing it here, inside the function body, breaks
+    # the cycle since by the time this function is actually CALLED, every
+    # module in that chain has already finished loading.
+    from .calibration import trip_fish_per_hour
+    label = lure_label.strip()
+    rates = []
+    for row in trip_rows:
+        if (row.get("lure_used") or "").strip() != label:
+            continue
+        conditions = parse_conditions(row)
+        _score, location_matched = _situation_match_score(row, conditions, situation)
+        if not location_matched:
+            continue
+        rate = trip_fish_per_hour(row)
+        if rate is not None:
+            rates.append(rate)
+    if len(rates) < min_trips:
+        return None
+    return statistics.median(rates)

@@ -385,12 +385,24 @@ def render_lure_block(block: LureBlock):
         if block.owned_items:
             # block.owned_items only ever contains items that both match this lure's
             # category AND match today's suggested color (core.lures._split_owned_by_
-            # color), already capped to the top MAX_OWNED_ITEMS_PER_BLOCK (#1/#2)
-            # by quantity on hand - so what's shown here is always ready to go, and
-            # never more than 2 items (punch-list #8).
+            # color), already capped to the top MAX_OWNED_ITEMS_PER_BLOCK (#1/#2) -
+            # so what's shown here is always ready to go, and never more than 2 items
+            # (punch-list #8). Punch-list #88: ranked by real catch success (median
+            # fish/hour for this exact product, when there's a trustworthy track
+            # record for it) rather than just quantity on hand, so #1 here is the
+            # angler's own best-proven pick, not just whichever's stocked deepest.
             st.success("✅ In your tackle box:")
             for i, it in enumerate(block.owned_items, start=1):
-                st.write(f"**#{i}** {it['brand']} – {it['description']} (qty {it['quantity']})")
+                rate = it.get("_item_fish_per_hour")
+                # Punch-list #88: show the actual number driving the ranking -
+                # this app's "show your work" philosophy (same reason core.
+                # lure_history.track_record_note() states its raw counts rather
+                # than a vague "proven pick"). Only shown when there's a
+                # trustworthy rate (2+ situation-matched, plausible-duration
+                # trips on this exact item) - otherwise silently omitted rather
+                # than implying a track record that doesn't exist yet.
+                rate_bit = f" — 📈 {rate:.1f} fish/hr (your history)" if rate else ""
+                st.write(f"**#{i}** {it['brand']} – {it['description']} (qty {it['quantity']}){rate_bit}")
 
             photos = [it for it in block.owned_items if resolve_image_source(it)]
             if photos:

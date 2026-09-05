@@ -362,6 +362,92 @@ def test_owned_items_tie_on_quantity_keeps_original_order():
     assert [it["sku"] for it in block.owned_items] == ["a", "b"]
 
 
+def _item_history_trip(lure_used, structure_type="Main-lake point", spot_id="spot1", fish_caught=1,
+                        lure_start_time="08:00:00", lure_end_time="09:00:00"):
+    # Punch-list #88 test helper - same shape as tests/test_lure_history.py's
+    # own _item_trip(), duplicated here for the same "keep this file's
+    # recommend()/_build_block()-focused tests self-contained" reason
+    # _history_trip() above already gives for punch-list #37's helper.
+    return {
+        "spot_id": spot_id,
+        "structure_type": structure_type,
+        "lure_used": lure_used,
+        "fish_caught": fish_caught,
+        "conditions_json": json.dumps({
+            "lure_category": "medium_diving_crankbait",
+            "lure_start_time": lure_start_time,
+            "lure_end_time": lure_end_time,
+        }),
+    }
+
+
+def test_owned_items_rank_by_catch_success_ahead_of_quantity():
+    # Punch-list #88: the angler's real complaint - a KVD-like crankbait with
+    # more quantity on hand was outranking a lower-quantity item that had
+    # actually caught more fish. With a trustworthy per-item track record,
+    # the higher-quantity item should no longer automatically win.
+    from core.lures import _build_block
+    owned = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad - most stock",
+         "quantity": 5, "sku": "high_qty_low_catch", "item_id": "a",
+         "image_url": "", "image_filename": ""},
+        {"brand": "Rapala", "description": "DT Green Shad - low stock",
+         "quantity": 1, "sku": "low_qty_high_catch", "item_id": "b",
+         "image_url": "", "image_filename": ""},
+    ]
+    situation = {"structure_type": "Main-lake point", "spot_id": "spot1"}
+    trip_history = [
+        # "Strike King - 3XD Chartreuse Shad - most stock": 1 fish/hr, twice.
+        _item_history_trip("Strike King - 3XD Chartreuse Shad - most stock", fish_caught=1),
+        _item_history_trip("Strike King - 3XD Chartreuse Shad - most stock", fish_caught=1),
+        # "Rapala - DT Green Shad - low stock": 4 fish/hr, twice - the real
+        # producer, despite only 1 on hand.
+        _item_history_trip("Rapala - DT Green Shad - low stock", fish_caught=4),
+        _item_history_trip("Rapala - DT Green Shad - low stock", fish_caught=4),
+    ]
+    block = _build_block("medium_diving_crankbait", "Green stained", owned_items=owned,
+                          trip_history=trip_history, situation=situation)
+    assert [it["sku"] for it in block.owned_items] == ["low_qty_high_catch", "high_qty_low_catch"]
+    assert block.owned_items[0]["_item_fish_per_hour"] == 4.0
+    assert block.owned_items[1]["_item_fish_per_hour"] == 1.0
+
+
+def test_owned_items_without_track_record_fall_back_to_quantity():
+    # No trip_history/situation passed at all - same as every recommend()
+    # call before punch-list #88 - so nothing should change: quantity is
+    # still the tiebreaker/fallback ranking.
+    from core.lures import _build_block
+    owned = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad - low stock",
+         "quantity": 1, "sku": "a", "item_id": "a", "image_url": "", "image_filename": ""},
+        {"brand": "Rapala", "description": "DT Green Shad - most stock",
+         "quantity": 5, "sku": "b", "item_id": "b", "image_url": "", "image_filename": ""},
+    ]
+    block = _build_block("medium_diving_crankbait", "Green stained", owned_items=owned)
+    assert [it["sku"] for it in block.owned_items] == ["b", "a"]
+    assert all(it["_item_fish_per_hour"] is None for it in block.owned_items)
+
+
+def test_owned_items_with_a_proven_rate_outrank_an_unproven_higher_quantity_item():
+    # An item with a real (if modest) track record should still rank ahead
+    # of one with none at all, however much more of it is in the tackle box.
+    from core.lures import _build_block
+    owned = [
+        {"brand": "Strike King", "description": "3XD Chartreuse Shad - most stock, never logged",
+         "quantity": 10, "sku": "unproven", "item_id": "a", "image_url": "", "image_filename": ""},
+        {"brand": "Rapala", "description": "DT Green Shad - one on hand, proven",
+         "quantity": 1, "sku": "proven", "item_id": "b", "image_url": "", "image_filename": ""},
+    ]
+    situation = {"structure_type": "Main-lake point", "spot_id": "spot1"}
+    trip_history = [
+        _item_history_trip("Rapala - DT Green Shad - one on hand, proven", fish_caught=1),
+        _item_history_trip("Rapala - DT Green Shad - one on hand, proven", fish_caught=1),
+    ]
+    block = _build_block("medium_diving_crankbait", "Green stained", owned_items=owned,
+                          trip_history=trip_history, situation=situation)
+    assert [it["sku"] for it in block.owned_items] == ["proven", "unproven"]
+
+
 def test_owned_off_color_item_populates_off_color_list_not_owned_items():
     # Punch-list #48: reproduces the exact user-reported case - a Heddon
     # Super Spook Jr. in "Blue Chrome" is correctly categorized as
