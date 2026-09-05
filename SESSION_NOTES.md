@@ -9888,6 +9888,40 @@ every real save.
     capped at 8), the hint-matching color is pre-selected by default, and the
     confirm form pre-fills from whichever variant was actually picked.
 
+151. **Punch-list #84 (FIXED): Tackle Box "Edit" now opens as a wide popup
+    instead of a cramped in-card expander.** Angler feedback: clicking "Edit"
+    on a lure card left the Save/Delete buttons hard to see - the tackle-box
+    grid shows 6 cards per row, so each card (and the `st.expander("Edit")`
+    inside it) is stuck at roughly 1/6 of the page's width no matter how wide
+    the browser window is; the qty/price/category/package-qty fields stacked
+    fine, but Save and Delete were squeezed into two narrow half-width
+    columns at the very bottom of that skinny card.
+
+    Fixed by converting the per-card edit block into a proper modal:
+    `pages/5_Lure_Inventory.py` gained a new `@st.dialog("Edit lure",
+    width="large")`-decorated function, `_edit_lure_dialog(row)`, holding the
+    exact same fields and Save/Delete logic the old expander had (same
+    `update_item()`/`delete_item()` calls, same `commit_and_push_data()` push,
+    same action-banner-then-rerun pattern). Each card's "Edit" control is now
+    a plain button ("✏️ Edit") that calls this dialog function on click - a
+    `st.dialog` renders as a centered overlay sized independently of whatever
+    narrow column opened it, so Save/Delete get real room regardless of the
+    grid's column count. This mirrors the pattern `pages/6_Spot_Session.py`
+    already established for its own trailer-pick and log-a-fish popups
+    (`_trailer_dialog`), so no new UI pattern was introduced to the codebase -
+    just applied to a second page that had the same underlying problem
+    (content trapped at its trigger's own width).
+
+    **Verified:** a targeted `AppTest` script (`at.button` filtered to the
+    "✏️ Edit" label, `.click().run()`, then `at.get("dialog")`) confirmed
+    clicking Edit actually opens a dialog and that dialog's own buttons
+    include both "Save" and "Delete" - would have failed against the old
+    expander-based code, since no `dialog` element existed there at all.
+    Full suite `pytest tests/ -q` - still 432 passed (no test needed
+    changing; the old tests never asserted on the expander's structure,
+    only on `update_item()`/`delete_item()` being called correctly). Full
+    `AppTest` smoke test clean across every page.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

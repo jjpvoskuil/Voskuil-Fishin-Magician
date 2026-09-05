@@ -84,6 +84,82 @@ def _set_action_banner(kind: str, text: str) -> None:
     st.session_state["inventory_action_banner"] = {"kind": kind, "text": text}
 
 
+@st.dialog("Edit lure", width="large")
+def _edit_lure_dialog(row: dict) -> None:
+    """Punch-list #84: this used to be an `st.expander("Edit")` sitting
+    inside one card of the tackle-box grid (6 cards per row, so each card -
+    and the expander inside it - was stuck at roughly 1/6 of the page's
+    width). Fine for the qty/price/category fields stacked vertically, but
+    the "Save"/"Delete" buttons at the bottom were squeezed into two
+    half-width columns of that already-narrow card, easy to miss or
+    mis-tap, especially on a phone. `st.dialog` (already used elsewhere on
+    this page's neighbor, pages/6_Spot_Session.py, for the trailer/log-a-
+    fish popups) renders as a centered modal at its own width regardless of
+    how narrow the card that opened it is - `width="large"` here so Save/
+    Delete get real room. Called from a plain "✏️ Edit" button on the card
+    instead of an expander; every widget key below is still item_id-scoped
+    so this works no matter which card's Edit button opened it."""
+    st.markdown(f"**{row['brand']}**")
+    st.caption(row["description"])
+    price_val = float(row["price"]) if row["price"] else 0.0
+    package_qty_val = int(row.get("package_qty") or 1)
+
+    new_qty = st.number_input(
+        "Quantity", min_value=0, step=1,
+        value=int(row["quantity"] or 0), key=f"qty_{row['item_id']}",
+    )
+    new_price = st.number_input(
+        "Last price ($)", min_value=0.0, step=0.01,
+        value=price_val, key=f"price_{row['item_id']}",
+    )
+    new_category_choice = st.selectbox(
+        "Category", CATEGORY_LABELS,
+        index=_category_index(row.get("category", "")), key=f"cat_{row['item_id']}",
+    )
+    new_package_qty = st.number_input(
+        "Package qty (lures per package)", min_value=1, step=1,
+        value=package_qty_val, key=f"pkgqty_{row['item_id']}",
+    )
+    ec1, ec2 = st.columns(2)
+    item_desc = f"{row['brand']} - {row['description'][:50]}"
+    if ec1.button("Save", key=f"save_{row['item_id']}", width='stretch', type="primary"):
+        new_category = CATEGORY_KEYS[CATEGORY_LABELS.index(new_category_choice)]
+        update_item(
+            row["item_id"], quantity=new_qty, price=new_price, category=new_category,
+            package_qty=new_package_qty,
+        )
+        get_inventory.clear()
+        token = github_token()
+        if token:
+            ok, msg = commit_and_push_data(
+                [INVENTORY_PATH], token, repo_slug(),
+                f"Update lure inventory item {row['item_id']}",
+            )
+            _set_action_banner(
+                "success" if ok else "warning",
+                f"✅ Saved: {item_desc}" if ok else msg,
+            )
+        else:
+            _set_action_banner("success", f"✅ Saved: {item_desc} (locally only - no GITHUB_TOKEN configured).")
+        st.rerun()
+    if ec2.button("Delete", key=f"del_{row['item_id']}", width='stretch'):
+        delete_item(row["item_id"])
+        get_inventory.clear()
+        token = github_token()
+        if token:
+            ok, msg = commit_and_push_data(
+                [INVENTORY_PATH, IMAGES_DIR], token, repo_slug(),
+                f"Remove lure inventory item {row['item_id']}",
+            )
+            _set_action_banner(
+                "success" if ok else "warning",
+                f"🗑️ Removed: {item_desc}" if ok else msg,
+            )
+        else:
+            _set_action_banner("success", f"🗑️ Removed: {item_desc} (locally only - no GITHUB_TOKEN configured).")
+        st.rerun()
+
+
 def _render_family_grid(families: list, session_key: str, family_key: str, key_prefix: str) -> None:
     """Step 1 of picking a Cabela's match, punch-list #83 - one card per
     real PRODUCT FAMILY (core.cabelas_lookup.group_by_family()), not one
@@ -712,58 +788,5 @@ else:
                     st.caption(f"Last price: ${price_val:,.2f}  ·  Qty: {row['quantity']}{package_note}")
                     st.caption(f"Category: {CATEGORY_NAME_BY_KEY.get(row.get('category', ''), 'Not categorized / other')}")
 
-                    with st.expander("Edit"):
-                        new_qty = st.number_input(
-                            "Quantity", min_value=0, step=1,
-                            value=int(row["quantity"] or 0), key=f"qty_{row['item_id']}",
-                        )
-                        new_price = st.number_input(
-                            "Last price ($)", min_value=0.0, step=0.01,
-                            value=price_val, key=f"price_{row['item_id']}",
-                        )
-                        new_category_choice = st.selectbox(
-                            "Category", CATEGORY_LABELS,
-                            index=_category_index(row.get("category", "")), key=f"cat_{row['item_id']}",
-                        )
-                        new_package_qty = st.number_input(
-                            "Package qty (lures per package)", min_value=1, step=1,
-                            value=package_qty_val, key=f"pkgqty_{row['item_id']}",
-                        )
-                        ec1, ec2 = st.columns(2)
-                        item_desc = f"{row['brand']} - {row['description'][:50]}"
-                        if ec1.button("Save", key=f"save_{row['item_id']}", width='stretch'):
-                            new_category = CATEGORY_KEYS[CATEGORY_LABELS.index(new_category_choice)]
-                            update_item(
-                                row["item_id"], quantity=new_qty, price=new_price, category=new_category,
-                                package_qty=new_package_qty,
-                            )
-                            get_inventory.clear()
-                            token = github_token()
-                            if token:
-                                ok, msg = commit_and_push_data(
-                                    [INVENTORY_PATH], token, repo_slug(),
-                                    f"Update lure inventory item {row['item_id']}",
-                                )
-                                _set_action_banner(
-                                    "success" if ok else "warning",
-                                    f"✅ Saved: {item_desc}" if ok else msg,
-                                )
-                            else:
-                                _set_action_banner("success", f"✅ Saved: {item_desc} (locally only - no GITHUB_TOKEN configured).")
-                            st.rerun()
-                        if ec2.button("Delete", key=f"del_{row['item_id']}", width='stretch'):
-                            delete_item(row["item_id"])
-                            get_inventory.clear()
-                            token = github_token()
-                            if token:
-                                ok, msg = commit_and_push_data(
-                                    [INVENTORY_PATH, IMAGES_DIR], token, repo_slug(),
-                                    f"Remove lure inventory item {row['item_id']}",
-                                )
-                                _set_action_banner(
-                                    "success" if ok else "warning",
-                                    f"🗑️ Removed: {item_desc}" if ok else msg,
-                                )
-                            else:
-                                _set_action_banner("success", f"🗑️ Removed: {item_desc} (locally only - no GITHUB_TOKEN configured).")
-                            st.rerun()
+                    if st.button("✏️ Edit", key=f"edit_{row['item_id']}", width='stretch'):
+                        _edit_lure_dialog(row)
