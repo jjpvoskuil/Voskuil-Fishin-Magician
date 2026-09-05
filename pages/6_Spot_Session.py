@@ -2073,8 +2073,26 @@ def _lure_added_dialog(
         trailer = lure.get("trailer")
         trailer_bit = f" + {trailer['label']} trailer" if trailer else ""
         st.write(f"🎣 {lure['label']}{trailer_bit}")
+    # Punch-list #87 follow-up: the widget keys below include len(pending_lures)
+    # - real, live-app feedback was that after adding 2 lures, tapping "Add
+    # more lures" a second time stopped working ("doesn't toggle to let me
+    # add more"). Every earlier build of this popup keyed these two buttons
+    # only by (spot_id, session_build_seq) - constant across every reopening
+    # of this same dialog within one session build, so the SECOND (and every
+    # later) time this exact popup opens, its buttons carry the exact same
+    # key as the FIRST time. That reuse worked fine under this app's own
+    # AppTest harness (which doesn't model real Streamlit's dialog-widget
+    # bookkeeping closely enough to catch this), but apparently doesn't
+    # survive a real browser session reopening the same st.dialog with
+    # identical keys more than once. len(pending_lures) increases by
+    # exactly 1 every time this popup opens (it only ever opens right after
+    # an add), so folding it into the key gives every single occurrence of
+    # this popup - the 1st, 2nd, 3rd, ... - a genuinely fresh, never-before-
+    # seen widget key, which is the standard fix for this class of Streamlit
+    # dialog quirk.
+    _popup_key_suffix = f"{spot['spot_id']}_{session_build_seq}_{len(pending_lures)}"
     dc1, dc2 = st.columns(2)
-    if dc1.button("➕ Add more lures", width='stretch', key=f"lure_added_popup_more_{spot['spot_id']}_{session_build_seq}"):
+    if dc1.button("➕ Add more lures", width='stretch', key=f"lure_added_popup_more_{_popup_key_suffix}"):
         # Explicitly closes the popup - see the trigger check's own comment
         # for why this can't just rely on the flag having already been
         # "consumed": the flag is deliberately NOT popped there (a plain
@@ -2086,7 +2104,7 @@ def _lure_added_dialog(
         st.rerun()
     if dc2.button(
         "▶ Start Session", type="primary", width='stretch',
-        key=f"lure_added_popup_start_{spot['spot_id']}_{session_build_seq}",
+        key=f"lure_added_popup_start_{_popup_key_suffix}",
     ):
         _start_pending_session(
             spot, cond_values, session_date, bundle, structure_type, resolved_angler,

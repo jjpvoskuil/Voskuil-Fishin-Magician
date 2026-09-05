@@ -37,6 +37,32 @@ does set the popup flag in the source, matching the already-proven
 non-trailer path exactly) rather than forced into an AppTest scenario this
 harness structurally can't drive.
 
+Real-app follow-up bug, reported directly by the angler after this popup
+first shipped: "after I add 2 lures, it doesn't toggle to let me add
+more." The FIRST "Add more lures" click (going from 1 lure to picking a
+2nd) worked; the SECOND one (after the 2nd lure landed, trying to go pick
+a 3rd) silently did nothing. Root cause: _lure_added_dialog()'s own two
+button keys were originally scoped only to (spot_id, session_build_seq) -
+constant across every reopening of this popup within one session build,
+so the 2nd (and every later) occurrence of this exact dialog reused the
+exact same widget keys as the 1st. That reuse worked fine under THIS
+harness (see the AppTest-vs-real-Streamlit gap noted above - this is
+another instance of it, just in the opposite direction: AppTest's
+simulation is apparently more forgiving of key reuse across separate
+dialog open/close cycles than a real browser session is), but a real
+deployed app's own dialog-widget bookkeeping got stuck the second time
+the identical key was reused. Fixed by folding len(pending_lures) - which
+increases by exactly 1 every single time this popup opens, since it only
+ever opens right after an add - into both button keys, giving every
+occurrence of the popup a genuinely fresh key.
+test_add_more_lures_can_be_used_twice_in_a_row() below is the regression
+guard for this specific report - even though the underlying real-app
+symptom couldn't be reproduced under AppTest either (the ORIGINAL,
+buggy key scheme also passed this exact same two-cycle sequence when
+tried against this harness beforehand), asserting the concrete key
+format directly (rather than only asserting behavior) at least catches a
+future regression back to a key that fails to vary per popup occurrence.
+
 Every real file write (core.storage.append_trip, core.storage.
 commit_and_push_data, core.storage.push_pending_data) and every cached
 getter (core.appstate.get_lake_spots/get_inventory/get_weather_bundle/
@@ -119,15 +145,18 @@ def test_lure_added_popup_shows_after_adding_a_lure(monkeypatch):
         "popup should list the lure that was just added"
     )
     button_keys = {b.key for b in at.button}
-    assert "lure_added_popup_more_spot1_0" in button_keys
-    assert "lure_added_popup_start_spot1_0" in button_keys
+    # Key now folds in len(pending_lures) (== 1 after this first add) so
+    # that every popup occurrence gets a genuinely fresh key - see this
+    # module's docstring for the real-app bug this fixes.
+    assert "lure_added_popup_more_spot1_0_1" in button_keys
+    assert "lure_added_popup_start_spot1_0_1" in button_keys
 
 
 def test_start_session_from_popup_starts_the_session(monkeypatch):
     at = _start_session_build(monkeypatch)
     _add_item1(at)
 
-    at.button(key="lure_added_popup_start_spot1_0").click().run()
+    at.button(key="lure_added_popup_start_spot1_0_1").click().run()
     assert not at.exception, f"after Start Session from popup: {at.exception}"
     headers = [h.value for h in at.header]
     assert any("Session in progress" in h for h in headers), (
@@ -140,11 +169,11 @@ def test_add_more_lures_from_popup_closes_it_and_a_second_add_still_works(monkey
     at = _start_session_build(monkeypatch, inventory=[FAKE_ITEM, FAKE_ITEM_2])
     _add_item1(at)
 
-    at.button(key="lure_added_popup_more_spot1_0").click().run()
+    at.button(key="lure_added_popup_more_spot1_0_1").click().run()
     assert not at.exception, f"after Add more lures: {at.exception}"
     remaining_keys = {b.key for b in at.button}
-    assert "lure_added_popup_more_spot1_0" not in remaining_keys, "popup should be closed"
-    assert "lure_added_popup_start_spot1_0" not in remaining_keys, "popup should be closed"
+    assert "lure_added_popup_more_spot1_0_1" not in remaining_keys, "popup should be closed"
+    assert "lure_added_popup_start_spot1_0_1" not in remaining_keys, "popup should be closed"
 
     at.button(key="session_lure_picker_spot1_0_toggle_item2").click().run()
     assert not at.exception, f"after adding a second lure: {at.exception}"
@@ -155,3 +184,48 @@ def test_add_more_lures_from_popup_closes_it_and_a_second_add_still_works(monkey
     lure_lines = [m.value for m in at.markdown if m.value.startswith("🎣")]
     assert any("Test Chartreuse Shad" in l for l in lure_lines)
     assert any("Test Fluke" in l for l in lure_lines)
+
+
+def test_add_more_lures_can_be_used_twice_in_a_row(monkeypatch):
+    """Regression guard for the angler's real-app bug report: "after I add
+    2 lures, it doesn't toggle to let me add more." Drives the exact
+    sequence that broke live - add1, Add more lures, add2, Add more lures
+    again, add3 - and asserts the SECOND "Add more lures" click uses a
+    genuinely different widget key than the first (the fix folds
+    len(pending_lures) into the key), so this popup can be reopened and
+    dismissed repeatedly within one session build rather than only once.
+    """
+    at = _start_session_build(
+        monkeypatch,
+        inventory=[FAKE_ITEM, FAKE_ITEM_2, {**FAKE_ITEM, "item_id": "item3", "sku": "sku3", "description": "Test Third Lure"}],
+    )
+    _add_item1(at)
+
+    first_more_key = "lure_added_popup_more_spot1_0_1"
+    button_keys = {b.key for b in at.button}
+    assert first_more_key in button_keys
+    at.button(key=first_more_key).click().run()
+    assert not at.exception, f"after first Add more lures: {at.exception}"
+
+    at.button(key="session_lure_picker_spot1_0_toggle_item2").click().run()
+    assert not at.exception, f"after adding a second lure: {at.exception}"
+
+    second_more_key = "lure_added_popup_more_spot1_0_2"
+    assert second_more_key != first_more_key, (
+        "the second popup occurrence must use a different key than the "
+        "first, or a real browser's dialog-widget bookkeeping gets stuck "
+        "reusing the identical key (this was the actual reported bug)"
+    )
+    button_keys = {b.key for b in at.button}
+    assert second_more_key in button_keys, (
+        f"expected the second 'Add more lures' click to still work, got button keys: {button_keys}"
+    )
+    at.button(key=second_more_key).click().run()
+    assert not at.exception, f"after second Add more lures: {at.exception}"
+
+    at.button(key="session_lure_picker_spot1_0_toggle_item3").click().run()
+    assert not at.exception, f"after adding a third lure: {at.exception}"
+    successes = [s.value for s in at.success]
+    assert any("Added!" in s and "3 lures queued" in s for s in successes), (
+        f"popup should reopen a third time, listing all three lures, got: {successes}"
+    )
