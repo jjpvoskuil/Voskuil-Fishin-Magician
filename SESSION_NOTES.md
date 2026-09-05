@@ -9820,6 +9820,74 @@ every real save.
     both changes live on GitHub via a fresh `git clone` + `git show
     origin/data:...` afterward.
 
+150. **Punch-list #83 (FIXED): Tackle Box "add a new lure" overhaul - automatic
+    query broadening + a real product/color-size picker.** Angler tried adding a
+    fluke via "Scan a lure": Claude's vision correctly read the label's full
+    product name, but searching Cabela's with that full description came back
+    with zero matches. Falling back to manually typing "zoom super fluke" worked,
+    but only surfaced 8 flat result cards - a random subset of the family's real
+    ~40 color options, with no way to reach the rest, and no dropdown of colors
+    the way Cabela's own site shows.
+
+    Root-caused both parts live rather than guessing:
+    - Confirmed (direct browser `fetch()` calls to the same two endpoints
+      `core/cabelas_lookup.py` uses) that Coveo's relevance search can return
+      zero results for a long, specific free-text query even though a shorter
+      prefix of the exact same words matches fine - a genuine Coveo relevance
+      quirk, not a hyphen/slash escaping bug (ruled out with controlled
+      space-only rewrites of the same query, which failed identically).
+    - Confirmed every color/size of one product shares a single
+      `ec_item_group_id` value in Coveo's raw result (e.g. every "Zoom Salty
+      Super Fluke" color is `ec_item_group_id == "7506"`), and that Coveo
+      already returns a real per-family variant count (`swatchcount`) and a
+      structured color name (`product_color`) - fields this module wasn't
+      using at all before.
+
+    **Built**, all in `core/cabelas_lookup.py`:
+    - `search_lures()` gained an optional `aq` (Coveo advanced-query) param,
+      used instead of free-text `q` when given.
+    - `search_lures_by_group(group_id)` - exact, precise re-query for every
+      variant of one product family (`aq='@ec_item_group_id=="<id>"'`),
+      immune to the free-text relevance quirk above.
+    - `search_lures_broadening(query, min_words=2)` - retries a failed search
+      with the last word dropped, repeating until something matches or the
+      word floor is hit; returns `(results, query_used)` so the UI can show an
+      honest caption when a shortened query is what actually matched.
+    - `group_by_family(results)` - collapses a flat result list into one dict
+      per family (keyed by `group_id`, falling back to a per-SKU singleton
+      key), with a `swatch_count` (the real Coveo count when present, else a
+      count of members actually seen).
+    - `best_variant_index(variants, hint_text)` - word-overlap heuristic that
+      picks which color/size to default the picker to, using whatever text
+      (photo read or typed search) originally identified the product.
+
+    `pages/5_Lure_Inventory.py`'s candidate grid was restructured into two
+    steps instead of one flat grid: `_render_family_grid()` shows one card per
+    product family ("🎨 Choose color/size" when `swatch_count > 1`, otherwise
+    a plain "Use this" straight to the confirm form), and a new
+    `_render_variant_picker()` step (reached from that button) calls
+    `search_lures_by_group()` for the real, complete color/size list and shows
+    it as a dropdown, pre-selected via `best_variant_index()`, with a "⬅ Back
+    to product list" escape hatch. Both the "Scan a lure" and "Search Cabela's
+    by description" flows now call `search_lures_broadening()` instead of
+    plain `search_lures()`, and both pass their own guess text through as the
+    picker's default-selection hint.
+
+    **Verified:** 14 new tests in `tests/test_cabelas_lookup.py` (22 total,
+    all passing) covering `aq` pass-through, `search_lures_by_group()`'s
+    input validation and exact filtering, `group_by_family()`'s grouping and
+    singleton-handling, `search_lures_broadening()`'s retry/give-up/blank-query
+    behavior, and `best_variant_index()`'s overlap-match and no-match-fallback
+    cases - each written against a fake Coveo response, no live network
+    needed. Full suite `pytest tests/ -q` - 432 passed. Full `AppTest` smoke
+    test clean across all 8 pages via `switch_page()`. Also ran targeted
+    end-to-end `AppTest` scripts against the restructured Tackle Box page with
+    a mocked multi-color Coveo response: confirmed no exceptions, the family
+    card correctly shows the "Choose color/size" button only when
+    `swatch_count > 1`, the variant dropdown lists every mocked color (not
+    capped at 8), the hint-matching color is pre-selected by default, and the
+    confirm form pre-fills from whichever variant was actually picked.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

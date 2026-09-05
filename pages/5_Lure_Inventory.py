@@ -3,7 +3,9 @@ from pathlib import Path
 import streamlit as st
 
 from core.appstate import anthropic_api_key, anthropic_model, get_inventory, github_token, repo_slug
-from core.cabelas_lookup import search_lures
+from core.cabelas_lookup import (
+    best_variant_index, group_by_family, search_lures_broadening, search_lures_by_group,
+)
 from core.lure_inventory import (
     IMAGES_DIR, INVENTORY_PATH, LureItem, append_item, delete_item, save_image, update_item,
 )
@@ -14,6 +16,25 @@ from core.ui import render_cabelas_suggestions, render_square_thumbnail, inject_
 
 CARD_THUMBNAIL_PX = 160
 SCAN_THUMBNAIL_PX = 110
+
+# Every st.session_state key the "Scan a lure" / "Search Cabela's by
+# description" flows can create, in one place - punch-list #83's family/
+# variant-picker step (_render_candidate_grid/_render_family_grid/
+# _render_variant_picker above) added a few new ones (the "*_family" pick
+# and the "*_pick_variants_cache*" fetch cache), and both flows' "start
+# over"/cleanup-on-save logic need to clear ALL of them, not just the
+# original handful, or a leftover cached family/variant pick could bleed
+# into the next scan/search.
+_SCAN_STATE_KEYS = (
+    "scan_result", "scan_candidates", "scan_selected", "scan_selected_family",
+    "scan_query_used", "scan_photo_bytes", "scan_photo_ext",
+    "scan_pick_variants_cache", "scan_pick_variants_cache_group_id",
+)
+_TEXT_SEARCH_STATE_KEYS = (
+    "text_search_candidates", "text_search_selected", "text_search_selected_family",
+    "text_search_query_used", "text_search_query",
+    "text_search_pick_variants_cache", "text_search_pick_variants_cache_group_id",
+)
 
 st.set_page_config(page_title="Tackle Box - Nolin Lake", page_icon="🧰", layout="wide")
 inject_mobile_css()
@@ -63,31 +84,127 @@ def _set_action_banner(kind: str, text: str) -> None:
     st.session_state["inventory_action_banner"] = {"kind": kind, "text": text}
 
 
-def _render_candidate_grid(candidates: list, session_key: str, key_prefix: str) -> None:
-    """Shared Cabela's-results grid, used by both the photo-scan flow above
-    and the type-a-description search flow below (punch-list #41) - picking
-    a card stores that candidate dict at `st.session_state[session_key]`
-    and reruns so a confirm form can render underneath."""
-    st.write(f"Found {len(candidates)} possible match(es) on Cabela's - pick one:")
+def _render_family_grid(families: list, session_key: str, family_key: str, key_prefix: str) -> None:
+    """Step 1 of picking a Cabela's match, punch-list #83 - one card per
+    real PRODUCT FAMILY (core.cabelas_lookup.group_by_family()), not one
+    per individual color/size like this used to show. A family with only
+    one real variant (`swatch_count <= 1` - no grouping data, or a
+    genuinely single-color product) behaves exactly like the old flat
+    grid: "Use this" stores it at `st.session_state[session_key]` directly
+    and a confirm form renders underneath. A family with more than one
+    color/size instead shows how many are available and moves on to
+    _render_variant_picker() below, rather than pretending the single
+    photo shown here is the only option - this is the direct fix for a
+    real angler report ("~40 color options instead of the 8 the original
+    search showed... ideally it would only show the [product] with color
+    options I could choose, just like the site does")."""
+    st.write(f"Found {len(families)} possible match(es) on Cabela's - pick one:")
     cols_per_row = 4
-    for row_start in range(0, len(candidates), cols_per_row):
-        row_candidates = list(enumerate(candidates[row_start:row_start + cols_per_row], start=row_start))
+    for row_start in range(0, len(families), cols_per_row):
+        row_families = list(enumerate(families[row_start:row_start + cols_per_row], start=row_start))
         cand_cols = st.columns(cols_per_row)
-        for col, (idx, cand) in zip(cand_cols, row_candidates):
+        for col, (idx, fam) in zip(cand_cols, row_families):
             with col:
                 with st.container(border=True):
-                    if not render_square_thumbnail(cand, size_px=SCAN_THUMBNAIL_PX):
+                    if not render_square_thumbnail(fam, size_px=SCAN_THUMBNAIL_PX):
                         st.caption("No photo")
-                    st.caption(f"**{cand['brand']}**  \n{cand['description']}"[:110])
-                    price_txt = f"${cand['price']:,.2f}" if cand["price"] is not None else "price n/a"
-                    st.caption(f"SKU {cand['sku']} · {price_txt}")
+                    st.caption(f"**{fam['brand']}**  \n{fam['description']}"[:110])
+                    price_txt = f"${fam['price']:,.2f}" if fam["price"] is not None else "price n/a"
+                    swatch_count = fam.get("swatch_count") or 1
+                    variant_note = f" · {swatch_count} colors/sizes" if swatch_count > 1 else ""
+                    st.caption(f"SKU {fam['sku']} · {price_txt}{variant_note}")
+                    button_label = "🎨 Choose color/size" if swatch_count > 1 else "Use this"
                     # Punch-list #38: core.cabelas_lookup.search_lures() now dedupes by
                     # SKU at the source (the real cause of the crash this fixed), but this
                     # index in the key is still worth keeping as cheap defense-in-depth -
                     # a key collision here means a full-page crash, not just a cosmetic bug.
-                    if st.button("Use this", key=f"{key_prefix}_{idx}_{cand['sku']}", width='stretch'):
-                        st.session_state[session_key] = cand
+                    if st.button(button_label, key=f"{key_prefix}_{idx}_{fam['sku']}", width='stretch'):
+                        if swatch_count > 1 and fam.get("group_id"):
+                            st.session_state[family_key] = fam
+                        else:
+                            st.session_state[session_key] = fam
                         st.rerun()
+
+
+def _render_variant_picker(family: dict, session_key: str, family_key: str, key_prefix: str, hint_text: str = "") -> None:
+    """Step 2, punch-list #83 - only reached for a multi-variant family.
+    Fetches every real color/size in that exact product line
+    (core.cabelas_lookup.search_lures_by_group(), a precise field filter on
+    Coveo's grouping id, not a free-text search) and shows a single
+    searchable dropdown to pick one - closer to how Cabela's own product
+    page's color-swatch picker works than paging through dozens of
+    separate photo cards would be. Pre-selects whichever variant's color
+    best matches `hint_text` (the original scan/typed query) via
+    core.cabelas_lookup.best_variant_index() - a real angler complaint was
+    "the app got the name of the lure right" but then still made picking
+    the right color a manual hunt, so reusing that already-correct read is
+    a real win, not just a cosmetic default."""
+    cache_key = f"{key_prefix}_variants_cache"
+    if st.session_state.get(f"{cache_key}_group_id") != family.get("group_id"):
+        with st.spinner("Loading colors/sizes..."):
+            variants = search_lures_by_group(
+                family["group_id"], num_results=max(family.get("swatch_count") or 0, 60),
+            )
+        if not variants:
+            # Fails soft: the group lookup itself failed (network hiccup,
+            # Coveo blocking this app's own server - the same standing
+            # limitation every Cabela's integration in this app has) - fall
+            # back to just the one family card already in hand rather than
+            # stranding the angler with an empty picker.
+            variants = [family]
+        st.session_state[cache_key] = variants
+        st.session_state[f"{cache_key}_group_id"] = family.get("group_id")
+    variants = st.session_state[cache_key]
+
+    def _label(v: dict) -> str:
+        text = v.get("color") or v["description"]
+        return f"{text} - ${v['price']:,.2f}" if v["price"] is not None else text
+
+    labels = [_label(v) for v in variants]
+    default_idx = best_variant_index(variants, hint_text) if hint_text else 0
+    st.caption(f"**{family['brand']}** - {len(variants)} color/size option(s)")
+    picked_label = st.selectbox(
+        "Pick the exact color/size", labels, index=min(default_idx, len(labels) - 1),
+        key=f"{key_prefix}_variant_select",
+    )
+    picked = variants[labels.index(picked_label)]
+    vc1, vc2 = st.columns([1, 3])
+    with vc1:
+        if not render_square_thumbnail(picked, size_px=SCAN_THUMBNAIL_PX):
+            st.caption("No photo")
+    with vc2:
+        st.write(picked["description"])
+        price_txt = f"${picked['price']:,.2f}" if picked["price"] is not None else "price n/a"
+        st.caption(f"SKU {picked['sku']} · {price_txt}")
+    bc1, bc2 = st.columns(2)
+    if bc1.button("✅ Use this color/size", key=f"{key_prefix}_variant_confirm", width='stretch'):
+        st.session_state[session_key] = picked
+        st.session_state.pop(family_key, None)
+        st.rerun()
+    if bc2.button("⬅ Back to product list", key=f"{key_prefix}_variant_back", width='stretch'):
+        st.session_state.pop(family_key, None)
+        st.session_state.pop(cache_key, None)
+        st.session_state.pop(f"{cache_key}_group_id", None)
+        st.rerun()
+
+
+def _render_candidate_grid(candidates: list, session_key: str, key_prefix: str, hint_text: str = "") -> None:
+    """Shared Cabela's-results entry point, used by both the photo-scan
+    flow above and the type-a-description search flow below (punch-list
+    #41). Groups the raw search_lures_broadening() results into product
+    families (punch-list #83 - core.cabelas_lookup.group_by_family()) and
+    renders whichever step applies: the family grid, or (once a
+    multi-variant family is picked) the color/size picker. Either way, the
+    final pick lands at `st.session_state[session_key]` and a confirm form
+    renders underneath - callers don't need to know or care which path got
+    there."""
+    family_key = f"{session_key}_family"
+    family = st.session_state.get(family_key)
+    if family:
+        _render_variant_picker(family, session_key, family_key, key_prefix, hint_text)
+    else:
+        families = group_by_family(candidates)
+        _render_family_grid(families, session_key, family_key, key_prefix)
 
 
 def _render_confirm_form(selected: dict, form_key: str, source_label: str, cleanup_keys: tuple) -> None:
@@ -273,9 +390,23 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                 st.session_state["scan_result"] = scan_result
                 st.session_state["scan_candidates"] = None
                 st.session_state["scan_selected"] = None
+                st.session_state.pop("scan_selected_family", None)
+                st.session_state["scan_query_used"] = None
                 if not scan_result.get("error") and scan_result.get("visible") and scan_result.get("search_query"):
                     with st.spinner("Searching Cabela's..."):
-                        st.session_state["scan_candidates"] = search_lures(scan_result["search_query"])
+                        # Punch-list #83: a real report - Claude read the label
+                        # correctly, but the exact full description it built a
+                        # search query from came back with zero Cabela's
+                        # matches ("did not like the full description"), a
+                        # reproduced Coveo relevance quirk on long, specific
+                        # queries - see search_lures_broadening()'s own
+                        # docstring. This automatically retries with a shorter
+                        # version instead of just reporting no matches.
+                        candidates, used_query = search_lures_broadening(
+                            scan_result["search_query"], num_results=30,
+                        )
+                        st.session_state["scan_candidates"] = candidates
+                        st.session_state["scan_query_used"] = used_query
 
         scan_result = st.session_state.get("scan_result")
         if scan_result:
@@ -295,8 +426,9 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                 candidates = st.session_state.get("scan_candidates")
                 if not candidates:
                     st.warning(
-                        "No matches found on Cabela's for that. Try a different search below, "
-                        "or add it manually further down."
+                        "No matches found on Cabela's for that - not even a broader version of "
+                        "the same description. Try a different search below, or add it manually "
+                        "further down."
                     )
                     manual_query = st.text_input(
                         "Search Cabela's yourself", value=scan_result.get("search_query", ""),
@@ -304,21 +436,29 @@ with st.expander("📷 Scan a lure", expanded=False, key="scan_expander", on_cha
                     )
                     if st.button("Search", key="scan_manual_search_btn") and manual_query.strip():
                         with st.spinner("Searching Cabela's..."):
-                            st.session_state["scan_candidates"] = search_lures(manual_query)
+                            candidates, used_query = search_lures_broadening(manual_query, num_results=30)
+                            st.session_state["scan_candidates"] = candidates
+                            st.session_state["scan_query_used"] = used_query
                         st.rerun()
                 else:
-                    _render_candidate_grid(candidates, "scan_selected", "scan_pick")
+                    used_query = st.session_state.get("scan_query_used") or scan_result.get("search_query", "")
+                    if used_query and used_query != scan_result.get("search_query", ""):
+                        st.caption(
+                            f"Your exact description had no matches - showing results for the "
+                            f"broader search \"{used_query}\" instead."
+                        )
+                    _render_candidate_grid(candidates, "scan_selected", "scan_pick", hint_text=read_as)
 
         selected = st.session_state.get("scan_selected")
         if selected:
             _render_confirm_form(
                 selected, "scan_confirm_form", "Scanned photo -> Cabela's lookup",
-                ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"),
+                _SCAN_STATE_KEYS,
             )
 
         if st.session_state.get("scan_result"):
             if st.button("Start over", key="scan_reset_btn"):
-                for key in ("scan_result", "scan_candidates", "scan_selected", "scan_photo_bytes", "scan_photo_ext"):
+                for key in _SCAN_STATE_KEYS:
                     st.session_state.pop(key, None)
                 st.rerun()
 
@@ -341,25 +481,39 @@ with st.expander("🔍 Search Cabela's by description", expanded=False, key="tex
     search_clicked = ts2.button("🔍 Search", key="text_search_btn", width='stretch')
     if search_clicked and text_query.strip():
         with st.spinner("Searching Cabela's..."):
-            st.session_state["text_search_candidates"] = search_lures(text_query)
+            # Punch-list #83: broadens automatically on a zero-result exact
+            # phrase - see search_lures_broadening()'s own docstring for the
+            # real, reproduced Coveo relevance quirk this works around.
+            candidates, used_query = search_lures_broadening(text_query, num_results=30)
+            st.session_state["text_search_candidates"] = candidates
+            st.session_state["text_search_query_used"] = used_query
         st.session_state["text_search_selected"] = None
+        st.session_state.pop("text_search_selected_family", None)
         st.rerun()
 
     text_candidates = st.session_state.get("text_search_candidates")
     if text_candidates is not None:
         if not text_candidates:
             st.warning(
-                "No matches found on Cabela's for that search. Try different wording, or add it "
-                "manually below."
+                "No matches found on Cabela's for that search - not even a broader version of "
+                "it. Try different wording, or add it manually below."
             )
         else:
-            _render_candidate_grid(text_candidates, "text_search_selected", "text_search_pick")
+            used_query = st.session_state.get("text_search_query_used") or text_query
+            if used_query and used_query != text_query.strip():
+                st.caption(
+                    f"Your exact search had no matches - showing results for the broader "
+                    f"search \"{used_query}\" instead."
+                )
+            _render_candidate_grid(
+                text_candidates, "text_search_selected", "text_search_pick", hint_text=text_query,
+            )
 
     text_selected = st.session_state.get("text_search_selected")
     if text_selected:
         _render_confirm_form(
             text_selected, "text_search_confirm_form", "Cabela's search",
-            ("text_search_candidates", "text_search_selected", "text_search_query"),
+            _TEXT_SEARCH_STATE_KEYS,
         )
 
 with st.expander("➕ Add a lure", expanded=len(items) == 0, key="add_lure_expander"):

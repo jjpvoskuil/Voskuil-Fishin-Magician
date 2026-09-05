@@ -963,26 +963,51 @@ current quantity on hand. Two ways items get in:
   "Turn off camera," or collapse the section. Claude's vision (`core/lure_vision.py`)
   reads the brand/product name off the label, that guess becomes a search query
   against Cabela's own product catalog (`core/cabelas_lookup.py`),
-  and you're shown the real matching product(s) - photo, brand, description, SKU,
-  price - to pick from. Picking one shows an editable confirm form (category
-  pre-guessed the same way the import batches above are, everything else editable)
-  before anything is saved - nothing is added automatically. If the SKU already
-  matches something in your inventory, confirming bumps that row's quantity instead
-  of creating a duplicate, same rule as the order-history/cart imports above. This
-  needs an `ANTHROPIC_API_KEY` in Streamlit secrets (see `secrets.toml.example`) -
-  without one, this section just explains that and stays otherwise out of the way;
-  manual entry above still works regardless. See "How the Cabela's lookup works"
-  below for how the product search itself works and its limitations.
+  and you're shown the real matching product(s) to pick from - one card per
+  distinct product, not one per color (see "one card per product, then a
+  color/size step" below, punch-list #83). Picking one shows an editable confirm
+  form (category pre-guessed the same way the import batches above are, everything
+  else editable) before anything is saved - nothing is added automatically. If the
+  SKU already matches something in your inventory, confirming bumps that row's
+  quantity instead of creating a duplicate, same rule as the order-history/cart
+  imports above. This needs an `ANTHROPIC_API_KEY` in Streamlit secrets (see
+  `secrets.toml.example`) - without one, this section just explains that and stays
+  otherwise out of the way; manual entry above still works regardless. See "How
+  the Cabela's lookup works" below for how the product search itself works and its
+  limitations.
 - **Search Cabela's by description (punch-list #41)** - no photo needed: the
   "🔍 Search Cabela's by description" section (between "Scan a lure" and "Add a
   lure") takes a typed description - brand, name, color, size, whatever you know -
   and searches Cabela's own catalog directly with it (`core/cabelas_lookup.py`,
-  the same lookup the photo-scan flow uses), then shows the same pick-a-match ->
-  confirm-details flow as scanning a photo does. Since there's no photo or
-  Claude-vision step involved, this works even without an `ANTHROPIC_API_KEY`
-  configured. Items added this way are tagged `source="Cabela's search"` in your
-  inventory, distinct from `"Scanned photo -> Cabela's lookup"` and `"Manual"`, so
-  it's still clear later how each lure was actually added.
+  the same lookup the photo-scan flow uses), then shows the same pick-a-product ->
+  color/size -> confirm-details flow as scanning a photo does. Since there's no
+  photo or Claude-vision step involved, this works even without an
+  `ANTHROPIC_API_KEY` configured. Items added this way are tagged
+  `source="Cabela's search"` in your inventory, distinct from `"Scanned photo ->
+  Cabela's lookup"` and `"Manual"`, so it's still clear later how each lure was
+  actually added.
+- **One card per product, then a color/size step (punch-list #83).** Both flows
+  above used to show up to 8 flat result cards straight from Cabela's search - for
+  a product family with many color options (e.g. the Zoom Salty Super Fluke, ~40
+  colors on Cabela's site), that meant 8 essentially-random colors shown and the
+  other ~30 never reachable at all, plus a very specific scanned/typed description
+  (e.g. a full "Zoom Salty Super Fluke - Green Pumpkin/Chartreuse" read off a
+  label) could match *zero* of those 8 and come back empty even though a shorter
+  version of the same query matched fine. Two fixes, both in
+  `core/cabelas_lookup.py`: (1) `search_lures_broadening()` - if the full
+  query returns nothing, it automatically retries with the last word dropped,
+  repeating until something matches or only 2 words are left, and the page shows
+  a small caption when this happened so it's clear a shortened version of what you
+  typed/scanned is what actually matched; (2) results are grouped into one card
+  per **product family** (`group_by_family()`, using Coveo's own
+  `ec_item_group_id` field, which every color/size of one product shares) instead
+  of one card per color. A family with more than one color/size shows a "🎨 Choose
+  color/size" button leading to a second step (`search_lures_by_group()` pulls
+  every real color/size Cabela's has for that exact family) with a dropdown of all
+  of them, defaulting to whichever one best matches the words from your
+  photo/typed description (`best_variant_index()`) rather than always the first
+  one alphabetically. A single-color family skips straight to the confirm form,
+  same as before.
 - **In-app camera photo quality (punch-list #39)** - both "Take a photo" camera
   widgets on this page (the "Scan a lure" flow above, and manual entry's own photo
   field) now explicitly request `resolution="1080p"` from the browser. Streamlit's
@@ -1190,6 +1215,23 @@ an honest "showing picks saved from a previous lookup" note whenever the fallbac
 not a live check - is what's actually on screen. This cache isn't auto-refreshing;
 updating it means re-running the same browser-based capture and overwriting the CSV
 in a future session.
+
+**Punch-list #83 finding:** confirmed live (via direct browser `fetch()` calls to
+the same two endpoints this module uses) that Coveo's relevance search can return
+zero results for a long, highly specific free-text query even though a shorter
+prefix of the exact same words matches perfectly - not a hyphen/slash escaping
+issue (ruled out with controlled space-only rewrites that failed identically).
+`search_lures_broadening()` works around this by dropping trailing words and
+retrying rather than trying to "fix" the query text. Separately, confirmed that
+every color/size variant of one product shares a single `ec_item_group_id` value
+in Coveo's raw result (e.g. every color of "Zoom Salty Super Fluke" is
+`ec_item_group_id == "7506"`), and that `product_color` and `swatchcount` are
+real per-family fields Coveo already returns - `group_by_family()` and
+`search_lures_by_group()` (which uses Coveo's `aq` advanced-query syntax,
+`'@ec_item_group_id=="<id>"'`, for a precise family-only re-query) are built
+directly on those fields rather than any name-matching heuristic, so the
+color/size list shown always matches Cabela's own site exactly (same count, same
+options) instead of an approximation.
 
 The photo-identify step (`core/lure_vision.py`) is deliberately kept separate from the
 product lookup - it only reads whatever's legible on the package well enough to build
