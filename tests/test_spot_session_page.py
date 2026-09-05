@@ -63,6 +63,32 @@ tried against this harness beforehand), asserting the concrete key
 format directly (rather than only asserting behavior) at least catches a
 future regression back to a key that fails to vary per popup occurrence.
 
+Real-app follow-up #2, found by the angler watching a live screen-shared
+reproduction of the sequence above: the popup itself WAS reopening
+correctly for every add (the len(pending_lures) key fix above really did
+fix the original report), but "Add more lures" was dumping the angler
+back onto a page where the "Add from tackle box" expander had silently
+collapsed shut again - so every add after the first needed an extra
+manual click just to reopen it before the next lure could even be picked,
+exactly backwards from the "keep adding lure after lure with no extra
+navigation" the whole popup was built for in the first place. Root cause:
+st.expander's `expanded=` argument only sets its INITIAL state on first
+mount - a manual open/close toggle lives purely in the frontend and does
+not survive a script rerun, so without something re-asserting
+`expanded=True` on the next render, it snaps back to its `expanded=False`
+default on every single st.rerun() (which every add and every popup
+button here triggers). Fixed with a new session_state flag,
+_tackle_box_expander_open_key(spot_id, seq), set True the moment a lure
+actually lands in the pending list (covers the tackle-box picker, manual
+entry, quick-add, and the trailer dialog's own "Add lure" confirm - all
+of them funnel through _handle_lure_add_click()/_trailer_dialog(), where
+the flag is set) and read back as both this expander's AND the
+"Suggestions for right now" expander's own `expanded=` argument, so
+either one stays open for the rest of this session build once used, no
+matter how many more st.rerun()s happen in between.
+test_tackle_box_expander_stays_open_across_add_more_lures_cycles() below
+is the regression guard for this specific report.
+
 Every real file write (core.storage.append_trip, core.storage.
 commit_and_push_data, core.storage.push_pending_data) and every cached
 getter (core.appstate.get_lake_spots/get_inventory/get_weather_bundle/
@@ -228,4 +254,54 @@ def test_add_more_lures_can_be_used_twice_in_a_row(monkeypatch):
     successes = [s.value for s in at.success]
     assert any("Added!" in s and "3 lures queued" in s for s in successes), (
         f"popup should reopen a third time, listing all three lures, got: {successes}"
+    )
+
+
+def _tackle_box_expander(at):
+    matches = [e for e in at.expander if e.label == "➕ Add from tackle box"]
+    assert matches, "expected an 'Add from tackle box' expander on the page"
+    return matches[0]
+
+
+def test_tackle_box_expander_stays_open_across_add_more_lures_cycles(monkeypatch):
+    """Regression guard for the angler's real-app follow-up #2, found while
+    watching a live screen-shared reproduction of the add-3-lures sequence:
+    the popup itself reopened correctly every time (the len(pending_lures)
+    key fix works), but "Add more lures" kept dumping the angler back onto
+    a page where the "Add from tackle box" expander had silently collapsed
+    shut again, needing an extra manual click to reopen it before the next
+    lure could even be picked. Before this fix, the expander's own
+    `expanded=` argument was a bare `False` with nothing keeping it open
+    across the st.rerun() every add/popup button triggers - so it snapped
+    shut every single cycle. This test drives add1 -> Add more lures ->
+    add2 -> Add more lures again and asserts the expander is still
+    reporting expanded=True immediately after each "Add more lures" click,
+    with no extra click of its own required to reopen it."""
+    at = _start_session_build(monkeypatch, inventory=[FAKE_ITEM, FAKE_ITEM_2])
+
+    # Starts collapsed on a fresh page load - unchanged from before this fix,
+    # and matches punch-list #33's own explicit "don't take up screen space
+    # on every page load" intent for the sibling suggestions expander.
+    assert _tackle_box_expander(at).proto.expanded is False
+
+    _add_item1(at)
+    # Adding the very first lure (from inside this same expander) should
+    # already flip it open for the rest of this session build.
+    assert _tackle_box_expander(at).proto.expanded is True
+
+    at.button(key="lure_added_popup_more_spot1_0_1").click().run()
+    assert not at.exception, f"after first Add more lures: {at.exception}"
+    assert _tackle_box_expander(at).proto.expanded is True, (
+        "the tackle-box picker should still be open immediately after "
+        "'Add more lures', with no extra click needed to reopen it - this "
+        "is the exact behavior the angler reported as broken"
+    )
+
+    at.button(key="session_lure_picker_spot1_0_toggle_item2").click().run()
+    assert not at.exception, f"after adding a second lure: {at.exception}"
+    at.button(key="lure_added_popup_more_spot1_0_2").click().run()
+    assert not at.exception, f"after second Add more lures: {at.exception}"
+    assert _tackle_box_expander(at).proto.expanded is True, (
+        "the tackle-box picker should stay open across every 'Add more "
+        "lures' cycle in this session build, not just the first one"
     )
