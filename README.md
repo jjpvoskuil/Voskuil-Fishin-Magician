@@ -1445,6 +1445,39 @@ dict, tagged as each lure key enters or moves within first/second choice) and
 actually knows which colors got picked for today's water clarity) - see
 `LureBlock.why` for the full field-level rationale.
 
+### Owned items rank by real catch success, not just quantity on hand (punch-list #88)
+
+Real feedback from a recommendation-card screenshot: "I am not sure why the KVD is
+#1 and the zoom is #2. The fluke has been far more successful and is roughly the
+same color??" Two separate root causes, both now fixed. First,
+`core.lure_history.lure_track_records()` (the personal-history signal, punch-list
+#37) aggregates by `LURE_PROFILES` *category*, not by specific product - a KVD
+Blade Minnow and a Zoom Super Fluke are both tagged `weightless_soft_plastic`, so a
+catch on either one contributed to the same blended "13 of 21 similar trips" stat.
+Second, `core.lures._build_block()`'s owned-item ordering was a plain sort by
+quantity on hand with no fishing-success signal at all, so two same-category items
+tied on quantity broke the tie on arbitrary insertion order. Asked how ranking
+should work; the answer was explicit: "Lets base it on catch success in fish
+caught per hour used."
+
+`core.lure_history.item_fish_per_hour()` computes median fish/hour (the same
+median-not-mean convention `core.calibration.py` already established, so one
+outlier trip can't single-handedly decide a specific lure's rate) for one EXACT
+logged product, matched by its `lure_used` label against the same deterministic
+"Brand - Description" string `core.activity_log.inventory_item_label()` always
+builds. It's gated by the same location-match requirement (same spot, or same
+structure type when no spot is known) `lure_track_records()` already uses, and
+requires at least 2 situation-matched, plausible-duration trips before returning a
+rate at all - never 0, `None` for "no real track record yet," matching this
+module's existing fail-soft convention. `_build_block()` now computes this rate
+for every color-matched owned item and sorts by (has a rate, the rate itself,
+quantity on hand) descending - a proven item always outranks an unproven one
+regardless of stock, and quantity remains the fallback/tiebreaker for items with
+no track record yet, exactly matching prior behavior when there's no trip history
+at all. `core.ui.render_lure_block()` now also shows the actual fish/hour number
+next to each ranked item ("show your work," matching this app's existing
+track-record-note style) instead of silently reordering with no visible reason.
+
 ## Development punch list
 
 The **Development** page is a running list of things to adjust or fix in the app

@@ -10052,6 +10052,119 @@ every real save.
     straightforward, low-branching widget swap whose actual conversion
     logic is already fully covered at the unit level.
 
+154. **Punch-list #88 (FIXED): owned lures now rank by real catch success
+    (fish/hour), not just quantity on hand.** Angler feedback on a lure
+    recommendation card screenshot: "I am not sure why the KVD is #1 and
+    the zoom is #2. The fluke has been far more successful and is roughly
+    the same color??"
+
+    Root-caused to two separate issues. First,
+    `core.lure_history.lure_track_records()` (the personal-history signal,
+    punch-list #37) aggregates by `LURE_PROFILES` *category*, not by
+    specific product - a KVD Blade Minnow and a Zoom Super Fluke are both
+    tagged `weightless_soft_plastic`, so a catch on either one contributed
+    to the same blended "13 of 21 similar trips" stat; neither product
+    could be told apart by that number. Second,
+    `core.lures._build_block()`'s owned-item ordering was a plain
+    `sort(key=lambda it: -(it.get("quantity") or 0))` with no fishing-
+    success signal at all, so two same-category items tied at
+    `quantity=1` (confirmed against the real `data/lure_inventory.csv` -
+    both the KVD and the Fluke sat at exactly 1 in stock) broke the tie on
+    arbitrary insertion order.
+
+    Asked the angler how ranking should work via `AskUserQuestion`; the
+    answer was explicit and specific: "Lets base it on catch success in
+    fish caught per hour used."
+
+    Implemented exactly that. New
+    `core.lure_history.item_fish_per_hour(trip_rows, situation,
+    lure_label, min_trips=2)`: computes median fish/hour (reusing
+    `core.calibration.trip_fish_per_hour()`'s per-trip rate calculation
+    and its median-not-mean convention - a real example already on file,
+    17 fish in one trustworthy 1-hour window, is exactly the kind of
+    outlier a median protects against) across every situation-matched
+    (same location gate `lure_track_records()` already uses - same spot,
+    or same structure type when no spot is known) trip whose own
+    `lure_used` field exactly matches `lure_label`. `lure_used` is written
+    from `core.activity_log.inventory_item_label()`'s deterministic
+    "Brand - Description" string, so an exact-string match reliably ties a
+    trip_log row back to one specific inventory product - this is the key
+    difference from the category-blended stat above. Returns `None` (never
+    0) below the 2-trip floor, so "no track record yet" stays distinct
+    from "tried and came up empty," matching this module's existing
+    fail-soft convention.
+
+    `core.lures._build_block()` gained `trip_history`/`situation`
+    parameters (now threaded through from `recommend()`, which already
+    builds a `situation` dict unconditionally as of this change - moved
+    outside the `if trip_history:` guard it used to live inside, with a
+    comment explaining why) and a new `_item_label()` helper (a
+    deliberate, small duplicate of `inventory_item_label()`'s
+    brand/description join, to avoid importing `core.activity_log` into
+    `core.lures` and risking the same class of circular import this
+    change itself had to fix - see below). Every color-matched owned item
+    now gets `it["_item_fish_per_hour"]` computed and stashed on it, and
+    the sort key became
+    `(rate is not None, rate or 0.0, quantity or 0)` descending - a proven
+    item always outranks an unproven one regardless of stock, and quantity
+    remains the fallback/tiebreaker for items with no track record yet
+    (verified this exactly matches prior behavior when no trip history is
+    passed at all - existing quantity-sort tests still pass unmodified).
+    `core.ui.render_lure_block()` now shows the actual fish/hour number
+    next to each ranked item ("📈 X.X fish/hr (your history)") when one
+    exists - "show your work," the same principle behind
+    `track_record_note()`'s raw-number phrasing - rather than silently
+    reordering with no visible reason.
+
+    **Bug caught and fixed mid-implementation:** adding
+    `from .calibration import trip_fish_per_hour` at module load time to
+    `core/lure_history.py` created a circular import -
+    `core.lure_history` -> `core.calibration` -> `core.scoring` (imports
+    `DEFAULT_WEIGHTS`) -> `core.onwater` (imports `from . import onwater`)
+    -> `core.lures` (imports `WATER_CLARITY_OPTIONS`) ->
+    `core.lure_history` (via its own pre-existing `from .lure_history
+    import lure_track_records, track_record_note`), closing the loop and
+    breaking every module that imports `core.lures` - i.e. nearly the
+    whole app. Fixed with a deferred import inside
+    `item_fish_per_hour()`'s own function body instead of at module load
+    time (checked for existing lazy-import precedent elsewhere in
+    `core/*.py` first - found none, so this is a new pattern for this
+    codebase, documented inline with the full dependency chain so a future
+    session doesn't reintroduce the same cycle by moving the import back
+    to the top of the file).
+
+    **Naming collision caught before logging:** this work was tracked
+    internally during implementation as "punch-list #87," but by the time
+    it was ready to log, the angler had separately added a real, unrelated
+    punch-list item directly through the live Development page - #87,
+    "When I get to adding lures in spot session, each lure I add to the
+    session should be followed by a pop up..." - which had already synced
+    in from the `data` branch. Every internal comment/docstring/test
+    referencing "#87" for this ranking work was renamed to "#88" (the
+    correct next number) before this was logged, so the code and the
+    actual `data/dev_tasks.csv` history stay consistent; punch-list #87
+    itself is untouched and still Open for future work.
+
+    **Verified:** 12 new tests - 7 in `tests/test_lure_history.py`
+    covering `item_fish_per_hour()`'s min-trips floor, median-not-mean
+    behavior, exact-label matching (confirming a KVD's trips never bleed
+    into a Fluke's rate or vice versa), location-match gating, excluding
+    rows with no trustworthy duration, and blank/garbage input; 3 in
+    `tests/test_lures.py` covering `_build_block()`'s new
+    rank-by-catch-success-then-quantity behavior, including a direct
+    reproduction of the KVD-vs-Fluke scenario (lower quantity, higher
+    proven rate, wins), the no-`trip_history`-passed fallback-to-quantity
+    case, and a proven-but-low-quantity item beating an unproven
+    high-quantity one. Full suite `pytest tests/ -q` - 456 passed (444 +
+    12 new). `AppTest` smoke test clean on every page reachable without
+    live network access (`pages/6_Spot_Session.py`, which calls
+    `recommend()` and renders `render_lure_block()`, confirmed clean;
+    `pages/1_7_Day_Forecast.py` also calls `recommend()` but could not be
+    smoke-tested in this sandbox - its own weather-fetch step hits an
+    external API blocked by this environment's own egress policy, an
+    unrelated pre-existing sandbox limitation, not a result of this
+    change).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
