@@ -1470,11 +1470,13 @@ structure type when no spot is known) `lure_track_records()` already uses, and
 requires at least 2 situation-matched, plausible-duration trips before returning a
 rate at all - never 0, `None` for "no real track record yet," matching this
 module's existing fail-soft convention. `_build_block()` now computes this rate
-for every color-matched owned item and sorts by (has a rate, the rate itself,
-quantity on hand) descending - a proven item always outranks an unproven one
-regardless of stock, and quantity remains the fallback/tiebreaker for items with
-no track record yet, exactly matching prior behavior when there's no trip history
-at all. `core.ui.render_lure_block()` now also shows the actual fish/hour number
+for every color-matched owned item and sorts by (has a rate, the rate itself)
+descending - a proven item always outranks an unproven one regardless of stock.
+Quantity on hand is deliberately **not** used as a fallback/tiebreaker for items
+with no track record: follow-up angler feedback was explicit that stock level is
+irrelevant to this ranking, so untested items simply keep whatever order they
+arrived in (their inventory row order) rather than being sorted by how many are
+on hand. `core.ui.render_lure_block()` now also shows the actual fish/hour number
 next to each ranked item ("show your work," matching this app's existing
 track-record-note style) instead of silently reordering with no visible reason.
 
