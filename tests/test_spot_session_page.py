@@ -82,12 +82,21 @@ _tackle_box_expander_open_key(spot_id, seq), set True the moment a lure
 actually lands in the pending list (covers the tackle-box picker, manual
 entry, quick-add, and the trailer dialog's own "Add lure" confirm - all
 of them funnel through _handle_lure_add_click()/_trailer_dialog(), where
-the flag is set) and read back as both this expander's AND the
-"Suggestions for right now" expander's own `expanded=` argument, so
-either one stays open for the rest of this session build once used, no
-matter how many more st.rerun()s happen in between.
+the flag is set) and read back as this expander's own `expanded=`
+argument, so it stays open for the rest of this session build once used,
+no matter how many more st.rerun()s happen in between.
 test_tackle_box_expander_stays_open_across_add_more_lures_cycles() below
 is the regression guard for this specific report.
+
+First draft of that fix also drove the sibling "Suggestions for right
+now" expander from the same flag (it has the identical quick-add-
+triggered collapse bug), but the angler explicitly asked for that one to
+be left alone: "the suggestions for right now should stay collapsed.
+That section should only open if I deliberately uncollapse it." Reverted
+- "Suggestions for right now" is back to a bare `expanded=False` (punch-
+list #33's own original intent) and does NOT track the tackle-box flag.
+test_suggestions_expander_stays_collapsed_even_after_adding_lures() below
+guards specifically against that regression.
 
 Every real file write (core.storage.append_trip, core.storage.
 commit_and_push_data, core.storage.push_pending_data) and every cached
@@ -304,4 +313,37 @@ def test_tackle_box_expander_stays_open_across_add_more_lures_cycles(monkeypatch
     assert _tackle_box_expander(at).proto.expanded is True, (
         "the tackle-box picker should stay open across every 'Add more "
         "lures' cycle in this session build, not just the first one"
+    )
+
+
+def _suggestions_expander(at):
+    matches = [e for e in at.expander if e.label == "Suggestions for right now"]
+    assert matches, "expected a 'Suggestions for right now' expander on the page"
+    return matches[0]
+
+
+def test_suggestions_expander_stays_collapsed_even_after_adding_lures(monkeypatch):
+    """Regression guard for the angler's explicit correction after the
+    tackle-box-expander fix shipped: "Better, but the suggestions for
+    right now should stay collapsed. That section should only open if I
+    deliberately uncollapse it." Unlike "Add from tackle box" (which
+    SHOULD stay open once used - see the test above), this sibling
+    expander must stay collapsed through the exact same add/Add-more-
+    lures cycle, matching punch-list #33's original "don't take up screen
+    space on every page load" intent with no exception for an in-progress
+    session build."""
+    at = _start_session_build(monkeypatch, inventory=[FAKE_ITEM, FAKE_ITEM_2])
+    assert _suggestions_expander(at).proto.expanded is False
+
+    _add_item1(at)
+    assert _suggestions_expander(at).proto.expanded is False, (
+        "adding a lure should not auto-expand 'Suggestions for right now'"
+    )
+
+    at.button(key="lure_added_popup_more_spot1_0_1").click().run()
+    assert not at.exception, f"after Add more lures: {at.exception}"
+    assert _suggestions_expander(at).proto.expanded is False, (
+        "'Suggestions for right now' must stay collapsed across an "
+        "'Add more lures' cycle too - the angler asked for this one to "
+        "only ever open when they deliberately click it themselves"
     )
