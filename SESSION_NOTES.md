@@ -9992,6 +9992,66 @@ every real save.
     success.) Full suite `pytest tests/ -q` - 436 passed (432 + 4 new).
     Full `AppTest` smoke test clean across every page.
 
+153. **Punch-list #86 (FIXED): weight/length dropdowns replace the fiddly
+    sliders on "Log a fish."** Angler feedback: the weight/length
+    `select_slider`s on the Spot Session fish-entry form (punch-list #31)
+    were too sensitive to drag precisely on a phone, and length always
+    reverted to 12 in for every new fish.
+
+    Root-caused the second complaint specifically: `_fish_entry_dialog()`
+    gives each new fish a fresh `dseq`-suffixed widget key_prefix (so the
+    form starts blank for the next catch, not carrying over the last
+    fish's values) - and the length slider's own default position, with
+    no explicit `value=` passed to `st.select_slider`, is simply its
+    first option, `LENGTH_SLIDER_OPTIONS[0]` = `"<13 in"` (representative
+    value 12.0 in). So every single fish, every time, started the length
+    field at that same 12" floor and had to be manually dragged up to
+    whatever the real length was - not a bug in the two-way slider/
+    manual-field sync (that part worked correctly), just a bad interaction
+    between "no persistent memory between fish" and "the widget's natural
+    default happens to be its lowest bucket."
+
+    Fix: replaced both sliders (and their manual-field two-way-sync
+    machinery) with plain `st.selectbox` dropdowns, angler-specified
+    ranges. Weight: "Weight - lb" (0-10, plus a "10+" catch-all bucket for
+    a true outlier, matching the old slider's own "+5 lb"-style
+    convention) and "oz" (0-15) side by side, defaulting to 0 lb 8 oz (the
+    same 0.5 lb the old slider's own default represented). Length: a
+    single dropdown - a "<12" catch-all, concrete 12-26 in one-inch steps,
+    a "26+" catch-all (mirroring the old slider's "<13 in"/"26+ in"
+    buckets, just with the floor moved down to 12 per the angler's own
+    ask) - defaulting to 12 in, the angler's own stated preference. New
+    pure helpers in `core/activity_log.py`:
+    `weight_lb_for_dropdown(lb_choice, oz_choice)` and
+    `length_in_for_dropdown(choice)`, replacing the removed
+    `_parse_nonneg_int`/`_parse_nonneg_float`/`_format_number` page-local
+    helpers and the slider<->manual-field `on_change` sync callbacks
+    entirely. Deliberately left `WEIGHT_SLIDER_OPTIONS`/
+    `LENGTH_SLIDER_OPTIONS` and their conversion/nearest-option helpers in
+    `core/activity_log.py` untouched, even though `pages/6_Spot_Session.py`
+    no longer imports them - removing them would also mean deleting their
+    own still-accurate, still-passing test coverage for no real benefit.
+
+    Checked real historical `data/trip_log.csv` before finalizing the
+    length range: logged lengths run from 5 in to 24 in across 280 real
+    catches - confirming a genuine sub-12" fish does occasionally happen,
+    which is exactly why the length dropdown keeps a "<12" catch-all
+    bucket rather than hard-flooring entry at 12 in.
+
+    **Verified:** 12 new tests in `tests/test_activity_log.py` covering
+    both new conversion helpers - lb+oz combinations, the "10+"/"<12"/
+    "26+" catch-all buckets, and garbage/blank input. Full suite
+    `pytest tests/ -q` - 444 passed (432 + 4 from punch-list #85's own
+    new test file + this round's 12, minus none removed). Full `AppTest`
+    smoke test clean across every page, `pages/6_Spot_Session.py`
+    included. Did **not** build a dedicated end-to-end `AppTest` for
+    `_fish_entry_dialog()` itself - it sits behind a fully active session/
+    spot/weather-bundle harness this test suite doesn't currently stand
+    up for Spot Session, and building one just for this change would have
+    been a large, disproportionate lift for what's really a
+    straightforward, low-branching widget swap whose actual conversion
+    logic is already fully covered at the unit level.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

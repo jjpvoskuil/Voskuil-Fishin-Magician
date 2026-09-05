@@ -231,6 +231,69 @@ def nearest_length_slider_option(length_in) -> str:
     return min(concrete, key=lambda opt: abs((length_in_for_slider_option(opt) or 0) - v))
 
 
+# --- Weight/length entry as plain dropdowns (punch-list #86) ----------------
+# The slider-based entry above turned out to be its own source of friction:
+# a 1-oz-increment (weight) or whole-inch (length) select_slider is fiddly to
+# drag precisely on a phone ("the sliders are too sensitive"), and since
+# pages/6_Spot_Session.py's fish-entry dialog gives every new fish a fresh
+# widget key (so the form is blank for the next catch), the length slider's
+# own default position - its lowest bucket, "<13 in" (12.0 in) - meant every
+# single fish had to be re-adjusted from a 12"-equivalent starting point
+# every time, reported as "the length always reverts to 12."" Fixed with
+# plain dropdowns (st.selectbox in the page - a native OS picker wheel on
+# mobile, tap once and scroll, no dragging) for weight (lb + oz) and length
+# (in). Kept as separate constants/helpers from the slider ones above rather
+# than replacing them outright - deleting WEIGHT_SLIDER_OPTIONS/
+# LENGTH_SLIDER_OPTIONS would also mean deleting their own still-accurate
+# test coverage for no real benefit, and nothing else in this app depends on
+# the slider path going away.
+WEIGHT_LB_OPTIONS = list(range(0, 11)) + ["10+"]
+WEIGHT_OZ_OPTIONS = list(range(0, 16))
+LENGTH_OPTIONS = ["<12"] + list(range(12, 27)) + ["26+"]
+
+
+def weight_lb_for_dropdown(lb_choice, oz_choice) -> float:
+    """Combines the lb dropdown (WEIGHT_LB_OPTIONS) and oz dropdown
+    (WEIGHT_OZ_OPTIONS) into a single decimal-pound value for storage.
+    "10+" is a single open-ended catch-all (matching weight_lb_for_slider_
+    option()'s own "+5 lb" convention) - its own fixed representative value
+    (10.5) is returned outright, ignoring whatever oz happens to be
+    selected, since an open-ended bucket was never meant to be refined
+    further. Blank/garbage input for either dropdown fails soft to 0,
+    matching every other optional numeric field in this app."""
+    if str(lb_choice).strip() == "10+":
+        return 10.5
+    try:
+        lb = int(lb_choice)
+    except (TypeError, ValueError):
+        lb = 0
+    try:
+        oz = int(oz_choice)
+    except (TypeError, ValueError):
+        oz = 0
+    return round(max(lb, 0) + max(oz, 0) / 16, 4)
+
+
+def length_in_for_dropdown(choice) -> float:
+    """Converts one of LENGTH_OPTIONS to a decimal-inch value for storage.
+    "<12" and "26+" are open-ended catch-alls (matching length_in_for_
+    slider_option()'s own "<13 in"/"26+ in" convention), each with its own
+    fixed representative value (11.0 and 27.0) rather than an exact
+    reading - real historical trip_log entries as small as 5 in confirm a
+    genuine sub-12" catch does happen occasionally, so this still needs to
+    be logged without blocking entry, just without fine precision below
+    the dropdown's main 12-26 in range."""
+    s = str(choice).strip()
+    if s == "<12":
+        return 11.0
+    if s == "26+":
+        return 27.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
 # --- Weight display: decimal lb (how it's entered/stored) <-> lb-oz (how it's
 # shown in Trip History, since that's how most anglers actually think/talk
 # about a fish's weight) ------------------------------------------------------

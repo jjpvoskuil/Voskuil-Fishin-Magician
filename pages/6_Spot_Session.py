@@ -24,9 +24,9 @@ from core.scoring import (
 from core.activity_log import (
     inventory_item_label, lure_can_take_trailer,
     FISH_ACTIVITY_OPTIONS, FORAGE_ACTIVITY_OPTIONS, RETRIEVE_SPEED_OPTIONS, RETRIEVE_STYLE_OPTIONS,
-    FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, WEIGHT_SLIDER_OPTIONS, LENGTH_SLIDER_OPTIONS,
-    weight_lb_for_slider_option, length_in_for_slider_option, format_weight_lb_oz,
-    nearest_weight_slider_option, nearest_length_slider_option,
+    FISH_SPECIES_OPTIONS, HIT_TYPE_OPTIONS, format_weight_lb_oz,
+    WEIGHT_LB_OPTIONS, WEIGHT_OZ_OPTIONS, LENGTH_OPTIONS,
+    weight_lb_for_dropdown, length_in_for_dropdown,
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, curate_recommendation
 from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
@@ -1337,110 +1337,48 @@ def _render_recommendation_with_quick_add(
 
 
 # --- Per-fish entry (used by both the active-session dialog and edit mode) --
-def _parse_nonneg_int(text) -> int:
-    """Parses a manual lb/oz field's typed text into a non-negative int,
-    defaulting to 0 for blank/garbage input rather than raising - same
-    fail-soft convention as every other optional numeric field in this
-    app."""
-    try:
-        v = int(str(text).strip())
-    except (TypeError, ValueError):
-        return 0
-    return max(v, 0)
-
-
-def _parse_nonneg_float(text) -> float:
-    try:
-        v = float(str(text).strip())
-    except (TypeError, ValueError):
-        return 0.0
-    return max(v, 0.0)
-
-
-def _format_number(v) -> str:
-    """Renders a number without a trailing ".0" for whole values (15.0 ->
-    "15", 15.5 -> "15.5") - used to seed the manual length field from a
-    slider-derived value without an odd-looking decimal point."""
-    v = float(v or 0)
-    return str(int(v)) if v == int(v) else str(v)
-
-
 def _weight_input(key_prefix: str) -> float:
-    """Punch-list #31: a 1-oz-increment weight slider
-    (core.activity_log.WEIGHT_SLIDER_OPTIONS) plus manual lb/oz fields to
-    its right, two-way synced - moving the slider updates the manual
-    fields to match, and typing into either manual field snaps the slider
-    to its nearest matching position
-    (core.activity_log.nearest_weight_slider_option()). A slider alone, 1
-    oz at a time across several pounds, turned out too easy to overshoot
-    by feel/touch on the water - the manual fields are the real source of
-    truth for the value this returns (full 1-oz precision, not limited to
-    the slider's own <1 lb floor or +N lb ceiling); the slider is a fast,
-    rough starting point, not the final say. Typing an oz value of 16+
-    carries over into lb automatically (e.g. "20" oz becomes 1 lb 4 oz),
-    so there's no need to do that arithmetic by hand. Returns the resolved
-    weight in decimal pounds (0.0 if both fields are left at 0)."""
-    slider_key = f"{key_prefix}_slider"
+    """Punch-list #86: plain lb/oz dropdowns (core.activity_log.
+    WEIGHT_LB_OPTIONS/WEIGHT_OZ_OPTIONS) replacing the old 1-oz-increment
+    select_slider (+ manual text fields) from punch-list #31 - angler
+    feedback was that the slider was too sensitive to drag precisely on a
+    phone. A selectbox opens a native OS picker wheel instead (tap once,
+    scroll, tap again), which is both faster and far less fiddly to aim
+    than dragging a slider handle. Defaults to 0 lb 8 oz (0.5 lb) - the
+    same starting point the old slider's own default position
+    represented, so a fish left untouched here still gets a sane
+    placeholder rather than truly zero."""
     lb_key = f"{key_prefix}_lb"
     oz_key = f"{key_prefix}_oz"
-
-    def _slider_changed():
-        lb, oz = divmod(round((weight_lb_for_slider_option(st.session_state.get(slider_key)) or 0) * 16), 16)
-        st.session_state[lb_key] = str(lb)
-        st.session_state[oz_key] = str(oz)
-
-    def _manual_changed():
-        lb = _parse_nonneg_int(st.session_state.get(lb_key))
-        oz = _parse_nonneg_int(st.session_state.get(oz_key))
-        lb, oz = lb + oz // 16, oz % 16
-        st.session_state[lb_key] = str(lb)
-        st.session_state[oz_key] = str(oz)
-        st.session_state[slider_key] = nearest_weight_slider_option(lb + oz / 16)
-
-    scol, lcol, ocol = st.columns([3, 1, 1])
-    scol.select_slider("Weight", options=WEIGHT_SLIDER_OPTIONS, key=slider_key, on_change=_slider_changed)
-    if lb_key not in st.session_state:
-        # First render of this key prefix - seed the manual fields from the
-        # slider's own default ("<1 lb" -> 0 lb 8 oz) so nothing changes if
-        # the angler never touches weight at all, same as before this round.
-        _seed_lb, _seed_oz = divmod(round((weight_lb_for_slider_option(st.session_state[slider_key]) or 0) * 16), 16)
-        st.session_state[lb_key] = str(_seed_lb)
-        st.session_state[oz_key] = str(_seed_oz)
-    lcol.text_input("lb", key=lb_key, on_change=_manual_changed)
-    ocol.text_input("oz", key=oz_key, on_change=_manual_changed)
-
-    lb = _parse_nonneg_int(st.session_state.get(lb_key))
-    oz = _parse_nonneg_int(st.session_state.get(oz_key))
-    return round(lb + oz / 16, 4)
+    lcol, ocol = st.columns(2)
+    lb_choice = lcol.selectbox(
+        "Weight - lb", WEIGHT_LB_OPTIONS, index=0, key=lb_key,
+        format_func=lambda v: f"{v} lb",
+    )
+    oz_choice = ocol.selectbox(
+        "oz", WEIGHT_OZ_OPTIONS, index=8, key=oz_key,
+        format_func=lambda v: f"{v} oz",
+    )
+    return weight_lb_for_dropdown(lb_choice, oz_choice)
 
 
 def _length_input(key_prefix: str) -> float:
-    """Same idea as _weight_input() above but for length: the
-    LENGTH_SLIDER_OPTIONS slider plus one manual inches field to its
-    right, two-way synced. Punch-list #31 only asked for the manual field
-    here, not a wider slider range - length wasn't reported as fiddly the
-    way weight was, so LENGTH_SLIDER_OPTIONS itself is unchanged. The
-    manual field is still the real source of truth for the returned value
-    (e.g. it accepts a half-inch reading the whole-inch slider alone
-    can't represent)."""
-    slider_key = f"{key_prefix}_slider"
-    in_key = f"{key_prefix}_manual"
-
-    def _slider_changed():
-        st.session_state[in_key] = _format_number(length_in_for_slider_option(st.session_state.get(slider_key)))
-
-    def _manual_changed():
-        v = _parse_nonneg_float(st.session_state.get(in_key))
-        st.session_state[in_key] = _format_number(v)
-        st.session_state[slider_key] = nearest_length_slider_option(v)
-
-    scol, icol = st.columns([3, 1])
-    scol.select_slider("Length", options=LENGTH_SLIDER_OPTIONS, key=slider_key, on_change=_slider_changed)
-    if in_key not in st.session_state:
-        st.session_state[in_key] = _format_number(length_in_for_slider_option(st.session_state[slider_key]))
-    icol.text_input("in", key=in_key, on_change=_manual_changed)
-
-    return _parse_nonneg_float(st.session_state.get(in_key))
+    """Punch-list #86: a single length dropdown (core.activity_log.
+    LENGTH_OPTIONS) replacing the old whole-inch select_slider (+ manual
+    field) from punch-list #31. Since every new fish gets a fresh widget
+    key (a blank form for the next catch), the old slider's own default
+    position - its lowest bucket, "<13 in" (12.0 in) - meant every single
+    fish had to be manually re-adjusted from a 12"-equivalent starting
+    point every time, reported as "the length always reverts to 12.""
+    Defaults to 12 in here too (an angler's own explicit preference, and
+    the single most common size range at this lake) - the difference is
+    that changing it is now one dropdown tap instead of a fiddly drag."""
+    length_key = f"{key_prefix}_len"
+    choice = st.selectbox(
+        "Length (in)", LENGTH_OPTIONS, index=LENGTH_OPTIONS.index(12), key=length_key,
+        format_func=lambda v: "Under 12 in" if v == "<12" else ("26+ in" if v == "26+" else f"{v} in"),
+    )
+    return length_in_for_dropdown(choice)
 
 
 def _new_fish_from_form(species_label, species_other, weight_lb, length_in, hit_types, retrieve_style, retrieve_speed) -> dict:
