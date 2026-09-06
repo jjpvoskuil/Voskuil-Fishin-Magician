@@ -1,0 +1,408 @@
+"""
+Reports page - punch-list #92, first pass ("get the basic framework
+together... I am sure this will iterate out a lot").
+
+Angler's ask, verbatim: "Create a dynamic reports page with the initial
+primary purpose of running correlations between various session
+parameters, session weather conditions, moon illumination (night before),
+location, lure used, lure colors, etc. and fishing success (# of fish
+caught, fish catching rate, success with certain fish types. I would like
+this to be as dynamic as possible so that I can run various analyses
+quickly and flexibly over various dates and date ranges. I'd like to also
+have the ability for the model to predict success in future days given
+forecasted parameter and/or known moon illumination (night before). I
+would like the output to generate line or bar graphs to visualize the
+data. I would also like the ability to export the output of the analysis
+to Excel as appropriate."
+
+This module is the data side of that: turn the raw trip log into two wide,
+fully-featured DataFrames (one row per logged lure-use, one row per
+individual fish caught - same two-granularity split pages/8_Leaderboard.py
+already uses, for the same reason: some questions are per-trip, some are
+per-catch), with every "session parameter"/weather/moon/location/lure
+factor already computed as a plain column - then one generic
+compute_report() that groups any chosen success metric by any chosen
+factor, over any date range/angler/segment/species filter. The page
+(pages/9_Reports.py) is just UI on top of this - picking a factor, a
+metric, and a filter set, then handing compute_report()'s output to a
+chart and an Excel export.
+
+Deliberately Streamlit-free (like core/daily_leaderboard.py) so this is
+unit-testable without AppTest, and deliberately does NOT reuse
+pages/8_Leaderboard.py's private _build_frames()/category builders for the
+same reason that module gave: different shape (a wide factor table meant
+to be grouped by ANY column, not a fixed list of ranking categories), so
+keeping them independent avoids regression risk on that already-shipped
+page even though the two share some parsing logic.
+
+Explicitly OUT of scope for this first pass, per the angler's own framing
+("I am sure this will iterate out a lot, but let's get the basic framework
+together today, at the least"): the predictive piece ("predict success in
+future days given forecasted parameters"). Everything below is the
+descriptive/correlational half only - see pages/9_Reports.py's own top-of-
+page caption for how that's flagged to the angler.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from typing import Optional
+
+import pandas as pd
+
+from core.astro import moon_phase
+from core.calibration import trip_fish_per_hour
+from core.daily_leaderboard import week_bounds
+from core.lures import LURE_PROFILES
+from core.onwater import water_temp_band, WATER_TEMP_BANDS, LIGHT_CONDITIONS, WIND_BAND_LABELS
+from core.scoring import SEGMENTS, season_stage
+from core.storage import parse_conditions
+
+# --- Small parsing helpers (mirrors pages/8_Leaderboard.py's own conventions,
+# kept local rather than imported since that page's are private) ------------
+
+def _parse_date(s) -> Optional[date]:
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _to_float(v) -> Optional[float]:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None  # NaN check
+
+
+def _lure_category_label(cond: dict) -> Optional[str]:
+    category = cond.get("lure_category")
+    if not category:
+        return None
+    return LURE_PROFILES.get(category, {}).get("name", category)
+
+
+# --- Pressure trend banding ---------------------------------------------------
+# No existing named band table for this one (unlike wind/sky/water-temp,
+# which already have one in core.onwater) - reusing the same two thresholds
+# core.calibration._factor_flags() already calibrates against
+# (pressure_falling <= -1.5, pressure_high_stable_post_front >= 2.0) so
+# "falling/steady/rising" here means the same thing it already means
+# elsewhere in this app, not a newly-invented cutoff.
+PRESSURE_TREND_BANDS = ["Falling", "Steady", "Rising / High"]
+
+
+def _pressure_trend_band(pt: Optional[float]) -> Optional[str]:
+    if pt is None:
+        return None
+    if pt <= -1.5:
+        return "Falling"
+    if pt >= 2.0:
+        return "Rising / High"
+    return "Steady"
+
+
+# --- Moon illumination (night before) -----------------------------------------
+# Reuses core.astro.moon_phase() directly (not core.calibration's private
+# day-of-cycle bucketing) for the actual real illumination % on the evening
+# BEFORE trip_date (6pm the prior day - the moon that was actually out
+# overnight before this trip's day), same convention
+# core.calibration._day_of_cycle_for_date() already uses for its own
+# Dawn/Morning-vs-moon chart, just without going through that chart's
+# whole-day-of-lunar-cycle bucketing - a continuous 0-100 float here.
+MOON_ILLUMINATION_BIN_WIDTH = 10  # fixed-width deciles, not data-driven quantiles
+MOON_ILLUMINATION_BIN_ORDER = [f"{lo}-{lo + MOON_ILLUMINATION_BIN_WIDTH}%" for lo in range(0, 100, MOON_ILLUMINATION_BIN_WIDTH)]
+
+
+def moon_illumination_pct_night_before(trip_date: date) -> float:
+    night_before = datetime.combine(trip_date - timedelta(days=1), datetime.min.time().replace(hour=18))
+    return round(moon_phase(night_before).illumination_pct, 1)
+
+
+def _moon_illumination_bin(pct: Optional[float]) -> Optional[str]:
+    if pct is None:
+        return None
+    pct = max(0.0, min(100.0, pct))
+    lo = int(pct // MOON_ILLUMINATION_BIN_WIDTH) * MOON_ILLUMINATION_BIN_WIDTH
+    lo = min(lo, 100 - MOON_ILLUMINATION_BIN_WIDTH)  # 100.0 falls in the last bucket, not a new "100-100%" one
+    hi = lo + MOON_ILLUMINATION_BIN_WIDTH
+    return f"{lo}-{hi}%"
+
+
+# --- Factor catalog --------------------------------------------------------
+# label -> (column name, ORDER_HINTS key or None). Every column here is
+# fully materialized (plain string/None) in both trips_df and fish_df by
+# build_reports_dataframe() below - compute_report() never special-cases a
+# factor by name, it just groups by whichever column the caller picked.
+FACTOR_OPTIONS = {
+    "Spot": "spot",
+    "Structure Type": "structure_type",
+    "Water Clarity": "water_clarity",
+    "Lure": "lure",
+    "Lure Category": "lure_category",
+    "Color": "color",
+    "Technique": "technique",
+    "Time Segment": "segment",
+    "Season": "season",
+    "Sky Condition": "light_condition",
+    "Wind Band": "wind_band",
+    "Wind Direction": "wind_direction",
+    "Precipitation": "precipitation",
+    "Water Temp Band": "water_temp_band",
+    "Pressure Trend": "pressure_trend_band",
+    "Moon Illumination % (night before)": "moon_illumination_bin",
+    "Fish Activity (reported)": "fish_activity",
+    "Forage Activity (reported)": "forage_activity",
+    "Angler": "angler",
+    "Day of Week": "day_of_week",
+    "Date (daily)": "date",
+    "Date (weekly, Sun-Sat)": "week_start",
+}
+
+# Columns whose natural order isn't plain alphabetical - used to both (a)
+# sort the aggregated report and (b) show every listed value even at n=0,
+# so e.g. "Time Segment" always shows all 6 segments in Dawn->Night order
+# instead of only whichever ones happen to have data, and a bar chart's
+# x-axis stays stable across different filter picks.
+_DAY_OF_WEEK_ORDER = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+ORDER_HINTS = {
+    "segment": SEGMENTS,
+    "water_temp_band": [b[2] for b in WATER_TEMP_BANDS],
+    "pressure_trend_band": PRESSURE_TREND_BANDS,
+    "light_condition": LIGHT_CONDITIONS,
+    "wind_band": WIND_BAND_LABELS,
+    "moon_illumination_bin": MOON_ILLUMINATION_BIN_ORDER,
+    "day_of_week": _DAY_OF_WEEK_ORDER,
+}
+
+# Factors whose column is a real date/week-start (not a plain label) - these
+# always sort chronologically and always get every date/week IN the
+# filtered range shown (even at n=0), never just the observed ones, same
+# "show a real zero, don't just omit the day" convention
+# core.calibration.daily_dawn_morning_catch() already uses.
+DATE_FACTOR_COLUMNS = {"date", "week_start"}
+
+METRIC_OPTIONS = {
+    "Total Fish Caught": "total_fish",
+    "Fish per Hour (rate)": "fish_per_hour",
+    "Biggest Fish (lb)": "biggest_fish",
+    "# Trips": "trip_count",
+}
+
+# Metrics answering "success with certain fish types" - species-filterable,
+# since they're computed from fish_df (one row per individual catch).
+# fish_per_hour/trip_count are inherently per-TRIP, not per-species, so the
+# page disables the species picker for those (mirrors
+# pages/8_Leaderboard.py's own disabled-when-not-applicable pattern).
+SPECIES_FILTERABLE_METRICS = {"total_fish", "biggest_fish"}
+
+
+def _row_factors(row: dict) -> dict:
+    """Every derived factor for one trip_log.csv row, computed once and
+    shared by both trips_df and fish_df below so the two frames can never
+    drift apart on how a factor is derived."""
+    cond = parse_conditions(row)
+    trip_date = _parse_date(row.get("trip_date"))
+    water_temp_f = _to_float(cond.get("water_temp_f"))
+    pressure_trend = _to_float(cond.get("pressure_trend_24h"))
+    moon_pct = moon_illumination_pct_night_before(trip_date) if trip_date else None
+    return {
+        "trip_id": row.get("trip_id"),
+        "date": trip_date,
+        "week_start": week_bounds(trip_date)[0] if trip_date else None,
+        "day_of_week": trip_date.strftime("%A") if trip_date else None,
+        "angler": (cond.get("angler") or "").strip() or "Unspecified",
+        "spot": row.get("spot_name") or "Unknown location",
+        "structure_type": row.get("structure_type") or "Unspecified",
+        "water_clarity": row.get("water_clarity") or "Unspecified",
+        "lure": row.get("lure_used") or _lure_category_label(cond) or "Unspecified",
+        "lure_category": _lure_category_label(cond) or "Unspecified",
+        "color": row.get("color_used") or "Unspecified",
+        "technique": row.get("technique_used") or "Unspecified",
+        "segment": row.get("segment") or "Unspecified",
+        "water_temp_f": water_temp_f,
+        "water_temp_band": water_temp_band(water_temp_f)["label"] if water_temp_f is not None else None,
+        "wind_band": cond.get("wind_band") or "Unspecified",
+        "wind_direction": cond.get("wind_direction") or "Unspecified",
+        "light_condition": cond.get("light_condition") or "Unspecified",
+        "precipitation": cond.get("precipitation") or "Unspecified",
+        "fish_activity": cond.get("fish_activity") or "Unspecified",
+        "forage_activity": cond.get("forage_activity") or "Unspecified",
+        "pressure_trend_24h": pressure_trend,
+        "pressure_trend_band": _pressure_trend_band(pressure_trend),
+        "avg_wind_mph": _to_float(cond.get("avg_wind_mph")),
+        "moon_illumination_pct": moon_pct,
+        "moon_illumination_bin": _moon_illumination_bin(moon_pct),
+        "season": season_stage(trip_date.timetuple().tm_yday, water_temp_f)
+                  if (trip_date and water_temp_f is not None) else None,
+    }, cond
+
+
+def build_reports_dataframe(rows: list) -> tuple:
+    """Returns (trips_df, fish_df):
+    - trips_df: one row per trip_log.csv row (one lure USE), with every
+      factor column above plus fish_caught (int) and fish_per_hour
+      (float|None, via core.calibration.trip_fish_per_hour() - already has
+      its own plausibility filter, see that function's docstring) and
+      biggest_fish_lb (float|None, that trip's own column).
+    - fish_df: one row per individual fish caught (flattened out of each
+      trip's conditions_json["fish"] list, same as
+      pages/8_Leaderboard.py's own fish_df), carrying every factor column
+      from its PARENT trip plus species/weight_lb/length_in/count.
+    A trip logged before the Spot Session redesign (no fish list) falls
+    back to its own fish_caught/biggest_fish_lb summary columns for
+    trips_df, and contributes nothing to fish_df (no species to attribute
+    it to) - same fallback pages/8_Leaderboard.py already uses."""
+    trip_records = []
+    fish_records = []
+    for row in rows:
+        factors, cond = _row_factors(row)
+        fish_list = cond.get("fish")
+        trip_fish_count = 0
+        if isinstance(fish_list, list) and fish_list:
+            for fish in fish_list:
+                if not isinstance(fish, dict):
+                    continue
+                try:
+                    count = int(fish.get("count") or 1)
+                except (TypeError, ValueError):
+                    count = 1
+                trip_fish_count += count
+                fish_records.append({
+                    **factors,
+                    "species": (fish.get("species") or "Unspecified").strip() or "Unspecified",
+                    "count": count,
+                    "weight_lb": _to_float(fish.get("weight_lb")),
+                    "length_in": _to_float(fish.get("length_in")),
+                })
+        else:
+            try:
+                trip_fish_count = int(float(row.get("fish_caught") or 0))
+            except (TypeError, ValueError):
+                trip_fish_count = 0
+
+        try:
+            biggest = float(row.get("biggest_fish_lb")) if row.get("biggest_fish_lb") not in (None, "") else None
+        except (TypeError, ValueError):
+            biggest = None
+
+        trip_records.append({
+            **factors,
+            "fish_caught": trip_fish_count,
+            "fish_per_hour": trip_fish_per_hour(row),
+            "biggest_fish_lb": biggest,
+        })
+
+    trips_df = pd.DataFrame(trip_records)
+    fish_df = pd.DataFrame(fish_records)
+    return trips_df, fish_df
+
+
+def _apply_filters(df: pd.DataFrame, date_start=None, date_end=None, anglers=None, segments=None) -> pd.DataFrame:
+    if df.empty:
+        return df
+    out = df
+    if date_start is not None:
+        out = out[out["date"].notna() & (out["date"] >= date_start)]
+    if date_end is not None:
+        out = out[out["date"].notna() & (out["date"] <= date_end)]
+    if anglers:
+        out = out[out["angler"].isin(anglers)]
+    if segments:
+        out = out[out["segment"].isin(segments)]
+    return out
+
+
+def _date_axis(date_start, date_end, weekly: bool) -> list:
+    """Every date/week-start value that SHOULD appear on the x-axis for the
+    requested window, even ones with no logged trips at all - matches
+    core.calibration.daily_dawn_morning_catch()'s "a day with zero trips
+    still appears, with a real 0" convention. Falls back to a 30-day
+    window ending today when no explicit range was given, so a date-based
+    report always has a concrete, bounded axis rather than trying to
+    enumerate "all time" one day at a time."""
+    end = date_end or date.today()
+    start = date_start or (end - timedelta(days=29))
+    if weekly:
+        w_start, _ = week_bounds(start)
+        _, w_end = week_bounds(end)
+        weeks = []
+        d = w_start
+        while d <= w_end:
+            weeks.append(d)
+            d += timedelta(days=7)
+        return weeks
+    days = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += timedelta(days=1)
+    return days
+
+
+def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: str, metric_key: str,
+                    species: Optional[str] = None, date_start=None, date_end=None,
+                    anglers: Optional[list] = None, segments: Optional[list] = None) -> pd.DataFrame:
+    """The one generic aggregator every Reports page chart/table/export
+    reads from: groups `metric_key` by `factor_col`, after applying the
+    filters, and returns a DataFrame with columns [factor_col, "value",
+    "n"] - "n" is the sample size actually backing "value" (trips for
+    fish_per_hour/trip_count, individual fish for total_fish/biggest_fish),
+    so a thin bar/point can be told apart from a well-supported one.
+
+    Row set: for a factor in ORDER_HINTS or a date-based factor, EVERY
+    known value in that order appears, even at n=0/value=0 - a stable axis
+    the angler can compare across different filter picks. Otherwise, only
+    values actually observed in the filtered data appear, sorted by value
+    descending (the "what's working best" reading most of this app's other
+    ranking views already default to).
+
+    species: only applied for a SPECIES_FILTERABLE_METRICS metric; ignored
+    (silently) for fish_per_hour/trip_count, since those are inherently
+    per-trip, not per-species."""
+    t_df = _apply_filters(trips_df, date_start, date_end, anglers, segments)
+    f_df = _apply_filters(fish_df, date_start, date_end, anglers, segments)
+    if species and species != "All species" and metric_key in SPECIES_FILTERABLE_METRICS and not f_df.empty:
+        f_df = f_df[f_df["species"] == species]
+
+    if metric_key == "fish_per_hour":
+        base = t_df.dropna(subset=["fish_per_hour"]) if not t_df.empty else t_df
+        agg = base.groupby(factor_col)["fish_per_hour"].agg(value="median", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+    elif metric_key == "trip_count":
+        agg = t_df.groupby(factor_col)["trip_id"].agg(n="count").reset_index() if not t_df.empty else pd.DataFrame(columns=[factor_col, "n"])
+        if not agg.empty:
+            agg["value"] = agg["n"]
+    elif metric_key == "biggest_fish":
+        base = f_df.dropna(subset=["weight_lb"]) if not f_df.empty else f_df
+        agg = base.groupby(factor_col)["weight_lb"].agg(value="max", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+    else:  # total_fish (default)
+        if species and species != "All species":
+            agg = f_df.groupby(factor_col)["count"].agg(value="sum", n="count").reset_index() if not f_df.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+        else:
+            agg = t_df.groupby(factor_col)["fish_caught"].agg(value="sum", n="count").reset_index() if not t_df.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+
+    if factor_col in DATE_FACTOR_COLUMNS:
+        axis = _date_axis(date_start, date_end, weekly=(factor_col == "week_start"))
+        full = pd.DataFrame({factor_col: axis})
+        agg = full.merge(agg, on=factor_col, how="left")
+        agg["value"] = agg["value"].fillna(0)
+        agg["n"] = agg["n"].fillna(0).astype(int)
+        return agg.sort_values(factor_col).reset_index(drop=True)
+
+    if factor_col in ORDER_HINTS:
+        full = pd.DataFrame({factor_col: ORDER_HINTS[factor_col]})
+        agg = full.merge(agg, on=factor_col, how="left")
+        agg["value"] = agg["value"].fillna(0)
+        agg["n"] = agg["n"].fillna(0).astype(int)
+        order = {v: i for i, v in enumerate(ORDER_HINTS[factor_col])}
+        return agg.sort_values(by=factor_col, key=lambda s: s.map(order)).reset_index(drop=True)
+
+    if agg.empty:
+        return agg
+    return agg.sort_values("value", ascending=False).reset_index(drop=True)
+
+
+def species_options(fish_df: pd.DataFrame) -> list:
+    if fish_df.empty:
+        return []
+    return sorted(fish_df["species"].dropna().unique().tolist())

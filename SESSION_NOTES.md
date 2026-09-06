@@ -10710,6 +10710,137 @@ every real save.
     committing. Verified via a fresh `git clone` into a new temp directory
     before pushing.
 
+160. **Punch-list #92 (first pass): new Reports page.** Angler's ask, verbatim
+    (full text also lives in the punch-list entry itself): "Create a dynamic
+    reports page... running correlations between various session parameters,
+    session weather conditions, moon illumination (night before), location,
+    lure used, lure colors, etc. and fishing success... as dynamic as
+    possible... over various dates and date ranges. I'd like to also have the
+    ability for the model to predict success in future days given forecasted
+    parameter and/or known moon illumination (night before)... line or bar
+    graphs... export the output... to Excel." Framed explicitly as a first
+    pass: "I am sure this will iterate out a lot, but let's get the basic
+    framework together today, at the least."
+
+    Scope for this pass, deliberately: the descriptive/correlational half
+    only (chart + table + Excel export over any factor/metric/filter
+    combination). The predictive half ("predict success in future days
+    given forecasted parameters") is explicitly deferred to a future
+    iteration - flagged with its own caption right on the page, and
+    punch-list #92 stays **open** rather than being marked done, since this
+    is a framework, not the full ask.
+
+    New `core/reports.py` (Streamlit-free, unit tested on its own, same
+    reasoning as `core/daily_leaderboard.py` for punch-list #91: built
+    independently from `pages/8_Leaderboard.py`'s own frame builder rather
+    than importing its private helpers, to avoid regression risk on that
+    already-shipped page despite the structural similarity). One pass over
+    `trip_log.csv` builds two DataFrames - `trips_df` (one row per logged
+    lure-use) and `fish_df` (one row per individual fish caught, inheriting
+    every factor from its parent trip) - with 21 factor columns already
+    materialized as plain strings/dates: spot, structure type, water
+    clarity, lure, lure category, color, technique, time segment, season,
+    sky condition, wind band, wind direction, precipitation, water temp
+    band, pressure trend band, moon illumination % bin (night before),
+    reported fish/forage activity, angler, day of week, and date
+    (daily/weekly). Most of these are reused directly from existing
+    vocabulary/classifiers already in the app (`core.onwater`'s band
+    tables, `core.scoring.season_stage()`) rather than reinvented; the two
+    exceptions with no existing table: pressure-trend banding reuses the
+    same two numeric thresholds `core.calibration._factor_flags()` already
+    calibrates against (falling ≤ -1.5, rising/high ≥ 2.0), and moon
+    illumination % is fixed-width-decile-binned (0-10%, 10-20%, ...
+    90-100%) from `core.astro.moon_phase()` computed for 6pm the evening
+    *before* the trip date - the moon actually out overnight before that
+    day's fishing, not the trip day's own phase. One generic
+    `compute_report(trips_df, fish_df, factor_col, metric_key, species=,
+    date_start=, date_end=, anglers=, segments=)` groups any of 4 success
+    metrics (total fish caught, fish per hour [median, reusing
+    `core.calibration.trip_fish_per_hour()`'s own plausibility filter],
+    biggest fish, # trips) by any factor column, after filters. A factor
+    with a natural non-alphabetical order (time segment, water temp band,
+    pressure trend, sky condition, wind band, moon illumination decile, day
+    of week) always returns every listed value even at n=0 (a stable chart
+    axis across filter picks, matching `core.calibration`'s own "a real
+    zero, not an omission" convention); date-based factors always fill
+    every day/week in the requested range the same way. Total-fish-caught
+    honors a species filter by reading `fish_df`'s per-catch `count`
+    column instead of `trips_df`'s per-trip summary column when a specific
+    species is picked; fish-per-hour/# trips silently ignore a species
+    filter (inherently per-trip, not per-catch).
+
+    New `pages/9_Reports.py`: factor picker, metric picker, a species
+    selectbox (disabled with a tooltip for the two per-trip metrics -
+    mirrors Leaderboard's own disabled-when-not-applicable pattern), a date
+    range, an angler multiselect, a time-segment multiselect, then a chart
+    (line for date-based factors, bar otherwise) + data table (with each
+    row's sample size `n` alongside its value, so a thin bar can be told
+    apart from a well-supported one) + a **"⬇️ Export to Excel"** button
+    (`pd.ExcelWriter(engine="openpyxl")` into a `BytesIO`, via
+    `st.download_button` - no existing precedent in this app; added
+    `openpyxl>=3.1` to `requirements.txt`). Same **"🔄 Refresh from
+    GitHub"** button as Leaderboard, for the same 5-minute-cache staleness
+    reason. Registered in `app.py`'s `st.navigation` list right after
+    Leaderboard.
+
+    Two real bugs caught during testing, both fixed:
+
+    - **Moon illumination binning had an off-by-one at the top edge.**
+      `_moon_illumination_bin(100.0)` produced a bogus `"100-100%"` bucket
+      instead of falling into `"90-100%"` (the decile math floors 100.0 to
+      a `lo` of 100, then adds the bin width unclamped). Fixed by clamping
+      `lo` to `100 - MOON_ILLUMINATION_BIN_WIDTH` before computing `hi`.
+      Caught by `tests/test_reports.py`'s own edge-case unit test for this
+      function, not by manual testing - exactly the kind of boundary bug a
+      quick manual check tends to miss.
+    - **The page's "From" date default crashed when trip history had rows
+      but no parseable dates.** `trips_df["date"].dropna().min()` returns
+      float `NaN` (not `None`) when every row's date is unparseable/missing
+      - `st.date_input()` rejects a float outright
+      (`StreamlitInvalidParameterTypeError`), crashing the whole page.
+      Only handling the `trips_df.empty` case wasn't enough; fixed by also
+      checking whether the dropna'd date Series itself came back empty.
+      This surfaced via a **pre-existing test-isolation gap**, not just a
+      contrived edge case: `tests/test_appstate.py`'s
+      `test_get_trip_history_is_cached_until_cleared` monkeypatches
+      `read_all_trips()` to return fake single-row data and calls `.clear()`
+      before/between reads, but never calls it a final time afterward - so
+      the LAST fake read (`[{"trip_id": "row-2"}]`, no `trip_date` at all)
+      stays memoized in `get_trip_history()`'s shared `st.cache_data` cache
+      for any test that runs later in the same pytest session and doesn't
+      explicitly refresh it, which is exactly the shape that triggered this
+      bug (a trips_df with rows but zero valid dates). Rather than touching
+      that pre-existing test (out of scope for this punch-list item, and
+      it's not wrong on its own terms), added a module-scoped `autouse`
+      fixture to the new `tests/test_reports_page.py` that clears
+      `get_trip_history`'s cache before (and after) every test in that
+      file, so it always sees a fresh real read of `data/trip_log.csv`
+      regardless of what ran before it or what test execution order pytest
+      picks.
+
+    **Verified:** 24 new tests in `tests/test_reports.py` (moon
+    illumination binning incl. the edge case above, pressure-trend
+    banding, `build_reports_dataframe()` shape/factor correctness/group-
+    logged-fish counting/legacy-row fallback/missing-water-temp
+    propagation/fish-per-hour reuse/empty input, `compute_report()` for
+    every metric incl. species-filtered vs. not and untrustworthy-row
+    exclusion, ORDER_HINTS full-axis behavior, date daily/weekly axis-
+    filling and Sunday-week grouping, date-range/angler/segment filter
+    combinations, empty-dataframe edge cases for both ordered and free-
+    form factors, `species_options()`) plus 4 new `AppTest`-based smoke
+    tests in `tests/test_reports_page.py` (default render, switching to a
+    date factor, switching to a non-species-filterable metric disabling
+    the species picker, an inverted date range not crashing). Full suite
+    `pytest tests/ -q` - 558 passed (530 + 24 + 4), including a full run
+    with `__pycache__` cleared beforehand and confirmed to reproduce (then
+    fixed) the cache-pollution-triggered crash above, which did not show up
+    running the new test file in isolation - a reminder that "passes on its
+    own" isn't the same as "passes in the full suite" for anything reading
+    a shared `st.cache_data` cache. Verified via a fresh `git clone` into a
+    new temp directory before pushing. Punch-list #92 left **open** in
+    `data/dev_tasks.csv` (not marked done) - this is the framework, with
+    the predictive half still to come in a future iteration.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
