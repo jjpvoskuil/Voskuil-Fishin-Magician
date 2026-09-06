@@ -10641,6 +10641,75 @@ every real save.
     Verified via a fresh `git clone` into a new temp directory before
     pushing.
 
+159. **Punch-list #91 follow-up (same session): tightened up "Fishing
+    Activity" for phones.** Angler's report, verbatim: "Can you tighten it
+    up a bit so that it fits cleanly on a phone? Right now it wraps and
+    has '...' where it doesn't fit across the page or bumps into the next
+    set up txt."
+
+    Root cause: the three award-tile labels ("🎣 Berkley - Biggest Fish of
+    the Day," "🎣 String King - Top Angler of the Day," "🎣 Z-Man - Top Bag
+    Limit Buster of the Day") are long enough that `inject_mobile_css()`'s
+    existing generic reflow (min-width 120px per column, enough to still
+    fit 2 of these 3 columns per row on a normal phone width) wasn't
+    enough room - `st.metric`'s own built-in label CSS is
+    `white-space: nowrap` + ellipsis with no way to wrap onto a second
+    line, so a column narrower than the full label just truncates with
+    "...". Three fixes, all in this entry:
+
+    - **Shortened the tile labels.** Dropped the redundant "of the Day"/
+      "of the Week" suffix from all three (the Today/This Week tab
+      already says which period this is), and trimmed "Z-Man - Top Bag
+      Limit Buster" to "Z-Man - Bag Limit Buster" (the longest of the
+      three, and "Top" was the most droppable word - there's only one
+      winner shown either way).
+    - **Moved the roster's 🟢/⚪ legend out of a repeated inline-text
+      prefix** ("🟢 = has an open Spot Session right now, ⚪ = posted but
+      not currently active.  ") **into a one-time `help=` tooltip** on
+      the roster caption itself - shorter visible text, same explanation
+      one tap/hover away. Also dropped the redundant "today"/"this week"
+      word from each roster bullet ("(N fish today)" -> "(N fish)"),
+      again since the tab already names the period.
+    - **Forced one award tile per row on a phone**, rather than relying
+      on `inject_mobile_css()`'s generic reflow to leave enough room.
+      Extended `core.ui.inject_compact_metric_css()` (already used for
+      "Today at a glance") with a new `stack_on_mobile: bool = False`
+      parameter - when `True`, an extra CSS rule scoped to that same
+      `st-key-<container_key>` wrapper forces every column inside it to
+      `flex: 1 1 100%` / `min-width: 100%` under the existing
+      `MOBILE_BREAKPOINT_PX` media query, so the row wraps to exactly one
+      tile per row at full phone width instead of squeezing two
+      side-by-side. `home.py` wraps each period's award-tile `st.columns`
+      in its own `st.container(key=f"activity_awards_{period_key}")` (a
+      short "today"/"week" slug, NOT the full "today"/"this week"
+      `period_word` string, so the CSS class name stays a clean
+      identifier) and calls `inject_compact_metric_css(container_key,
+      stack_on_mobile=True)` inside it - each of the two tabs gets its
+      own independently-scoped CSS block, confirmed via a scratch
+      `AppTest` script (below) rather than assumed.
+
+    **Verified:** 3 new tests in `tests/test_ui.py` covering
+    `inject_compact_metric_css(stack_on_mobile=...)` - off by default (no
+    behavior change for "Today at a glance," which was never asking to
+    stack), the `flex: 1 1 100%`/`min-width: 100%` rule actually landing
+    inside the `@media` block (not the unconditional CSS above it) when
+    `stack_on_mobile=True`, and two different container keys ("today"/
+    "week") producing independently-scoped CSS rather than one rule that
+    would accidentally match both. Full suite `pytest tests/ -q` - 530
+    passed (527 + 3 new). A scratch `AppTest` script (not committed)
+    confirmed live: the three metric labels no longer contain "of the
+    Day"/"of the Week," the roster caption's visible text no longer
+    contains the legend sentence, and - inspecting the raw `st.markdown()`
+    calls directly rather than just trusting the Python call succeeded -
+    both `st-key-activity_awards_today` and `st-key-activity_awards_week`
+    each got their own emitted CSS block containing `flex: 1 1 100%`, with
+    neither block's selector text bleeding into the other's. Also re-ran
+    the full-page smoke pass across every page. Same
+    `data/segment_score_freeze.csv` test-run side effect as entries
+    157/158 above - caught and reverted with `git checkout --` before
+    committing. Verified via a fresh `git clone` into a new temp directory
+    before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

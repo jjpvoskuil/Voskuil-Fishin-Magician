@@ -235,49 +235,65 @@ except Exception:
 _lake_today = lake_today()
 
 
-def _render_activity_section(period_stats: list, period_word: str, reset_note: str):
+def _render_activity_section(period_stats: list, period_word: str, period_key: str, reset_note: str):
     """Renders one period's roster + award tiles + leaderboard table.
     period_word is used in the roster/table captions ("today"/"this
-    week") - everything else about the two periods is identical, since
-    core.daily_leaderboard's functions don't know or care which period
-    built the stats they're handed."""
+    week"); period_key is a short slug ("today"/"week") used only to give
+    this period's award-tile container its own unique CSS scope. Otherwise
+    identical for both periods, since core.daily_leaderboard's functions
+    don't know or care which period built the stats they're handed.
+
+    Punch-list #91 follow-up: tightened up for phones - confirmed live
+    that the original labels (with "of the Day"/"of the Week" appended)
+    and the roster's per-angler "(N fish today)" wording both got cut off
+    with "..." once inject_mobile_css()'s generic reflow packed 2 tiles
+    per row on a normal phone width. The period is already named by the
+    tab itself now, so it's dropped from both the tile labels and the
+    roster bullets; the roster legend also moved from an every-time text
+    prefix into a one-time `help=` tooltip. inject_compact_metric_css(...,
+    stack_on_mobile=True) forces one tile per row on a phone besides
+    shrinking the font, which is what actually stops the label
+    truncation - see that function's own docstring for why the shrink
+    alone wasn't enough."""
     if not period_stats:
         st.caption(f"Nobody's logged a Spot Session yet {period_word} - be the first one out there!")
         return
 
     roster_bits = [
-        f"{'🟢' if s.active else '⚪'} **{s.angler}** ({s.fish_count} fish {period_word})"
+        f"{'🟢' if s.active else '⚪'} **{s.angler}** ({s.fish_count} fish)"
         for s in period_stats
     ]
     st.caption(
-        "🟢 = has an open Spot Session right now, ⚪ = posted but not currently active.  "
-        + " · ".join(roster_bits)
+        " · ".join(roster_bits),
+        help="🟢 = has an open Spot Session right now. ⚪ = posted but not currently active.",
     )
 
     awards = daily_awards(period_stats)
-    award_cols = st.columns(3)
+    award_container_key = f"activity_awards_{period_key}"
+    with st.container(key=award_container_key):
+        inject_compact_metric_css(award_container_key, stack_on_mobile=True)
+        award_cols = st.columns(3)
 
-    period_suffix = " of the Day" if period_word == "today" else " of the Week"
-    biggest = awards["biggest_fish"]
-    award_cols[0].metric(
-        "🎣 Berkley - Biggest Fish" + period_suffix,
-        f"{biggest['angler']} ({format_weight_lb_oz(biggest['weight_lb'])})" if biggest else "None yet",
-        help=f"{biggest['species']}" if biggest else f"No fish logged yet {period_word}.",
-    )
-    top_weight = awards["top_angler_weight"]
-    award_cols[1].metric(
-        "🎣 String King - Top Angler" + period_suffix,
-        f"{top_weight.angler} ({format_weight_lb_oz(top_weight.total_weight_lb)})" if top_weight else "None yet",
-        help=f"Highest total weight caught {period_word}, across every species." if top_weight
-             else f"No fish logged yet {period_word}.",
-    )
-    top_count = awards["top_bag_count"]
-    award_cols[2].metric(
-        "🎣 Z-Man - Top Bag Limit Buster" + period_suffix,
-        f"{top_count.angler} ({top_count.fish_count} fish)" if top_count else "None yet",
-        help=f"Most total fish caught {period_word}, across every species." if top_count
-             else f"No fish logged yet {period_word}.",
-    )
+        biggest = awards["biggest_fish"]
+        award_cols[0].metric(
+            "🎣 Berkley - Biggest Fish",
+            f"{biggest['angler']} ({format_weight_lb_oz(biggest['weight_lb'])})" if biggest else "None yet",
+            help=f"{biggest['species']}" if biggest else f"No fish logged yet {period_word}.",
+        )
+        top_weight = awards["top_angler_weight"]
+        award_cols[1].metric(
+            "🎣 String King - Top Angler",
+            f"{top_weight.angler} ({format_weight_lb_oz(top_weight.total_weight_lb)})" if top_weight else "None yet",
+            help=f"Highest total weight caught {period_word}, across every species." if top_weight
+                 else f"No fish logged yet {period_word}.",
+        )
+        top_count = awards["top_bag_count"]
+        award_cols[2].metric(
+            "🎣 Z-Man - Bag Limit Buster",
+            f"{top_count.angler} ({top_count.fish_count} fish)" if top_count else "None yet",
+            help=f"Most total fish caught {period_word}, across every species." if top_count
+                 else f"No fish logged yet {period_word}.",
+        )
 
     table_rows = leaderboard_table_rows(period_stats)
     if table_rows:
@@ -290,7 +306,7 @@ _today_tab, _week_tab = st.tabs(["📅 Today", "🗓️ This Week"])
 with _today_tab:
     day_stats = build_daily_activity(_activity_rows, _lake_today.isoformat())
     _render_activity_section(
-        day_stats, "today",
+        day_stats, "today", "today",
         "Resets at the lake's own local midnight (America/Chicago) - see the full, filterable, "
         "all-time rankings on the **Leaderboard** page.",
     )
@@ -298,9 +314,9 @@ with _week_tab:
     week_start, week_end = week_bounds(_lake_today)
     week_stats = build_weekly_activity(_activity_rows, _lake_today)
     _render_activity_section(
-        week_stats, "this week",
-        f"Week of {week_start.strftime('%-m/%d')} - {week_end.strftime('%-m/%d')} (Sunday-Saturday, "
-        "lake-local) - see the full, filterable, all-time rankings on the **Leaderboard** page.",
+        week_stats, "this week", "week",
+        f"Week of {week_start.strftime('%-m/%d')} - {week_end.strftime('%-m/%d')} (Sun-Sat, lake-local) - "
+        "see the full, filterable, all-time rankings on the **Leaderboard** page.",
     )
 
 # Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,

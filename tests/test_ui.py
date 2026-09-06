@@ -2,7 +2,7 @@ import pandas as pd
 
 from core import ui
 from core.ui import (
-    inject_mobile_css, render_line_chart, render_moon_illumination_dawn_chart,
+    inject_mobile_css, inject_compact_metric_css, render_line_chart, render_moon_illumination_dawn_chart,
     render_daily_dawn_morning_catch_chart, render_square_thumbnail,
 )
 
@@ -297,3 +297,56 @@ def test_inject_mobile_css_shrinks_selectbox_font_only_on_mobile(monkeypatch):
     # And it must NOT be sitting in the unconditional (pre-media-query) CSS.
     unconditional_block = css[:media_start]
     assert "font-size: 12.5px" not in unconditional_block
+
+
+# --- inject_compact_metric_css(stack_on_mobile=...) -----------------------------
+# Punch-list #91 follow-up: home.py's "Fishing Activity" award tiles needed
+# one-tile-per-row on a phone, not just a smaller font, since their labels
+# are long enough to still hit st.metric's own nowrap+ellipsis CSS at 2
+# tiles per row (inject_mobile_css()'s generic reflow default).
+
+def test_compact_metric_css_stack_on_mobile_false_by_default(monkeypatch):
+    """Without stack_on_mobile, behavior must be unchanged from before this
+    parameter existed (e.g. home.py's "Today at a glance" row, which
+    fits fine at 4-6 tiles wide and was never asking to stack)."""
+    calls = []
+    monkeypatch.setattr(ui.st, "markdown", lambda html, **kw: calls.append(html))
+
+    inject_compact_metric_css("some_row")
+
+    css = calls[0]
+    assert "flex: 1 1 100%" not in css
+    assert f"@media (max-width: {ui.MOBILE_BREAKPOINT_PX}px)" not in css
+
+
+def test_compact_metric_css_stack_on_mobile_forces_full_width_columns(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ui.st, "markdown", lambda html, **kw: calls.append(html))
+
+    inject_compact_metric_css("activity_awards_today", stack_on_mobile=True)
+
+    css = calls[0]
+    assert ".st-key-activity_awards_today" in css
+    media_start = css.index(f"@media (max-width: {ui.MOBILE_BREAKPOINT_PX}px)")
+    mobile_block = css[media_start:]
+    assert "flex: 1 1 100%" in mobile_block
+    assert "min-width: 100%" in mobile_block
+    # Must be scoped to THIS container's key, not a bare column selector
+    # that would affect every column on the page.
+    assert ".st-key-activity_awards_today [data-testid=\"stColumn\"]" in mobile_block
+    # And it must not leak into the unconditional (pre-media-query) CSS.
+    unconditional_block = css[:media_start]
+    assert "flex: 1 1 100%" not in unconditional_block
+
+
+def test_compact_metric_css_stack_on_mobile_scoped_per_container_key(monkeypatch):
+    """Two different periods (today/week) must get independently-scoped
+    CSS, not one rule that accidentally matches both containers."""
+    calls = []
+    monkeypatch.setattr(ui.st, "markdown", lambda html, **kw: calls.append(html))
+
+    inject_compact_metric_css("activity_awards_week", stack_on_mobile=True)
+
+    css = calls[0]
+    assert ".st-key-activity_awards_week" in css
+    assert ".st-key-activity_awards_today" not in css
