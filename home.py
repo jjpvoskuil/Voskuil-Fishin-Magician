@@ -13,8 +13,8 @@ from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
-from core.calibration import moon_phase_time_of_day_rates, MOON_PHASE_ORDER
-from core.ui import inject_mobile_css, inject_compact_metric_css, render_line_chart, render_moon_phase_rate_chart
+from core.calibration import moon_illumination_dawn_rates
+from core.ui import inject_mobile_css, inject_compact_metric_css, render_line_chart, render_moon_illumination_dawn_chart
 
 # Punch-list #20: fixed Y-axis range (°F) for this page's temperature trend
 # charts (est. water temp, USACE surface water temp) - the real range
@@ -260,17 +260,22 @@ try:
 except Exception:
     pass
 
-# Punch-list #89: "is there a study that moon phase shifts WHEN fish feed,
-# not just whether they feed at all" - core.calibration.moon_phase_time_of_day_rates()
-# splits the angler's own logged trips by moon phase and by Dawn+Morning vs.
-# rest-of-day, so this can be looked at directly against real data rather
-# than only the (thin, non-bass-specific) published literature - see the
-# caption rendered alongside the chart below for what was actually found.
-# Independent fetch from everything above (trip log, not weather/USACE), so
-# a weather-fetch failure shouldn't hide this chart either.
-moon_phase_rates = {}
+# Punch-list #89 (revised): "is there a study that moon phase shifts WHEN
+# fish feed, not just whether they feed at all" -
+# core.calibration.moon_illumination_dawn_rates() buckets the angler's own
+# logged Dawn+Morning trips by day of the lunar cycle (0-29) and labels
+# each day with its real % moon illumination the night before, so this can
+# be looked at directly against real data rather than only the (thin,
+# non-bass-specific) published literature - see the caption rendered
+# alongside the chart below for what was actually found. First version of
+# this chart split by moon phase name (8 buckets) x Dawn+Morning vs. rest
+# of day; the angler asked to drop the rest-of-day series (Dawn+Morning is
+# where almost all the real data is) and go day-by-day instead of by named
+# phase. Independent fetch from everything above (trip log, not
+# weather/USACE), so a weather-fetch failure shouldn't hide this chart.
+moon_day_rates = []
 try:
-    moon_phase_rates = moon_phase_time_of_day_rates(get_trip_history())
+    moon_day_rates = moon_illumination_dawn_rates(get_trip_history())
 except Exception:
     pass
 
@@ -307,11 +312,9 @@ if wq_log:
     trend_items.append(("USACE DO saturation (%)", pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx), None))
     trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx), TEMP_CHART_Y_DOMAIN))
 
-any_moon_phase_data = any(
-    side["n"] > 0 for sides in moon_phase_rates.values() for side in sides.values()
-)
+any_moon_day_data = any(d["n"] > 0 for d in moon_day_rates)
 
-if trend_items or any_moon_phase_data:
+if trend_items or any_moon_day_data:
     with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
         for row_start in range(0, len(trend_items), 3):
             row_items = trend_items[row_start:row_start + 3]
@@ -337,26 +340,21 @@ if trend_items or any_moon_phase_data:
         if caption_bits:
             st.caption(" ".join(caption_bits))
 
-        if any_moon_phase_data:
+        if any_moon_day_data:
             if trend_items:
                 st.divider()
-            st.caption("Moon phase vs. time-of-day catch rate (all logged trips)")
-            render_moon_phase_rate_chart(st, moon_phase_rates, MOON_PHASE_ORDER)
-            phases_with_data = sorted({
-                phase for phase, sides in moon_phase_rates.items()
-                if any(s["n"] > 0 for s in sides.values())
-            }, key=MOON_PHASE_ORDER.index)
-            missing_phases = [p for p in MOON_PHASE_ORDER if p not in phases_with_data]
+            st.caption("Moon illumination vs. Dawn+Morning catch rate, by day of the lunar cycle")
+            render_moon_illumination_dawn_chart(st, moon_day_rates)
+            days_with_data = sum(1 for d in moon_day_rates if d["n"] > 0)
             st.caption(
                 "Some studies suggest a bright full moon lets bass feed more at night and less at dawn, "
                 "with the reverse near a new moon - though other research finds moon phase doesn't change "
-                "total daily catch rate, just possibly when fish bite. This chart lets you check that "
-                "against your own logged trips, split into Dawn+Morning vs. the rest of the day - it "
-                "isn't wired into the activity score above yet. Right now this lake's log has data for "
-                f"{len(phases_with_data)} of 8 phases"
-                + (f" (still nothing logged for {', '.join(missing_phases)})" if missing_phases else "")
-                + ", and Dawn/Morning trips outnumber every other time of day combined, so treat any "
-                "thin bar (hover for exact trip counts) as an early read, not a settled pattern."
+                "total daily catch rate, just possibly when fish bite. This chart checks that against your "
+                "own logged Dawn+Morning trips (the time of day with the most data by far), bucketed by day "
+                "of the lunar cycle and labeled with each day's real % moon illumination the night before - "
+                "it isn't wired into the activity score above yet. Right now this lake's log has data for "
+                f"only {days_with_data} of {len(moon_day_rates)} days in the cycle, so treat any thin bar "
+                "(hover for exact trip counts) as an early read, not a settled pattern."
             )
 
 st.divider()

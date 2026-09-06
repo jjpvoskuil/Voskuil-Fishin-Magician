@@ -1,8 +1,8 @@
 import json
 
 from core.calibration import (
-    calibrate_weights, calibration_summary, location_adjustments, moon_phase_time_of_day_rates,
-    trip_fish_per_hour, MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES, MOON_PHASE_ORDER,
+    calibrate_weights, calibration_summary, location_adjustments, moon_illumination_dawn_rates,
+    trip_fish_per_hour, DAYS_IN_LUNAR_CYCLE, MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES,
 )
 from core.scoring import DEFAULT_WEIGHTS
 
@@ -15,7 +15,7 @@ def _row(pressure_trend_24h=0.0, fish_caught=1, conditions_json=None):
 
 def _timed_row(
     pressure_trend_24h=0.0, fish_caught=1, hours=1.0,
-    spot_id=None, spot_name=None, segment=None, extra_conditions=None,
+    spot_id=None, spot_name=None, segment=None, extra_conditions=None, trip_date=None,
 ):
     """A row with a real lure_start_time/lure_end_time window (punch-list
     #81) - the shape trip_fish_per_hour()/calibrate_weights()/
@@ -37,6 +37,8 @@ def _timed_row(
         row["spot_name"] = spot_name
     if segment is not None:
         row["segment"] = segment
+    if trip_date is not None:
+        row["trip_date"] = trip_date
     return row
 
 
@@ -163,53 +165,100 @@ def test_location_adjustments_shrinks_small_samples_toward_zero():
     assert adjustments[("big", "Dawn")]["adjustment"] > adjustments[("small", "Dawn")]["adjustment"] > 0
 
 
-# --- Punch-list #89: moon_phase_time_of_day_rates() --------------------------
+# --- Punch-list #89 (revised): moon_illumination_dawn_rates() ---------------
+#
+# core.astro's own reference new moon is 2000-01-06 18:14 UTC (REF_NEW_MOON_JD)
+# - 2000-01-07 was a real, easy-to-reason-about New Moon day (age ~0), so
+# every test date below is picked as an exact multiple of the synodic month
+# (~29.53 days) offset from that date, landing near age 0 (new), ~7.4
+# (waxing, ~50%) or ~14.8 (full, ~100%) predictably instead of needing a
+# live ephemeris lookup to know what day-of-cycle/illumination a given
+# calendar date should produce.
 
-def test_moon_phase_order_is_the_natural_lunar_cycle_not_alphabetical():
-    assert MOON_PHASE_ORDER == [
-        "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
-        "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent",
-    ]
-
-
-def test_moon_phase_time_of_day_rates_covers_all_8_phases_even_with_no_data():
-    # Real live state right now: several phases have zero logged trips at
-    # all (no Full Moon, Waning Gibbous, or Last Quarter yet) - the chart
-    # this feeds needs every phase to show up on the axis regardless.
-    rates = moon_phase_time_of_day_rates([])
-    assert set(rates.keys()) == set(MOON_PHASE_ORDER)
-    for phase in MOON_PHASE_ORDER:
-        assert rates[phase]["morning"] == {"median": None, "n": 0}
-        assert rates[phase]["rest_of_day"] == {"median": None, "n": 0}
+def test_days_in_lunar_cycle_is_30():
+    # int(SYNODIC_MONTH) + 1 = int(29.53...) + 1 - age_days is always
+    # < SYNODIC_MONTH, so int(age_days) only ever lands in 0-29.
+    assert DAYS_IN_LUNAR_CYCLE == 30
 
 
-def test_moon_phase_time_of_day_rates_splits_dawn_and_morning_from_rest_of_day():
+def test_moon_illumination_dawn_rates_covers_all_30_days_even_with_no_data():
+    rates = moon_illumination_dawn_rates([])
+    assert len(rates) == 30
+    assert [d["day_of_cycle"] for d in rates] == list(range(30))
+    for d in rates:
+        assert d["median"] is None
+        assert d["n"] == 0
+        assert 0.0 <= d["illumination_pct"] <= 100.0
+
+
+def test_moon_illumination_dawn_rates_new_moon_day_is_near_0_pct_illumination():
+    # A Dawn trip on 2000-01-07 - the morning right after the reference new
+    # moon (core.astro.REF_NEW_MOON_JD, 2000-01-06 18:14 UTC) - has its
+    # "night before" (18:00 on 2000-01-06) at age ~0.15 days: day_of_cycle
+    # 0, illumination near 0% (verified directly against core.astro.moon_phase()).
+    rows = [_timed_row(fish_caught=3, hours=1.0, segment="Dawn", trip_date="2000-01-07")]
+    rates = moon_illumination_dawn_rates(rows)
+    day0 = rates[0]
+    assert day0["n"] == 1
+    assert day0["median"] == 3.0
+    assert day0["illumination_pct"] < 5.0
+
+
+def test_moon_illumination_dawn_rates_full_moon_day_is_near_100_pct_illumination():
+    # ~14.77 days (half a synodic month) after the reference new moon lands
+    # right on a full moon - 2000-01-21 (13 days later) is close enough to
+    # land in the high-illumination days near day_of_cycle 14.
+    rows = [_timed_row(fish_caught=2, hours=1.0, segment="Morning", trip_date="2000-01-21")]
+    rates = moon_illumination_dawn_rates(rows)
+    matching = [d for d in rates if d["n"] == 1]
+    assert len(matching) == 1
+    assert matching[0]["illumination_pct"] > 85.0
+
+
+def test_moon_illumination_dawn_rates_only_counts_dawn_and_morning_segments():
     rows = [
-        _timed_row(fish_caught=4, hours=1.0, segment="Dawn", extra_conditions={"moon_phase": "Full Moon"}),
-        _timed_row(fish_caught=2, hours=1.0, segment="Morning", extra_conditions={"moon_phase": "Full Moon"}),
-        _timed_row(fish_caught=6, hours=1.0, segment="Night", extra_conditions={"moon_phase": "Full Moon"}),
-        _timed_row(fish_caught=8, hours=1.0, segment="Dusk", extra_conditions={"moon_phase": "Full Moon"}),
+        _timed_row(fish_caught=8, hours=1.0, segment="Night", trip_date="2000-01-08"),
+        _timed_row(fish_caught=8, hours=1.0, segment="Dusk", trip_date="2000-01-08"),
+        _timed_row(fish_caught=8, hours=1.0, segment="Afternoon", trip_date="2000-01-08"),
     ]
-    rates = moon_phase_time_of_day_rates(rows)
-    assert rates["Full Moon"]["morning"] == {"median": 3.0, "n": 2}  # median of 4.0, 2.0
-    assert rates["Full Moon"]["rest_of_day"] == {"median": 7.0, "n": 2}  # median of 6.0, 8.0
+    rates = moon_illumination_dawn_rates(rows)
+    assert all(d["n"] == 0 for d in rates)  # none of these are Dawn/Morning
 
 
-def test_moon_phase_time_of_day_rates_excludes_untrustworthy_duration_rows():
+def test_moon_illumination_dawn_rates_uses_the_night_before_trip_date_not_trip_date_itself():
+    # The whole point of the rewrite: a Dawn/Morning trip's relevant moon
+    # state is the night that already passed, not core.scoring's own
+    # same-day-18:00 convention (which is the UPCOMING night for that
+    # date - a full calendar day later than what a Dawn trip experienced).
+    # 2000-01-08 (night-before-relative age ~0.2, day 0) vs. 2000-01-09
+    # (night-before-relative age ~1.2, day 1) must land in DIFFERENT
+    # buckets, one calendar day apart, exactly tracking trip_date.
+    day0_rows = moon_illumination_dawn_rates(
+        [_timed_row(fish_caught=1, hours=1.0, segment="Dawn", trip_date="2000-01-08")]
+    )
+    day1_rows = moon_illumination_dawn_rates(
+        [_timed_row(fish_caught=1, hours=1.0, segment="Dawn", trip_date="2000-01-09")]
+    )
+    bucket0 = next(d["day_of_cycle"] for d in day0_rows if d["n"] == 1)
+    bucket1 = next(d["day_of_cycle"] for d in day1_rows if d["n"] == 1)
+    assert bucket1 == bucket0 + 1
+
+
+def test_moon_illumination_dawn_rates_excludes_untrustworthy_duration_rows():
     untimed = _row(fish_caught=99)
     untimed["segment"] = "Dawn"
+    untimed["trip_date"] = "2000-01-08"
     rows = [
-        _timed_row(fish_caught=2, hours=1.0, segment="Dawn", extra_conditions={"moon_phase": "New Moon"}),
+        _timed_row(fish_caught=2, hours=1.0, segment="Dawn", trip_date="2000-01-08"),
         untimed,  # no timing at all - must not pollute the median
     ]
-    # _row() doesn't stamp a moon_phase, so this second row wouldn't be
-    # bucketed anywhere anyway - confirm the untimed row is excluded via
-    # trip_fish_per_hour() rather than silently counted.
-    rates = moon_phase_time_of_day_rates(rows)
-    assert rates["New Moon"]["morning"] == {"median": 2.0, "n": 1}
+    rates = moon_illumination_dawn_rates(rows)
+    day0 = next(d for d in rates if d["n"] > 0)
+    assert day0["n"] == 1
+    assert day0["median"] == 2.0
 
 
-def test_moon_phase_time_of_day_rates_ignores_unrecognized_or_missing_phase():
-    rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn")]  # no moon_phase in conditions at all
-    rates = moon_phase_time_of_day_rates(rows)
-    assert all(sides["morning"]["n"] == 0 for sides in rates.values())
+def test_moon_illumination_dawn_rates_ignores_rows_missing_trip_date():
+    rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn")]  # no trip_date at all
+    rates = moon_illumination_dawn_rates(rows)
+    assert all(d["n"] == 0 for d in rates)

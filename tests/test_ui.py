@@ -1,7 +1,7 @@
 import pandas as pd
 
 from core import ui
-from core.ui import inject_mobile_css, render_line_chart, render_moon_phase_rate_chart, render_square_thumbnail
+from core.ui import inject_mobile_css, render_line_chart, render_moon_illumination_dawn_chart, render_square_thumbnail
 
 
 class _FakeCol:
@@ -73,68 +73,58 @@ def test_render_line_chart_x_axis_preserves_series_order_not_alphabetical():
     assert spec["encoding"]["x"]["sort"] is None
 
 
-def _phase_rates():
-    # Mirrors core.calibration.moon_phase_time_of_day_rates()'s real return
-    # shape (see tests/test_calibration.py) but with just 2 phases - one
-    # with real data on both sides, one entirely unlogged so far (the real
-    # live state for 3 of the 8 phases right now) - to check the chart
-    # handles a "no data" phase without crashing.
-    return {
-        "Full Moon": {
-            "morning": {"median": 1.5, "n": 6},
-            "rest_of_day": {"median": 3.0, "n": 2},
-        },
-        "Waning Gibbous": {
-            "morning": {"median": None, "n": 0},
-            "rest_of_day": {"median": None, "n": 0},
-        },
-    }
+def _day_rates():
+    # Mirrors core.calibration.moon_illumination_dawn_rates()'s real return
+    # shape (see tests/test_calibration.py) but with just 3 days - two with
+    # real Dawn+Morning data, one entirely unlogged so far (the real live
+    # state for most of the 30 days right now) - to check the chart handles
+    # a "no data" day without crashing, and that two different days sharing
+    # a similar illumination % still render as distinct bars.
+    return [
+        {"day_of_cycle": 0, "illumination_pct": 1.5, "median": 1.5, "n": 6},
+        {"day_of_cycle": 7, "illumination_pct": 52.0, "median": None, "n": 0},
+        {"day_of_cycle": 22, "illumination_pct": 52.0, "median": 2.5, "n": 3},
+    ]
 
 
-def test_render_moon_phase_rate_chart_x_axis_uses_natural_cycle_order_not_alphabetical():
-    # Punch-list #89: moon phases have a real chronological cycle order
-    # (New Moon -> ... -> Full Moon -> ... ) that alphabetical sort would
-    # scramble ("Full Moon" < "New Moon" alphabetically).
+def test_render_moon_illumination_dawn_chart_x_axis_uses_cycle_order_not_alphabetical():
+    # Day 0, 7, 22 must stay in that chronological order - an alphabetical
+    # (or numeric-string) sort of their labels would scramble it.
     col = _FakeCol()
-    order = ["New Moon", "Full Moon", "Waning Gibbous"]
-    render_moon_phase_rate_chart(col, _phase_rates(), order)
+    render_moon_illumination_dawn_chart(col, _day_rates())
     assert col.line_chart_calls == []
     assert len(col.altair_chart_calls) == 1
     chart, width = col.altair_chart_calls[0]
     spec = chart.to_dict()
-    assert spec["encoding"]["x"]["sort"] == order
+    assert spec["encoding"]["x"]["sort"] == [
+        "Day 0 (2%)", "Day 7 (52%)", "Day 22 (52%)",
+    ]
     assert width == "stretch"
 
 
-def test_render_moon_phase_rate_chart_has_two_grouped_series_with_legend():
-    # Two time-of-day groups per phase means an xOffset (grouped bars) plus
-    # a color encoding that doubles as the legend - identity must not be
-    # color-alone with only 2 series and no direct labels.
+def test_render_moon_illumination_dawn_chart_keeps_days_with_matching_pct_distinct():
+    # Day 7 (waxing) and day 22 (waning) share the same rounded illumination
+    # % here on purpose - they must still be two separate bars, not merged
+    # into one just because their % labels look similar.
     col = _FakeCol()
-    render_moon_phase_rate_chart(col, _phase_rates(), ["Full Moon", "Waning Gibbous"])
-    spec = col.altair_chart_calls[0][0].to_dict()
-    assert spec["encoding"]["xOffset"]["field"] == "group"
-    assert spec["encoding"]["color"]["field"] == "group"
-    groups = {row["group"] for row in col.altair_chart_calls[0][0].data.to_dict("records")}
-    assert groups == {"Dawn + Morning", "Rest of day"}
+    render_moon_illumination_dawn_chart(col, _day_rates())
+    chart = col.altair_chart_calls[0][0]
+    records = chart.data.to_dict("records")
+    assert len(records) == 3
+    assert {r["day_of_cycle"] for r in records} == {0, 7, 22}
+    assert len({r["label"] for r in records}) == 3  # every label string is unique
 
 
-def test_render_moon_phase_rate_chart_includes_n_in_tooltip_and_keeps_no_data_rows():
-    # A phase with zero logged trips (Waning Gibbous, above) must still show
-    # up in the underlying data (so the bar is just absent, not the whole
-    # category missing from the axis) and every row's tooltip must surface
-    # `n` so a thin/zero sample isn't visually indistinguishable from a
-    # well-supported one.
+def test_render_moon_illumination_dawn_chart_includes_pct_and_n_in_tooltip():
     col = _FakeCol()
-    render_moon_phase_rate_chart(col, _phase_rates(), ["Full Moon", "Waning Gibbous"])
+    render_moon_illumination_dawn_chart(col, _day_rates())
     chart = col.altair_chart_calls[0][0]
     tooltip_fields = {t["field"] for t in chart.to_dict()["encoding"]["tooltip"]}
-    assert "n" in tooltip_fields
+    assert {"n", "illumination_pct", "day_of_cycle"} <= tooltip_fields
     records = chart.data.to_dict("records")
-    assert len(records) == 4  # 2 phases x 2 groups, including the all-null one
-    zero_n_rows = [r for r in records if r["phase"] == "Waning Gibbous"]
-    assert all(r["n"] == 0 for r in zero_n_rows)
-    assert all(pd.isna(r["median_rate"]) for r in zero_n_rows)
+    day7 = next(r for r in records if r["day_of_cycle"] == 7)
+    assert day7["n"] == 0
+    assert pd.isna(day7["median_rate"])
 
 
 # --- Punch-list #74: render_square_thumbnail() must shrink with its real ---
