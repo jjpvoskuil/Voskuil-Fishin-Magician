@@ -1,14 +1,32 @@
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from core.astro import moon_phase
 from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     moon_illumination_pct_night_before, _moon_illumination_bin, _pressure_trend_band,
     _water_temp_bucket_label, _water_temp_bucket_axis, WATER_TEMP_BUCKET_FACTOR,
-    predict_by_moon_illumination, MIN_PREDICTION_SAMPLES,
+    predict_by_moon_illumination, predict_by_pressure_trend, MIN_PREDICTION_SAMPLES,
 )
+from core.weather import WeatherBundle
 import pandas as pd
+
+
+def _pressure_bundle(start_date: date, num_days: int, hpa_change_per_24h: float,
+                      base_pressure: float = 1015.0) -> WeatherBundle:
+    """A minimal WeatherBundle covering `num_days` days of hourly data
+    starting at local midnight of `start_date`, with a perfectly linear
+    surface_pressure trend of exactly `hpa_change_per_24h` hPa every 24
+    hours - lets tests exercise all three PRESSURE_TREND_BANDS on demand
+    (unlike tests/test_scoring.py's own _fake_bundle(), whose trend is
+    always falling), and lets a test compute the exact expected
+    pressure_trend_hpa_per_24h() value rather than just asserting a sign."""
+    start = datetime.combine(start_date, datetime.min.time())
+    total_hours = num_days * 24
+    hourly_change = hpa_change_per_24h / 24.0
+    times = [(start + timedelta(hours=h)).isoformat() for h in range(total_hours)]
+    pressures = [base_pressure + hourly_change * h for h in range(total_hours)]
+    return WeatherBundle(hourly={"time": times, "surface_pressure": pressures}, daily={})
 
 
 def _row(trip_id, trip_date, segment="Dawn", angler="John", spot_name="Baby Back Bass",
@@ -524,3 +542,137 @@ def test_predict_by_moon_illumination_pools_fish_per_hour_and_respects_filters()
     )
     assert result_amy_only["predicted_value"] == 0.0  # Amy's own trip was skunked
     assert result_amy_only["n"] == 1
+
+
+# --- predict_by_pressure_trend (forecasted - punch-list #92's 2nd predictor) ---
+
+def test_predict_by_pressure_trend_matches_the_forecasted_bucket_and_pools_the_value():
+    target = date(2026, 9, 6)
+    bundle = _pressure_bundle(target - timedelta(days=1), num_days=3, hpa_change_per_24h=-3.0)  # "Falling"
+    rows = [
+        _row("t1", "2026-09-06", pressure_trend_24h=-3.0, fish=[_fish("Bass", 2.0)]),
+        _row("t2", "2026-09-06", pressure_trend_24h=-3.0, fish=[_fish("Bass", 3.0)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
+    assert result["forecast_available"] is True
+    assert result["target_date"] == target
+    assert result["pressure_trend_24h"] == -3.0
+    assert result["pressure_trend_band"] == "Falling"
+    assert result["metric_key"] == "total_fish"
+    assert result["predicted_value"] == 2  # 1 fish from t1 + 1 fish from t2
+    assert result["n"] == 2
+    assert result["low_sample"] is True  # 2 < MIN_PREDICTION_SAMPLES
+
+
+def test_predict_by_pressure_trend_exercises_all_three_bands():
+    target = date(2026, 9, 6)
+    falling = predict_by_pressure_trend(
+        *build_reports_dataframe([]), target,
+        _pressure_bundle(target - timedelta(days=1), 3, hpa_change_per_24h=-3.0),
+    )
+    steady = predict_by_pressure_trend(
+        *build_reports_dataframe([]), target,
+        _pressure_bundle(target - timedelta(days=1), 3, hpa_change_per_24h=0.0),
+    )
+    rising = predict_by_pressure_trend(
+        *build_reports_dataframe([]), target,
+        _pressure_bundle(target - timedelta(days=1), 3, hpa_change_per_24h=4.0),
+    )
+    assert falling["pressure_trend_band"] == "Falling"
+    assert steady["pressure_trend_band"] == "Steady"
+    assert rising["pressure_trend_band"] == "Rising / High"
+
+
+def test_predict_by_pressure_trend_not_low_sample_at_the_threshold():
+    target = date(2026, 9, 6)
+    bundle = _pressure_bundle(target - timedelta(days=1), num_days=3, hpa_change_per_24h=-3.0)
+    rows = [
+        _row(f"t{i}", "2026-09-06", pressure_trend_24h=-3.0, fish=[_fish("Bass", 2.0)])
+        for i in range(MIN_PREDICTION_SAMPLES)
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
+    assert result["n"] == MIN_PREDICTION_SAMPLES
+    assert result["low_sample"] is False
+
+
+def test_predict_by_pressure_trend_returns_none_and_zero_n_with_no_data():
+    target = date(2026, 9, 6)
+    bundle = _pressure_bundle(target - timedelta(days=1), num_days=3, hpa_change_per_24h=-3.0)
+    trips_df, fish_df = build_reports_dataframe([])
+    result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
+    assert result["forecast_available"] is True
+    assert result["predicted_value"] is None
+    assert result["n"] == 0
+    assert result["low_sample"] is False  # no data isn't "low sample," it's "no sample"
+
+
+def test_predict_by_pressure_trend_pools_fish_per_hour_and_respects_filters():
+    target = date(2026, 9, 6)
+    bundle = _pressure_bundle(target - timedelta(days=1), num_days=3, hpa_change_per_24h=-3.0)
+    rows = [
+        _row("t1", "2026-09-06", angler="Amy", pressure_trend_24h=-3.0, fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1hr
+        _row("t2", "2026-09-06", angler="Bob", pressure_trend_24h=-3.0, fish_caught=6,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 6 fish, 1hr
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result_all = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="fish_per_hour")
+    assert result_all["predicted_value"] == 3.0  # pooled: 6 fish / 2 hours
+
+    result_amy_only = predict_by_pressure_trend(
+        trips_df, fish_df, target, bundle, metric_key="fish_per_hour", anglers=["Amy"],
+    )
+    assert result_amy_only["predicted_value"] == 0.0  # Amy's own trip was skunked
+    assert result_amy_only["n"] == 1
+
+
+# --- predict_by_pressure_trend: bounds-checking guard ----------------------------
+# core.weather.pressure_trend_hpa_per_24h()'s own nearest_idx() helper has no
+# built-in guard against a target date outside the bundle's actual fetched
+# range - it always returns SOME value, computed from whichever hourly
+# reading happens to be nearest, however distant that actually is. These
+# confirm predict_by_pressure_trend() catches that itself instead of
+# silently trusting a misleading number.
+
+def test_predict_by_pressure_trend_reports_unavailable_when_target_date_is_outside_the_bundle():
+    target = date(2026, 9, 6)
+    # Bundle only covers three days around 2026-01-01 - nowhere near the
+    # target date's own noon (or its 24h-earlier reading).
+    bundle = _pressure_bundle(date(2026, 1, 1), num_days=3, hpa_change_per_24h=-3.0)
+    trips_df, fish_df = build_reports_dataframe([
+        _row("t1", "2026-09-06", pressure_trend_24h=-3.0, fish=[_fish("Bass", 2.0)]),
+    ])
+    result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
+    assert result["forecast_available"] is False
+    assert result["pressure_trend_24h"] is None
+    assert result["pressure_trend_band"] is None
+    assert result["predicted_value"] is None
+    assert result["n"] == 0
+    assert result["low_sample"] is False
+
+
+def test_predict_by_pressure_trend_reports_unavailable_when_bundle_is_none():
+    target = date(2026, 9, 6)
+    trips_df, fish_df = build_reports_dataframe([
+        _row("t1", "2026-09-06", pressure_trend_24h=-3.0, fish=[_fish("Bass", 2.0)]),
+    ])
+    result = predict_by_pressure_trend(trips_df, fish_df, target, None, metric_key="total_fish")
+    assert result["forecast_available"] is False
+    assert result["predicted_value"] is None
+    assert result["n"] == 0
+
+
+def test_predict_by_pressure_trend_reports_unavailable_right_at_the_forward_edge():
+    # The bundle's very LAST hourly reading is one hour short of target's
+    # noon - close, but pressure_trend_hpa_per_24h() itself would still
+    # silently answer using that nearest (1hr-off) reading; the guard
+    # should say no rather than trust a near-miss.
+    target = date(2026, 9, 6)
+    bundle = _pressure_bundle(target - timedelta(days=2), num_days=2, hpa_change_per_24h=-3.0)
+    # 2 days starting 2 days before target ends at target's own midnight -
+    # noon that same day is 12 hours past the bundle's last hourly reading.
+    trips_df, fish_df = build_reports_dataframe([])
+    result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
+    assert result["forecast_available"] is False

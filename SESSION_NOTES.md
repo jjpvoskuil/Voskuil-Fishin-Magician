@@ -11102,6 +11102,110 @@ every real save.
     `AppTest` smoke pass across every other page - clean. Verified via a
     fresh `git clone` into a new temp directory before pushing.
 
+164. **Punch-list #92, second predictor: barometric pressure trend
+    (forecasted).** Angler's ask, verbatim, right after the moon-
+    illumination predictor above shipped: "OK....lets try weather but lets
+    focus only on barometric pressure forecast first" - deliberately
+    scoped to pressure trend alone, not sky condition/wind/the rest of the
+    weather bundle (those stay a future iteration, same "one or two
+    variables first" framing that picked moon illumination first).
+
+    A quick research pass (confirmed by directly reading `core/weather.py`
+    and `core/scoring.py`, not just taken on faith) found this one mostly
+    already built: `core.weather.pressure_trend_hpa_per_24h(bundle,
+    at_time)` is already the single source of truth this app uses for
+    pressure trend on BOTH sides of the historical lookup -
+    `core.scoring.score_day()`/`_segment_score()` call it (noon-anchored
+    for a whole day, at each segment's own midpoint for a segment) to
+    compute the FORECASTED `pressure_trend_24h` shown on the 7-Day
+    Forecast page, and `core.scoring.realtime_context_from_bundle()` (via
+    Spot Session, at the moment a trip is actually logged) calls the exact
+    same function to capture the LIVE value that ends up in
+    `conditions_json["pressure_trend_24h"]` - exactly what `core.reports.
+    _row_factors()` already reads back out for every historical trip row.
+    Same units (hPa change over 24h, positive = rising), same sign
+    convention, both sides - meaning a forecasted value plugs straight
+    into this module's own `_pressure_trend_band()` classifier (`<=-1.5`
+    Falling, `>=2.0` Rising/High, else Steady) with zero conversion,
+    exactly like a historical one already does. So the new predictor is
+    almost entirely reuse, not new modeling: fetch a forecast, call the
+    same trend function, classify with the same bands, look up the bucket
+    via `compute_report()` - the same historical-bucket-lookup shape as
+    the moon predictor, just with the bucket coming from a real forecast
+    instead of exact closed-form math.
+
+    That last difference is exactly the risk this pass had to design
+    around: a live check confirmed Open-Meteo access itself is blocked
+    from this sandbox (`ProxyError: 403 Forbidden` fetching
+    `api.open-meteo.com`), and reading `pressure_trend_hpa_per_24h()`
+    directly turned up a real gap - its internal `nearest_idx()` helper
+    has **no bounds-checking at all**. Handed a target time far outside
+    the bundle's actual fetched hourly window (Open-Meteo's real cap is
+    16 days out - `core.weather.fetch_forecast()`'s own `forecast_days`
+    clamp), it doesn't raise or return `None` - it just answers using
+    whichever hourly reading happens to be nearest, however distant that
+    actually is, which would let this predictor show a confident-looking
+    number for a date its forecast never actually covered. New
+    `core.reports.predict_by_pressure_trend(trips_df, fish_df,
+    target_date, bundle, metric_key=, species=, date_start=, date_end=,
+    anglers=, segments=)` guards against this itself, with a new
+    `_bundle_covers_pressure_forecast(bundle, at_time)` helper: both
+    `at_time` (`target_date`'s noon, matching `score_day()`'s own
+    convention) AND the ~24h-earlier hour the trend function diffs against
+    have to fall inside the bundle's real fetched range, or the whole
+    result comes back `forecast_available: False` (`pressure_trend_24h`/
+    `pressure_trend_band`/`predicted_value` all `None`, `n=0`) instead of
+    a guess. `bundle=None` (the live weather fetch itself failed - this
+    app's own established fail-soft convention, `pages/6_Spot_Session.py`'s
+    own `try: bundle = get_weather_bundle(7) except Exception: bundle =
+    None`) is handled the identical way. `core/reports.py` stays
+    Streamlit-free on purpose (see its own module docstring) - it takes an
+    already-fetched `bundle` as a plain argument rather than calling
+    `core.appstate.get_weather_bundle()` itself.
+
+    New second block in the existing "🔮 Predict a future day" section on
+    `pages/9_Reports.py` (same shared `predict_date` and Metric/Species/
+    date-range/Angler/Segment filters as the moon block above it, not a
+    separate control panel), fetching its own `get_weather_bundle(16)` -
+    16, not this app's usual 7, to maximize how far out `predict_date` can
+    actually be covered by the fetched forecast - behind the same
+    `try/except Exception: bundle = None` pattern already used elsewhere.
+    Three distinct outcomes: a real prediction + sample-size caption when
+    the forecast covers the target date; "no live weather forecast
+    available right now" when the fetch itself failed; and an explicit
+    "outside the fetched weather forecast's window" message (naming the
+    actual covered date range) when it succeeded but doesn't reach the
+    target date - never a silently-wrong number for any of these. Every
+    caption under this block also flags that, unlike moon illumination, a
+    real weather forecast carries real accuracy uncertainty that gets
+    worse the further out the target date is.
+
+    **Verified:** 8 new unit tests in `tests/test_reports.py` (bucket/value
+    match against a real forecasted trend; a small helper builds a
+    `WeatherBundle` with a perfectly linear, tunable pressure trend so the
+    test can exercise all three `PRESSURE_TREND_BANDS` on demand - unlike
+    `tests/test_scoring.py`'s own `_fake_bundle()`, whose trend is always
+    falling; `low_sample` false right at the threshold; the `n == 0`/
+    `predicted_value is None` no-data case; pooled fish-per-hour plus an
+    angler filter actually changing the result; and three dedicated
+    bounds-checking tests - a target date far outside the bundle's window,
+    `bundle=None`, and right at the forward edge (the bundle's last hourly
+    reading one hour short of the target's own noon) - all three
+    correctly come back `forecast_available: False` rather than trusting
+    `pressure_trend_hpa_per_24h()`'s own nearest-reading fallback) plus 4
+    new `AppTest` smoke tests in `tests/test_reports_page.py`, each
+    explicitly mocking `core.appstate.get_weather_bundle` for a
+    deterministic result (a real covering bundle renders both predictors'
+    metrics and a "📉 Forecast:" caption; `bundle=None` renders only
+    moon's metric plus the "no live weather forecast" caption; a bundle
+    that doesn't cover the target date renders only moon's metric plus the
+    "outside the fetched weather forecast's window" caption; the pressure
+    block still renders - as a dash, not a crash - when the historical
+    report above it is empty). Full suite `pytest tests/ -q` - 590 passed
+    (578 + 8 + 4). Full-page `AppTest` smoke pass across every other page -
+    clean. Verified via a fresh `git clone` into a new temp directory
+    before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

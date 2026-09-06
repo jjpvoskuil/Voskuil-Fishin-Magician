@@ -6,10 +6,16 @@ just AppTest (streamlit.testing.v1) confirming the actual PAGE renders,
 reacts to its own controls, and produces the download button - the same
 level this repo already tests pages/4_Trip_History.py's own filters at.
 
-No weather-bundle mocking needed here (unlike pages that call
-core.weather.get_weather_bundle()) - this page only reads
+Most of this page needs no weather-bundle mocking - it mainly reads
 core.appstate.get_trip_history(), a plain read of data/trip_log.csv, so it
-renders fine against this repo's own on-disk fixture data.
+renders fine against this repo's own on-disk fixture data. The one
+exception is the barometric-pressure predictor section added for punch-list
+#92's 2nd predictive pass, which genuinely depends on core.appstate.
+get_weather_bundle(16) - those tests mock it explicitly (see the "Barometric
+pressure trend predictor" section below) for a deterministic result, rather
+than relying on this sandbox's own network access (which fails here,
+incidentally exercising the "no live weather" path in every OTHER test in
+this file that never mocks it).
 
 The module-scoped autouse fixture below clears that cache before every
 test in this file. Without it, a fake single-row cache left behind by
@@ -20,15 +26,34 @@ afterward, so the LAST fake read stays memoized) can leak into this file
 whenever it runs later in the same test session, making these tests see a
 single fake trip_id-only row instead of this repo's real trip history.
 """
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
 from core import appstate
+from core.weather import WeatherBundle
 
 PAGE_PATH = str(Path(__file__).resolve().parent.parent / "pages" / "9_Reports.py")
+
+
+def _pressure_bundle(start_date: date, num_days: int, hpa_change_per_24h: float,
+                      base_pressure: float = 1015.0) -> WeatherBundle:
+    """A minimal WeatherBundle with a perfectly linear surface_pressure
+    trend, covering `num_days` days of hourly data from local midnight of
+    `start_date` - same idea as tests/test_reports.py's own helper of the
+    same name (kept local rather than shared, matching this repo's existing
+    convention of not importing helpers across test files), just enough to
+    give the page's own get_weather_bundle() mock a real, in-range forecast
+    to compute a pressure-trend prediction from."""
+    start = datetime.combine(start_date, datetime.min.time())
+    total_hours = num_days * 24
+    hourly_change = hpa_change_per_24h / 24.0
+    times = [(start + timedelta(hours=h)).isoformat() for h in range(total_hours)]
+    pressures = [base_pressure + hourly_change * h for h in range(total_hours)]
+    return WeatherBundle(hourly={"time": times, "surface_pressure": pressures}, daily={})
 
 
 @pytest.fixture(autouse=True)
@@ -161,3 +186,66 @@ def test_predicting_for_a_date_with_no_matching_bucket_data_shows_a_dash_not_a_c
     assert not at.exception, f"page raised: {at.exception}"
     predicted_metric = next(m for m in at.metric if m.label.startswith("Predicted "))
     assert predicted_metric.value == "—"
+
+
+# --- Barometric pressure trend predictor (punch-list #92's 2nd predictor) -------
+# Unlike moon illumination, this predictor genuinely depends on a live
+# weather fetch (core.appstate.get_weather_bundle(16)) - every test below
+# mocks it explicitly for a deterministic result, rather than relying on
+# whatever this sandbox's own network access happens to do (the other
+# predict-section tests above run against the REAL get_weather_bundle,
+# which fails in this sandbox - see this module's own top-of-file
+# docstring - and so incidentally exercise the "no live weather" path,
+# but that's not something a portable test should depend on).
+
+def test_pressure_predict_section_renders_a_prediction_when_the_forecast_covers_the_target_date():
+    target = date.today() + timedelta(days=1)  # the page's own default "Predict for date"
+    bundle = _pressure_bundle(target - timedelta(days=2), num_days=5, hpa_change_per_24h=-3.0)
+    with mock.patch.object(appstate, "get_weather_bundle", return_value=bundle):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    predicted_metrics = [m for m in at.metric if m.label.startswith("Predicted ")]
+    assert len(predicted_metrics) == 2, "expected one 'Predicted' metric each for moon and pressure"
+    assert any(c.value.startswith("📉 Forecast:") for c in at.caption), (
+        "expected a pressure-trend forecast caption once the bundle covers the target date"
+    )
+
+
+def test_pressure_predict_section_shows_an_unavailable_message_when_the_weather_fetch_fails():
+    with mock.patch.object(appstate, "get_weather_bundle", return_value=None):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        at.run()
+    assert not at.exception, f"page raised when the weather bundle was None: {at.exception}"
+    predicted_metrics = [m for m in at.metric if m.label.startswith("Predicted ")]
+    assert len(predicted_metrics) == 1, "only moon illumination's metric should render, not pressure's"
+    assert any("No live weather forecast available" in c.value for c in at.caption)
+
+
+def test_pressure_predict_section_shows_an_out_of_range_message_when_the_target_date_is_outside_the_forecast():
+    target = date.today() + timedelta(days=1)
+    # A bundle that covers dates nowhere near the (default) target date.
+    bundle = _pressure_bundle(target - timedelta(days=100), num_days=3, hpa_change_per_24h=-3.0)
+    with mock.patch.object(appstate, "get_weather_bundle", return_value=bundle):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+    predicted_metrics = [m for m in at.metric if m.label.startswith("Predicted ")]
+    assert len(predicted_metrics) == 1, "only moon illumination's metric should render, not pressure's"
+    assert any("outside the fetched weather forecast's window" in c.value for c in at.caption)
+
+
+def test_pressure_predict_section_still_renders_when_the_historical_report_above_is_empty():
+    target = date.today() + timedelta(days=1)
+    bundle = _pressure_bundle(target - timedelta(days=2), num_days=5, hpa_change_per_24h=-3.0)
+    with mock.patch.object(appstate, "get_weather_bundle", return_value=bundle):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        at.run()
+        # Same "empty historical report above" regression guard as the moon
+        # predictor's own test above - a date range with no real trips at all.
+        at.date_input(key="rpt_date_start").set_value(date(2020, 1, 1)).run()
+        at.date_input(key="rpt_date_end").set_value(date(2020, 1, 2)).run()
+    assert not at.exception, f"page raised with an empty historical report: {at.exception}"
+    predicted_metrics = [m for m in at.metric if m.label.startswith("Predicted ")]
+    assert len(predicted_metrics) == 2
+    assert predicted_metrics[1].value == "—", "starved of matching historical trips, pressure's own prediction should be a dash"
