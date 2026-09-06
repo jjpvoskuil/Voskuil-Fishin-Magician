@@ -307,6 +307,59 @@ def render_moon_illumination_dawn_chart(col, day_rates: list):
     col.altair_chart(chart, width="stretch")
 
 
+def render_daily_dawn_morning_catch_chart(col, day_rows: list):
+    """Renders `core.calibration.daily_dawn_morning_catch()`'s output as two
+    stacked panels sharing one calendar-day X axis: total Dawn+Morning fish
+    caught per day on top, that day's moon illumination % (night before)
+    on the bottom - replaces the previous per-lunar-cycle-day rate chart
+    for this app's "recent window" view (see calibration.py's docstring
+    for why: a raw daily fish count isn't distorted by how a session
+    happened to get chopped into short per-lure log rows the way a
+    per-row rate is).
+
+    Two separate panels, not one dual-axis chart - fish count and % are
+    different scales/units, and a single chart with two Y axes reads the
+    two series' shapes as directly comparable when they aren't (the #1
+    anti-pattern this app's dataviz conventions rule out). Sharing the X
+    scale (`resolve_scale(x="shared")`) keeps both panels' bars aligned to
+    the exact same calendar day without repeating axis machinery beyond
+    what's needed - only the bottom panel actually draws its X labels."""
+    import altair as alt
+
+    df = pd.DataFrame(day_rows)
+    x_order = [r["label"] for r in day_rows]
+
+    fish_chart = (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("label:N", sort=x_order, title=None, axis=alt.Axis(labels=False, ticks=False)),
+            y=alt.Y("fish:Q", title="Fish caught (Dawn + Morning)"),
+            tooltip=[
+                alt.Tooltip("label:N", title="Date"),
+                alt.Tooltip("fish:Q", title="Fish caught"),
+                alt.Tooltip("illumination_pct:Q", title="Moon illumination (night before)", format=".0f"),
+            ],
+        )
+    )
+    illumination_chart = (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("label:N", sort=x_order, title=None, axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("illumination_pct:Q", title="Moon illumination % (night before)",
+                    scale=alt.Scale(domain=[0, 100])),
+            tooltip=[
+                alt.Tooltip("label:N", title="Date"),
+                alt.Tooltip("illumination_pct:Q", title="Moon illumination", format=".0f"),
+                alt.Tooltip("fish:Q", title="Fish caught"),
+            ],
+        )
+    )
+    combined = alt.vconcat(fish_chart, illumination_chart, spacing=5).resolve_scale(x="shared")
+    col.altair_chart(combined, width="stretch")
+
+
 def render_square_thumbnail(item: dict, size_px: int = 96) -> bool:
     """Render one inventory item's photo (if it has one) as a center-cropped
     square, capped at `size_px` but shrinking to fit a narrower container,
