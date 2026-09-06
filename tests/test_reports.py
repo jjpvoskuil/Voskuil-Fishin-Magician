@@ -1,11 +1,12 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from core.astro import moon_phase
 from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     moon_illumination_pct_night_before, _moon_illumination_bin, _pressure_trend_band,
     _water_temp_bucket_label, _water_temp_bucket_axis, WATER_TEMP_BUCKET_FACTOR,
+    predict_by_moon_illumination, MIN_PREDICTION_SAMPLES,
 )
 import pandas as pd
 
@@ -447,3 +448,79 @@ def test_species_options_sorted_unique():
 
 def test_species_options_empty_fish_df():
     assert species_options(build_reports_dataframe([])[1]) == []
+
+
+# --- predict_by_moon_illumination (punch-list #92's predictive first pass) -----
+
+def test_predict_by_moon_illumination_matches_the_computed_bucket_and_pools_the_value():
+    target = date(2026, 9, 6)
+    rows = [
+        _row("t1", "2026-09-06", fish=[_fish("Bass", 2.0)]),
+        _row("t2", "2026-09-06", fish=[_fish("Bass", 3.0)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result = predict_by_moon_illumination(trips_df, fish_df, target, metric_key="total_fish")
+    expected_bucket = _moon_illumination_bin(moon_illumination_pct_night_before(target))
+    assert result["target_date"] == target
+    assert result["moon_illumination_bucket"] == expected_bucket
+    assert result["metric_key"] == "total_fish"
+    assert result["predicted_value"] == 2  # 1 fish from t1 + 1 fish from t2
+    assert result["n"] == 2
+    assert result["low_sample"] is True  # 2 < MIN_PREDICTION_SAMPLES
+
+
+def test_predict_by_moon_illumination_uses_trips_from_a_different_date_in_the_same_bucket():
+    # The whole point of a bucket-based lookup: the TARGET date itself
+    # never needs to have been fished, only some other date sharing its
+    # same moon-illumination bucket. Finds a real matching date dynamically
+    # (moon buckets are ~10 percentage points wide over a ~29.5-day cycle,
+    # so a match well within 40 days is effectively guaranteed) rather than
+    # hardcoding any lunar-phase fact.
+    target = date(2026, 9, 6)
+    target_bucket = _moon_illumination_bin(moon_illumination_pct_night_before(target))
+    other_date = next(
+        d for d in (target - timedelta(days=offset) for offset in range(1, 40))
+        if _moon_illumination_bin(moon_illumination_pct_night_before(d)) == target_bucket
+    )
+    rows = [_row("t1", other_date.isoformat(), fish=[_fish("Bass", 2.0)])]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result = predict_by_moon_illumination(trips_df, fish_df, target, metric_key="total_fish")
+    assert result["predicted_value"] == 1
+    assert result["n"] == 1
+
+
+def test_predict_by_moon_illumination_not_low_sample_at_the_threshold():
+    target = date(2026, 9, 6)
+    rows = [_row(f"t{i}", "2026-09-06", fish=[_fish("Bass", 2.0)]) for i in range(MIN_PREDICTION_SAMPLES)]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result = predict_by_moon_illumination(trips_df, fish_df, target, metric_key="total_fish")
+    assert result["n"] == MIN_PREDICTION_SAMPLES
+    assert result["low_sample"] is False
+
+
+def test_predict_by_moon_illumination_returns_none_and_zero_n_with_no_data():
+    target = date(2026, 9, 6)
+    trips_df, fish_df = build_reports_dataframe([])
+    result = predict_by_moon_illumination(trips_df, fish_df, target, metric_key="total_fish")
+    assert result["predicted_value"] is None
+    assert result["n"] == 0
+    assert result["low_sample"] is False  # no data isn't "low sample," it's "no sample"
+
+
+def test_predict_by_moon_illumination_pools_fish_per_hour_and_respects_filters():
+    target = date(2026, 9, 6)
+    rows = [
+        _row("t1", "2026-09-06", angler="Amy", fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1hr
+        _row("t2", "2026-09-06", angler="Bob", fish_caught=6,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 6 fish, 1hr
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    result_all = predict_by_moon_illumination(trips_df, fish_df, target, metric_key="fish_per_hour")
+    assert result_all["predicted_value"] == 3.0  # pooled: 6 fish / 2 hours
+
+    result_amy_only = predict_by_moon_illumination(
+        trips_df, fish_df, target, metric_key="fish_per_hour", anglers=["Amy"],
+    )
+    assert result_amy_only["predicted_value"] == 0.0  # Amy's own trip was skunked
+    assert result_amy_only["n"] == 1
