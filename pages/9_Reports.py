@@ -92,7 +92,18 @@ METRIC_LABELS = list(METRIC_OPTIONS.keys())
 
 c1, c2 = st.columns([1, 1])
 factor_label = c1.selectbox("Factor (x-axis)", FACTOR_LABELS, index=FACTOR_LABELS.index("Lure Category"), key="rpt_factor")
-metric_label = c2.selectbox("Success metric", METRIC_LABELS, index=0, key="rpt_metric")
+# Defaults to the pooled RATE, not "Total Fish Caught" - a sum across every
+# trip logged under a bucket keeps growing as more trips get logged (a
+# "Steady" pressure bucket with 121 real trips sums to 261 total fish,
+# which reads as an absurd single-day number once the Predict section below
+# echoes it back as "Predicted Total Fish Caught: 261 fish") while the
+# pooled fish/hour rate stays a stable, comparable number regardless of how
+# many trips back it - see _trustworthy_session_hours()'s own comment in
+# core/reports.py for the full "why pooled, not per-trip" reasoning. Total
+# Fish Caught/# Trips are both still available in the picker for the
+# historical chart above (where "here's the cumulative total logged so
+# far" is a meaningful reading) - only the DEFAULT changed.
+metric_label = c2.selectbox("Success metric", METRIC_LABELS, index=METRIC_LABELS.index("Fish per Hour (rate)"), key="rpt_metric")
 factor_col = FACTOR_OPTIONS[factor_label]
 metric_key = METRIC_OPTIONS[metric_label]
 
@@ -142,7 +153,16 @@ earliest = _valid_dates.min() if not _valid_dates.empty else None
 default_start = earliest if earliest else (date.today() - timedelta(days=29))
 date_start = c5.date_input("From", value=default_start, key="rpt_date_start")
 date_end = c6.date_input("To", value=date.today(), key="rpt_date_end")
-segments_choice = c7.multiselect("Time segments (blank = all)", SEGMENTS, key="rpt_segments")
+# Defaults to Dawn + Morning, not blank/all - real logged trip history is
+# heavily lopsided toward these two segments right now (110 Dawn + 30
+# Morning out of 174 total, vs. single digits for Midday/Dusk/Night), so
+# starting scoped to where the bulk of the data actually is gives a
+# cleaner, more representative rate out of the gate - a bucket pooling a
+# handful of Evening trips in with a hundred Dawn ones reads as one number
+# but isn't really describing either. Still just a DEFAULT - clear it (or
+# pick something else) to see every segment pooled together again.
+DEFAULT_SEGMENTS = [s for s in ("Dawn", "Morning") if s in SEGMENTS]
+segments_choice = c7.multiselect("Time segments (blank = all)", SEGMENTS, default=DEFAULT_SEGMENTS, key="rpt_segments")
 
 if date_start > date_end:
     st.warning("From date is after To date - swapping them.")

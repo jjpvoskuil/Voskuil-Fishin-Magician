@@ -78,6 +78,33 @@ def test_page_renders_with_default_controls():
     )
 
 
+def test_default_metric_is_the_pooled_rate_not_a_bucket_sum():
+    # A plain sum (Total Fish Caught, the old default) keeps growing as
+    # more trips get logged under a bucket - a real "Steady" pressure
+    # bucket with 121 logged trips sums to 261 total fish, which reads as
+    # an absurd single-day number once the Predict section echoes it back
+    # as "Predicted Total Fish Caught: 261 fish" (angler's own live report:
+    # "the numbers look really high"). Fish per Hour's pooled RATE doesn't
+    # inflate with n, so it's the sane default - still just a default,
+    # Total Fish Caught is still pickable for the historical chart above.
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    metric_box = next(s for s in at.selectbox if s.label == "Success metric")
+    assert metric_box.value == "Fish per Hour (rate)"
+
+
+def test_default_segments_are_dawn_and_morning_where_the_bulk_of_real_data_is():
+    # Angler's own live report: real trip history is heavily lopsided
+    # toward Dawn/Morning right now (110/30 out of 174 total, vs. single
+    # digits for Midday/Dusk/Night) - "it might be better to just look at
+    # the dawn/morning window given that is where the bulk of the data is
+    # right now." Still just a default (blank = every segment pooled).
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    segments_box = next(m for m in at.multiselect if m.label == "Time segments (blank = all)")
+    assert segments_box.value == ["Dawn", "Morning"]
+
+
 def test_switching_to_a_date_factor_still_renders_and_uses_a_line_chart():
     at = AppTest.from_file(PAGE_PATH, default_timeout=60)
     at.run()
