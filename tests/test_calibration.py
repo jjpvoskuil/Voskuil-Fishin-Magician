@@ -320,3 +320,58 @@ def test_moon_illumination_dawn_rates_since_none_keeps_every_trip():
     # Sanity: a since far in the future excludes it, proving since is really applied.
     excluded = moon_illumination_dawn_rates(rows, since=dt.date(2099, 1, 1))
     assert sum(d["n"] for d in excluded) == 0
+
+
+# --- Punch-list #89 (3rd follow-up): since+until restricts the BUCKETS ------
+# too, not just which trips count - "the 14 day chart should only show the
+# last 14 days not all 30 days of the lunar cycle."
+
+def test_moon_illumination_dawn_rates_since_alone_still_returns_all_30_buckets():
+    # since alone (no until) keeps the pre-existing "all 30 buckets, just
+    # filter which trips count" behavior - only since+until together
+    # restricts which buckets are returned at all.
+    import datetime as dt
+
+    rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn", trip_date="2000-01-07")]
+    assert len(moon_illumination_dawn_rates(rows, since=dt.date(2000, 1, 1))) == 30
+
+
+def test_moon_illumination_dawn_rates_since_and_until_only_returns_that_windows_days():
+    import datetime as dt
+
+    # A 14-day window (inclusive both ends) can only ever touch 14 distinct
+    # lunar-cycle days - not all 30.
+    since = dt.date(2000, 1, 7)
+    until = since + dt.timedelta(days=13)
+    rates = moon_illumination_dawn_rates([], since=since, until=until)
+    assert len(rates) == 14
+
+
+def test_moon_illumination_dawn_rates_since_and_until_keeps_calendar_order_not_numeric():
+    # Picking a window that straddles the lunar-cycle wrap (day 29 -> day 0)
+    # would come out numerically out of order (e.g. ...,28,29,0,1,...) if
+    # sorted 0-29 - it must instead follow calendar date order.
+    import datetime as dt
+
+    since = dt.date(2000, 1, 1)  # a few days before the reference new moon
+    until = since + dt.timedelta(days=6)
+    rates = moon_illumination_dawn_rates([], since=since, until=until)
+    days = [d["day_of_cycle"] for d in rates]
+    assert len(days) == 7
+    assert days != sorted(days)  # genuinely wraps, not coincidentally ascending
+
+
+def test_moon_illumination_dawn_rates_since_and_until_excludes_trips_outside_the_window():
+    import datetime as dt
+
+    rows = [
+        _timed_row(fish_caught=9, hours=1.0, segment="Dawn", trip_date="2000-01-06"),  # 1 day too early
+        _timed_row(fish_caught=3, hours=1.0, segment="Dawn", trip_date="2000-01-10"),  # inside
+        _timed_row(fish_caught=9, hours=1.0, segment="Dawn", trip_date="2000-01-21"),  # 1 day too late
+    ]
+    since = dt.date(2000, 1, 7)
+    until = dt.date(2000, 1, 20)
+    rates = moon_illumination_dawn_rates(rows, since=since, until=until)
+    assert sum(d["n"] for d in rates) == 1
+    matching = next(d for d in rates if d["n"] > 0)
+    assert matching["median"] == 3.0

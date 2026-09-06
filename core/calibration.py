@@ -261,7 +261,22 @@ def _illumination_pct_for_age(age_days: float) -> float:
     return (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
 
 
-def moon_illumination_dawn_rates(trip_rows: list, since: Optional[object] = None) -> list:
+def _day_of_cycle_for_date(trip_date) -> int:
+    """The day-of-cycle bucket a Dawn/Morning trip on `trip_date` belongs
+    in - moon state recomputed fresh at 18:00 the evening BEFORE
+    trip_date, not read from conditions_json's already-logged moon_phase
+    (which core/scoring.py computes at 18:00 on trip_date itself - the
+    UPCOMING night, appropriate for an evening/night forecast, but a full
+    calendar day too late for a Dawn/Morning session that already
+    happened THAT SAME morning, before that night arrives). Getting this
+    right matters specifically for this chart, since the whole point is
+    checking whether the moonlight that was actually out overnight - not
+    tomorrow night - lines up with a quieter or busier morning bite."""
+    night_before = datetime.combine(trip_date - timedelta(days=1), dtime(18, 0))
+    return int(moon_phase(night_before).age_days)
+
+
+def moon_illumination_dawn_rates(trip_rows: list, since=None, until=None) -> list:
     """Median fish-per-hour for Dawn+Morning trips ONLY (punch-list #89,
     revised after the angler saw the first version: dropped the "rest of
     day" comparison - Dawn+Morning is where the large majority of this
@@ -270,37 +285,44 @@ def moon_illumination_dawn_rates(trip_rows: list, since: Optional[object] = None
     moon, ~15 = full moon, 0-29) rather than the 8 named phases the first
     version used.
 
-    `since` (a `datetime.date`, optional): when given, only trips whose
-    trip_date is on or after this date are counted - added so home.py can
-    show a "just the last 2 weeks" chart alongside the all-time one (the
-    angler's own follow-up, wanting to see whether a recent stretch tracks
-    or diverges from the full history) without a second, near-duplicate
-    function. `None` (the default) keeps every trustworthy-duration trip
-    ever logged, unchanged from before this parameter existed.
+    `since`/`until` (both `datetime.date`, optional): with neither given
+    (the default), every trustworthy-duration trip ever logged counts,
+    and all 30 buckets are returned in cycle order 0-29 - unchanged from
+    before these parameters existed. With `since` alone, only trips whose
+    trip_date is on or after that date count, but all 30 buckets still
+    show (added so home.py could show a "just the last 2 weeks" chart
+    with the same shape as the all-time one). With BOTH given (home.py's
+    actual "last 2 weeks" chart, after a further angler follow-up: "the
+    14 day chart should only show the last 14 days not all 30 days of the
+    lunar cycle"), only trips with since <= trip_date <= until count, AND
+    only the handful of buckets those calendar days can actually land in
+    are returned at all, in calendar-date order (not sorted 0-29) - a
+    ~14-day window can only ever touch ~14 of the 30 lunar days, so
+    showing all 30 buried the real bars in a wall of always-empty ones
+    that window could never have populated.
 
-    Each bucket's moon state is recomputed fresh at 18:00 the evening
-    BEFORE trip_date, not read from conditions_json's already-logged
-    moon_phase (which core/scoring.py computes at 18:00 on trip_date
-    itself - the UPCOMING night, appropriate for an evening/night
-    forecast, but a full calendar day too late for a Dawn/Morning session
-    that already happened THAT SAME morning, before that night arrives).
-    Getting this right matters specifically for this chart, since the
-    whole point is checking whether the moonlight that was actually out
-    overnight - not tomorrow night - lines up with a quieter or busier
-    morning bite.
+    Returns a list of dicts: {"day_of_cycle": int, "illumination_pct":
+    float (0-100, see _illumination_pct_for_age() above), "median":
+    float|None, "n": int}. Every requested day appears even with zero
+    logged trips - a caller should treat "n": 0 as "no data yet," not
+    "confirmed no difference," same convention as location_adjustments()/
+    the original moon-phase version above. Deliberately does NOT gate on
+    MIN_SAMPLES_PER_SIDE - this is an exploratory chart the angler is
+    meant to eyeball sample sizes on directly, not a scoring input."""
+    if until is not None:
+        day_order = []
+        seen = set()
+        d = since
+        while d <= until:
+            day_of_cycle = _day_of_cycle_for_date(d)
+            if day_of_cycle not in seen:
+                seen.add(day_of_cycle)
+                day_order.append(day_of_cycle)
+            d += timedelta(days=1)
+    else:
+        day_order = list(range(DAYS_IN_LUNAR_CYCLE))
 
-    Returns a list of 30 dicts, one per day 0-29 in cycle order:
-    {"day_of_cycle": int, "illumination_pct": float (0-100, see
-    _illumination_pct_for_age() above), "median": float|None, "n": int}.
-    Every day appears even with zero logged trips (real state right now:
-    most of the 30 buckets are thin or empty - only ~54 Dawn+Morning trips
-    exist in total, spread across a whole lunar cycle) - a caller should
-    treat "n": 0 as "no data yet," not "confirmed no difference," same
-    convention as location_adjustments()/the original moon-phase version
-    above. Deliberately does NOT gate on MIN_SAMPLES_PER_SIDE - this is an
-    exploratory chart the angler is meant to eyeball sample sizes on
-    directly, not a scoring input."""
-    buckets = {d: [] for d in range(DAYS_IN_LUNAR_CYCLE)}
+    buckets = {d: [] for d in day_order}
     for row in trip_rows:
         if row.get("segment") not in MORNING_SEGMENTS:
             continue
@@ -316,18 +338,21 @@ def moon_illumination_dawn_rates(trip_rows: list, since: Optional[object] = None
             continue
         if since is not None and trip_date < since:
             continue
-        night_before = datetime.combine(trip_date - timedelta(days=1), dtime(18, 0))
-        day_of_cycle = int(moon_phase(night_before).age_days)
-        buckets.setdefault(day_of_cycle, []).append(rate)
+        if until is not None and trip_date > until:
+            continue
+        day_of_cycle = _day_of_cycle_for_date(trip_date)
+        if day_of_cycle not in buckets:
+            continue  # outside the requested window's own set of days
+        buckets[day_of_cycle].append(rate)
 
     return [
         {
             "day_of_cycle": d,
             "illumination_pct": round(_illumination_pct_for_age(d), 1),
-            "median": statistics.median(rates) if rates else None,
-            "n": len(rates),
+            "median": statistics.median(buckets[d]) if buckets[d] else None,
+            "n": len(buckets[d]),
         }
-        for d, rates in sorted(buckets.items())
+        for d in day_order
     ]
 
 

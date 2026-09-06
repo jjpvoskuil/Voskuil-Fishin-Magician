@@ -274,16 +274,24 @@ except Exception:
 # phase. A later follow-up asked for a second, "just the last 2 weeks"
 # chart alongside the all-time one - same HOME_TREND_CHART_PAST_DAYS window
 # every other chart on this page already uses, so "recent" means the same
-# thing everywhere on this page. Independent fetch from everything above
-# (trip log, not weather/USACE), so a weather-fetch failure shouldn't hide
-# either chart.
+# thing everywhere on this page. A further follow-up: that recent chart
+# was still showing all 30 lunar-cycle-day buckets (mostly empty, since a
+# 14-day window can only ever touch ~14 of them) - passing `until` too
+# (not just `since`) tells moon_illumination_dawn_rates() to restrict the
+# buckets themselves to the ones this window's own calendar days can
+# actually land in. Independent fetch from everything above (trip log,
+# not weather/USACE), so a weather-fetch failure shouldn't hide either
+# chart.
 moon_day_rates_all_time = []
 moon_day_rates_recent = []
 try:
     trip_history = get_trip_history()
     moon_day_rates_all_time = moon_illumination_dawn_rates(trip_history)
-    recent_cutoff = lake_today() - timedelta(days=HOME_TREND_CHART_PAST_DAYS - 1)
-    moon_day_rates_recent = moon_illumination_dawn_rates(trip_history, since=recent_cutoff)
+    # Named distinctly from the `today` ScoreResult above (this is a plain
+    # date) even though nothing later in this file still reads that one.
+    today_date = lake_today()
+    recent_cutoff = today_date - timedelta(days=HOME_TREND_CHART_PAST_DAYS - 1)
+    moon_day_rates_recent = moon_illumination_dawn_rates(trip_history, since=recent_cutoff, until=today_date)
 except Exception:
     pass
 
