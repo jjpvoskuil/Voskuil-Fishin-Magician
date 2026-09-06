@@ -14,7 +14,9 @@ from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
 from core.calibration import moon_illumination_dawn_rates, daily_dawn_morning_catch
-from core.daily_leaderboard import build_daily_activity, daily_awards, leaderboard_table_rows
+from core.daily_leaderboard import (
+    build_daily_activity, build_weekly_activity, daily_awards, leaderboard_table_rows, week_bounds,
+)
 from core.activity_log import format_weight_lb_oz
 from core.ui import (
     inject_mobile_css, inject_compact_metric_css, render_line_chart,
@@ -212,66 +214,93 @@ if today:
 
 # Punch-list #91: "show fishing activity for any or all anglers that are
 # currently logged in and/or posted a session" - a combined roster (open
-# Spot Session anywhere on the lake, OR at least one row logged today),
-# three "award" tiles for the day's biggest fish/top angler by weight/top
-# angler by fish count, and a detailed per-angler, per-species leaderboard
-# table with subtotals and a grand total. All the real logic lives in
+# Spot Session anywhere on the lake, OR at least one row logged in the
+# period), three "award" tiles for the period's biggest fish/top angler by
+# weight/top angler by fish count, and a detailed per-angler, per-species
+# leaderboard table with subtotals and a grand total. Originally just
+# "today"; extended (same punch-list item, angler follow-up) to offer the
+# identical set of categories for "this week" (Sunday-start, per the
+# angler's own framing) too - _render_activity_section() below renders
+# either period from the same core.daily_leaderboard functions, which
+# don't care which period built their input. All the real logic lives in
 # core/daily_leaderboard.py (kept Streamlit-free and unit tested on its
 # own) - this block is just rendering. Independent of the weather/bundle
 # status above (this is trip-log data, not weather), so a weather outage
 # shouldn't hide it.
-st.subheader("🎣 Today's Activity")
+st.subheader("🎣 Fishing Activity")
 try:
     _activity_rows = get_trip_history()
 except Exception:
     _activity_rows = []
-_today_iso = lake_today().isoformat()
-day_stats = build_daily_activity(_activity_rows, _today_iso)
+_lake_today = lake_today()
 
-if not day_stats:
-    st.caption("Nobody's logged a Spot Session yet today - be the first one out there!")
-else:
-    _roster_bits = [
-        f"{'🟢' if s.active else '⚪'} **{s.angler}** ({s.fish_count} fish today)"
-        for s in day_stats
+
+def _render_activity_section(period_stats: list, period_word: str, reset_note: str):
+    """Renders one period's roster + award tiles + leaderboard table.
+    period_word is used in the roster/table captions ("today"/"this
+    week") - everything else about the two periods is identical, since
+    core.daily_leaderboard's functions don't know or care which period
+    built the stats they're handed."""
+    if not period_stats:
+        st.caption(f"Nobody's logged a Spot Session yet {period_word} - be the first one out there!")
+        return
+
+    roster_bits = [
+        f"{'🟢' if s.active else '⚪'} **{s.angler}** ({s.fish_count} fish {period_word})"
+        for s in period_stats
     ]
     st.caption(
-        "🟢 = has an open Spot Session right now, ⚪ = posted today but not currently active.  "
-        + " · ".join(_roster_bits)
+        "🟢 = has an open Spot Session right now, ⚪ = posted but not currently active.  "
+        + " · ".join(roster_bits)
     )
 
-    awards = daily_awards(day_stats)
+    awards = daily_awards(period_stats)
     award_cols = st.columns(3)
 
-    _biggest = awards["biggest_fish"]
+    period_suffix = " of the Day" if period_word == "today" else " of the Week"
+    biggest = awards["biggest_fish"]
     award_cols[0].metric(
-        "🎣 Berkley - Biggest Fish of the Day",
-        format_weight_lb_oz(_biggest["weight_lb"]) if _biggest else "None yet",
-        help=(f"{_biggest['species']}, caught by {_biggest['angler']}" if _biggest
-              else "No fish logged yet today."),
+        "🎣 Berkley - Biggest Fish" + period_suffix,
+        f"{biggest['angler']} ({format_weight_lb_oz(biggest['weight_lb'])})" if biggest else "None yet",
+        help=f"{biggest['species']}" if biggest else f"No fish logged yet {period_word}.",
     )
-    _top_weight = awards["top_angler_weight"]
+    top_weight = awards["top_angler_weight"]
     award_cols[1].metric(
-        "🎣 String King - Top Angler of the Day",
-        f"{_top_weight.angler} ({format_weight_lb_oz(_top_weight.total_weight_lb)})" if _top_weight else "None yet",
-        help="Highest total weight caught today, across every species." if _top_weight
-             else "No fish logged yet today.",
+        "🎣 String King - Top Angler" + period_suffix,
+        f"{top_weight.angler} ({format_weight_lb_oz(top_weight.total_weight_lb)})" if top_weight else "None yet",
+        help=f"Highest total weight caught {period_word}, across every species." if top_weight
+             else f"No fish logged yet {period_word}.",
     )
-    _top_count = awards["top_bag_count"]
+    top_count = awards["top_bag_count"]
     award_cols[2].metric(
-        "🎣 Z-Man - Top Bag Limit Buster",
-        f"{_top_count.angler} ({_top_count.fish_count} fish)" if _top_count else "None yet",
-        help="Most total fish caught today, across every species." if _top_count
-             else "No fish logged yet today.",
+        "🎣 Z-Man - Top Bag Limit Buster" + period_suffix,
+        f"{top_count.angler} ({top_count.fish_count} fish)" if top_count else "None yet",
+        help=f"Most total fish caught {period_word}, across every species." if top_count
+             else f"No fish logged yet {period_word}.",
     )
 
-    _table_rows = leaderboard_table_rows(day_stats)
-    if _table_rows:
-        st.caption("Leaderboard - today's catch by angler")
-        st.dataframe(pd.DataFrame(_table_rows), width='stretch', hide_index=True)
-    st.caption(
+    table_rows = leaderboard_table_rows(period_stats)
+    if table_rows:
+        st.caption(f"Leaderboard - {period_word}'s catch by angler")
+        st.dataframe(pd.DataFrame(table_rows), width='stretch', hide_index=True)
+    st.caption(reset_note)
+
+
+_today_tab, _week_tab = st.tabs(["📅 Today", "🗓️ This Week"])
+with _today_tab:
+    day_stats = build_daily_activity(_activity_rows, _lake_today.isoformat())
+    _render_activity_section(
+        day_stats, "today",
         "Resets at the lake's own local midnight (America/Chicago) - see the full, filterable, "
-        "all-time rankings on the **Leaderboard** page."
+        "all-time rankings on the **Leaderboard** page.",
+    )
+with _week_tab:
+    week_start, week_end = week_bounds(_lake_today)
+    week_stats = build_weekly_activity(_activity_rows, _lake_today)
+    _render_activity_section(
+        week_stats, "this week",
+        f"Week of {week_start.strftime('%-m/%d')} - {week_end.strftime('%-m/%d')} (Sunday-Saturday, "
+        "lake-local) - see the full, filterable, all-time rankings on the **Leaderboard** page.",
     )
 
 # Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,
