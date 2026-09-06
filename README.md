@@ -45,6 +45,17 @@ gesture to swallow the second tap before it reaches the calendar). Added a one-t
 only" button under the date field that jumps straight to a single day on today, without
 depending on getting a double-tap exactly right.
 
+The Home page's "🎣 Fishing Activity" award tiles (punch-list #91 follow-up) had the same
+truncation problem in a different shape: their labels ("String King - Top Angler," "Z-Man - Bag
+Limit Buster") are long enough that even `inject_mobile_css()`'s generic reflow - which still
+fits 2 tiles per row at its 120px column minimum - left `st.metric`'s own built-in
+`white-space: nowrap` + ellipsis CSS clipping every label with "...". Confirmed live and fixed by
+forcing that row to one tile per row below the phone breakpoint
+(`core.ui.inject_compact_metric_css(..., stack_on_mobile=True)`), on top of shortening the labels
+themselves (dropped the redundant "of the Day"/"of the Week," since the Today/This Week tab
+already says that) and moving the roster's 🟢/⚪ legend out of a repeated inline-text prefix into
+a one-time hover tooltip.
+
 Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
 this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
 iframe under its own wrapper page, and that wrapper page - not this repo - owns the `<head>`
@@ -106,7 +117,7 @@ this repo that can override it on this hosting.
   explicit angler decisions when this was built); three award tiles for the period so far - "🎣
   Berkley - Biggest Fish" (the single biggest fish logged in that period, any angler/species, with
   the angler's own name shown right on the tile), "🎣 String King - Top Angler" (highest total
-  weight caught in that period, across every species), and "🎣 Z-Man - Top Bag Limit Buster" (most
+  weight caught in that period, across every species), and "🎣 Z-Man - Bag Limit Buster" (most
   total fish caught in that period) - each shows "None yet" rather than a misleading zero-winner
   before the period's first fish lands; and a flat leaderboard table (angler, species, # fish,
   largest, total) grouped by angler with a "Subtotal" row closing out each angler's own species and
@@ -115,7 +126,13 @@ this repo that can override it on this hosting.
   rather than summing the stored per-fish weight_lb values as-is. The Today tab resets at the
   lake's own local midnight, the This Week tab at the following Sunday (both
   `core.weather.lake_today()`, America/Chicago) - the **Leaderboard** page (below) still has the
-  full, filterable, all-time rankings. All the actual roster/award/table logic lives in
+  full, filterable, all-time rankings. Tightened up for phones (confirmed live the original layout
+  truncated with "..." on a narrow screen): the tile labels no longer repeat "of the Day"/"of the
+  Week" (redundant with the tab name), the roster's 🟢/⚪ legend moved from repeated inline text
+  into a one-time hover tooltip, and each period's award-tile row forces one tile per row below the
+  phone-width breakpoint (`core.ui.inject_compact_metric_css(..., stack_on_mobile=True)`) rather
+  than letting Streamlit's own 2-per-row reflow still truncate a long label. All the actual
+  roster/award/table logic lives in
   `core/daily_leaderboard.py`, a small Streamlit-free module (unit tested on its own in
   `tests/test_daily_leaderboard.py`) that builds both periods from the same
   `build_period_activity()` core - `build_daily_activity()`/`build_weekly_activity()` are thin

@@ -177,7 +177,8 @@ def inject_mobile_css():
     )
 
 
-def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label_rem: float = 0.72):
+def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label_rem: float = 0.72,
+                               stack_on_mobile: bool = False):
     """Punch-list #16: shrink `st.metric()`'s label/value/delta font size,
     scoped to one `st.container(key=container_key)` rather than site-wide -
     for a row that's grown past the 4-5 columns Streamlit's default metric
@@ -191,7 +192,29 @@ def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label
     (deliberately wide-reaching, for any multi-column row on any page),
     this only ever affects the one caller-chosen row, so it's safe to call
     from just the one page that needs it without touching metric sizing
-    anywhere else in the app."""
+    anywhere else in the app.
+
+    `stack_on_mobile=True` (punch-list #91 follow-up) additionally forces
+    every column in this container to full row width - one tile per row -
+    once the phone-width breakpoint hits. Confirmed live this is needed
+    for home.py's "Fishing Activity" award tiles: their labels ("String
+    King - Top Angler," "Z-Man - Top Bag Limit Buster") are long enough
+    that `inject_mobile_css()`'s own generic reflow (min-width 120px,
+    still 2-per-row on a normal phone width) wasn't enough room - Streamlit's
+    own `st.metric` label CSS is `white-space: nowrap` + ellipsis with no
+    built-in way to wrap it onto a second line, so a column narrower than
+    the full label just truncates with "...". One tile per row, at the
+    phone's full width, gives even the longest label real room instead."""
+    stack_css = ""
+    if stack_on_mobile:
+        stack_css = f"""
+        @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
+            .st-key-{container_key} [data-testid="stColumn"] {{
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }}
+        }}
+        """
     st.markdown(
         f"""
         <style>
@@ -204,6 +227,7 @@ def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label
         .st-key-{container_key} [data-testid="stMetricDelta"] {{
             font-size: {label_rem}rem !important;
         }}
+        {stack_css}
         </style>
         """,
         unsafe_allow_html=True,
