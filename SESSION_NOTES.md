@@ -11206,6 +11206,59 @@ every real save.
     clean. Verified via a fresh `git clone` into a new temp directory
     before pushing.
 
+165. **Punch-list #92 follow-up (same session): Reports page defaults - Fish
+    per Hour, not Total Fish Caught; Dawn+Morning, not every segment.**
+    Angler's live report, right after trying the new pressure predictor:
+    "the numbers look really high. Can you look at this? Also, it might be
+    better to express this as a rate... Maybe we can do as a rate and it
+    might be better to just look at the dawn/morning window given that is
+    where the bulk of the data is right now."
+
+    Investigated against the real `data`-branch trip history (174 rows)
+    before touching any code, rather than guessing at the cause. Confirmed
+    the real root cause, and it's not "the forecast predicts fish caught
+    if we fished all day" (the angler's own guess) - it's that "Total Fish
+    Caught" (the page's previous default metric) is a plain SUM across
+    every trip pooled into a bucket, and that sum only ever grows as more
+    trips get logged under it: the real "Steady" pressure-trend bucket has
+    121 logged trips summing to 261 total fish, which the Predict section
+    below echoes straight back as "Predicted Total Fish Caught: 261 fish"
+    - an absurd single-day number, because it was never a per-day number
+    to begin with. "Fish per Hour (rate)" - already this page's pooled
+    sum(fish)/sum(hours) metric, punch-list #92's own earlier fix for a
+    different symptom of the same "a sum scales with n" issue - doesn't
+    have this problem: pooling the same 121 trips gives 1.80 fish/hr, a
+    number that stays sane regardless of how much history backs it. Also
+    confirmed the segment lopsidedness directly: 110 Dawn + 30 Morning out
+    of 174 total logged trips (only single digits each for Midday/Dusk/
+    Night) - restricting the "Steady" bucket to just Dawn+Morning moves its
+    rate from 1.80 to 2.06 fish/hr on 74 trips (still comfortably above
+    `MIN_PREDICTION_SAMPLES`), a real, meaningfully different number from
+    pooling in the sparser other segments alongside it.
+
+    Fix was two one-line default changes on `pages/9_Reports.py` (both
+    still just defaults - every option remains pickable): the "Success
+    metric" selectbox now defaults to `METRIC_LABELS.index("Fish per Hour
+    (rate)")` instead of index 0 ("Total Fish Caught"), and the "Time
+    segments" multiselect now defaults to `["Dawn", "Morning"]` instead of
+    blank ("blank = all" still works exactly as before if cleared).
+    Deliberately a shared-control default change, not a predict-section-
+    only special case - the same "a sum inflates with n" problem exists on
+    the historical chart above just as much as in the Predict section, and
+    keeping one shared Metric/Segments control for both (rather than a
+    second, independent one just for prediction) matches this page's
+    existing convention of reusing filters rather than proliferating
+    controls.
+
+    **Verified:** 2 new `AppTest` regression tests in `tests/
+    test_reports_page.py` confirming both new defaults render correctly
+    (`Success metric` reads "Fish per Hour (rate)"; `Time segments` reads
+    `["Dawn", "Morning"]`) - both against the page's actual default state,
+    not just the picker's option list. Full suite `pytest tests/ -q` - 592
+    passed (590 + 2). Full-page `AppTest` smoke pass across every other
+    page - clean. Verified via a fresh `git clone` into a new temp
+    directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

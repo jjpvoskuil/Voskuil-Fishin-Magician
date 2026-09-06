@@ -1052,12 +1052,15 @@ success, flexibly over any date range, with a chart and an Excel export. Pick a 
 time segment, season, sky condition, wind band/direction, precipitation, water temp band,
 water temp custom range, pressure trend, moon illumination % the night before, reported
 fish/forage activity, angler, day of week, or date daily/weekly) and a **success metric**
-(total fish caught, fish per hour, biggest fish, or # trips), then narrow it down with an
-optional species filter
+(total fish caught, fish per hour, biggest fish, or # trips - defaults to **Fish per Hour**,
+see why below), then narrow it down with an optional species filter
 (only applies to the two metrics computed per-catch - disabled, with a tooltip, for the two
 that are inherently per-trip, mirroring Leaderboard's own disabled-when-not-applicable
-pattern), a date range, an angler multiselect, and a time-segment multiselect. Date-based
-factors draw as a line chart over time; everything else draws as a bar chart. A factor with
+pattern), a date range, an angler multiselect, and a time-segment multiselect (defaults to
+**Dawn + Morning** - real logged trip history is heavily lopsided toward those two right now,
+so starting there gives a cleaner, more representative read than pooling in the handful of
+Midday/Dusk/Night trips too; still just a default, clear it to pool every segment together).
+Date-based factors draw as a line chart over time; everything else draws as a bar chart. A factor with
 a natural non-alphabetical order (time segment, water temp band, pressure trend, sky
 condition, wind band, moon illumination decile, day of week) always shows every listed
 value even at zero, so the chart's axis stays stable across different filter picks -
@@ -1103,6 +1106,16 @@ happened to get skunked read as a flat, misleading 0.0 on the chart, even when i
 produced real fish overall by the Total Fish Caught count sitting right next to it. Pooling
 means a bucket only reads as 0 if it genuinely caught nothing across every trustworthy hour
 logged under it.
+
+It's also the page's **default** metric, ahead of Total Fish Caught, for the same underlying
+reason: a plain sum keeps growing as more trips get logged under a bucket - a real "Steady"
+pressure-trend bucket with 121 logged trips sums to 261 total fish, which reads as an absurd
+number once the Predict section below echoes it straight back as "Predicted Total Fish
+Caught: 261 fish" (a real live report: "the numbers look really high"). The pooled rate
+doesn't inflate with n, just gets better-supported by it, so it's the one that stays
+sane-looking regardless of how much history is behind it - Total Fish Caught/# Trips are
+still there in the picker for exploring the historical chart above, where "here's the
+cumulative total logged so far" is a meaningful reading in its own right.
 
 **🔮 Predict a future day** (punch-list #92's predictive half) is a section at the bottom of
 the page: pick a date (shared by both predictors below) and get back a prediction for
