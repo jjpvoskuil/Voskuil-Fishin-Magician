@@ -1,10 +1,12 @@
 import json
+from datetime import date
 
 from core.daily_leaderboard import (
-    active_anglers, build_daily_activity, daily_awards, grand_total, leaderboard_table_rows,
+    active_anglers, build_daily_activity, build_period_activity, build_weekly_activity,
+    daily_awards, grand_total, leaderboard_table_rows, week_bounds,
 )
 
-TODAY = "2026-09-06"
+TODAY = "2026-09-06"  # a Sunday
 YESTERDAY = "2026-09-05"
 
 
@@ -242,3 +244,90 @@ def test_active_angler_with_zero_fish_contributes_no_table_rows():
     rows_out = leaderboard_table_rows(stats)
     anglers_in_table = {r["Angler"] for r in rows_out if r["Angler"] not in ("", "Subtotal", "All anglers - total")}
     assert anglers_in_table == {"Amy"}
+
+
+# --- week_bounds -------------------------------------------------------------------
+
+def test_week_bounds_sunday_is_the_start_of_its_own_week():
+    start, end = week_bounds(date(2026, 9, 6))  # a Sunday
+    assert start == date(2026, 9, 6)
+    assert end == date(2026, 9, 12)  # the following Saturday
+
+
+def test_week_bounds_saturday_is_the_end_of_its_own_week():
+    start, end = week_bounds(date(2026, 9, 12))  # a Saturday
+    assert start == date(2026, 9, 6)
+    assert end == date(2026, 9, 12)
+
+
+def test_week_bounds_mid_week_day():
+    start, end = week_bounds(date(2026, 9, 9))  # a Wednesday
+    assert start == date(2026, 9, 6)
+    assert end == date(2026, 9, 12)
+
+
+def test_week_bounds_spans_a_month_boundary():
+    start, end = week_bounds(date(2026, 10, 1))  # a Thursday
+    assert start == date(2026, 9, 27)  # the prior Sunday, in September
+    assert end == date(2026, 10, 3)
+
+
+# --- build_period_activity / build_weekly_activity ----------------------------------
+
+def test_period_activity_includes_rows_anywhere_in_an_inclusive_range():
+    rows = [
+        _row("Amy", trip_date="2026-09-06", session_end_time="x", fish=[_fish("Bass", 2.0)]),
+        _row("Amy", trip_date="2026-09-09", session_end_time="x", fish=[_fish("Bass", 1.0)]),
+        _row("Amy", trip_date="2026-09-12", session_end_time="x", fish=[_fish("Bass", 3.0)]),
+    ]
+    stats = build_period_activity(rows, "2026-09-06", "2026-09-12")
+    assert len(stats) == 1
+    assert stats[0].fish_count == 3
+    assert stats[0].total_weight_lb == 6.0
+
+
+def test_period_activity_excludes_rows_outside_the_range():
+    rows = [
+        _row("Amy", trip_date="2026-09-05", session_end_time="x", fish=[_fish("Bass", 2.0)]),  # Saturday before
+        _row("Amy", trip_date="2026-09-13", session_end_time="x", fish=[_fish("Bass", 3.0)]),  # Sunday after
+    ]
+    stats = build_period_activity(rows, "2026-09-06", "2026-09-12")
+    assert stats == []
+
+
+def test_weekly_activity_uses_sunday_start_week_containing_today():
+    rows = [
+        _row("Amy", trip_date="2026-09-06", session_end_time="x", fish=[_fish("Bass", 2.0)]),  # Sun (in week)
+        _row("Amy", trip_date="2026-09-12", session_end_time="x", fish=[_fish("Bass", 1.0)]),  # Sat (in week)
+        _row("Amy", trip_date="2026-09-05", session_end_time="x", fish=[_fish("Bass", 5.0)]),  # prior Sat (out)
+    ]
+    stats = build_weekly_activity(rows, date(2026, 9, 9))  # a Wednesday in that week
+    assert len(stats) == 1
+    assert stats[0].fish_count == 2
+    assert stats[0].total_weight_lb == 3.0
+
+
+def test_weekly_activity_still_includes_an_active_angler_with_no_catch_this_week():
+    rows = [_row("John", trip_date="2026-08-01", session_end_time=None)]  # open session, old date
+    stats = build_weekly_activity(rows, date(2026, 9, 9))
+    assert len(stats) == 1
+    assert stats[0].angler == "John"
+    assert stats[0].active is True
+    assert stats[0].fish_count == 0
+
+
+def test_weekly_awards_and_table_reuse_the_same_functions_as_daily():
+    rows = [
+        _row("Amy", trip_date="2026-09-06", session_end_time="x", fish=[_fish("Largemouth Bass", 5.0)]),
+        _row("Bob", trip_date="2026-09-10", session_end_time="x", fish=[_fish("Bluegill", 0.5, count=4)]),
+    ]
+    stats = build_weekly_activity(rows, date(2026, 9, 9))
+    awards = daily_awards(stats)
+    assert awards["top_angler_weight"].angler == "Amy"
+    assert awards["top_bag_count"].angler == "Bob"
+    total = grand_total(stats)
+    assert total == {"fish_count": 5, "total_weight_lb": 7.0}
+    table = leaderboard_table_rows(stats)
+    assert table[-1] == {
+        "Angler": "All anglers - total", "Species": "", "# Fish": 5, "Largest": "", "Total": "7 lb",
+    }

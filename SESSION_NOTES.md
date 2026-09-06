@@ -10581,6 +10581,66 @@ every real save.
     not a real data change. Verified via a fresh `git clone` into a new
     temp directory before pushing.
 
+158. **Punch-list #91 follow-up (same session): added an identical "This
+    Week" view alongside "Today's Activity," and put the biggest-fish
+    angler's name directly on that tile.** Two separate angler asks, both
+    handled in this entry:
+
+    - "lets also add the same categories, but for the week as well as the
+      day (week starting on the Sunday of every week)." Refactored
+      `core/daily_leaderboard.py`'s single-day builder into a general
+      `build_period_activity(rows, start_iso, end_iso)` (inclusive
+      trip_date range); `build_daily_activity()` is now a one-line wrapper
+      around it with `start_iso == end_iso`. Added `week_bounds(today)` -
+      `date.weekday()` is Monday=0..Sunday=6, so
+      `(weekday() + 1) % 7` gives days-since-the-most-recent-Sunday for any
+      day, letting the Sunday-start/Saturday-end week be computed with no
+      special-casing - and `build_weekly_activity(rows, today)`, a thin
+      wrapper around `build_period_activity()` scoped to that week.
+      `daily_awards()`, `grand_total()`, and `leaderboard_table_rows()`
+      needed NO changes at all - they only ever read the already-aggregated
+      `AnglerActivityStats` list (renamed from `AnglerDayStats` now that it
+      represents either period), so the exact same three functions render
+      both the day and the week section. `home.py` restructured around a
+      new `_render_activity_section(period_stats, period_word, reset_note)`
+      helper (avoids duplicating the roster/tiles/table rendering code
+      twice) and `st.tabs(["📅 Today", "🗓️ This Week"])` - the subheader
+      changed from "🎣 Today's Activity" to "🎣 Fishing Activity" since it
+      now covers both tabs. The "currently active" (🟢) part of the roster
+      is deliberately NOT re-scoped per period - `active_anglers()` already
+      checks all dates, since "is this angler out on the water right now"
+      doesn't depend on which period's tab you're looking at.
+
+    - "Lets also add the name of the angler for the biggest fish of the day
+      and week too" - the angler's name was already being computed
+      (`awards["biggest_fish"]["angler"]`) but only surfaced in the tile's
+      *hover* help text, unlike the other two tiles (String King/Z-Man),
+      which both show the angler's name directly in the metric's visible
+      value. Fixed by changing the Berkley tile's value from just the
+      weight to `f"{angler} ({weight})"`, matching the other two tiles'
+      own format exactly - hover help now shows just the species (the
+      angler's already visible without hovering).
+
+    **Verified:** 9 new tests in `tests/test_daily_leaderboard.py`
+    (`week_bounds()` for a Sunday/Saturday/mid-week day/a month-crossing
+    week; `build_period_activity()` including an inclusive range and
+    excluding rows outside it; `build_weekly_activity()` scoping to the
+    right Sunday-start week, still surfacing a zero-fish active angler, and
+    confirming `daily_awards()`/`grand_total()`/`leaderboard_table_rows()`
+    work identically against week-built stats). Full suite `pytest tests/
+    -q` - 527 passed (518 + 9 new). A scratch `AppTest` script (not
+    committed) drove `home.py` with one angler fishing only today and a
+    second fishing only on a different day in the same Sunday-start week -
+    confirmed the Today tab's "Biggest Fish" tile names the first angler,
+    the This Week tab's names the second (correctly combining both days),
+    and the biggest-fish tile's visible value includes the angler's name on
+    both tabs; also re-ran the empty-state check (no activity in either
+    period) and the full-page smoke pass across every other page. Same
+    `data/segment_score_freeze.csv` test-run side effect as entry 157 above
+    - caught and reverted with `git checkout --` before committing.
+    Verified via a fresh `git clone` into a new temp directory before
+    pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

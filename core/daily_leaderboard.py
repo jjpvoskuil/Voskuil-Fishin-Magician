@@ -1,32 +1,47 @@
 """
-Today's activity / daily leaderboard - punch-list #91.
+Today's/this week's activity + leaderboard - punch-list #91 (day view),
+extended (same day) to add an identical week view.
 
 Home page feature: "show fishing activity for any or all anglers that are
 currently logged in and/or posted a session," three "award" tiles for the
-day's biggest fish / top angler by total weight / top angler by fish count,
-and a detailed per-angler, per-species leaderboard table with subtotals and
-a grand total - all scoped to "today" (the lake's own local day, see
-core.weather.lake_today()) except the "currently active" roster check,
-which looks at open Spot Sessions across ALL dates (a session spanning a
-midnight rollover shouldn't vanish from the roster).
+period's biggest fish / top angler by total weight / top angler by fish
+count, and a detailed per-angler, per-species leaderboard table with
+subtotals and a grand total - originally scoped to just "today" (the
+lake's own local day, see core.weather.lake_today()), then extended to
+offer the identical set of categories for "this week" too, per the
+angler's own follow-up ask: "lets also add the same categories, but for
+the week as well as the day (week starting on the Sunday of every week)."
+The "currently active" roster check is the one thing that's never scoped
+to a period - it looks at open Spot Sessions across ALL dates (a session
+spanning a midnight rollover shouldn't vanish from the roster), for both
+the day and the week view.
+
+build_period_activity() is the one real builder - it takes an inclusive
+[start_iso, end_iso] trip_date range. build_daily_activity() and
+build_weekly_activity() are both thin, differently-scoped wrappers around
+it; daily_awards()/grand_total()/leaderboard_table_rows() below don't care
+which period built their input, so the exact same three functions render
+both the day and the week section on the Home page.
 
 Deliberately a separate, self-contained module rather than reusing/
 importing from pages/8_Leaderboard.py's private helpers - that page's
 _build_frames()/category builders are page-local, all-time, filterable
-rankings; this is a narrower "today only" activity summary with a very
-different shape (per-angler grouped table with subtotals, not a flat
-top-N). Some logic (fish-list parsing, count-aware weight math) is
+rankings; this is a narrower "today/this week only" activity summary with
+a very different shape (per-angler grouped table with subtotals, not a
+flat top-N). Some logic (fish-list parsing, count-aware weight math) is
 necessarily similar, but keeping them independent avoids any regression
 risk on the already-shipped Leaderboard page.
 
 No Streamlit import here on purpose - every function takes plain rows (as
-returned by core.appstate.get_trip_history()) and a plain `today_iso` date
-string, and returns plain dataclasses/dicts, so this can be unit tested
-without AppTest and reused anywhere "today's activity" is needed.
+returned by core.appstate.get_trip_history()) and plain date/string
+bounds, and returns plain dataclasses/dicts, so this can be unit tested
+without AppTest and reused anywhere "today's" or "this week's" activity is
+needed.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Optional
 
 from core.activity_log import format_weight_lb_oz
@@ -79,7 +94,11 @@ class SpeciesStats:
 
 
 @dataclass
-class AnglerDayStats:
+class AnglerActivityStats:
+    """Per-angler stats for whatever period built it (a single day, or a
+    Sunday-start week) - the period itself isn't tracked here, only the
+    aggregated numbers, since every renderer/award function below is
+    period-agnostic."""
     angler: str
     active: bool = False
     fish_count: int = 0
@@ -93,30 +112,35 @@ class AnglerDayStats:
         return sorted(self.species.values(), key=lambda s: (-s.count, s.species.lower()))
 
 
-def build_daily_activity(rows: list, today_iso: str) -> list:
-    """One AnglerDayStats per angler who is either active right now (open
-    session anywhere) or has logged at least one row today (trip_date ==
-    today_iso) - a combined "today's activity" roster per the angler's own
-    answer when asked what "currently logged in" should mean. Sorted
-    active-first, then by today's fish count descending, then name - also
-    per the angler's own answer on ordering.
+def build_period_activity(rows: list, start_iso: str, end_iso: str) -> list:
+    """One AnglerActivityStats per angler who is either active right now
+    (open session anywhere) or has logged at least one row with trip_date
+    in [start_iso, end_iso] inclusive - a combined "activity" roster per
+    the angler's own answer when asked what "currently logged in" should
+    mean. Sorted active-first, then by the period's fish count descending,
+    then name - also per the angler's own answer on ordering.
 
-    A currently-active angler with zero fish logged yet today still
-    appears (with fish_count 0) - "I'm out there right now" is itself
-    activity worth showing, even before the first catch."""
+    A currently-active angler with zero fish logged yet in this period
+    still appears (with fish_count 0) - "I'm out there right now" is
+    itself activity worth showing, even before the first catch.
+
+    build_daily_activity() and build_weekly_activity() below are both
+    thin wrappers around this with start_iso == end_iso (one day) or a
+    Sunday-through-Saturday week, respectively."""
     active = active_anglers(rows)
     stats: dict = {}
 
-    def _get(angler: str) -> AnglerDayStats:
+    def _get(angler: str) -> AnglerActivityStats:
         if angler not in stats:
-            stats[angler] = AnglerDayStats(angler=angler, active=angler in active)
+            stats[angler] = AnglerActivityStats(angler=angler, active=angler in active)
         return stats[angler]
 
     for a in active:
         _get(a)
 
     for row in rows:
-        if (row.get("trip_date") or "") != today_iso:
+        trip_date = row.get("trip_date") or ""
+        if not (start_iso <= trip_date <= end_iso):
             continue
         cond = parse_conditions(row)
         angler = (cond.get("angler") or "").strip()
@@ -174,14 +198,45 @@ def build_daily_activity(rows: list, today_iso: str) -> list:
     return sorted(stats.values(), key=lambda s: (not s.active, -s.fish_count, s.angler.lower()))
 
 
+def build_daily_activity(rows: list, today_iso: str) -> list:
+    """build_period_activity() scoped to a single day (today_iso as both
+    bounds) - see that function's docstring for the full behavior."""
+    return build_period_activity(rows, today_iso, today_iso)
+
+
+def week_bounds(today: date) -> tuple:
+    """The Sunday-start, Saturday-end calendar week (inclusive) containing
+    `today`, per the angler's own request: "week starting on the Sunday of
+    every week." date.weekday() is Monday=0..Sunday=6, so
+    (weekday() + 1) % 7 gives days-since-the-most-recent-Sunday for any
+    day (Sunday itself -> 0, Monday -> 1, ..., Saturday -> 6)."""
+    days_since_sunday = (today.weekday() + 1) % 7
+    start = today - timedelta(days=days_since_sunday)
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def build_weekly_activity(rows: list, today: date) -> list:
+    """build_period_activity() scoped to the Sunday-start calendar week
+    containing `today` (see week_bounds()) - same combined roster/sort
+    order as build_daily_activity(), just widened to a week of trip_dates
+    instead of one. `today` is a plain date object (pass core.weather.
+    lake_today()), not an isoformat string, since week_bounds() needs to
+    do real date arithmetic on it."""
+    start, end = week_bounds(today)
+    return build_period_activity(rows, start.isoformat(), end.isoformat())
+
+
 def daily_awards(day_stats: list) -> dict:
-    """The three "of the day" tiles - Berkley Biggest Fish, String King Top
-    Angler (total weight), Z-Man Top Bag Limit Buster (total fish count) -
-    computed across every angler in day_stats who's actually logged a fish
-    today. Each value is None when nobody has (a fresh morning, or a
-    no-fish day) rather than crashing or showing a misleading zero
-    "winner." Ties break toward whichever angler sorts first in day_stats
-    (i.e. active anglers, then higher fish count, then name - the same
+    """The three "of the day/week" tiles - Berkley Biggest Fish, String
+    King Top Angler (total weight), Z-Man Top Bag Limit Buster (total fish
+    count) - computed across every angler in day_stats who's actually
+    logged a fish in this period (works identically whether day_stats came
+    from build_daily_activity() or build_weekly_activity()). Each value is
+    None when nobody has (a fresh morning, or a no-fish day/week) rather
+    than crashing or showing a misleading zero "winner." Ties break toward
+    whichever angler sorts first in day_stats (i.e. active anglers, then
+    higher fish count, then name - the same
     roster order shown everywhere else on this section)."""
     with_fish = [s for s in day_stats if s.fish_count > 0]
     biggest_fish = None
@@ -202,7 +257,7 @@ def daily_awards(day_stats: list) -> dict:
 def grand_total(day_stats: list) -> dict:
     """Total fish and total weight across every angler and every species,
     for the leaderboard table's closing "totals for all anglers so far on
-    the day" row."""
+    the day/week" row."""
     return {
         "fish_count": sum(s.fish_count for s in day_stats),
         "total_weight_lb": sum(s.total_weight_lb for s in day_stats),
