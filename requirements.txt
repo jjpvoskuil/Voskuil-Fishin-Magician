@@ -1,4 +1,9 @@
-streamlit>=1.36
+streamlit>=1.56
+# 1.56.0 (Mar 2026) is the floor here specifically because that's the
+# release that added st.selectbox's filter_mode parameter - punch-list #90
+# (pages/6_Spot_Session.py's "Add fish" weight/length dropdowns) relies on
+# filter_mode=None to disable the hidden search box that was popping a
+# phone's on-screen keyboard over the option list.
 # Pinned below 1.4.0: starlette 1.4.0 added a required thread_minimum_size
 # kwarg to its internal GZipResponder that streamlit's vendored gzip wrapper
 # (streamlit/web/server/starlette/starlette_gzip_middleware.py) doesn't pass,

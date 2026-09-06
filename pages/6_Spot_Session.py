@@ -1393,17 +1393,37 @@ def _weight_input(key_prefix: str) -> float:
     than dragging a slider handle. Defaults to 0 lb 8 oz (0.5 lb) - the
     same starting point the old slider's own default position
     represented, so a fish left untouched here still gets a sane
-    placeholder rather than truly zero."""
+    placeholder rather than truly zero.
+
+    Punch-list #90: `filter_mode=None` on both dropdowns - a plain
+    `st.selectbox` always renders a "type to search" text box at the top
+    of its option list (its default `filter_mode="fuzzy"`), and on a
+    phone, tapping that box to open the dropdown focuses that hidden text
+    field too, popping the on-screen keyboard - which then covers the
+    option list right below it, exactly the reported "keyboard blocks the
+    dropdown, can't get to it to pick" symptom. `filter_mode=None`
+    disables that search box entirely (per Streamlit's own docs: "typing
+    is disabled and the options are not filtered"), leaving a pure
+    tap-to-open/tap-to-pick list with no text input to steal focus - a
+    real fix, not a workaround, and it's exactly the "not a manual key-in
+    field" the angler asked for. Needs Streamlit's `filter_mode` selectbox
+    parameter (confirmed present in 1.63.0, the version this sandbox
+    installs from this repo's own `streamlit>=1.36` pin - not otherwise
+    version-gated here, since this app has never pinned an exact upper
+    version and Streamlit Cloud installs whatever's current at deploy
+    time)."""
     lb_key = f"{key_prefix}_lb"
     oz_key = f"{key_prefix}_oz"
     lcol, ocol = st.columns(2)
     lb_choice = lcol.selectbox(
         "Weight - lb", WEIGHT_LB_OPTIONS, index=0, key=lb_key,
         format_func=lambda v: f"{v} lb",
+        filter_mode=None,
     )
     oz_choice = ocol.selectbox(
         "oz", WEIGHT_OZ_OPTIONS, index=8, key=oz_key,
         format_func=lambda v: f"{v} oz",
+        filter_mode=None,
     )
     return weight_lb_for_dropdown(lb_choice, oz_choice)
 
@@ -1418,11 +1438,17 @@ def _length_input(key_prefix: str) -> float:
     point every time, reported as "the length always reverts to 12.""
     Defaults to 12 in here too (an angler's own explicit preference, and
     the single most common size range at this lake) - the difference is
-    that changing it is now one dropdown tap instead of a fiddly drag."""
+    that changing it is now one dropdown tap instead of a fiddly drag.
+
+    Punch-list #90: `filter_mode=None` here too - see `_weight_input()`'s
+    docstring above for why (disables the hidden "type to search" text
+    box that was popping a phone's on-screen keyboard over the option
+    list)."""
     length_key = f"{key_prefix}_len"
     choice = st.selectbox(
         "Length (in)", LENGTH_OPTIONS, index=LENGTH_OPTIONS.index(12), key=length_key,
         format_func=lambda v: "Under 12 in" if v == "<12" else ("26+ in" if v == "26+" else f"{v} in"),
+        filter_mode=None,
     )
     return length_in_for_dropdown(choice)
 

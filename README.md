@@ -839,9 +839,23 @@ manually readjusted from a 12"-equivalent starting point for every single
 fish. Replaced with plain dropdowns: "Weight - lb" (0-10, plus a "10+" option
 for a true outlier) and "oz" (0-15) side by side, defaulting to 0 lb 8 oz; a
 single "Length (in)" dropdown (a "Under 12 in" catch-all, 12-26 in one-inch
-steps, a "26+ in" catch-all), defaulting to 12 in. A dropdown opens your
-phone's native picker wheel - tap once, scroll, tap again - instead of
-dragging a slider handle to aim at a precise position.
+steps, a "26+ in" catch-all), defaulting to 12 in. Tap once, scroll the
+option list, tap again - instead of dragging a slider handle to aim at a
+precise position.
+
+**...but on a phone, tapping one of those dropdowns was popping the
+keyboard up over the option list (punch-list #90).** A plain
+`st.selectbox` always renders a hidden "type to search" text box at the
+top of its option list (its default `filter_mode="fuzzy"`) - on a phone,
+tapping the dropdown to open it also focuses that search box, which pops
+the on-screen keyboard, and the keyboard then covers the very options
+list you just opened it to pick from. All three "Log a fish" dropdowns
+(Weight - lb, oz, Length) now pass `filter_mode=None`, which Streamlit
+documents as disabling typing/filtering entirely - no search box, nothing
+to focus, no keyboard, just a pure tap-to-open/tap-to-pick list. This
+needs Streamlit 1.56+ (`requirements.txt`'s floor was raised from `>=1.36`
+to `>=1.56` for exactly this), the release that added the `filter_mode`
+parameter.
 
 **Adding a lure while building a session now confirms itself with a popup, instead of
 requiring a scroll down to check (punch-list #87).** Angler's own ask, verbatim: "each
