@@ -251,49 +251,54 @@ def render_line_chart(col, series, y_domain: tuple | None = None):
     col.altair_chart(chart, width="stretch")
 
 
-def render_moon_phase_rate_chart(col, phase_rates: dict, x_order: list):
-    """Renders `core.calibration.moon_phase_time_of_day_rates()`'s output as
-    a grouped bar chart: moon phase (all 8 names, in `x_order` - the real
-    lunar cycle order, not alphabetical) on the X axis, one bar per
-    time-of-day group ("Dawn + Morning" vs. "Rest of day") side by side
-    within each phase, median fish/hour on the Y axis. A phase/group with no
-    logged trips yet just renders no bar (Altair drops null Y values) rather
-    than a misleading zero-height bar, since "no data" and "confirmed zero
-    catch rate" are very different claims.
+def render_moon_illumination_dawn_chart(col, day_rates: list):
+    """Renders `core.calibration.moon_illumination_dawn_rates()`'s output
+    (punch-list #89, revised) as a single-series bar chart: one bar per day
+    of the lunar cycle (0 = new moon, ~15 = full moon, 0-29), in cycle
+    order, median Dawn+Morning fish/hour on the Y axis. A day with no
+    logged trips yet just renders no bar (Altair drops null Y values)
+    rather than a misleading zero-height bar - "no data" and "confirmed
+    zero catch rate" are very different claims, and with only ~54
+    Dawn+Morning trips spread across 30 days that gap is the common case
+    right now, not the exception.
 
-    Two series need a legend so time-of-day identity is never color-alone
-    (this app has no custom palette anywhere else, so this leans on
-    Streamlit/Altair's own default categorical theme rather than picking
-    colors by hand), and every bar carries a tooltip with the exact median
-    and sample size `n` so the angler can judge a thin-sample phase (right
-    now several phases have zero logged trips - see the caption this chart
-    ships alongside in home.py) rather than the chart silently implying
-    every phase is equally trustworthy."""
+    Only one series, so no legend/color-identity concerns (that's exactly
+    why the earlier by-phase version's "Dawn + Morning vs. rest of day"
+    grouping was dropped here - Dawn+Morning is the one series with real
+    data, per the angler's own steer). The X axis tick label shows each
+    day's actual % moon illumination (see
+    calibration.py's _illumination_pct_for_age()) alongside its day
+    number so the two days on opposite sides of full/new moon that happen
+    to share a similar % (e.g. day 7 waxing vs. day 22 waning) still read
+    as distinct bars in the right chronological order, not one merged
+    category - every bar's tooltip repeats the exact % plus the sample
+    size `n` so a thin day isn't visually indistinguishable from a
+    well-supported one."""
     import altair as alt
 
-    rows = []
-    labels = {"morning": "Dawn + Morning", "rest_of_day": "Rest of day"}
-    for phase, sides in phase_rates.items():
-        for side, stats in sides.items():
-            rows.append({
-                "phase": phase,
-                "group": labels[side],
-                "median_rate": stats["median"],
-                "n": stats["n"],
-            })
+    rows = [
+        {
+            "day_of_cycle": d["day_of_cycle"],
+            "label": f"Day {d['day_of_cycle']} ({d['illumination_pct']:.0f}%)",
+            "illumination_pct": d["illumination_pct"],
+            "median_rate": d["median"],
+            "n": d["n"],
+        }
+        for d in day_rates
+    ]
     df = pd.DataFrame(rows)
+    x_order = [r["label"] for r in rows]
 
     chart = (
         alt.Chart(df)
         .mark_bar()
         .encode(
-            x=alt.X("phase:N", sort=x_order, title=None, axis=alt.Axis(labelAngle=-30)),
-            xOffset=alt.XOffset("group:N", sort=list(labels.values())),
-            y=alt.Y("median_rate:Q", title="Median fish/hour"),
-            color=alt.Color("group:N", title=None, sort=list(labels.values())),
+            x=alt.X("label:N", sort=x_order, title="Day of lunar cycle (% moon illumination)",
+                    axis=alt.Axis(labelAngle=-60)),
+            y=alt.Y("median_rate:Q", title="Median fish/hour (Dawn + Morning)"),
             tooltip=[
-                alt.Tooltip("phase:N", title="Moon phase"),
-                alt.Tooltip("group:N", title="Time of day"),
+                alt.Tooltip("day_of_cycle:Q", title="Day of cycle"),
+                alt.Tooltip("illumination_pct:Q", title="Moon illumination", format=".0f"),
                 alt.Tooltip("median_rate:Q", title="Median fish/hour", format=".2f"),
                 alt.Tooltip("n:Q", title="Trips logged"),
             ],

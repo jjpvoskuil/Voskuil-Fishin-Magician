@@ -40,21 +40,16 @@ in the live data: 17 fish logged in a 1-hour window) can't single-handedly
 swing a whole factor's calibration.
 """
 from __future__ import annotations
+import math
 import statistics
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
+from datetime import time as dtime
 from typing import Optional
 
-from .astro import PHASE_NAMES
+from .astro import SYNODIC_MONTH, moon_phase
 from .scoring import DEFAULT_WEIGHTS
 from .storage import parse_conditions
-
-# The 8 unique phase names in natural cycle order (astro.PHASE_NAMES is a
-# list of (lo, hi, name) fraction windows with "New Moon" appearing twice -
-# once at the very start of the cycle and once at the very end wrapping
-# back around - so dict.fromkeys() dedups that repeat while keeping every
-# other name's first-seen (i.e. chronological) position).
-MOON_PHASE_ORDER = list(dict.fromkeys(name for _, _, name in PHASE_NAMES))
 
 MIN_SAMPLES_PER_SIDE = 4
 MAX_NUDGE_FRACTION = 0.35  # never move a weight more than 35% from default
@@ -230,50 +225,83 @@ def location_adjustments(trip_rows: list) -> dict:
 # time-of-day instead of repeating that same whole-day comparison).
 MORNING_SEGMENTS = ("Dawn", "Morning")
 
+# int(SYNODIC_MONTH) + 1 = 30 whole-day buckets (age_days runs 0 up to just
+# under 29.53, so int(age_days) is always 0-29) - one bucket per day of the
+# lunar cycle, replacing the earlier 8-named-phase version per the angler's
+# own follow-up ("let's look at each day of the lunar cycle" - finer detail
+# than 8 buckets, and every day gets its own real illumination % instead of
+# a shared phase label).
+DAYS_IN_LUNAR_CYCLE = int(SYNODIC_MONTH) + 1
 
-def moon_phase_time_of_day_rates(trip_rows: list) -> dict:
-    """Median fish-per-hour by moon phase, split into Dawn+Morning trips vs.
-    every other time-of-day segment ("rest of day") - built so the angler
-    can look at their own logged data next to the hypothesis above, not to
-    itself decide anything. This is NOT wired into scoring - core/scoring.py
-    still applies its moon-phase bonus/penalty uniformly across every
-    segment; adding a real per-segment-per-phase scoring interaction is a
-    separate, not-yet-made decision.
 
-    Returns {phase_name: {"morning": {"median": float|None, "n": int},
-    "rest_of_day": {"median": float|None, "n": int}}} for all 8 phase names
-    in natural cycle order (MOON_PHASE_ORDER above), including phases with
-    zero logged trips yet - a caller should treat "n": 0 as "no data yet",
-    not "confirmed no difference," same convention as location_adjustments()
-    above. Uses the same trustworthy-duration fish-per-hour metric
-    (trip_fish_per_hour()) and median-not-mean choice as the rest of this
-    module, for the same outlier-resistance reasons documented at the top of
-    this file - but deliberately does NOT gate on MIN_SAMPLES_PER_SIDE the
-    way calibrate_weights()/location_adjustments() do, since this is an
+def _illumination_pct_for_age(age_days: float) -> float:
+    """The exact illumination-% formula astro.moon_phase() uses internally
+    (0% at new moon, 100% at full moon), applied directly to a whole day-of-
+    cycle number rather than averaged across whatever few real trips happen
+    to land in that bucket - so every bucket's label is a fixed, reproducible
+    number, not a noisy sample statistic."""
+    fraction = age_days / SYNODIC_MONTH
+    return (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
+
+
+def moon_illumination_dawn_rates(trip_rows: list) -> list:
+    """Median fish-per-hour for Dawn+Morning trips ONLY (punch-list #89,
+    revised after the angler saw the first version: dropped the "rest of
+    day" comparison - Dawn+Morning is where the large majority of this
+    lake's logged trips actually are, so that's the one series worth
+    trusting right now), bucketed by whole day of the lunar cycle (0 = new
+    moon, ~15 = full moon, 0-29) rather than the 8 named phases the first
+    version used.
+
+    Each bucket's moon state is recomputed fresh at 18:00 the evening
+    BEFORE trip_date, not read from conditions_json's already-logged
+    moon_phase (which core/scoring.py computes at 18:00 on trip_date
+    itself - the UPCOMING night, appropriate for an evening/night
+    forecast, but a full calendar day too late for a Dawn/Morning session
+    that already happened THAT SAME morning, before that night arrives).
+    Getting this right matters specifically for this chart, since the
+    whole point is checking whether the moonlight that was actually out
+    overnight - not tomorrow night - lines up with a quieter or busier
+    morning bite.
+
+    Returns a list of 30 dicts, one per day 0-29 in cycle order:
+    {"day_of_cycle": int, "illumination_pct": float (0-100, see
+    _illumination_pct_for_age() above), "median": float|None, "n": int}.
+    Every day appears even with zero logged trips (real state right now:
+    most of the 30 buckets are thin or empty - only ~54 Dawn+Morning trips
+    exist in total, spread across a whole lunar cycle) - a caller should
+    treat "n": 0 as "no data yet," not "confirmed no difference," same
+    convention as location_adjustments()/the original moon-phase version
+    above. Deliberately does NOT gate on MIN_SAMPLES_PER_SIDE - this is an
     exploratory chart the angler is meant to eyeball sample sizes on
-    directly (real "n" per phase can currently be as low as 0 - no Full
-    Moon, Waning Gibbous, or Last Quarter trips have been logged yet), not a
-    scoring input that needs a trust threshold before it's allowed to move
-    anything."""
-    buckets = {phase: {"morning": [], "rest_of_day": []} for phase in MOON_PHASE_ORDER}
+    directly, not a scoring input."""
+    buckets = {d: [] for d in range(DAYS_IN_LUNAR_CYCLE)}
     for row in trip_rows:
+        if row.get("segment") not in MORNING_SEGMENTS:
+            continue
         rate = trip_fish_per_hour(row)
         if rate is None:
             continue
-        conditions = parse_conditions(row)
-        phase = conditions.get("moon_phase")
-        if phase not in buckets:
-            continue  # missing/unrecognized phase (e.g. logged before this field existed)
-        side = "morning" if row.get("segment") in MORNING_SEGMENTS else "rest_of_day"
-        buckets[phase][side].append(rate)
+        trip_date_str = row.get("trip_date")
+        if not trip_date_str:
+            continue
+        try:
+            trip_date = datetime.strptime(trip_date_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        night_before = datetime.combine(trip_date - timedelta(days=1), dtime(18, 0))
+        day_of_cycle = int(moon_phase(night_before).age_days)
+        buckets.setdefault(day_of_cycle, []).append(rate)
 
-    return {
-        phase: {
-            side: {"median": statistics.median(rates) if rates else None, "n": len(rates)}
-            for side, rates in sides.items()
+    return [
+        {
+            "day_of_cycle": d,
+            "illumination_pct": round(_illumination_pct_for_age(d), 1),
+            "median": statistics.median(rates) if rates else None,
+            "n": len(rates),
         }
-        for phase, sides in buckets.items()
-    }
+        for d, rates in sorted(buckets.items())
+    ]
 
 
 def calibration_summary(trip_rows: list) -> dict:
