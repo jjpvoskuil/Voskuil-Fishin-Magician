@@ -40,3 +40,8 @@ scipy>=1.11
 # secrets - the import is wrapped in a try/except there either way, so a
 # missing/outdated version here just disables that one feature, not the app.
 anthropic>=0.40
+# Reports page (punch-list #92) writes its "Export to Excel" download
+# button's workbook via pd.ExcelWriter(engine="openpyxl") - pandas doesn't
+# ship an .xlsx writer itself, it just delegates to whichever engine is
+# installed.
+openpyxl>=3.1

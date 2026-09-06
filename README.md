@@ -1042,6 +1042,47 @@ syncs from GitHub once at boot, and the trip cache itself is separately held for
 minutes - press it if you know a trip was saved (here, on Trip History, or from a Spot
 Session elsewhere) but the rankings still look stale.
 
+## Reports (punch-list #92, first pass)
+
+A dynamic, "pick any two things and see how they line up" analysis page (`pages/9_Reports.py`,
+`core/reports.py`) - the first-pass framework for the angler's own ask: run correlations
+between session parameters/weather/moon illumination/location/lure/color/etc. and fishing
+success, flexibly over any date range, with a chart and an Excel export. Pick a **factor**
+(21 choices - spot, structure type, water clarity, lure, lure category, color, technique,
+time segment, season, sky condition, wind band/direction, precipitation, water temp band,
+pressure trend, moon illumination % the night before, reported fish/forage activity,
+angler, day of week, or date daily/weekly) and a **success metric** (total fish caught, fish
+per hour, biggest fish, or # trips), then narrow it down with an optional species filter
+(only applies to the two metrics computed per-catch - disabled, with a tooltip, for the two
+that are inherently per-trip, mirroring Leaderboard's own disabled-when-not-applicable
+pattern), a date range, an angler multiselect, and a time-segment multiselect. Date-based
+factors draw as a line chart over time; everything else draws as a bar chart. A factor with
+a natural non-alphabetical order (time segment, water temp band, pressure trend, sky
+condition, wind band, moon illumination decile, day of week) always shows every listed
+value even at zero, so the chart's axis stays stable across different filter picks -
+matching the "a real zero, not just an omission" convention `core.calibration`'s own charts
+already use. The **"⬇️ Export to Excel"** button downloads a two-sheet workbook: the
+aggregated report exactly as shown, plus the underlying filtered raw trip rows, for further
+analysis outside the app.
+
+Moon illumination is a genuinely continuous value with no existing band table elsewhere in
+this app, so it's binned into fixed 10-point deciles (0-10%, 10-20%, ... 90-100%) computed
+from `core.astro.moon_phase()` for 6pm the evening *before* the trip date - the moon that
+was actually out overnight before that day's fishing, not the trip day's own phase.
+Everything else reuses this app's existing categorical vocabulary and classifiers directly
+(wind bands, sky conditions, water-temp bands, season staging) rather than reinventing
+binning logic for factors that are already plain categorical strings in the conditions
+dict. Read entirely from `data/trip_log.csv` (same cached `get_trip_history()` every other
+page uses, with its own **"🔄 Refresh from GitHub"** button for the same staleness reasons
+Leaderboard's copy exists) - this page never writes anything.
+
+**Deliberately out of scope for this first pass:** the predictive half of the original ask
+("predict success in future days given forecasted parameters and/or known moon
+illumination"). The angler's own framing going in was "let's get the basic framework
+together today... I am sure this will iterate out a lot" - this pass is the descriptive/
+correlational half only (what's worked), flagged as such in a caption right on the page.
+Punch-list #92 stays open pending that next iteration.
+
 ## Tackle Box (lure inventory)
 
 The **Tackle Box** page (`pages/5_Lure_Inventory.py`) is a tackle inventory tracker
@@ -1777,6 +1818,8 @@ pages/ (sidebar order set by app.py's st.navigation list, not these numeric
                          way to log one) + per-trip details + calibration status
   8_Leaderboard.py        Ranks trip history different ways - biggest/longest fish,
                          most fish by lure/spot/angler/day, best fish-per-use rates
+  9_Reports.py            Dynamic factor-vs-success-metric correlation/analysis page,
+                         with a chart and Excel export (punch-list #92, first pass)
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
   7_Development.py        Punch list of app adjustments/fixes to track between sessions
 core/
@@ -1835,6 +1878,15 @@ core/
   anglers.py                "Who's fishing" roster read/add + git commit-back
                            (data/anglers.csv) - punch-list #26's lightweight
                            multi-user support, used by the Spot Session picker
+  reports.py                Reports page's data/aggregation layer (punch-list #92) -
+                           builds a per-trip/per-catch factor table (every session
+                           parameter/weather/moon/location/lure factor as a plain
+                           column) and one generic compute_report() that groups any
+                           success metric by any factor, over any filter set;
+                           Streamlit-free and unit tested on its own, kept
+                           independent from pages/8_Leaderboard.py's own frame
+                           builder for the same regression-risk reason as
+                           daily_leaderboard.py above
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)
