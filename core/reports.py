@@ -45,12 +45,13 @@ page caption for how that's flagged to the angler.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from datetime import time as dtime
 from typing import Optional
 
 import pandas as pd
 
 from core.astro import moon_phase
-from core.calibration import trip_fish_per_hour
+from core.calibration import trip_fish_per_hour, MIN_TRUSTED_SESSION_HOURS, MAX_TRUSTED_SESSION_HOURS
 from core.daily_leaderboard import week_bounds
 from core.lures import LURE_PROFILES
 from core.onwater import water_temp_band, WATER_TEMP_BANDS, LIGHT_CONDITIONS, WIND_BAND_LABELS
@@ -197,6 +198,62 @@ METRIC_OPTIONS = {
 SPECIES_FILTERABLE_METRICS = {"total_fish", "biggest_fish"}
 
 
+# --- Fish-per-hour: pooled (sum/sum), not a median-of-per-trip-rates ------------
+# Punch-list #92 follow-up (angler's live report: "if I pick sky condition and
+# total fish caught, there is something in every bucket, but if I do it as a
+# fish caught rate, only 3 buckets have a number... something is off").
+#
+# Root cause, confirmed against the real logged data: core.calibration's own
+# calibrate_weights()/location_adjustments() deliberately take the MEDIAN of
+# each trip's own fish-per-hour rate within a bucket (see that module's
+# docstring - a single wildly-productive-but-still-plausible outlier
+# shouldn't single-handedly swing a calibration nudge). This module originally
+# mirrored that same convention. But bass fishing produces plenty of
+# genuinely-skunked (0 fish, otherwise perfectly trustworthy) trips - real
+# live data checked directly: "Clear / Sunny" had 64 trustworthy trips
+# totalling 134 fish (a clearly productive condition, per Total Fish Caught),
+# yet its MEDIAN per-trip rate was exactly 0.0, because more than half of
+# those 64 individual trips happened to be skunked. Calibration only needs
+# one outlier-robust NUDGE direction, so that's fine there; a page whose
+# whole point is "compare success across conditions at a glance" is actively
+# misleading when a condition that clearly produces fish reads as a flat,
+# invisible-on-the-chart zero.
+#
+# Fixed by pooling instead: sum(fish caught) / sum(trustworthy hours) across
+# every trustworthy trip in the bucket - the standard "catch per unit
+# effort" framing (every logged hour counts toward the denominator, a
+# skunked-but-trustworthy trip included, not excluded) - rather than
+# averaging each trip's own already-noisy single-trip rate. A bucket only
+# reads as 0 now if it genuinely caught zero fish across every trustworthy
+# hour logged under it.
+#
+# _trustworthy_session_hours() duplicates trip_fish_per_hour()'s own
+# duration-parsing/plausibility-window check (see that function's docstring
+# for the full "why 5min-6hr" reasoning) rather than importing it, because a
+# skunked trip's real hours can't be recovered by dividing back out of its
+# own 0.0 rate (0 fish / hours = 0.0, and 0.0 doesn't tell you what the
+# hours were) - the pooled denominator genuinely needs the raw hours, not
+# just the rate. MIN/MAX_TRUSTED_SESSION_HOURS are imported (not
+# duplicated) so the plausibility window itself can't drift out of sync
+# with calibration's own.
+def _trustworthy_session_hours(row: dict) -> Optional[float]:
+    conditions = parse_conditions(row)
+    start = conditions.get("lure_start_time")
+    end = conditions.get("lure_end_time")
+    if not start or not end:
+        return None
+    try:
+        t0 = dtime.fromisoformat(start)
+        t1 = dtime.fromisoformat(end)
+    except (ValueError, TypeError):
+        return None
+    seconds = lambda t: t.hour * 3600 + t.minute * 60 + t.second + t.microsecond / 1e6
+    hours = (seconds(t1) - seconds(t0)) / 3600.0
+    if not (MIN_TRUSTED_SESSION_HOURS <= hours <= MAX_TRUSTED_SESSION_HOURS):
+        return None
+    return hours
+
+
 def _row_factors(row: dict) -> dict:
     """Every derived factor for one trip_log.csv row, computed once and
     shared by both trips_df and fish_df below so the two frames can never
@@ -241,10 +298,15 @@ def _row_factors(row: dict) -> dict:
 def build_reports_dataframe(rows: list) -> tuple:
     """Returns (trips_df, fish_df):
     - trips_df: one row per trip_log.csv row (one lure USE), with every
-      factor column above plus fish_caught (int) and fish_per_hour
-      (float|None, via core.calibration.trip_fish_per_hour() - already has
-      its own plausibility filter, see that function's docstring) and
-      biggest_fish_lb (float|None, that trip's own column).
+      factor column above plus fish_caught (int), fish_per_hour (float|None,
+      via core.calibration.trip_fish_per_hour() - already has its own
+      plausibility filter, see that function's docstring), trustworthy_hours
+      (float|None, this trip's own raw duration when that same plausibility
+      filter passes - see _trustworthy_session_hours() above; needed
+      alongside fish_per_hour so compute_report() can pool sum(fish caught)/
+      sum(hours) across a bucket instead of averaging each trip's own noisy
+      single-trip rate), and biggest_fish_lb (float|None, that trip's own
+      column).
     - fish_df: one row per individual fish caught (flattened out of each
       trip's conditions_json["fish"] list, same as
       pages/8_Leaderboard.py's own fish_df), carrying every factor column
@@ -290,6 +352,7 @@ def build_reports_dataframe(rows: list) -> tuple:
             **factors,
             "fish_caught": trip_fish_count,
             "fish_per_hour": trip_fish_per_hour(row),
+            "trustworthy_hours": _trustworthy_session_hours(row),
             "biggest_fish_lb": biggest,
         })
 
@@ -359,15 +422,35 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
 
     species: only applied for a SPECIES_FILTERABLE_METRICS metric; ignored
     (silently) for fish_per_hour/trip_count, since those are inherently
-    per-trip, not per-species."""
+    per-trip, not per-species.
+
+    fish_per_hour is a POOLED rate per bucket - sum(fish caught) /
+    sum(trustworthy hours) across every trustworthy trip in it ("catch per
+    unit effort," standard fisheries framing) - not an average of each
+    trip's own individual rate. See _trustworthy_session_hours()'s own
+    comment above for why: bass fishing produces plenty of genuinely
+    skunked (0 fish, otherwise trustworthy) trips, and averaging (mean OR
+    median) each trip's own rate lets a bucket where most trips happened to
+    get skunked read as a flat 0 even when it clearly produced real fish
+    overall - confirmed against live data (a condition with 64 trustworthy
+    trips totalling 134 fish still had a median per-trip rate of exactly
+    0.0). Pooling first means a bucket only reads as 0 if it genuinely
+    caught nothing across every trustworthy hour logged under it."""
     t_df = _apply_filters(trips_df, date_start, date_end, anglers, segments)
     f_df = _apply_filters(fish_df, date_start, date_end, anglers, segments)
     if species and species != "All species" and metric_key in SPECIES_FILTERABLE_METRICS and not f_df.empty:
         f_df = f_df[f_df["species"] == species]
 
     if metric_key == "fish_per_hour":
-        base = t_df.dropna(subset=["fish_per_hour"]) if not t_df.empty else t_df
-        agg = base.groupby(factor_col)["fish_per_hour"].agg(value="median", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+        base = t_df.dropna(subset=["trustworthy_hours"]) if not t_df.empty else t_df
+        if not base.empty:
+            agg = base.groupby(factor_col).agg(
+                _fish_sum=("fish_caught", "sum"), _hours_sum=("trustworthy_hours", "sum"), n=("trip_id", "count"),
+            ).reset_index()
+            agg["value"] = agg["_fish_sum"] / agg["_hours_sum"]
+            agg = agg[[factor_col, "value", "n"]]
+        else:
+            agg = pd.DataFrame(columns=[factor_col, "value", "n"])
     elif metric_key == "trip_count":
         agg = t_df.groupby(factor_col)["trip_id"].agg(n="count").reset_index() if not t_df.empty else pd.DataFrame(columns=[factor_col, "n"])
         if not agg.empty:

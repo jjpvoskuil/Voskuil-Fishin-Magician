@@ -165,16 +165,16 @@ def test_compute_report_total_fish_with_species_filter_uses_fish_df():
 
 # --- compute_report: fish_per_hour ---------------------------------------------
 
-def test_compute_report_fish_per_hour_uses_median_and_ignores_species():
+def test_compute_report_fish_per_hour_pools_across_trips_and_ignores_species():
     rows = [
         _row("t1", "2026-09-06", lure_category="lipless_crankbait", fish_caught=4,
-             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 4.0 fish/hr
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 4 fish / 1 hr
         _row("t2", "2026-09-06", lure_category="lipless_crankbait", fish_caught=2,
-             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 2.0 fish/hr
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 2 fish / 1 hr
     ]
     trips_df, fish_df = build_reports_dataframe(rows)
     report = compute_report(trips_df, fish_df, "lure_category", "fish_per_hour")
-    assert report.iloc[0]["value"] == 3.0  # median of [4.0, 2.0]
+    assert report.iloc[0]["value"] == 3.0  # pooled: (4 + 2) fish / (1 + 1) hours
     assert report.iloc[0]["n"] == 2
     # species is ignored for this metric - same result either way
     report_species = compute_report(trips_df, fish_df, "lure_category", "fish_per_hour", species="Largemouth Bass")
@@ -189,6 +189,28 @@ def test_compute_report_fish_per_hour_excludes_untrustworthy_rows():
     trips_df, fish_df = build_reports_dataframe(rows)
     report = compute_report(trips_df, fish_df, "lure_category", "fish_per_hour")
     assert report.empty
+
+
+def test_compute_report_fish_per_hour_pooling_survives_a_majority_of_skunked_trips():
+    # Regression guard for the angler's own live report: "if I pick sky
+    # condition and total fish caught, there is something in every bucket,
+    # but if I do it as a fish caught rate, only 3 buckets have a number" -
+    # a bucket where MOST trustworthy trips got skunked used to read as a
+    # flat, misleading 0.0 (the old median-of-per-trip-rates: median of
+    # [0, 0, 6] is 0), even though it clearly produced real fish overall.
+    # Pooling (sum fish / sum hours) must read as a real, nonzero rate here.
+    rows = [
+        _row("t1", "2026-09-06", lure_category="lipless_crankbait", fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1 hr
+        _row("t2", "2026-09-06", lure_category="lipless_crankbait", fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1 hr
+        _row("t3", "2026-09-06", lure_category="lipless_crankbait", fish_caught=6,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 6 fish, 1 hr
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(trips_df, fish_df, "lure_category", "fish_per_hour")
+    assert report.iloc[0]["value"] == 2.0  # pooled: 6 fish / 3 hours, not median([0, 0, 6]) == 0
+    assert report.iloc[0]["n"] == 3
 
 
 # --- compute_report: biggest_fish / trip_count ---------------------------------

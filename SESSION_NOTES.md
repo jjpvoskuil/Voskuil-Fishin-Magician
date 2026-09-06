@@ -10841,6 +10841,76 @@ every real save.
     `data/dev_tasks.csv` (not marked done) - this is the framework, with
     the predictive half still to come in a future iteration.
 
+161. **Punch-list #92 follow-up (same session): fixed a misleading "Fish per
+    Hour" rate on the Reports page.** Angler's live report, verbatim: "If I
+    pick sky condition and then total fish caught, there is something in
+    every bucket, but if I do it as a fish caught rate, only 3 buckets have
+    a number. Something is off with this."
+
+    Confirmed against the real logged data (pulled from the `data` branch
+    for this, not `main`'s own frozen snapshot, specifically to reproduce
+    against what the angler was actually looking at): "Sky Condition" x
+    "Total Fish Caught" showed all 5 real buckets with a value, but "Sky
+    Condition" x "Fish per Hour" showed exactly 0.0 for "Clear / Sunny" (64
+    trustworthy trips, 134 total fish - clearly a productive condition) and
+    "Mostly Clear" (16 trips, 32 fish), while the other 3 buckets showed a
+    real number - the exact "only 3 buckets" symptom reported. Root cause
+    was not a coding bug but a metric-choice one: `compute_report()`
+    computed fish-per-hour by taking the MEDIAN of each trip's own
+    individual fish/hour rate within a bucket, mirroring
+    `core.calibration.calibrate_weights()`'s own deliberate choice there (a
+    single wildly-productive-but-still-plausible outlier shouldn't swing a
+    calibration nudge - see that module's docstring). That reasoning holds
+    for calibration, which only needs one outlier-robust nudge direction,
+    but bass fishing produces plenty of genuinely-skunked (0 fish, otherwise
+    perfectly trustworthy-duration) trips, and averaging (median, and mean
+    would have the same failure mode to a lesser degree) each trip's own
+    rate lets a bucket where more than half its trips happened to get
+    skunked read as a flat, invisible-on-a-bar-chart 0.0 - even though it
+    obviously produced real fish overall by the Total Fish Caught count
+    sitting right next to it.
+
+    Fixed by pooling instead of averaging: `fish_per_hour` is now
+    sum(fish caught) / sum(trustworthy hours) across every trustworthy trip
+    in the bucket - the standard "catch per unit effort" framing in
+    fisheries science (every logged trustworthy hour counts toward the
+    denominator, a skunked-but-trustworthy trip included rather than
+    dropped or letting it drag a median to exactly zero). A bucket now
+    reads as 0 only if it genuinely caught nothing across every trustworthy
+    hour logged under it. New `core.reports._trustworthy_session_hours(row)`
+    duplicates `trip_fish_per_hour()`'s own duration-parsing/plausibility-
+    window check (5 minutes - 6 hours) rather than importing it, because a
+    skunked trip's real hours can't be recovered by dividing back out of
+    its own 0.0 rate (0 fish / hours = 0.0 either way) - the pooled
+    denominator genuinely needs the raw hours, not just the rate;
+    `MIN_TRUSTED_SESSION_HOURS`/`MAX_TRUSTED_SESSION_HOURS` are imported
+    from `core.calibration` (not duplicated as literals) so the
+    plausibility window itself can't drift out of sync with calibration's
+    own. `build_reports_dataframe()`'s `trips_df` gained a
+    `trustworthy_hours` column alongside `fish_per_hour` for this;
+    `compute_report()`'s `fish_per_hour` branch now groups on
+    `sum(fish_caught) / sum(trustworthy_hours)` instead of
+    `.agg(value="median")`. Verified the fix directly against the real
+    `data`-branch trip history before writing any code (`Clear / Sunny`
+    went from a flat 0.0 to a real 1.04 fish/hr; every one of the 5 real
+    buckets now shows a genuine rate) - re-ran the same check after the
+    fix via a scratch script and through the actual rendered page
+    (`AppTest`, mocking `get_trip_history()` with the real fetched rows)
+    to confirm the fix holds end-to-end, not just in the aggregation
+    function alone.
+
+    **Verified:** renamed/updated `tests/test_reports.py`'s existing
+    fish-per-hour test (its old "median of [4.0, 2.0]" comment no longer
+    described what the code does, though the assertion's numeric value
+    happened to still hold since both trips had equal 1-hour durations) and
+    added a new regression test,
+    `test_compute_report_fish_per_hour_pooling_survives_a_majority_of_
+    skunked_trips` (2 skunked 1-hour trips + 1 six-fish 1-hour trip: pooled
+    = 6 fish / 3 hours = 2.0, guarding specifically against a return to
+    `median([0, 0, 6]) == 0`). Full suite `pytest tests/ -q` - 559 passed
+    (558 + 1 new). Verified via a fresh `git clone` into a new temp
+    directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
