@@ -85,27 +85,6 @@ this repo that can override it on this hosting.
   on every single page load to be worth showing, and each tile's hover text always states the real
   survey date either way, plus a note when it's showing that cached fallback rather than a
   just-fetched reading.
-- **14-day trend charts** on the Home page ("📈 14-day trends", below "Today at a glance") - one
-  expander with every trend on this page, not split across separate dropdowns: activity score,
-  estimated water temp, and 24h pressure trend for the last 14 days (recomputed from the same
-  weather data already fetched for today - `core.weather.fetch_forecast()` requests
-  `HOME_TREND_CHART_PAST_DAYS` (14) days of real past weather alongside the forecast, so no extra
-  live calls are needed), a real USGS lake-level trend covering the same window, and the periodic
-  USACE water-quality survey - surface water temp, dissolved oxygen (mg/l), and DO saturation % -
-  charted on its own real-survey timeline rather than forced onto the 14-day window (since that
-  live USACE report only ever has the CURRENT reading, this app records its own local archive,
-  `data/water_quality_log.csv`, git-committed like the trip log, every time it fetches a fresh
-  survey, and charts it starting from the very first point - even a single real reading renders as
-  a genuine chart rather than a "not enough data yet" placeholder - filling in further as USACE
-  republishes, roughly every 1-2 weeks). `HOME_TREND_CHART_PAST_DAYS` is kept separate from
-  `WATER_TEMP_TREND_PAST_DAYS` (5, the water-temp estimate model's own tuned trailing-average
-  window - see `core/weather.py`) so changing one never silently retunes the other;
-  `fetch_forecast()` requests the larger of the two. The two °F charts (est. water temp, USACE
-  surface water temp) use a fixed 45-95°F Y-axis (`home.py`'s `TEMP_CHART_Y_DOMAIN`) instead of
-  auto-scaling, so a real but small swing doesn't fill the whole chart height and read as more
-  dramatic than it is - every other chart on this page still auto-scales. See
-  `core.ui.render_line_chart()` for how the fixed range is drawn (a raw `st.altair_chart()` with an
-  explicit `alt.Scale(domain=...)`, since plain `st.line_chart()` has no way to pin its Y axis).
 - **"🎣 Fishing Activity"** on the Home page (punch-list #91) - sits right under "Today at a
   glance" (the old intro paragraph/bullet list above it was removed to make room). Two tabs,
   **📅 Today** and **🗓️ This Week** (Sunday-Saturday, lake-local - added as a same-punch-list

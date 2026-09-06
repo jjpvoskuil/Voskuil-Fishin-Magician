@@ -11259,6 +11259,64 @@ every real save.
     page - clean. Verified via a fresh `git clone` into a new temp
     directory before pushing.
 
+166. **Removed the "📈 14-day trends" section from the Home page.** Angler's
+    ask, verbatim: "Lets kill the 14-day trend area of the 'Today' page."
+
+    This was the whole labeled section below "Today at a glance" -
+    everything inside its expander, not just the headline weather charts:
+    the activity-score/est.-water-temp/pressure-trend line charts (`score_
+    day()` recomputed for each of the last 14 days), the real USGS
+    lake-level trend, the periodic USACE water-quality charts (surface
+    temp, dissolved oxygen, DO saturation), the all-time moon-illumination-
+    vs-Dawn+Morning-catch-rate chart (bucketed by day of the lunar cycle),
+    and the "last 14 days" Dawn+Morning daily-catch chart nested under it -
+    all one labeled area on the page, so all of it came out together.
+    `home.py` shrank from 511 to 318 lines: the whole computation block
+    (trend_forecasts/lake_level_history/wq_log/moon_day_rates_all_time/
+    daily_catch_recent, none of it read anywhere else on the page) plus the
+    `st.expander(...)` rendering it, and every now-unused import that came
+    with it (`datetime.timedelta`; `core.appstate.get_lake_level_history`;
+    `core.weather.HOME_TREND_CHART_PAST_DAYS`; `core.calibration.
+    moon_illumination_dawn_rates`/`daily_dawn_morning_catch`; `core.ui.
+    render_line_chart`/`render_moon_illumination_dawn_chart`/`render_daily_
+    dawn_morning_catch_chart`) plus the now-dead `TEMP_CHART_Y_DOMAIN`
+    module constant that only fed those charts' fixed Y-axis.
+
+    Deliberately scoped to just this page section, nothing underneath it:
+    every core function the removed charts called (`core.calibration.
+    moon_illumination_dawn_rates()`/`daily_dawn_morning_catch()`, `core.ui.
+    render_line_chart()`/`render_moon_illumination_dawn_chart()`/`render_
+    daily_dawn_morning_catch_chart()`, `core.appstate.
+    get_lake_level_history()`) is untouched and still has its own real unit
+    test coverage (30 existing tests across `tests/test_calibration.py`/
+    `tests/test_ui.py`/`tests/test_lake_level.py`) - removed from this
+    page's rendering, not deleted as dead code, in case any of it gets
+    reused elsewhere later. Also deliberately left `core/weather.py`
+    completely alone: `HOME_TREND_CHART_PAST_DAYS` (14) still exists there
+    and still widens every `fetch_forecast()` call's `past_days` request
+    (`max(WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS)`) even
+    though `home.py` no longer imports the constant itself - that extra
+    real past-weather history sitting in the bundle is harmless, and other
+    features (e.g. the Reports page's own pressure-trend predictor, punch-
+    list #92) can still benefit from it. Retuning how far back `fetch_
+    forecast()` reaches was never asked for here and would be a separate,
+    considered call, not a side effect of removing one page's chart.
+
+    **Verified:** full suite `pytest tests/ -q` - unchanged at 592 passed
+    (no dedicated `AppTest` file exists for `home.py` itself - none of the
+    30 tests above target the page's own rendering, only the underlying
+    core functions, so nothing needed updating there); confirmed no
+    unused-import residue with a small `ast`-based scratch check of every
+    name `home.py` imports against every name it actually references.
+    Also rendered `home.py` directly through `AppTest` as a one-off check
+    (not a permanent test file, matching this page's existing lack of one):
+    no exception, zero `st.expander` elements left on the page, and
+    "Today at a glance"/"🎣 Fishing Activity" are the only two subheaders
+    now, confirming the trend section is fully gone rather than just
+    hidden. Full-page `AppTest` smoke pass across every other page -
+    clean. Verified via a fresh `git clone` into a new temp directory
+    before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

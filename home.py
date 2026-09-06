@@ -1,34 +1,21 @@
-from datetime import timedelta
-
 import pandas as pd
 import streamlit as st
 
 from core.appstate import (
-    get_weather_bundle, get_calibrated_weights, get_lake_level, get_lake_level_history,
+    get_weather_bundle, get_calibrated_weights, get_lake_level,
     get_surface_water_quality, get_water_quality_log, get_trip_history, github_token, repo_slug,
 )
 from core.scoring import score_day
-from core.weather import lake_today, HOME_TREND_CHART_PAST_DAYS
+from core.weather import lake_today
 from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
-from core.calibration import moon_illumination_dawn_rates, daily_dawn_morning_catch
 from core.daily_leaderboard import (
     build_daily_activity, build_weekly_activity, daily_awards, leaderboard_table_rows, week_bounds,
 )
 from core.activity_log import format_weight_lb_oz
-from core.ui import (
-    inject_mobile_css, inject_compact_metric_css, render_line_chart,
-    render_moon_illumination_dawn_chart, render_daily_dawn_morning_catch_chart,
-)
-
-# Punch-list #20: fixed Y-axis range (°F) for this page's temperature trend
-# charts (est. water temp, USACE surface water temp) - the real range
-# Nolin Lake's surface plausibly sees across a season, so a real but small
-# swing doesn't fill the whole chart height and read as more dramatic than
-# it is. See core.ui.render_line_chart() for how this is actually applied.
-TEMP_CHART_Y_DOMAIN = (45, 95)
+from core.ui import inject_mobile_css, inject_compact_metric_css
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
@@ -318,185 +305,6 @@ with _week_tab:
         f"Week of {week_start.strftime('%-m/%d')} - {week_end.strftime('%-m/%d')} (Sun-Sat, lake-local) - "
         "see the full, filterable, all-time rankings on the **Leaderboard** page.",
     )
-
-# Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,
-# now going back HOME_TREND_CHART_PAST_DAYS (14) days rather than 3.
-# score_day() works for any date the bundle covers, and fetch_forecast()
-# requests max(WATER_TEMP_TREND_PAST_DAYS, HOME_TREND_CHART_PAST_DAYS) days
-# of real past weather alongside the forecast - so the last 14 days
-# (today included) are already sitting in `bundle` with no extra fetch
-# needed for the first three charts below. Lake level's trend is a
-# separate live USGS request (fetch_lake_level_history()) since that's
-# real telemetry, not something derivable from the weather bundle.
-trend_forecasts = []
-if bundle is not None:
-    trend_days = [lake_today() - timedelta(days=i) for i in range(HOME_TREND_CHART_PAST_DAYS - 1, -1, -1)]
-    for d in trend_days:
-        try:
-            trend_forecasts.append(score_day(bundle, d, weights=weights))
-        except ValueError:
-            pass  # date fell outside the bundle's window - shouldn't normally
-            # happen given fetch_forecast()'s past_days request, but a chart
-            # with fewer points is a much better failure mode here than
-            # blowing up the whole page.
-
-lake_level_history = None
-try:
-    lake_level_history = get_lake_level_history(days=HOME_TREND_CHART_PAST_DAYS)
-except Exception:
-    pass
-
-# Punch-list #13: "for the data from the corp of engineers, let's do a
-# longer trend since that is update[d] less frequently." Unlike the charts
-# above, this can't just be computed from data already on hand - the live
-# USACE page has no history (see core/water_quality_log.py's docstring), so
-# this series is only ever as long as what's been locally recorded so far,
-# starting from whenever this feature first shipped and growing by roughly
-# one point every 1-2 weeks. Fetched independently of `bundle`/weather
-# status above - a weather-fetch failure shouldn't hide a USACE trend
-# that's otherwise available.
-wq_log = []
-try:
-    wq_log = get_water_quality_log()
-except Exception:
-    pass
-
-# Punch-list #89 (revised): "is there a study that moon phase shifts WHEN
-# fish feed, not just whether they feed at all" -
-# core.calibration.moon_illumination_dawn_rates() buckets the angler's own
-# logged Dawn+Morning trips by day of the lunar cycle (0-29) and labels
-# each day with its real % moon illumination the night before, so this can
-# be looked at directly against real data rather than only the (thin,
-# non-bass-specific) published literature - see the caption rendered
-# alongside the chart below for what was actually found. First version of
-# this chart split by moon phase name (8 buckets) x Dawn+Morning vs. rest
-# of day; the angler asked to drop the rest-of-day series (Dawn+Morning is
-# where almost all the real data is) and go day-by-day instead of by named
-# phase. A later follow-up asked for a second, "just the last 2 weeks"
-# chart alongside the all-time one - same HOME_TREND_CHART_PAST_DAYS window
-# every other chart on this page already uses, so "recent" means the same
-# thing everywhere on this page.
-#
-# The "recent" half was then REPLACED entirely (still punch-list #89): the
-# angler compared it against a real session (13 fish over ~3 hours) that
-# showed up as a lunar-cycle bucket reading 0.2 fish/hour, and correctly
-# diagnosed why - moon_illumination_dawn_rates() takes the MEDIAN of
-# per-lure-segment rates, and a session logged as many quick lure swaps
-# (several catching nothing in their own short window) gets dragged toward
-# zero even on a great outing, since per-segment session durations are
-# "dirtier data" than a simple fish count. daily_dawn_morning_catch() below
-# sidesteps that by aggregating raw fish caught per CALENDAR day instead of
-# any duration-based rate - see its own docstring in core/calibration.py.
-# The all-time chart above is untouched (same lunar-cycle-day median-rate
-# view as before) - only the recent window's chart changed. Independent
-# fetch from everything above (trip log, not weather/USACE), so a
-# weather-fetch failure shouldn't hide either chart.
-moon_day_rates_all_time = []
-daily_catch_recent = []
-try:
-    trip_history = get_trip_history()
-    moon_day_rates_all_time = moon_illumination_dawn_rates(trip_history)
-    # Named distinctly from the `today` ScoreResult above (this is a plain
-    # date) even though nothing later in this file still reads that one.
-    today_date = lake_today()
-    recent_cutoff = today_date - timedelta(days=HOME_TREND_CHART_PAST_DAYS - 1)
-    daily_catch_recent = daily_dawn_morning_catch(trip_history, since=recent_cutoff, until=today_date)
-except Exception:
-    pass
-
-# Punch-list #19: USACE's charts used to live in their own separate
-# expander below this one, and only showed as metric tiles (not an actual
-# chart) until a second real survey was logged. Folded into this same
-# "N-day trends" expander instead - one place for every trend on this page
-# - and now charted starting from the very first point: `st.line_chart()`
-# on a single-value Series just renders one dot, which reads fine sitting
-# alongside the fuller weather/lake-level charts rather than needing its
-# own "not enough data yet" special case. Each entry here is (caption,
-# pd.Series, y_domain) - USACE's own index is however many real surveys
-# have been logged (not the same 14-day window as the weather-derived
-# charts, and deliberately not forced onto it - see the note above).
-# y_domain is None for most charts (auto-scaled, as before) except the two
-# °F series - punch-list #20 pins those to TEMP_CHART_Y_DOMAIN so a real
-# but small swing (a degree or two) doesn't fill the whole chart height
-# and read as more dramatic than it is; see core.ui.render_line_chart()
-# for how the fixed scale is actually drawn.
-trend_items = []
-if len(trend_forecasts) >= 2:
-    trend_idx = [df.the_date.strftime("%a %-m/%d") for df in trend_forecasts]
-    trend_items.append(("Activity score", pd.Series([df.overall_score for df in trend_forecasts], index=trend_idx), None))
-    trend_items.append(("Est. water temp (°F)", pd.Series([df.water_temp_f for df in trend_forecasts], index=trend_idx), TEMP_CHART_Y_DOMAIN))
-    trend_items.append(("Pressure trend (24h, hPa)", pd.Series([df.pressure_trend_24h for df in trend_forecasts], index=trend_idx), None))
-if lake_level_history:
-    trend_items.append(("Lake level (ft)", pd.Series(
-        [lv.elevation_ft for lv in lake_level_history],
-        index=[lv.observed_at for lv in lake_level_history],
-    ), None))
-if wq_log:
-    wq_idx = [r["observed_at"].strftime("%-m/%d/%y") for r in wq_log]
-    trend_items.append(("USACE dissolved oxygen (mg/l)", pd.Series([r["do_mg_l"] for r in wq_log], index=wq_idx), None))
-    trend_items.append(("USACE DO saturation (%)", pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx), None))
-    trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx), TEMP_CHART_Y_DOMAIN))
-
-any_moon_day_data = any(d["n"] > 0 for d in moon_day_rates_all_time)
-any_daily_catch_recent = any(d["fish"] > 0 for d in daily_catch_recent)
-
-if trend_items or any_moon_day_data:
-    with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
-        for row_start in range(0, len(trend_items), 3):
-            row_items = trend_items[row_start:row_start + 3]
-            row_cols = st.columns(len(row_items))
-            for col, (caption, series, y_domain) in zip(row_cols, row_items):
-                col.caption(caption)
-                render_line_chart(col, series, y_domain)
-        caption_bits = []
-        if len(trend_forecasts) >= 2:
-            caption_bits.append(
-                f"Activity score, water temp, and pressure trend are recomputed from the same weather data "
-                f"as \"Today at a glance\" above, for the last {HOME_TREND_CHART_PAST_DAYS} days."
-            )
-        if lake_level_history:
-            caption_bits.append("Lake level is real USGS telemetry (readings every 15-60 min) for the same window.")
-        if wq_log:
-            caption_bits.append(
-                f"USACE readings ({len(wq_log)} logged so far, starting {wq_log[0]['observed_at'].strftime('%-m/%d/%Y')}) "
-                "are real periodic surveys, roughly every 1-2 weeks - not the same 14-day window as the "
-                "charts above, and never backfilled with guessed past readings, so this series just grows "
-                "one real point at a time."
-            )
-        if caption_bits:
-            st.caption(" ".join(caption_bits))
-
-        if any_moon_day_data:
-            if trend_items:
-                st.divider()
-            st.caption("Moon illumination vs. Dawn+Morning catch rate, by day of the lunar cycle (all logged trips)")
-            render_moon_illumination_dawn_chart(st, moon_day_rates_all_time)
-            days_with_data = sum(1 for d in moon_day_rates_all_time if d["n"] > 0)
-            st.caption(
-                "Some studies suggest a bright full moon lets bass feed more at night and less at dawn, "
-                "with the reverse near a new moon - though other research finds moon phase doesn't change "
-                "total daily catch rate, just possibly when fish bite. This chart checks that against your "
-                "own logged Dawn+Morning trips (the time of day with the most data by far), bucketed by day "
-                "of the lunar cycle and labeled with each day's real % moon illumination the night before - "
-                "it isn't wired into the activity score above yet. Right now this lake's log has data for "
-                f"only {days_with_data} of {len(moon_day_rates_all_time)} days in the cycle, so treat any thin bar "
-                "(hover for exact trip counts) as an early read, not a settled pattern."
-            )
-
-            if any_daily_catch_recent:
-                st.divider()
-                st.caption(f"Dawn+Morning fish caught by day, last {HOME_TREND_CHART_PAST_DAYS} days")
-                render_daily_dawn_morning_catch_chart(st, daily_catch_recent)
-                recent_days_with_data = sum(1 for d in daily_catch_recent if d["fish"] > 0)
-                st.caption(
-                    f"Raw fish caught per day (not a per-lure-hour rate) for the last "
-                    f"{HOME_TREND_CHART_PAST_DAYS} days, Dawn+Morning only, against moon illumination the "
-                    f"night before ({recent_days_with_data} of {len(daily_catch_recent)} days have a logged "
-                    "catch). A day's total session duration can be dirtier data than its fish count - several "
-                    "quick lure changes in one outing each log their own short window, and averaging those "
-                    "per-lure rates can make a genuinely good morning look weak - so this counts the whole "
-                    "day's catch directly instead."
-                )
 
 st.divider()
 if lake_level is None:
