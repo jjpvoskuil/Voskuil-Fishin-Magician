@@ -271,11 +271,19 @@ except Exception:
 # this chart split by moon phase name (8 buckets) x Dawn+Morning vs. rest
 # of day; the angler asked to drop the rest-of-day series (Dawn+Morning is
 # where almost all the real data is) and go day-by-day instead of by named
-# phase. Independent fetch from everything above (trip log, not
-# weather/USACE), so a weather-fetch failure shouldn't hide this chart.
-moon_day_rates = []
+# phase. A later follow-up asked for a second, "just the last 2 weeks"
+# chart alongside the all-time one - same HOME_TREND_CHART_PAST_DAYS window
+# every other chart on this page already uses, so "recent" means the same
+# thing everywhere on this page. Independent fetch from everything above
+# (trip log, not weather/USACE), so a weather-fetch failure shouldn't hide
+# either chart.
+moon_day_rates_all_time = []
+moon_day_rates_recent = []
 try:
-    moon_day_rates = moon_illumination_dawn_rates(get_trip_history())
+    trip_history = get_trip_history()
+    moon_day_rates_all_time = moon_illumination_dawn_rates(trip_history)
+    recent_cutoff = lake_today() - timedelta(days=HOME_TREND_CHART_PAST_DAYS - 1)
+    moon_day_rates_recent = moon_illumination_dawn_rates(trip_history, since=recent_cutoff)
 except Exception:
     pass
 
@@ -312,7 +320,8 @@ if wq_log:
     trend_items.append(("USACE DO saturation (%)", pd.Series([r["do_saturation_pct"] for r in wq_log], index=wq_idx), None))
     trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx), TEMP_CHART_Y_DOMAIN))
 
-any_moon_day_data = any(d["n"] > 0 for d in moon_day_rates)
+any_moon_day_data = any(d["n"] > 0 for d in moon_day_rates_all_time)
+any_moon_day_data_recent = any(d["n"] > 0 for d in moon_day_rates_recent)
 
 if trend_items or any_moon_day_data:
     with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
@@ -343,9 +352,9 @@ if trend_items or any_moon_day_data:
         if any_moon_day_data:
             if trend_items:
                 st.divider()
-            st.caption("Moon illumination vs. Dawn+Morning catch rate, by day of the lunar cycle")
-            render_moon_illumination_dawn_chart(st, moon_day_rates)
-            days_with_data = sum(1 for d in moon_day_rates if d["n"] > 0)
+            st.caption("Moon illumination vs. Dawn+Morning catch rate, by day of the lunar cycle (all logged trips)")
+            render_moon_illumination_dawn_chart(st, moon_day_rates_all_time)
+            days_with_data = sum(1 for d in moon_day_rates_all_time if d["n"] > 0)
             st.caption(
                 "Some studies suggest a bright full moon lets bass feed more at night and less at dawn, "
                 "with the reverse near a new moon - though other research finds moon phase doesn't change "
@@ -353,9 +362,22 @@ if trend_items or any_moon_day_data:
                 "own logged Dawn+Morning trips (the time of day with the most data by far), bucketed by day "
                 "of the lunar cycle and labeled with each day's real % moon illumination the night before - "
                 "it isn't wired into the activity score above yet. Right now this lake's log has data for "
-                f"only {days_with_data} of {len(moon_day_rates)} days in the cycle, so treat any thin bar "
+                f"only {days_with_data} of {len(moon_day_rates_all_time)} days in the cycle, so treat any thin bar "
                 "(hover for exact trip counts) as an early read, not a settled pattern."
             )
+
+            if any_moon_day_data_recent:
+                st.divider()
+                st.caption(f"Same chart, last {HOME_TREND_CHART_PAST_DAYS} days only")
+                render_moon_illumination_dawn_chart(st, moon_day_rates_recent)
+                recent_days_with_data = sum(1 for d in moon_day_rates_recent if d["n"] > 0)
+                st.caption(
+                    f"Only Dawn+Morning trips logged in the last {HOME_TREND_CHART_PAST_DAYS} days "
+                    f"({recent_days_with_data} of {len(moon_day_rates_recent)} lunar-cycle days have any) - "
+                    "useful for spotting whether a recent stretch is tracking or diverging from the "
+                    "all-time pattern above, but with fewer trips this window is even thinner, so a "
+                    "single busy or slow morning can swing a bar more than it would above."
+                )
 
 st.divider()
 if lake_level is None:

@@ -262,3 +262,31 @@ def test_moon_illumination_dawn_rates_ignores_rows_missing_trip_date():
     rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn")]  # no trip_date at all
     rates = moon_illumination_dawn_rates(rows)
     assert all(d["n"] == 0 for d in rates)
+
+
+def test_moon_illumination_dawn_rates_since_filters_out_older_trips():
+    # Punch-list #89 (2nd follow-up): "just the last two weeks as a
+    # separate chart" - since= lets home.py reuse this same function for
+    # both the all-time and the recent-only view.
+    import datetime as dt
+
+    rows = [
+        _timed_row(fish_caught=5, hours=1.0, segment="Dawn", trip_date="2000-01-07"),  # old
+        _timed_row(fish_caught=1, hours=1.0, segment="Dawn", trip_date="2000-02-07"),  # recent
+    ]
+    all_time = moon_illumination_dawn_rates(rows)
+    recent = moon_illumination_dawn_rates(rows, since=dt.date(2000, 2, 1))
+    assert sum(d["n"] for d in all_time) == 2
+    assert sum(d["n"] for d in recent) == 1
+    recent_day = next(d for d in recent if d["n"] > 0)
+    assert recent_day["median"] == 1.0
+
+
+def test_moon_illumination_dawn_rates_since_none_keeps_every_trip():
+    import datetime as dt
+
+    rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn", trip_date="2000-01-07")]
+    assert moon_illumination_dawn_rates(rows, since=None) == moon_illumination_dawn_rates(rows)
+    # Sanity: a since far in the future excludes it, proving since is really applied.
+    excluded = moon_illumination_dawn_rates(rows, since=dt.date(2099, 1, 1))
+    assert sum(d["n"] for d in excluded) == 0
