@@ -1,7 +1,10 @@
 import pandas as pd
 
 from core import ui
-from core.ui import inject_mobile_css, render_line_chart, render_moon_illumination_dawn_chart, render_square_thumbnail
+from core.ui import (
+    inject_mobile_css, render_line_chart, render_moon_illumination_dawn_chart,
+    render_daily_dawn_morning_catch_chart, render_square_thumbnail,
+)
 
 
 class _FakeCol:
@@ -125,6 +128,84 @@ def test_render_moon_illumination_dawn_chart_includes_pct_and_n_in_tooltip():
     day7 = next(r for r in records if r["day_of_cycle"] == 7)
     assert day7["n"] == 0
     assert pd.isna(day7["median_rate"])
+
+
+def _daily_catch_rows():
+    # Mirrors core.calibration.daily_dawn_morning_catch()'s real return shape
+    # - three consecutive calendar days, one with no logged catch, to check
+    # the chart renders a real zero-height bar there (unlike the lunar-cycle
+    # chart above, "fish": 0 here IS a confirmed zero, not "no data").
+    return [
+        {"date": "2026-08-23", "label": "Sun 8/23", "fish": 12, "illumination_pct": 66.9},
+        {"date": "2026-08-24", "label": "Mon 8/24", "fish": 0, "illumination_pct": 76.4},
+        {"date": "2026-08-25", "label": "Tue 8/25", "fish": 24, "illumination_pct": 84.8},
+    ]
+
+
+def test_render_daily_dawn_morning_catch_chart_is_two_stacked_panels_not_dual_axis():
+    # One shared calendar-day X axis, two separate Y-scaled panels (fish
+    # count, illumination %) - never one chart with two Y axes, which would
+    # falsely imply the two series are on a directly comparable scale.
+    col = _FakeCol()
+    render_daily_dawn_morning_catch_chart(col, _daily_catch_rows())
+    assert len(col.altair_chart_calls) == 1
+    chart, width = col.altair_chart_calls[0]
+    spec = chart.to_dict()
+    assert width == "stretch"
+    assert "vconcat" in spec
+    assert len(spec["vconcat"]) == 2
+    fish_panel, illum_panel = spec["vconcat"]
+    assert fish_panel["encoding"]["y"]["field"] == "fish"
+    assert illum_panel["encoding"]["y"]["field"] == "illumination_pct"
+
+
+def test_render_daily_dawn_morning_catch_chart_x_axis_keeps_calendar_order():
+    # Chronological order, not alphabetical ("Mon" would otherwise sort
+    # before "Sun" and "Tue").
+    col = _FakeCol()
+    render_daily_dawn_morning_catch_chart(col, _daily_catch_rows())
+    chart = col.altair_chart_calls[0][0]
+    spec = chart.to_dict()
+    for panel in spec["vconcat"]:
+        assert panel["encoding"]["x"]["sort"] == ["Sun 8/23", "Mon 8/24", "Tue 8/25"]
+
+
+def test_render_daily_dawn_morning_catch_chart_only_bottom_panel_shows_x_labels():
+    # The top (fish-count) panel shares the same calendar-day X axis as the
+    # bottom (illumination) panel - showing its own labels too would just
+    # repeat the same day/date strings twice for no benefit.
+    col = _FakeCol()
+    render_daily_dawn_morning_catch_chart(col, _daily_catch_rows())
+    chart = col.altair_chart_calls[0][0]
+    spec = chart.to_dict()
+    fish_panel, illum_panel = spec["vconcat"]
+    assert fish_panel["encoding"]["x"]["axis"].get("labels") is False
+    assert illum_panel["encoding"]["x"]["axis"].get("labels") is not False
+
+
+def test_render_daily_dawn_morning_catch_chart_zero_fish_day_is_a_real_zero():
+    # Unlike the lunar-cycle chart's "no data yet" gap, a day with zero
+    # logged Dawn+Morning fish must render as an actual zero-height bar,
+    # not be dropped from the data the way a null median is.
+    col = _FakeCol()
+    render_daily_dawn_morning_catch_chart(col, _daily_catch_rows())
+    chart = col.altair_chart_calls[0][0]
+    records = chart.data.to_dict("records")
+    monday = next(r for r in records if r["label"] == "Mon 8/24")
+    assert monday["fish"] == 0
+    assert pd.notna(monday["fish"])
+
+
+def test_render_daily_dawn_morning_catch_chart_includes_illumination_in_tooltip():
+    col = _FakeCol()
+    render_daily_dawn_morning_catch_chart(col, _daily_catch_rows())
+    chart = col.altair_chart_calls[0][0]
+    spec = chart.to_dict()
+    fish_panel, illum_panel = spec["vconcat"]
+    fish_tooltip_fields = {t["field"] for t in fish_panel["encoding"]["tooltip"]}
+    illum_tooltip_fields = {t["field"] for t in illum_panel["encoding"]["tooltip"]}
+    assert {"label", "fish", "illumination_pct"} <= fish_tooltip_fields
+    assert {"label", "fish", "illumination_pct"} <= illum_tooltip_fields
 
 
 # --- Punch-list #74: render_square_thumbnail() must shrink with its real ---

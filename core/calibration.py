@@ -356,6 +356,71 @@ def moon_illumination_dawn_rates(trip_rows: list, since=None, until=None) -> lis
     ]
 
 
+def daily_dawn_morning_catch(trip_rows: list, since, until) -> list:
+    """Total Dawn+Morning fish caught per CALENDAR day over [since, until]
+    (both `datetime.date`, inclusive), alongside that day's moon
+    illumination % from the night before - a follow-up to
+    moon_illumination_dawn_rates() above, added after the angler compared
+    that chart's "last 14 days" view against a real session: 13 fish
+    caught over about 3 hours logged as a lunar-cycle bucket showing 0.2
+    fish/hour. That number was real, not a bug - trip_fish_per_hour()
+    computes a rate per logged LURE segment, not per whole session, and a
+    session logged as many quick lure swaps (several catching nothing in
+    their own short window) has its per-segment MEDIAN dragged toward zero
+    even on a genuinely excellent outing. The angler's own diagnosis:
+    session durations are "dirtier data" than a simple fish count, so this
+    aggregates the one number that isn't sensitive to how a session
+    happened to get chopped into lure-change rows - total fish caught that
+    day - rather than any per-row rate.
+
+    Unlike moon_illumination_dawn_rates(), `since`/`until` are both
+    required and the returned buckets are literal calendar dates (one per
+    day in the window, in order), not lunar-cycle-day numbers - this is
+    meant specifically as the "recent window" chart, not an all-time one,
+    so there's no "no window given" mode to support.
+
+    Returns a list of dicts, one per calendar day, oldest first:
+    {"date": date, "label": str (e.g. "Sat 9/05", matching this app's
+    other trend-chart date labels), "fish": int (0 if nothing logged),
+    "illumination_pct": float}. A day with zero Dawn+Morning trips still
+    appears, with "fish": 0 - real, confirmed zero for that specific
+    metric (unlike moon_illumination_dawn_rates()'s "n": 0, which means
+    "no trustworthy-duration data," not "confirmed zero catch")."""
+    fish_by_date = defaultdict(int)
+    for row in trip_rows:
+        if row.get("segment") not in MORNING_SEGMENTS:
+            continue
+        trip_date_str = row.get("trip_date")
+        if not trip_date_str:
+            continue
+        try:
+            trip_date = datetime.strptime(trip_date_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        if not (since <= trip_date <= until):
+            continue
+        try:
+            fish_by_date[trip_date] += int(row.get("fish_caught") or 0)
+        except (ValueError, TypeError):
+            continue
+
+    day_list = []
+    d = since
+    while d <= until:
+        day_list.append(d)
+        d += timedelta(days=1)
+
+    return [
+        {
+            "date": d,
+            "label": d.strftime("%a %-m/%d"),
+            "fish": fish_by_date.get(d, 0),
+            "illumination_pct": round(_illumination_pct_for_age(_day_of_cycle_for_date(d)), 1),
+        }
+        for d in day_list
+    ]
+
+
 def calibration_summary(trip_rows: list) -> dict:
     """Human-readable summary of how many trips have been logged and which
     weight factors have enough trustworthy-duration data to influence the

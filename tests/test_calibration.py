@@ -4,7 +4,8 @@ import pytest
 
 from core.calibration import (
     calibrate_weights, calibration_summary, location_adjustments, moon_illumination_dawn_rates,
-    trip_fish_per_hour, DAYS_IN_LUNAR_CYCLE, MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES,
+    daily_dawn_morning_catch, trip_fish_per_hour, DAYS_IN_LUNAR_CYCLE, MIN_SAMPLES_PER_SIDE,
+    LOCATION_MIN_SAMPLES,
 )
 from core.scoring import DEFAULT_WEIGHTS
 
@@ -375,3 +376,118 @@ def test_moon_illumination_dawn_rates_since_and_until_excludes_trips_outside_the
     assert sum(d["n"] for d in rates) == 1
     matching = next(d for d in rates if d["n"] > 0)
     assert matching["median"] == 3.0
+
+
+# --- daily_dawn_morning_catch() (punch-list #89, further follow-up): the ---
+# angler compared moon_illumination_dawn_rates()'s "last 14 days" chart
+# against a real session (13 fish over ~3 hours) that showed up as a
+# lunar-cycle bucket reading 0.2 fish/hour - a real median-of-per-lure-
+# segment artifact, not a bug (see trip_fish_per_hour()'s docstring and
+# core.calibration.daily_dawn_morning_catch()'s own docstring above). These
+# tests use plain dicts (no _timed_row()) since this function never reads
+# lure_start_time/lure_end_time at all - that independence from duration
+# data is the entire point.
+
+def test_daily_dawn_morning_catch_returns_one_entry_per_calendar_day_in_window():
+    import datetime as dt
+
+    since = dt.date(2000, 1, 7)
+    until = since + dt.timedelta(days=6)
+    days = daily_dawn_morning_catch([], since=since, until=until)
+    assert len(days) == 7
+    assert [d["date"] for d in days] == [since + dt.timedelta(days=i) for i in range(7)]
+
+
+def test_daily_dawn_morning_catch_sums_fish_caught_per_day():
+    import datetime as dt
+
+    rows = [
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 10},
+        {"segment": "Morning", "trip_date": "2000-01-08", "fish_caught": 1},
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 0},
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 1},
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 1},
+    ]
+    days = daily_dawn_morning_catch(
+        rows, since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9),
+    )
+    by_date = {d["date"]: d["fish"] for d in days}
+    assert by_date[dt.date(2000, 1, 8)] == 13  # matches the angler's real 13-fish report
+
+
+def test_daily_dawn_morning_catch_ignores_non_dawn_morning_segments():
+    import datetime as dt
+
+    rows = [
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 3},
+        {"segment": "Night", "trip_date": "2000-01-08", "fish_caught": 9},
+        {"segment": "Midday", "trip_date": "2000-01-08", "fish_caught": 9},
+    ]
+    days = daily_dawn_morning_catch(
+        rows, since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9),
+    )
+    by_date = {d["date"]: d["fish"] for d in days}
+    assert by_date[dt.date(2000, 1, 8)] == 3
+
+
+def test_daily_dawn_morning_catch_ignores_rows_outside_the_window():
+    import datetime as dt
+
+    rows = [
+        {"segment": "Dawn", "trip_date": "2000-01-06", "fish_caught": 9},  # 1 day too early
+        {"segment": "Dawn", "trip_date": "2000-01-08", "fish_caught": 3},  # inside
+        {"segment": "Dawn", "trip_date": "2000-01-10", "fish_caught": 9},  # 1 day too late
+    ]
+    days = daily_dawn_morning_catch(
+        rows, since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9),
+    )
+    assert sum(d["fish"] for d in days) == 3
+
+
+def test_daily_dawn_morning_catch_day_with_no_trips_is_a_real_zero_not_missing():
+    import datetime as dt
+
+    days = daily_dawn_morning_catch([], since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9))
+    assert all(d["fish"] == 0 for d in days)
+
+
+def test_daily_dawn_morning_catch_ignores_rows_missing_trip_date():
+    import datetime as dt
+
+    rows = [{"segment": "Dawn", "fish_caught": 9}]  # no trip_date at all
+    days = daily_dawn_morning_catch(rows, since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9))
+    assert sum(d["fish"] for d in days) == 0
+
+
+def test_daily_dawn_morning_catch_counts_rows_with_no_duration_data_at_all():
+    # The entire point: unlike moon_illumination_dawn_rates()/
+    # trip_fish_per_hour(), a row with no lure_start_time/lure_end_time (or
+    # an implausible one) still counts in full - there's no rate to trust
+    # or distrust here, just a fish count.
+    import datetime as dt
+
+    rows = [{"segment": "Morning", "trip_date": "2000-01-08", "fish_caught": 13}]
+    days = daily_dawn_morning_catch(rows, since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 9))
+    by_date = {d["date"]: d["fish"] for d in days}
+    assert by_date[dt.date(2000, 1, 8)] == 13
+
+
+def test_daily_dawn_morning_catch_label_matches_this_apps_day_date_format():
+    import datetime as dt
+
+    # 2000-01-08 was a Saturday - label format matches this app's other
+    # trend-chart date labels ("%a %-m/%d", e.g. home.py's trend_idx).
+    days = daily_dawn_morning_catch([], since=dt.date(2000, 1, 8), until=dt.date(2000, 1, 8))
+    assert days[0]["label"] == "Sat 1/08"
+
+
+def test_daily_dawn_morning_catch_illumination_pct_uses_the_night_before():
+    # Same reference dates as moon_illumination_dawn_rates()'s own tests
+    # above - 2000-01-07 (new moon morning) near 0%, 2000-01-21 (full moon
+    # morning) near 100%.
+    import datetime as dt
+
+    days = daily_dawn_morning_catch([], since=dt.date(2000, 1, 7), until=dt.date(2000, 1, 21))
+    by_date = {d["date"]: d["illumination_pct"] for d in days}
+    assert by_date[dt.date(2000, 1, 7)] < 5.0
+    assert by_date[dt.date(2000, 1, 21)] > 95.0

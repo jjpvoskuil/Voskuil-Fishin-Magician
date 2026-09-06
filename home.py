@@ -13,8 +13,11 @@ from core.lake_level import NORMAL_SUMMER_POOL_FT
 from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
-from core.calibration import moon_illumination_dawn_rates
-from core.ui import inject_mobile_css, inject_compact_metric_css, render_line_chart, render_moon_illumination_dawn_chart
+from core.calibration import moon_illumination_dawn_rates, daily_dawn_morning_catch
+from core.ui import (
+    inject_mobile_css, inject_compact_metric_css, render_line_chart,
+    render_moon_illumination_dawn_chart, render_daily_dawn_morning_catch_chart,
+)
 
 # Punch-list #20: fixed Y-axis range (°F) for this page's temperature trend
 # charts (est. water temp, USACE surface water temp) - the real range
@@ -274,16 +277,24 @@ except Exception:
 # phase. A later follow-up asked for a second, "just the last 2 weeks"
 # chart alongside the all-time one - same HOME_TREND_CHART_PAST_DAYS window
 # every other chart on this page already uses, so "recent" means the same
-# thing everywhere on this page. A further follow-up: that recent chart
-# was still showing all 30 lunar-cycle-day buckets (mostly empty, since a
-# 14-day window can only ever touch ~14 of them) - passing `until` too
-# (not just `since`) tells moon_illumination_dawn_rates() to restrict the
-# buckets themselves to the ones this window's own calendar days can
-# actually land in. Independent fetch from everything above (trip log,
-# not weather/USACE), so a weather-fetch failure shouldn't hide either
-# chart.
+# thing everywhere on this page.
+#
+# The "recent" half was then REPLACED entirely (still punch-list #89): the
+# angler compared it against a real session (13 fish over ~3 hours) that
+# showed up as a lunar-cycle bucket reading 0.2 fish/hour, and correctly
+# diagnosed why - moon_illumination_dawn_rates() takes the MEDIAN of
+# per-lure-segment rates, and a session logged as many quick lure swaps
+# (several catching nothing in their own short window) gets dragged toward
+# zero even on a great outing, since per-segment session durations are
+# "dirtier data" than a simple fish count. daily_dawn_morning_catch() below
+# sidesteps that by aggregating raw fish caught per CALENDAR day instead of
+# any duration-based rate - see its own docstring in core/calibration.py.
+# The all-time chart above is untouched (same lunar-cycle-day median-rate
+# view as before) - only the recent window's chart changed. Independent
+# fetch from everything above (trip log, not weather/USACE), so a
+# weather-fetch failure shouldn't hide either chart.
 moon_day_rates_all_time = []
-moon_day_rates_recent = []
+daily_catch_recent = []
 try:
     trip_history = get_trip_history()
     moon_day_rates_all_time = moon_illumination_dawn_rates(trip_history)
@@ -291,7 +302,7 @@ try:
     # date) even though nothing later in this file still reads that one.
     today_date = lake_today()
     recent_cutoff = today_date - timedelta(days=HOME_TREND_CHART_PAST_DAYS - 1)
-    moon_day_rates_recent = moon_illumination_dawn_rates(trip_history, since=recent_cutoff, until=today_date)
+    daily_catch_recent = daily_dawn_morning_catch(trip_history, since=recent_cutoff, until=today_date)
 except Exception:
     pass
 
@@ -329,7 +340,7 @@ if wq_log:
     trend_items.append(("USACE surface water temp (°F)", pd.Series([r["water_temp_f"] for r in wq_log], index=wq_idx), TEMP_CHART_Y_DOMAIN))
 
 any_moon_day_data = any(d["n"] > 0 for d in moon_day_rates_all_time)
-any_moon_day_data_recent = any(d["n"] > 0 for d in moon_day_rates_recent)
+any_daily_catch_recent = any(d["fish"] > 0 for d in daily_catch_recent)
 
 if trend_items or any_moon_day_data:
     with st.expander(f"📈 {HOME_TREND_CHART_PAST_DAYS}-day trends", expanded=True):
@@ -374,17 +385,19 @@ if trend_items or any_moon_day_data:
                 "(hover for exact trip counts) as an early read, not a settled pattern."
             )
 
-            if any_moon_day_data_recent:
+            if any_daily_catch_recent:
                 st.divider()
-                st.caption(f"Same chart, last {HOME_TREND_CHART_PAST_DAYS} days only")
-                render_moon_illumination_dawn_chart(st, moon_day_rates_recent)
-                recent_days_with_data = sum(1 for d in moon_day_rates_recent if d["n"] > 0)
+                st.caption(f"Dawn+Morning fish caught by day, last {HOME_TREND_CHART_PAST_DAYS} days")
+                render_daily_dawn_morning_catch_chart(st, daily_catch_recent)
+                recent_days_with_data = sum(1 for d in daily_catch_recent if d["fish"] > 0)
                 st.caption(
-                    f"Only Dawn+Morning trips logged in the last {HOME_TREND_CHART_PAST_DAYS} days "
-                    f"({recent_days_with_data} of {len(moon_day_rates_recent)} lunar-cycle days have any) - "
-                    "useful for spotting whether a recent stretch is tracking or diverging from the "
-                    "all-time pattern above, but with fewer trips this window is even thinner, so a "
-                    "single busy or slow morning can swing a bar more than it would above."
+                    f"Raw fish caught per day (not a per-lure-hour rate) for the last "
+                    f"{HOME_TREND_CHART_PAST_DAYS} days, Dawn+Morning only, against moon illumination the "
+                    f"night before ({recent_days_with_data} of {len(daily_catch_recent)} days have a logged "
+                    "catch). A day's total session duration can be dirtier data than its fish count - several "
+                    "quick lure changes in one outing each log their own short window, and averaging those "
+                    "per-lure rates can make a genuinely good morning look weak - so this counts the whole "
+                    "day's catch directly instead."
                 )
 
 st.divider()
