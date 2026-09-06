@@ -244,7 +244,7 @@ def _illumination_pct_for_age(age_days: float) -> float:
     return (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
 
 
-def moon_illumination_dawn_rates(trip_rows: list) -> list:
+def moon_illumination_dawn_rates(trip_rows: list, since: Optional[object] = None) -> list:
     """Median fish-per-hour for Dawn+Morning trips ONLY (punch-list #89,
     revised after the angler saw the first version: dropped the "rest of
     day" comparison - Dawn+Morning is where the large majority of this
@@ -252,6 +252,14 @@ def moon_illumination_dawn_rates(trip_rows: list) -> list:
     trusting right now), bucketed by whole day of the lunar cycle (0 = new
     moon, ~15 = full moon, 0-29) rather than the 8 named phases the first
     version used.
+
+    `since` (a `datetime.date`, optional): when given, only trips whose
+    trip_date is on or after this date are counted - added so home.py can
+    show a "just the last 2 weeks" chart alongside the all-time one (the
+    angler's own follow-up, wanting to see whether a recent stretch tracks
+    or diverges from the full history) without a second, near-duplicate
+    function. `None` (the default) keeps every trustworthy-duration trip
+    ever logged, unchanged from before this parameter existed.
 
     Each bucket's moon state is recomputed fresh at 18:00 the evening
     BEFORE trip_date, not read from conditions_json's already-logged
@@ -288,6 +296,8 @@ def moon_illumination_dawn_rates(trip_rows: list) -> list:
         try:
             trip_date = datetime.strptime(trip_date_str, "%Y-%m-%d").date()
         except (ValueError, TypeError):
+            continue
+        if since is not None and trip_date < since:
             continue
         night_before = datetime.combine(trip_date - timedelta(days=1), dtime(18, 0))
         day_of_cycle = int(moon_phase(night_before).age_days)
