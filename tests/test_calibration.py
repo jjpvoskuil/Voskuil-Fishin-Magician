@@ -1,8 +1,8 @@
 import json
 
 from core.calibration import (
-    calibrate_weights, calibration_summary, location_adjustments, trip_fish_per_hour,
-    MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES,
+    calibrate_weights, calibration_summary, location_adjustments, moon_phase_time_of_day_rates,
+    trip_fish_per_hour, MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES, MOON_PHASE_ORDER,
 )
 from core.scoring import DEFAULT_WEIGHTS
 
@@ -161,3 +161,55 @@ def test_location_adjustments_shrinks_small_samples_toward_zero():
              for _ in range(LOCATION_MIN_SAMPLES)]
     adjustments = location_adjustments(rows)
     assert adjustments[("big", "Dawn")]["adjustment"] > adjustments[("small", "Dawn")]["adjustment"] > 0
+
+
+# --- Punch-list #89: moon_phase_time_of_day_rates() --------------------------
+
+def test_moon_phase_order_is_the_natural_lunar_cycle_not_alphabetical():
+    assert MOON_PHASE_ORDER == [
+        "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+        "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent",
+    ]
+
+
+def test_moon_phase_time_of_day_rates_covers_all_8_phases_even_with_no_data():
+    # Real live state right now: several phases have zero logged trips at
+    # all (no Full Moon, Waning Gibbous, or Last Quarter yet) - the chart
+    # this feeds needs every phase to show up on the axis regardless.
+    rates = moon_phase_time_of_day_rates([])
+    assert set(rates.keys()) == set(MOON_PHASE_ORDER)
+    for phase in MOON_PHASE_ORDER:
+        assert rates[phase]["morning"] == {"median": None, "n": 0}
+        assert rates[phase]["rest_of_day"] == {"median": None, "n": 0}
+
+
+def test_moon_phase_time_of_day_rates_splits_dawn_and_morning_from_rest_of_day():
+    rows = [
+        _timed_row(fish_caught=4, hours=1.0, segment="Dawn", extra_conditions={"moon_phase": "Full Moon"}),
+        _timed_row(fish_caught=2, hours=1.0, segment="Morning", extra_conditions={"moon_phase": "Full Moon"}),
+        _timed_row(fish_caught=6, hours=1.0, segment="Night", extra_conditions={"moon_phase": "Full Moon"}),
+        _timed_row(fish_caught=8, hours=1.0, segment="Dusk", extra_conditions={"moon_phase": "Full Moon"}),
+    ]
+    rates = moon_phase_time_of_day_rates(rows)
+    assert rates["Full Moon"]["morning"] == {"median": 3.0, "n": 2}  # median of 4.0, 2.0
+    assert rates["Full Moon"]["rest_of_day"] == {"median": 7.0, "n": 2}  # median of 6.0, 8.0
+
+
+def test_moon_phase_time_of_day_rates_excludes_untrustworthy_duration_rows():
+    untimed = _row(fish_caught=99)
+    untimed["segment"] = "Dawn"
+    rows = [
+        _timed_row(fish_caught=2, hours=1.0, segment="Dawn", extra_conditions={"moon_phase": "New Moon"}),
+        untimed,  # no timing at all - must not pollute the median
+    ]
+    # _row() doesn't stamp a moon_phase, so this second row wouldn't be
+    # bucketed anywhere anyway - confirm the untimed row is excluded via
+    # trip_fish_per_hour() rather than silently counted.
+    rates = moon_phase_time_of_day_rates(rows)
+    assert rates["New Moon"]["morning"] == {"median": 2.0, "n": 1}
+
+
+def test_moon_phase_time_of_day_rates_ignores_unrecognized_or_missing_phase():
+    rows = [_timed_row(fish_caught=1, hours=1.0, segment="Dawn")]  # no moon_phase in conditions at all
+    rates = moon_phase_time_of_day_rates(rows)
+    assert all(sides["morning"]["n"] == 0 for sides in rates.values())

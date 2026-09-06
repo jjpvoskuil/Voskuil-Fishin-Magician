@@ -45,8 +45,16 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
+from .astro import PHASE_NAMES
 from .scoring import DEFAULT_WEIGHTS
 from .storage import parse_conditions
+
+# The 8 unique phase names in natural cycle order (astro.PHASE_NAMES is a
+# list of (lo, hi, name) fraction windows with "New Moon" appearing twice -
+# once at the very start of the cycle and once at the very end wrapping
+# back around - so dict.fromkeys() dedups that repeat while keeping every
+# other name's first-seen (i.e. chronological) position).
+MOON_PHASE_ORDER = list(dict.fromkeys(name for _, _, name in PHASE_NAMES))
 
 MIN_SAMPLES_PER_SIDE = 4
 MAX_NUDGE_FRACTION = 0.35  # never move a weight more than 35% from default
@@ -211,6 +219,61 @@ def location_adjustments(trip_rows: list) -> dict:
         result[(spot_id, segment)] = {"adjustment": adjustment, "n": n, "spot_name": spot_names[spot_id]}
 
     return result
+
+
+# Punch-list #new: the angler's own hypothesis - a bright full moon lets
+# bass see (and feed) better at night, so they feed LESS at dawn/morning,
+# with the opposite pattern near a new moon - is about WHEN during the day
+# fish bite, not whether total daily catch rate changes with moon phase (the
+# 2023 SN Applied Sciences study cited in core/scoring.py's docstring found
+# no such 24h-total relationship, which is exactly why this splits by
+# time-of-day instead of repeating that same whole-day comparison).
+MORNING_SEGMENTS = ("Dawn", "Morning")
+
+
+def moon_phase_time_of_day_rates(trip_rows: list) -> dict:
+    """Median fish-per-hour by moon phase, split into Dawn+Morning trips vs.
+    every other time-of-day segment ("rest of day") - built so the angler
+    can look at their own logged data next to the hypothesis above, not to
+    itself decide anything. This is NOT wired into scoring - core/scoring.py
+    still applies its moon-phase bonus/penalty uniformly across every
+    segment; adding a real per-segment-per-phase scoring interaction is a
+    separate, not-yet-made decision.
+
+    Returns {phase_name: {"morning": {"median": float|None, "n": int},
+    "rest_of_day": {"median": float|None, "n": int}}} for all 8 phase names
+    in natural cycle order (MOON_PHASE_ORDER above), including phases with
+    zero logged trips yet - a caller should treat "n": 0 as "no data yet",
+    not "confirmed no difference," same convention as location_adjustments()
+    above. Uses the same trustworthy-duration fish-per-hour metric
+    (trip_fish_per_hour()) and median-not-mean choice as the rest of this
+    module, for the same outlier-resistance reasons documented at the top of
+    this file - but deliberately does NOT gate on MIN_SAMPLES_PER_SIDE the
+    way calibrate_weights()/location_adjustments() do, since this is an
+    exploratory chart the angler is meant to eyeball sample sizes on
+    directly (real "n" per phase can currently be as low as 0 - no Full
+    Moon, Waning Gibbous, or Last Quarter trips have been logged yet), not a
+    scoring input that needs a trust threshold before it's allowed to move
+    anything."""
+    buckets = {phase: {"morning": [], "rest_of_day": []} for phase in MOON_PHASE_ORDER}
+    for row in trip_rows:
+        rate = trip_fish_per_hour(row)
+        if rate is None:
+            continue
+        conditions = parse_conditions(row)
+        phase = conditions.get("moon_phase")
+        if phase not in buckets:
+            continue  # missing/unrecognized phase (e.g. logged before this field existed)
+        side = "morning" if row.get("segment") in MORNING_SEGMENTS else "rest_of_day"
+        buckets[phase][side].append(rate)
+
+    return {
+        phase: {
+            side: {"median": statistics.median(rates) if rates else None, "n": len(rates)}
+            for side, rates in sides.items()
+        }
+        for phase, sides in buckets.items()
+    }
 
 
 def calibration_summary(trip_rows: list) -> dict:
