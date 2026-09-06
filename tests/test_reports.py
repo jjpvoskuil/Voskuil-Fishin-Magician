@@ -5,7 +5,9 @@ from core.astro import moon_phase
 from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     moon_illumination_pct_night_before, _moon_illumination_bin, _pressure_trend_band,
+    _water_temp_bucket_label, _water_temp_bucket_axis, WATER_TEMP_BUCKET_FACTOR,
 )
+import pandas as pd
 
 
 def _row(trip_id, trip_date, segment="Dawn", angler="John", spot_name="Baby Back Bass",
@@ -65,6 +67,29 @@ def test_pressure_trend_band_thresholds():
     assert _pressure_trend_band(2.0) == "Rising / High"
     assert _pressure_trend_band(5.0) == "Rising / High"
     assert _pressure_trend_band(None) is None
+
+
+# --- water temp custom bucketing (punch-list #92 follow-up) --------------------
+
+def test_water_temp_bucket_label_floors_to_width_and_formats_cleanly():
+    assert _water_temp_bucket_label(83.4, 2) == "82-84°F"
+    assert _water_temp_bucket_label(84.0, 2) == "84-86°F"  # exactly on a boundary -> the bucket it starts
+    assert _water_temp_bucket_label(72.3, 1) == "72-73°F"
+    assert _water_temp_bucket_label(72.3, 5) == "70-75°F"
+    assert _water_temp_bucket_label(None, 2) is None
+    assert _water_temp_bucket_label(float("nan"), 2) is None  # pandas' missing-value shape, not Python None
+    assert _water_temp_bucket_label(72.0, 0) is None  # a bogus non-positive width must not divide-by-zero
+
+
+def test_water_temp_bucket_axis_fills_every_bucket_between_observed_min_and_max():
+    values = pd.Series([82.17, 84.9, 93.0])
+    axis = _water_temp_bucket_axis(values, 2)
+    assert axis == ["82-84°F", "84-86°F", "86-88°F", "88-90°F", "90-92°F", "92-94°F"]
+
+
+def test_water_temp_bucket_axis_is_empty_for_no_observed_data():
+    assert _water_temp_bucket_axis(pd.Series(dtype=float), 2) == []
+    assert _water_temp_bucket_axis(None, 2) == []
 
 
 # --- build_reports_dataframe --------------------------------------------------
@@ -280,6 +305,90 @@ def test_compute_report_date_weekly_factor_groups_by_sunday_start_week():
     assert len(report) == 1
     assert report.iloc[0]["week_start"] == date(2026, 9, 6)
     assert report.iloc[0]["value"] == 2
+
+
+# --- compute_report: WATER_TEMP_BUCKET_FACTOR (punch-list #92 follow-up) ------
+# Angler's report: "Water Temp Band" (5 fixed biological stages) is too
+# coarse - a season's worth of trips hasn't been logged yet, so the real
+# range so far is only ~10-15°F wide, and nearly every trip lands in just
+# one or two of those five bands. This factor lets the bucket width be
+# tuned by the caller (pages/9_Reports.py's own number_input) instead.
+
+def test_compute_report_water_temp_bucket_factor_uses_custom_width_and_fills_gaps():
+    rows = [
+        _row("t1", "2026-09-01", water_temp_f=82.5, fish=[_fish("Bass", 2.0)]),
+        _row("t2", "2026-09-02", water_temp_f=83.9, fish=[_fish("Bass", 3.0)]),  # same 2-wide bucket as t1
+        _row("t3", "2026-09-03", water_temp_f=93.0, fish=[_fish("Bass", 1.0)]),  # far bucket - gap in between
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(
+        trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, "total_fish", water_temp_bucket_width_f=2,
+    )
+    assert list(report[WATER_TEMP_BUCKET_FACTOR]) == [
+        "82-84°F", "84-86°F", "86-88°F", "88-90°F", "90-92°F", "92-94°F",
+    ]
+    values = dict(zip(report[WATER_TEMP_BUCKET_FACTOR], report["value"]))
+    assert values["82-84°F"] == 2  # t1 + t2 pooled into one bucket
+    assert values["84-86°F"] == 0  # a real gap, shown as zero rather than omitted
+    assert values["92-94°F"] == 1
+
+
+def test_compute_report_water_temp_bucket_factor_widening_collapses_buckets():
+    rows = [
+        _row("t1", "2026-09-01", water_temp_f=82.5, fish=[_fish("Bass", 2.0)]),
+        _row("t2", "2026-09-03", water_temp_f=93.0, fish=[_fish("Bass", 1.0)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(
+        trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, "total_fish", water_temp_bucket_width_f=20,
+    )
+    assert len(report) == 1  # both readings collapse into one wide bucket
+    assert report.iloc[0]["value"] == 2  # 1 fish from t1 + 1 fish from t2
+
+
+def test_compute_report_water_temp_bucket_factor_excludes_missing_water_temp():
+    rows = [
+        _row("t1", "2026-09-01", water_temp_f=None, fish=[_fish("Bass", 2.0)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(
+        trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, "total_fish", water_temp_bucket_width_f=2,
+    )
+    assert report.empty
+
+
+def test_compute_report_water_temp_bucket_factor_defaults_width_when_not_given():
+    rows = [_row("t1", "2026-09-01", water_temp_f=72.3, fish=[_fish("Bass", 2.0)])]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, "total_fish")
+    assert list(report[WATER_TEMP_BUCKET_FACTOR]) == ["72-74°F"]  # default 2°F width
+
+
+def test_compute_report_water_temp_bucket_factor_pools_fish_per_hour_per_bucket():
+    # Same masking pattern as the sky-condition regression test above, just
+    # bucketed by water temp instead: 2 skunked trips + 1 productive trip,
+    # all in the SAME bucket - median([0, 0, 9]) would be 0, pooled must not be.
+    rows = [
+        _row("t1", "2026-09-01", water_temp_f=82.5, fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1hr
+        _row("t2", "2026-09-02", water_temp_f=82.8, fish_caught=0,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # skunked, 1hr
+        _row("t3", "2026-09-03", water_temp_f=83.0, fish_caught=9,
+             lure_start_time="06:00:00", lure_end_time="07:00:00"),  # 9 fish, 1hr
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(
+        trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, "fish_per_hour", water_temp_bucket_width_f=2,
+    )
+    assert report.iloc[0][WATER_TEMP_BUCKET_FACTOR] == "82-84°F"
+    assert report.iloc[0]["value"] == 3.0  # pooled: 9 fish / 3 hours, not median([0, 0, 9]) == 0
+
+
+def test_compute_report_water_temp_bucket_factor_with_empty_data_returns_empty_for_every_metric():
+    trips_df, fish_df = build_reports_dataframe([])
+    for metric_key in ("total_fish", "fish_per_hour", "biggest_fish", "trip_count"):
+        report = compute_report(trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, metric_key)
+        assert report.empty, f"expected an empty report for {metric_key} with no data at all"
 
 
 # --- compute_report: filters ---------------------------------------------------

@@ -44,6 +44,7 @@ page caption for how that's flagged to the angler.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from typing import Optional
@@ -130,11 +131,80 @@ def _moon_illumination_bin(pct: Optional[float]) -> Optional[str]:
     return f"{lo}-{hi}%"
 
 
+# --- Water temp: user-adjustable-width buckets (punch-list #92 follow-up) -----
+# Angler's report: "Water Temp Band" (the 5 fixed biological bands right
+# below) is too coarse right now - a whole season's worth of trips hasn't
+# been logged yet, so the real observed range so far is only ~10-15°F wide,
+# meaning nearly every trip lands in just one or two of those five bands.
+# "As the seasons change, this will certainly get larger, so maybe we can
+# have the app create buckets based on a user inputted range."
+#
+# Rather than replacing "Water Temp Band" (still the right long-term view,
+# and it's the same classification core.scoring/Spot Session already use
+# elsewhere), this adds a SECOND, independent water-temp factor with a
+# user-chosen bucket width in °F (pages/9_Reports.py's own "Bucket width"
+# control, shown only when this factor is picked) - the angler can zoom in
+# tight while the logged range is narrow, and widen it back out once a
+# full season's spread makes the coarser named bands meaningful again.
+#
+# Unlike every other factor above, this one can't be precomputed as a
+# column in build_reports_dataframe() - the bucket width isn't known until
+# query time - so compute_report() computes it on the fly (see the
+# WATER_TEMP_BUCKET_FACTOR handling there) instead of _row_factors()
+# materializing it up front like every other factor.
+#
+# Buckets are anchored to absolute 0°F (floor(value / width) * width), NOT
+# to whatever the currently-filtered data's own min happens to be, for the
+# same reason MOON_ILLUMINATION_BIN_ORDER is anchored to 0% rather than the
+# observed minimum illumination: a given bucket's boundaries need to stay
+# the SAME (e.g. always "68-70°F" at a 2°F width, never shifting to
+# "67.4-69.4°F" because a different date range was picked) so two different
+# filter picks stay comparable side by side, and so the label itself is a
+# clean round number instead of an arbitrary float.
+WATER_TEMP_BUCKET_FACTOR = "water_temp_bucket"
+DEFAULT_WATER_TEMP_BUCKET_WIDTH_F = 2.0
+
+
+def _water_temp_bucket_label(temp_f: Optional[float], width: float) -> Optional[str]:
+    # pd.isna(), not "is None" - callers apply() this over a pandas Series,
+    # which represents a missing water_temp_f as float NaN, not Python None
+    # (math.floor(nan) raises ValueError, not something floor() itself
+    # would ever cleanly return, so this has to be caught before that call).
+    if temp_f is None or width <= 0 or pd.isna(temp_f):
+        return None
+    lo = math.floor(temp_f / width) * width
+    hi = lo + width
+    return f"{lo:g}-{hi:g}°F"
+
+
+def _water_temp_bucket_axis(observed_temps: pd.Series, width: float) -> list:
+    """Every width-wide bucket between the coldest and warmest water-temp
+    reading actually present in the currently-filtered trips (not the
+    metric's own possibly-narrower subset, and not the app's all-time
+    range) - same "show a real zero between two real endpoints, don't just
+    skip it" convention _date_axis() already uses for date-based factors,
+    just for a continuous numeric range instead of a calendar range."""
+    valid = observed_temps.dropna() if observed_temps is not None else pd.Series(dtype=float)
+    if valid.empty or width <= 0:
+        return []
+    lo = math.floor(valid.min() / width) * width
+    hi = math.floor(valid.max() / width) * width
+    labels = []
+    b = lo
+    while b <= hi + 1e-9:  # tolerate float drift at the top edge
+        labels.append(_water_temp_bucket_label(b, width))
+        b += width
+    return labels
+
+
 # --- Factor catalog --------------------------------------------------------
 # label -> (column name, ORDER_HINTS key or None). Every column here is
 # fully materialized (plain string/None) in both trips_df and fish_df by
 # build_reports_dataframe() below - compute_report() never special-cases a
-# factor by name, it just groups by whichever column the caller picked.
+# factor by name, it just groups by whichever column the caller picked. The
+# one exception is WATER_TEMP_BUCKET_FACTOR (see its own comment above) -
+# its bucket width isn't known until query time, so compute_report()
+# computes that one column on the fly instead.
 FACTOR_OPTIONS = {
     "Spot": "spot",
     "Structure Type": "structure_type",
@@ -150,6 +220,7 @@ FACTOR_OPTIONS = {
     "Wind Direction": "wind_direction",
     "Precipitation": "precipitation",
     "Water Temp Band": "water_temp_band",
+    "Water Temp (custom range)": WATER_TEMP_BUCKET_FACTOR,
     "Pressure Trend": "pressure_trend_band",
     "Moon Illumination % (night before)": "moon_illumination_bin",
     "Fish Activity (reported)": "fish_activity",
@@ -405,7 +476,8 @@ def _date_axis(date_start, date_end, weekly: bool) -> list:
 
 def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: str, metric_key: str,
                     species: Optional[str] = None, date_start=None, date_end=None,
-                    anglers: Optional[list] = None, segments: Optional[list] = None) -> pd.DataFrame:
+                    anglers: Optional[list] = None, segments: Optional[list] = None,
+                    water_temp_bucket_width_f: Optional[float] = None) -> pd.DataFrame:
     """The one generic aggregator every Reports page chart/table/export
     reads from: groups `metric_key` by `factor_col`, after applying the
     filters, and returns a DataFrame with columns [factor_col, "value",
@@ -435,11 +507,33 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
     overall - confirmed against live data (a condition with 64 trustworthy
     trips totalling 134 fish still had a median per-trip rate of exactly
     0.0). Pooling first means a bucket only reads as 0 if it genuinely
-    caught nothing across every trustworthy hour logged under it."""
+    caught nothing across every trustworthy hour logged under it.
+
+    water_temp_bucket_width_f: only meaningful when factor_col is
+    WATER_TEMP_BUCKET_FACTOR - see that constant's own module-level comment
+    for why this factor can't be precomputed like every other one. Ignored
+    for every other factor_col. Defaults to
+    DEFAULT_WATER_TEMP_BUCKET_WIDTH_F when not given."""
     t_df = _apply_filters(trips_df, date_start, date_end, anglers, segments)
     f_df = _apply_filters(fish_df, date_start, date_end, anglers, segments)
     if species and species != "All species" and metric_key in SPECIES_FILTERABLE_METRICS and not f_df.empty:
         f_df = f_df[f_df["species"] == species]
+
+    water_temp_bucket_width = water_temp_bucket_width_f or DEFAULT_WATER_TEMP_BUCKET_WIDTH_F
+    if factor_col == WATER_TEMP_BUCKET_FACTOR:
+        # Can't be a precomputed column (unlike every other factor) - the
+        # bucket width isn't known until query time - so it's added here,
+        # on a copy (.assign(), never mutating the caller's own trips_df/
+        # fish_df), right before the same groupby-by-factor_col logic every
+        # other factor already goes through below.
+        if not t_df.empty:
+            t_df = t_df.assign(**{factor_col: t_df["water_temp_f"].apply(
+                lambda v: _water_temp_bucket_label(v, water_temp_bucket_width)
+            )})
+        if not f_df.empty:
+            f_df = f_df.assign(**{factor_col: f_df["water_temp_f"].apply(
+                lambda v: _water_temp_bucket_label(v, water_temp_bucket_width)
+            )})
 
     if metric_key == "fish_per_hour":
         base = t_df.dropna(subset=["trustworthy_hours"]) if not t_df.empty else t_df
@@ -452,9 +546,18 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
         else:
             agg = pd.DataFrame(columns=[factor_col, "value", "n"])
     elif metric_key == "trip_count":
+        # Punch-list #92 follow-up: an entirely-empty result used to come
+        # back with no "value" column at all (only assigned "if not
+        # agg.empty"), which every axis-filling branch below unconditionally
+        # reads via agg["value"] - a latent bug that a fully-empty ORDER_
+        # HINTS/date-factor report never happened to exercise before (their
+        # axis always has at least one listed value to merge against), but
+        # WATER_TEMP_BUCKET_FACTOR's dynamically-generated axis can
+        # legitimately be empty too (no trustworthy water-temp readings at
+        # all), which does hit it. Always include "value" so the merge
+        # below never KeyErrors on a genuinely empty report.
         agg = t_df.groupby(factor_col)["trip_id"].agg(n="count").reset_index() if not t_df.empty else pd.DataFrame(columns=[factor_col, "n"])
-        if not agg.empty:
-            agg["value"] = agg["n"]
+        agg["value"] = agg["n"] if not agg.empty else pd.Series(dtype=float)
     elif metric_key == "biggest_fish":
         base = f_df.dropna(subset=["weight_lb"]) if not f_df.empty else f_df
         agg = base.groupby(factor_col)["weight_lb"].agg(value="max", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
@@ -478,6 +581,26 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
         agg["value"] = agg["value"].fillna(0)
         agg["n"] = agg["n"].fillna(0).astype(int)
         order = {v: i for i, v in enumerate(ORDER_HINTS[factor_col])}
+        return agg.sort_values(by=factor_col, key=lambda s: s.map(order)).reset_index(drop=True)
+
+    if factor_col == WATER_TEMP_BUCKET_FACTOR:
+        # Same "every bucket between the two real endpoints, even at n=0"
+        # idea as ORDER_HINTS/DATE_FACTOR_COLUMNS above, but the axis itself
+        # has to be generated fresh each call (from whatever's actually in
+        # the filtered trips_df right now) instead of coming from a fixed
+        # table, since the bucket width is chosen at query time.
+        axis_labels = _water_temp_bucket_axis(t_df["water_temp_f"] if not t_df.empty else None, water_temp_bucket_width)
+        # An empty axis_labels list (no trustworthy water-temp readings at
+        # all in the filtered trips) would otherwise default to a float64
+        # column here, which can't merge against agg's object-dtype
+        # factor_col when agg is ALSO empty (pandas refuses a float64 <->
+        # object merge outright) - force object dtype explicitly so the
+        # "nothing to show" case merges cleanly instead of raising.
+        full = pd.DataFrame({factor_col: pd.Series(axis_labels, dtype=object)})
+        agg = full.merge(agg, on=factor_col, how="left")
+        agg["value"] = agg["value"].fillna(0)
+        agg["n"] = agg["n"].fillna(0).astype(int)
+        order = {v: i for i, v in enumerate(axis_labels)}
         return agg.sort_values(by=factor_col, key=lambda s: s.map(order)).reset_index(drop=True)
 
     if agg.empty:

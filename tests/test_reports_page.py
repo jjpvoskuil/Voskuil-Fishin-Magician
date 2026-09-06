@@ -83,3 +83,38 @@ def test_swapping_an_inverted_date_range_does_not_raise():
     date_inputs["From"].set_value(to_value).run()
     date_inputs["To"].set_value(from_value).run()
     assert not at.exception, f"page raised on an inverted date range: {at.exception}"
+
+
+def test_water_temp_bucket_width_control_only_appears_for_that_factor():
+    # Punch-list #92 follow-up: "Water Temp Band" (the 5 fixed biological
+    # stages) was too coarse for this repo's real on-disk trip data (an
+    # ~83-89°F range, so nearly every trip lands in one or two of the five
+    # named bands) - "Water Temp (custom range)" lets the angler pick a
+    # tighter bucket width instead. The width control should be invisible
+    # for every other factor.
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    assert not any(n.label == "Bucket width (°F)" for n in at.number_input), (
+        "the bucket-width control should not appear for the default factor"
+    )
+
+    at.selectbox(key="rpt_factor").set_value("Water Temp (custom range)").run()
+    assert not at.exception, f"page raised after switching to the water-temp-bucket factor: {at.exception}"
+    width_inputs = [n for n in at.number_input if n.label == "Bucket width (°F)"]
+    assert len(width_inputs) == 1, "expected exactly one bucket-width control once this factor is picked"
+    assert len(at.dataframe) == 1
+
+
+def test_narrowing_the_water_temp_bucket_width_produces_more_rows():
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    at.selectbox(key="rpt_factor").set_value("Water Temp (custom range)").run()
+    wide_row_count = len(at.dataframe[0].value)
+
+    at.number_input(key="rpt_water_temp_bucket_width").set_value(1.0).run()
+    assert not at.exception, f"page raised after narrowing the bucket width: {at.exception}"
+    narrow_row_count = len(at.dataframe[0].value)
+
+    assert narrow_row_count > wide_row_count, (
+        "a narrower bucket width over the same real data should produce MORE, not fewer, rows"
+    )

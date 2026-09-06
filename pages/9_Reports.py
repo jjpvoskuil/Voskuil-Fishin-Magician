@@ -24,6 +24,7 @@ from core.appstate import get_trip_history, get_anglers, github_token, repo_slug
 from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     FACTOR_OPTIONS, METRIC_OPTIONS, SPECIES_FILTERABLE_METRICS, DATE_FACTOR_COLUMNS,
+    WATER_TEMP_BUCKET_FACTOR, DEFAULT_WATER_TEMP_BUCKET_WIDTH_F,
 )
 from core.scoring import SEGMENTS
 from core.storage import sync_data_from_data_branch
@@ -84,6 +85,23 @@ metric_label = c2.selectbox("Success metric", METRIC_LABELS, index=0, key="rpt_m
 factor_col = FACTOR_OPTIONS[factor_label]
 metric_key = METRIC_OPTIONS[metric_label]
 
+# Punch-list #92 follow-up: "Water Temp Band" (the 5 fixed biological
+# stages) is too coarse while a whole season's worth of trips hasn't been
+# logged yet - the angler's own report was that the real observed range so
+# far is only ~10-15°F wide, so nearly every trip lands in one or two of
+# those five bands. This lets the bucket width be tuned instead of fixed -
+# tight while the season's range is narrow, wider once it isn't. Only
+# shown for that one factor; every other factor ignores this control.
+water_temp_bucket_width = DEFAULT_WATER_TEMP_BUCKET_WIDTH_F
+if factor_col == WATER_TEMP_BUCKET_FACTOR:
+    water_temp_bucket_width = st.number_input(
+        "Bucket width (°F)", min_value=0.5, max_value=20.0, value=DEFAULT_WATER_TEMP_BUCKET_WIDTH_F, step=0.5,
+        key="rpt_water_temp_bucket_width",
+        help="How wide each water-temp bucket should be. Narrower gives more buckets over "
+             "your current logged range; widen it back out once a fuller season's worth of "
+             "temperature spread makes fewer, bigger buckets more useful.",
+    )
+
 species_supported = metric_key in SPECIES_FILTERABLE_METRICS
 c3, c4 = st.columns([1, 1])
 if species_supported:
@@ -123,6 +141,7 @@ report = compute_report(
     trips_df, fish_df, factor_col, metric_key,
     species=species_choice, date_start=date_start, date_end=date_end,
     anglers=anglers_choice or None, segments=segments_choice or None,
+    water_temp_bucket_width_f=water_temp_bucket_width,
 )
 
 st.divider()
