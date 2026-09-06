@@ -14,6 +14,8 @@ from core.storage import commit_and_push_data
 from core.water_quality_log import append_if_new, WATER_QUALITY_LOG_PATH
 from core.lake_water_quality import SurfaceWaterQuality
 from core.calibration import moon_illumination_dawn_rates, daily_dawn_morning_catch
+from core.daily_leaderboard import build_daily_activity, daily_awards, leaderboard_table_rows
+from core.activity_log import format_weight_lb_oz
 from core.ui import (
     inject_mobile_css, inject_compact_metric_css, render_line_chart,
     render_moon_illumination_dawn_chart, render_daily_dawn_morning_catch_chart,
@@ -31,19 +33,6 @@ inject_mobile_css()
 
 st.title("🎣 Voskuil Fishin' Magician")
 st.caption("Largemouth bass fishing forecasts for Nolin River Lake, KY")
-
-st.markdown(
-    """
-This app blends weather, moon phase, and solunar theory into a 1-10 daily
-activity forecast for largemouth bass on Nolin River Lake, then recommends
-where to fish and what to throw. Use the sidebar to navigate:
-
-- **7 Day Forecast** - the full week, drill into any day for best times, lures, colors, and technique.
-- **Lake Map** - click any spot on the lake, then **Spot Session** to get a live, on-the-water
-  recommendation and log what actually happened so the model can learn from it.
-- **Trip History** - filter and review your logged trips, and see how the model is calibrating.
-"""
-)
 
 bundle = None
 weights, n_trips = {}, 0
@@ -220,6 +209,70 @@ if today:
         st.caption(f"Model calibration: using {n_trips} logged trip(s) to nudge the default weights.")
     else:
         st.caption("Model calibration: no trips logged yet - using default weights. Log a trip to start improving it!")
+
+# Punch-list #91: "show fishing activity for any or all anglers that are
+# currently logged in and/or posted a session" - a combined roster (open
+# Spot Session anywhere on the lake, OR at least one row logged today),
+# three "award" tiles for the day's biggest fish/top angler by weight/top
+# angler by fish count, and a detailed per-angler, per-species leaderboard
+# table with subtotals and a grand total. All the real logic lives in
+# core/daily_leaderboard.py (kept Streamlit-free and unit tested on its
+# own) - this block is just rendering. Independent of the weather/bundle
+# status above (this is trip-log data, not weather), so a weather outage
+# shouldn't hide it.
+st.subheader("🎣 Today's Activity")
+try:
+    _activity_rows = get_trip_history()
+except Exception:
+    _activity_rows = []
+_today_iso = lake_today().isoformat()
+day_stats = build_daily_activity(_activity_rows, _today_iso)
+
+if not day_stats:
+    st.caption("Nobody's logged a Spot Session yet today - be the first one out there!")
+else:
+    _roster_bits = [
+        f"{'🟢' if s.active else '⚪'} **{s.angler}** ({s.fish_count} fish today)"
+        for s in day_stats
+    ]
+    st.caption(
+        "🟢 = has an open Spot Session right now, ⚪ = posted today but not currently active.  "
+        + " · ".join(_roster_bits)
+    )
+
+    awards = daily_awards(day_stats)
+    award_cols = st.columns(3)
+
+    _biggest = awards["biggest_fish"]
+    award_cols[0].metric(
+        "🎣 Berkley - Biggest Fish of the Day",
+        format_weight_lb_oz(_biggest["weight_lb"]) if _biggest else "None yet",
+        help=(f"{_biggest['species']}, caught by {_biggest['angler']}" if _biggest
+              else "No fish logged yet today."),
+    )
+    _top_weight = awards["top_angler_weight"]
+    award_cols[1].metric(
+        "🎣 String King - Top Angler of the Day",
+        f"{_top_weight.angler} ({format_weight_lb_oz(_top_weight.total_weight_lb)})" if _top_weight else "None yet",
+        help="Highest total weight caught today, across every species." if _top_weight
+             else "No fish logged yet today.",
+    )
+    _top_count = awards["top_bag_count"]
+    award_cols[2].metric(
+        "🎣 Z-Man - Top Bag Limit Buster",
+        f"{_top_count.angler} ({_top_count.fish_count} fish)" if _top_count else "None yet",
+        help="Most total fish caught today, across every species." if _top_count
+             else "No fish logged yet today.",
+    )
+
+    _table_rows = leaderboard_table_rows(day_stats)
+    if _table_rows:
+        st.caption("Leaderboard - today's catch by angler")
+        st.dataframe(pd.DataFrame(_table_rows), width='stretch', hide_index=True)
+    st.caption(
+        "Resets at the lake's own local midnight (America/Chicago) - see the full, filterable, "
+        "all-time rankings on the **Leaderboard** page."
+    )
 
 # Punch-list #13/#15: trend charts for "Today at a glance"'s own metrics,
 # now going back HOME_TREND_CHART_PAST_DAYS (14) days rather than 3.
