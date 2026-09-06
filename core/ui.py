@@ -2,6 +2,7 @@
 identical on the 7-Day Forecast page and the Spot Session page."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+import pandas as pd
 import streamlit as st
 
 from .lures import LureBlock, STRUCTURE_TYPES, FORAGE_OPTIONS, MAX_OWNED_ITEMS_PER_BLOCK, curate_recommendation
@@ -245,6 +246,57 @@ def render_line_chart(col, series, y_domain: tuple | None = None):
         .encode(
             x=alt.X("x", sort=None, title=None),
             y=alt.Y("value", scale=alt.Scale(domain=list(y_domain)), title=None),
+        )
+    )
+    col.altair_chart(chart, width="stretch")
+
+
+def render_moon_phase_rate_chart(col, phase_rates: dict, x_order: list):
+    """Renders `core.calibration.moon_phase_time_of_day_rates()`'s output as
+    a grouped bar chart: moon phase (all 8 names, in `x_order` - the real
+    lunar cycle order, not alphabetical) on the X axis, one bar per
+    time-of-day group ("Dawn + Morning" vs. "Rest of day") side by side
+    within each phase, median fish/hour on the Y axis. A phase/group with no
+    logged trips yet just renders no bar (Altair drops null Y values) rather
+    than a misleading zero-height bar, since "no data" and "confirmed zero
+    catch rate" are very different claims.
+
+    Two series need a legend so time-of-day identity is never color-alone
+    (this app has no custom palette anywhere else, so this leans on
+    Streamlit/Altair's own default categorical theme rather than picking
+    colors by hand), and every bar carries a tooltip with the exact median
+    and sample size `n` so the angler can judge a thin-sample phase (right
+    now several phases have zero logged trips - see the caption this chart
+    ships alongside in home.py) rather than the chart silently implying
+    every phase is equally trustworthy."""
+    import altair as alt
+
+    rows = []
+    labels = {"morning": "Dawn + Morning", "rest_of_day": "Rest of day"}
+    for phase, sides in phase_rates.items():
+        for side, stats in sides.items():
+            rows.append({
+                "phase": phase,
+                "group": labels[side],
+                "median_rate": stats["median"],
+                "n": stats["n"],
+            })
+    df = pd.DataFrame(rows)
+
+    chart = (
+        alt.Chart(df)
+        .mark_bar()
+        .encode(
+            x=alt.X("phase:N", sort=x_order, title=None, axis=alt.Axis(labelAngle=-30)),
+            xOffset=alt.XOffset("group:N", sort=list(labels.values())),
+            y=alt.Y("median_rate:Q", title="Median fish/hour"),
+            color=alt.Color("group:N", title=None, sort=list(labels.values())),
+            tooltip=[
+                alt.Tooltip("phase:N", title="Moon phase"),
+                alt.Tooltip("group:N", title="Time of day"),
+                alt.Tooltip("median_rate:Q", title="Median fish/hour", format=".2f"),
+                alt.Tooltip("n:Q", title="Trips logged"),
+            ],
         )
     )
     col.altair_chart(chart, width="stretch")
