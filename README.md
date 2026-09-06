@@ -1104,23 +1104,43 @@ produced real fish overall by the Total Fish Caught count sitting right next to 
 means a bucket only reads as 0 if it genuinely caught nothing across every trustworthy hour
 logged under it.
 
-**🔮 Predict a future day** (punch-list #92's predictive half, first pass) is a section at the
-bottom of the page: pick a date and get back a prediction for whichever success metric is
-selected above, based on moon illumination alone for this first pass - the one input with
-zero forecast uncertainty (moon phase for a future date is exact closed-form math, unlike
-weather, which is itself only ever a forecast). This is deliberately NOT a fitted
-statistical model - the real logged data currently sits at only ~126 trustworthy trips,
-thin for fitting anything across this page's many candidate factors - it's a transparent
-historical-bucket **lookup**: figure out which moon-illumination bucket the target date's
-night falls into, then report back that same bucket's real historical average from your
-logged trips (honoring whichever Species/date-range/Angler/Segment filters are set above).
-"Here's what happened historically under this same moon phase," not a real forecast - and
-the sample size backing the number is always shown right alongside it, with an explicit
-low-confidence caveat once it drops below 4 trips (the same "wait for enough data before
-trusting a pattern" threshold this app's own weight-calibration engine already uses
-elsewhere). Predicting from forecasted weather (temperature, cloud cover, wind,
-precipitation) is a planned next iteration - the ingredients already exist in
-`core/weather.py`'s forecast bundle, just not wired up to this lookup yet.
+**🔮 Predict a future day** (punch-list #92's predictive half) is a section at the bottom of
+the page: pick a date (shared by both predictors below) and get back a prediction for
+whichever success metric is selected above. Both predictors are deliberately NOT fitted
+statistical models - the real logged data currently sits at only ~126 trustworthy trips,
+thin for fitting anything across this page's many candidate factors - they're transparent
+historical-bucket **lookups**: figure out which bucket the target date falls into for that
+one variable, then report back that same bucket's real historical average from your logged
+trips (honoring whichever Species/date-range/Angler/Segment filters are set above). "Here's
+what happened historically under this same condition," not a forecast in the statistical
+sense - and the sample size backing each number is always shown right alongside it, with an
+explicit low-confidence caveat once it drops below 4 trips (the same "wait for enough data
+before trusting a pattern" threshold this app's own weight-calibration engine already uses
+elsewhere).
+
+- **🌙 Moon illumination (night before)** - the first pass, and still the simplest: moon
+  phase for a future date is exact closed-form math (`core.astro.moon_phase()`), so this one
+  carries zero forecast uncertainty. Works for any date, including a past one (handy for
+  sanity-checking a prediction against a day that's already been fished and logged).
+- **📉 Barometric pressure trend (forecasted)** - the second pass, added at the angler's own
+  direction ("lets try weather but lets focus only on barometric pressure forecast first").
+  Unlike moon illumination, this one genuinely depends on a real weather forecast
+  (`core.appstate.get_weather_bundle(16)`, Open-Meteo's real 16-day cap) and reuses the exact
+  same `core.weather.pressure_trend_hpa_per_24h()` calculation this app's 7-Day Forecast
+  page and Spot Session's own live-condition logging already use - same units, same sign
+  convention, so a forecasted value slots directly into this page's existing "Pressure
+  Trend" bucketing with zero conversion. Because a forecast only covers a bounded window (and
+  because the underlying pressure-trend function has no built-in guard against being asked
+  about a date outside that window - it would otherwise just answer using whatever hourly
+  reading happens to be nearest, however far off that actually is), this predictor checks the
+  target date's coverage explicitly and says so plainly - "outside the fetched weather
+  forecast's window" - rather than ever showing a confident-looking number it can't actually
+  back. It also carries real forecast-accuracy uncertainty that gets worse the further out
+  the target date is, unlike the moon-illumination prediction next to it - the captions under
+  each prediction say so.
+
+Predicting from the rest of the weather bundle (sky condition, wind, precipitation) is a
+planned next iteration.
 
 ## Tackle Box (lure inventory)
 

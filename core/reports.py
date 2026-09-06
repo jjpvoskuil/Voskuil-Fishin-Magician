@@ -51,8 +51,22 @@ thin for fitting anything across this page's many candidate factors, but
 plenty for a simple, transparent "what happened historically under this
 bucket" lookup - matching this whole app's existing explainable,
 not-a-black-box design philosophy rather than introducing a new one).
-Forecasted-weather-based prediction (the OTHER half of the original ask)
-is still out of scope for this pass.
+
+Forecasted-weather-based prediction (the other half of the original ask)
+now has its own first stab too, at the angler's explicit direction ("lets
+try weather but lets focus only on barometric pressure forecast first") -
+predict_by_pressure_trend(), also at the bottom of this file. Same
+historical-bucket-lookup shape as the moon predictor, reusing
+core.weather.pressure_trend_hpa_per_24h() (already computed for the
+existing 7-Day Forecast/Spot Session pipelines, same units/sign
+convention this module's own historical pressure_trend_band already
+uses) - but UNLIKE moon illumination, this one genuinely depends on a
+weather forecast, which only covers a bounded window and carries real
+forecast-accuracy uncertainty that gets worse the further out you look.
+See that function's own docstring for how this module surfaces that
+honestly (a `forecast_available` flag) rather than quietly returning a
+number computed from whatever hourly reading happens to be nearest, however
+far outside the fetched window that actually is.
 """
 from __future__ import annotations
 
@@ -72,6 +86,7 @@ from core.lures import LURE_PROFILES
 from core.onwater import water_temp_band, WATER_TEMP_BANDS, LIGHT_CONDITIONS, WIND_BAND_LABELS
 from core.scoring import SEGMENTS, season_stage
 from core.storage import parse_conditions
+from core.weather import WeatherBundle, pressure_trend_hpa_per_24h
 
 # --- Small parsing helpers (mirrors pages/8_Leaderboard.py's own conventions,
 # kept local rather than imported since that page's are private) ------------
@@ -694,6 +709,148 @@ def predict_by_moon_illumination(trips_df: pd.DataFrame, fish_df: pd.DataFrame, 
         "target_date": target_date,
         "moon_illumination_pct": target_pct,
         "moon_illumination_bucket": target_bucket,
+        "metric_key": metric_key,
+        "predicted_value": predicted_value,
+        "n": n,
+        "low_sample": 0 < n < MIN_PREDICTION_SAMPLES,
+    }
+
+
+# --- Prediction: barometric pressure trend (forecasted) ------------------------
+# Angler's explicit direction after the moon predictor above: "OK....lets try
+# weather but lets focus only on barometric pressure forecast first" - so
+# THIS is scoped to pressure trend only, not sky condition/wind/the rest of
+# the weather bundle (those stay a future iteration, same "one or two
+# variables first to test it out" framing that picked moon illumination
+# first).
+#
+# Same historical-bucket-LOOKUP shape as predict_by_moon_illumination()
+# above (figure out which bucket the target date falls into, then hand back
+# that bucket's real historical average) - but the bucket itself now comes
+# from a genuine weather FORECAST (core.weather.pressure_trend_hpa_per_24h()
+# against a fetched WeatherBundle) rather than exact closed-form math. That
+# function is already the single source of truth this app uses for pressure
+# trend on BOTH sides of the historical lookup: core.scoring.score_day()/
+# _segment_score() call it to compute a day's/segment's FORECASTED
+# pressure_trend_24h, and core.scoring.realtime_context_from_bundle() (via
+# pages/6_Spot_Session.py, at the moment a trip is actually logged) calls
+# the exact same function to capture the LIVE historical value that ends up
+# in conditions_json["pressure_trend_24h"] - which is exactly what
+# _row_factors() above reads back out for every historical trip row. Same
+# units (hPa change over 24h, positive = rising), same sign convention, on
+# both sides - a forecasted value plugs directly into this module's own
+# _pressure_trend_band() with zero conversion, exactly like a historical
+# one already does.
+#
+# The one thing that genuinely differs from the moon predictor: a weather
+# forecast only covers a bounded window (Open-Meteo's real cap is 16 days
+# out - see core.weather.fetch_forecast()'s own forecast_days clamp), and
+# core.weather.pressure_trend_hpa_per_24h()'s internal nearest_idx() helper
+# has NO built-in guard against `at_time` falling outside that window - it
+# always returns SOME value, computed from whichever hourly reading happens
+# to be nearest, however distant that actually is, rather than raising or
+# signaling "out of range." Silently trusting that would let a target_date
+# well beyond the fetched forecast (or the caller passing bundle=None,
+# e.g. because the live weather fetch itself failed - this app's own
+# established fail-soft convention elsewhere, see pages/6_Spot_Session.py's
+# own `try: bundle = get_weather_bundle(7) except Exception: bundle = None`)
+# come back reading as a confident, plausible-looking number instead of the
+# unknown it actually is. _bundle_covers_pressure_forecast() below is the
+# guard: both `at_time` itself AND the ~24h-earlier hour
+# pressure_trend_hpa_per_24h() diffs against have to fall inside the
+# bundle's own actual fetched hourly range, or this predictor reports
+# `forecast_available: False` (predicted_value/pressure_trend_24h/
+# pressure_trend_band all None, n=0) instead of guessing.
+def _bundle_covers_pressure_forecast(bundle: Optional[WeatherBundle], at_time: datetime) -> bool:
+    if bundle is None or not bundle.hourly:
+        return False
+    times_raw = bundle.hourly.get("time")
+    if not times_raw:
+        return False
+    try:
+        times = [datetime.fromisoformat(t) for t in times_raw]
+    except (ValueError, TypeError):
+        return False
+    if not times:
+        return False
+    lo, hi = min(times), max(times)
+    # pressure_trend_hpa_per_24h() reads at_time AND (at_time - 24h) - both
+    # need real coverage, not just the later of the two.
+    return lo <= (at_time - timedelta(hours=24)) and at_time <= hi
+
+
+def predict_by_pressure_trend(trips_df: pd.DataFrame, fish_df: pd.DataFrame, target_date: date,
+                               bundle: Optional[WeatherBundle], metric_key: str = "fish_per_hour",
+                               species: Optional[str] = None, date_start=None, date_end=None,
+                               anglers: Optional[list] = None, segments: Optional[list] = None) -> dict:
+    """Second pass at punch-list #92's predictive half - barometric pressure
+    trend, at the angler's own explicit direction ("lets try weather but
+    lets focus only on barometric pressure forecast first"). Same
+    historical-bucket-lookup idea as predict_by_moon_illumination() above:
+    figure out which PRESSURE_TREND_BANDS bucket the target date's forecast
+    falls into, then hand back that bucket's real historical average from
+    the (optionally filtered) logged trips via compute_report() - "here's
+    what happened historically the last time pressure was doing this," not
+    a fitted forecast in the statistical sense.
+
+    Unlike moon illumination, this one genuinely depends on a weather
+    forecast - `bundle` (a core.weather.WeatherBundle, already fetched by
+    the caller; this module stays Streamlit-free and never fetches one
+    itself) only covers a bounded window and carries real forecast-accuracy
+    uncertainty. `target_date`'s noon (matching core.scoring.score_day()'s
+    own noon-anchored convention for a day's pressure trend) has to fall
+    within `bundle`'s own actual fetched hourly coverage - which can be
+    real past readings as well as forecasted future ones, since Open-Meteo
+    returns both - or this returns `forecast_available: False` rather than
+    a number computed from whichever hourly reading happens to be nearest,
+    however far outside that window it actually is (see
+    _bundle_covers_pressure_forecast()'s own comment above for exactly why
+    that guard exists). `bundle=None` (e.g. the live weather fetch itself
+    failed) is handled the same way, for the same reason.
+
+    species/date_start/date_end/anglers/segments: passed straight through
+    to compute_report(), same meaning as predict_by_moon_illumination()'s
+    own (scopes which HISTORICAL trips the lookup is built from - not
+    applied to target_date itself).
+
+    Returns a dict:
+    - target_date
+    - forecast_available: False when target_date's forecast isn't covered
+      by `bundle` (out of range, or bundle itself is None) - every other
+      field below is then None/0/False, not a guess.
+    - pressure_trend_24h (float|None): the forecasted hPa/24h value itself
+    - pressure_trend_band (str|None): which PRESSURE_TREND_BANDS bucket
+      that value falls into (same _pressure_trend_band() thresholds this
+      module already uses for historical trips)
+    - metric_key (echoed back, so a caller can format the value correctly)
+    - predicted_value: float|None - None when n == 0 (a bucket nobody has
+      ever logged a trustworthy trip under yet) OR when forecast_available
+      is False
+    - n: sample size backing predicted_value (same meaning as
+      compute_report()'s own "n" column / predict_by_moon_illumination()'s)
+    - low_sample: True when 0 < n < MIN_PREDICTION_SAMPLES."""
+    at_time = datetime.combine(target_date, dtime(12, 0))
+    forecast_available = _bundle_covers_pressure_forecast(bundle, at_time)
+
+    pressure_trend = pressure_trend_hpa_per_24h(bundle, at_time) if forecast_available else None
+    pressure_band = _pressure_trend_band(pressure_trend) if forecast_available else None
+
+    n = 0
+    predicted_value = None
+    if forecast_available:
+        report = compute_report(
+            trips_df, fish_df, "pressure_trend_band", metric_key,
+            species=species, date_start=date_start, date_end=date_end, anglers=anglers, segments=segments,
+        )
+        row = report[report["pressure_trend_band"] == pressure_band]
+        n = int(row.iloc[0]["n"]) if not row.empty else 0
+        predicted_value = float(row.iloc[0]["value"]) if n > 0 else None
+
+    return {
+        "target_date": target_date,
+        "forecast_available": forecast_available,
+        "pressure_trend_24h": pressure_trend,
+        "pressure_trend_band": pressure_band,
         "metric_key": metric_key,
         "predicted_value": predicted_value,
         "n": n,

@@ -16,7 +16,12 @@ and why a historical lookup instead of a fitted model" reasoning - short
 version: moon phase for a future date is exact (no forecast uncertainty),
 and the real live data (~126 trustworthy trips) is thin for fitting
 anything more sophisticated across this page's many candidate factors.
-Forecasted-weather-based prediction is still out of scope for this pass.
+A second predictor - barometric pressure trend, from a real weather
+forecast this time - lives right below it, at the angler's own explicit
+direction ("lets try weather but lets focus only on barometric pressure
+forecast first"); see core.reports.predict_by_pressure_trend()'s own
+docstring for how it stays honest about the bounded forecast window that
+one genuinely depends on.
 """
 from datetime import date, timedelta
 from io import BytesIO
@@ -25,9 +30,10 @@ import pandas as pd
 import streamlit as st
 
 from core.activity_log import format_weight_lb_oz
-from core.appstate import get_trip_history, get_anglers, github_token, repo_slug
+from core.appstate import get_trip_history, get_anglers, get_weather_bundle, github_token, repo_slug
 from core.reports import (
-    build_reports_dataframe, compute_report, species_options, predict_by_moon_illumination,
+    build_reports_dataframe, compute_report, species_options,
+    predict_by_moon_illumination, predict_by_pressure_trend,
     FACTOR_OPTIONS, METRIC_OPTIONS, SPECIES_FILTERABLE_METRICS, DATE_FACTOR_COLUMNS,
     WATER_TEMP_BUCKET_FACTOR, DEFAULT_WATER_TEMP_BUCKET_WIDTH_F, MIN_PREDICTION_SAMPLES,
 )
@@ -47,8 +53,8 @@ st.caption(
 )
 st.caption(
     "🔮 A first, deliberately narrow stab at predicting a future day lives at the bottom of "
-    "this page - moon illumination only for now (it's the one input with zero forecast "
-    "uncertainty). Predicting from forecasted weather is still a future iteration."
+    "this page - moon illumination (zero forecast uncertainty) and now barometric pressure "
+    "trend (a real weather forecast, so it carries real forecast-accuracy uncertainty)."
 )
 
 # Mirrors pages/8_Leaderboard.py's own "🔄 Refresh from GitHub" button -
@@ -230,20 +236,20 @@ else:
 st.divider()
 st.subheader("🔮 Predict a future day")
 st.caption(
-    "First pass at punch-list #92's other ask - starting with moon illumination since it's "
-    "the one input that's exactly known for any future date, with no forecast uncertainty at "
-    "all (unlike weather, which is itself only ever a forecast). This is a historical lookup, "
-    "not a fitted statistical model: it figures out which moon-illumination bucket the target "
-    "date's night falls into, then reports back that bucket's real historical average from "
-    "your logged trips (using whichever Species/date-range/Angler/Segment filters are set "
-    "above) - \"here's what happened historically under this same moon phase,\" not a real "
-    "forecast. Predicting from forecasted weather is a planned next iteration."
+    "First pass at punch-list #92's other ask, one variable at a time - both predictors below "
+    "share the same target date and the same Species/date-range/Angler/Segment filters set "
+    "above, and both are historical-bucket LOOKUPS (not fitted statistical models): each one "
+    "figures out which bucket the target date falls into, then reports back that bucket's real "
+    "historical average from your logged trips - \"here's what happened historically under "
+    "this same condition,\" not a forecast in the statistical sense."
 )
 
 predict_date = st.date_input(
     "Predict for date", value=date.today() + timedelta(days=1), key="rpt_predict_date",
     help="Any date works, including a past one - useful for sanity-checking a prediction "
-         "against a day that's already been fished and logged.",
+         "against a day that's already been fished and logged. The pressure-trend predictor "
+         "below is further limited to whatever window the fetched weather forecast actually "
+         "covers.",
 )
 
 prediction = predict_by_moon_illumination(
@@ -265,6 +271,7 @@ def _format_metric_value(key: str, value) -> str:
     return f"{value:.0f} fish"  # total_fish
 
 
+st.markdown("**🌙 Moon illumination (night before)**")
 pred_col1, pred_col2 = st.columns([1, 2])
 pred_col1.metric(
     f"Predicted {metric_label}",
@@ -291,3 +298,74 @@ else:
         f"🌙 {moon_pct:.0f}% illuminated the night before ({moon_bucket} bucket) - based on {n} "
         "logged trips under this same bucket."
     )
+
+# --- Predict a future day: barometric pressure trend (forecasted) -------------------
+# Second predictor, at the angler's own explicit direction ("lets try
+# weather but lets focus only on barometric pressure forecast first").
+# Requests 16 days (Open-Meteo's real forecast_days cap - see
+# core.weather.fetch_forecast()) rather than this app's usual 7, to
+# maximize how far out `predict_date` above can actually be covered - a
+# separate st.cache_data entry from the 7-day bundle other pages use
+# (get_weather_bundle() caches per its own `days` argument), same
+# fail-soft "no live weather, no crash" convention pages/6_Spot_Session.py
+# already uses elsewhere on this app.
+try:
+    _pressure_bundle = get_weather_bundle(16)
+except Exception:
+    _pressure_bundle = None
+
+pressure_prediction = predict_by_pressure_trend(
+    trips_df, fish_df, predict_date, _pressure_bundle, metric_key=metric_key,
+    species=species_choice, date_start=date_start, date_end=date_end,
+    anglers=anglers_choice or None, segments=segments_choice or None,
+)
+
+st.markdown("**📉 Barometric pressure trend (forecasted)**")
+if not pressure_prediction["forecast_available"]:
+    if _pressure_bundle is None:
+        st.caption(
+            "📉 No live weather forecast available right now, so there's nothing to predict "
+            "pressure trend from for this date - moon illumination above still works."
+        )
+    else:
+        _times = _pressure_bundle.hourly.get("time") or []
+        if _times:
+            _lo = min(_times)[:10]
+            _hi = max(_times)[:10]
+            _window_note = f"the fetched forecast only covers {_lo} through {_hi}"
+        else:
+            _window_note = "the fetched forecast has no usable hourly data right now"
+        st.caption(
+            f"📉 {predict_date.isoformat()} is outside the fetched weather forecast's window - "
+            f"{_window_note}. Pick a date in that range for a pressure-based prediction (moon "
+            "illumination above still works for any date)."
+        )
+else:
+    pcol1, pcol2 = st.columns([1, 2])
+    pcol1.metric(
+        f"Predicted {metric_label}",
+        _format_metric_value(metric_key, pressure_prediction["predicted_value"]),
+    )
+    p_trend = pressure_prediction["pressure_trend_24h"]
+    p_band = pressure_prediction["pressure_trend_band"]
+    p_n = pressure_prediction["n"]
+    if p_n == 0:
+        pcol2.caption(
+            f"📉 Forecast: {p_trend:+.1f} hPa/24h ({p_band}) - no trips logged under this "
+            "pressure-trend bucket yet (with the filters above), so there's nothing to predict "
+            "from."
+        )
+    elif pressure_prediction["low_sample"]:
+        pcol2.caption(
+            f"📉 Forecast: {p_trend:+.1f} hPa/24h ({p_band}) - based on only {p_n} logged "
+            f"trip(s) under this bucket, fewer than the {MIN_PREDICTION_SAMPLES} this app's own "
+            "weight-calibration engine requires before trusting a pattern elsewhere - treat this "
+            "one with real skepticism. This also carries real weather-forecast uncertainty on "
+            "top of that, unlike the moon-illumination prediction above."
+        )
+    else:
+        pcol2.caption(
+            f"📉 Forecast: {p_trend:+.1f} hPa/24h ({p_band}) - based on {p_n} logged trips under "
+            "this same bucket. Still a real weather forecast, not a certainty - accuracy degrades "
+            "the further out `predict_date` is, unlike the moon-illumination prediction above."
+        )
