@@ -1048,11 +1048,12 @@ A dynamic, "pick any two things and see how they line up" analysis page (`pages/
 `core/reports.py`) - the first-pass framework for the angler's own ask: run correlations
 between session parameters/weather/moon illumination/location/lure/color/etc. and fishing
 success, flexibly over any date range, with a chart and an Excel export. Pick a **factor**
-(21 choices - spot, structure type, water clarity, lure, lure category, color, technique,
+(22 choices - spot, structure type, water clarity, lure, lure category, color, technique,
 time segment, season, sky condition, wind band/direction, precipitation, water temp band,
-pressure trend, moon illumination % the night before, reported fish/forage activity,
-angler, day of week, or date daily/weekly) and a **success metric** (total fish caught, fish
-per hour, biggest fish, or # trips), then narrow it down with an optional species filter
+water temp custom range, pressure trend, moon illumination % the night before, reported
+fish/forage activity, angler, day of week, or date daily/weekly) and a **success metric**
+(total fish caught, fish per hour, biggest fish, or # trips), then narrow it down with an
+optional species filter
 (only applies to the two metrics computed per-catch - disabled, with a tooltip, for the two
 that are inherently per-trip, mirroring Leaderboard's own disabled-when-not-applicable
 pattern), a date range, an angler multiselect, and a time-segment multiselect. Date-based
@@ -1075,6 +1076,33 @@ binning logic for factors that are already plain categorical strings in the cond
 dict. Read entirely from `data/trip_log.csv` (same cached `get_trip_history()` every other
 page uses, with its own **"🔄 Refresh from GitHub"** button for the same staleness reasons
 Leaderboard's copy exists) - this page never writes anything.
+
+**Water Temp (custom range)** (punch-list #92 follow-up) exists alongside the fixed
+**Water Temp Band** factor for the same reason moon illumination needed its own binning:
+the five named biological bands (Cold/Lethargic, Pre-Spawn Transition, Peak Optimal Prime,
+Summer Stratified, Extreme Thermal Load) are the right long-term view, but early in a
+season - before a full spread of temperatures has been logged - the real observed range
+can be as narrow as 10-15°F, meaning nearly every trip lands in just one or two of those
+five bands. Picking this factor shows a **"Bucket width (°F)"** control (default 2°F,
+adjustable from 0.5 to 20) that bins water temperature into even-width buckets anchored to
+absolute 0°F (so a given bucket's boundaries, e.g. "68-70°F," stay the same regardless of
+which date range or filters are active) instead of the fixed named stages - narrow it down
+while the season's spread is tight, widen it back out as more of the year gets logged.
+Every bucket between the coldest and warmest reading actually in the filtered data shows
+up, including any gap in between, at a real zero rather than being silently omitted - same
+convention as every other factor's chart axis.
+
+**Fish per Hour (rate)** is a *pooled* rate per bucket - sum(fish caught) ÷ sum(trustworthy
+hours) across every trustworthy trip in it (the standard "catch per unit effort" framing in
+fisheries science), not an average of each trip's own individual rate. This was a real fix,
+not just a design choice from the start: bass fishing produces plenty of genuinely skunked
+(0 fish, otherwise trustworthy-duration) trips, and averaging each trip's own rate - even
+taking the median, which is what this app's own weight-calibration engine deliberately
+does elsewhere, for good reason there - let a bucket where more than half its trips
+happened to get skunked read as a flat, misleading 0.0 on the chart, even when it clearly
+produced real fish overall by the Total Fish Caught count sitting right next to it. Pooling
+means a bucket only reads as 0 if it genuinely caught nothing across every trustworthy hour
+logged under it.
 
 **Deliberately out of scope for this first pass:** the predictive half of the original ask
 ("predict success in future days given forecasted parameters and/or known moon

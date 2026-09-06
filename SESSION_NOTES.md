@@ -10911,6 +10911,100 @@ every real save.
     (558 + 1 new). Verified via a fresh `git clone` into a new temp
     directory before pushing.
 
+162. **Punch-list #92 follow-up (same session): user-adjustable water-temp
+    buckets.** Angler's ask, verbatim: "Lets look at water temperature. The
+    buckets now are too broad, maybe this can be a selectable range, but
+    right now, the range has not been much more than 10-15 degrees across
+    all trips. As the seasons change, this will certainly get larger so
+    maybe we can have the app create buckets based on a user inputted
+    range."
+
+    Confirmed against the real `data`-branch trip history before writing
+    any code: observed water temp so far spans roughly 82-93°F - a single
+    ~11°F window that falls almost entirely inside just one or two of
+    "Water Temp Band"'s five fixed biological stages (Cold/Lethargic,
+    Pre-Spawn Transition, Peak Optimal Prime, Summer Stratified, Extreme
+    Thermal Load - each spanning 7-13°F on its own), making that factor
+    nearly useless for comparison purposes with the season only partway
+    logged, exactly as reported.
+
+    Rather than replacing "Water Temp Band" (still the right long-term
+    view once a full season's spread is logged, and it's the same
+    classification `core.scoring`/Spot Session already use elsewhere for
+    the forecast engine itself), added a SECOND, independent factor -
+    "Water Temp (custom range)" (`core.reports.WATER_TEMP_BUCKET_FACTOR`) -
+    with a user-chosen bucket width in °F. Picking it on the page shows a
+    new **"Bucket width (°F)"** `st.number_input` (default 2°F, 0.5-20
+    range) that appears ONLY for this factor (mirrors the existing
+    Species-picker conditional-visibility pattern). Unlike every other
+    factor, this one can't be precomputed as a column in
+    `build_reports_dataframe()` - the width isn't known until query time -
+    so `compute_report()` computes it on the fly via `.assign()` (a copy,
+    never mutating the caller's own `trips_df`/`fish_df`) right before the
+    same per-factor groupby logic every other factor already goes through.
+    Buckets are anchored to absolute 0°F (`floor(value / width) * width`),
+    not to the currently-filtered data's own observed minimum, for the
+    same reason `MOON_ILLUMINATION_BIN_ORDER` anchors to 0% rather than
+    the observed minimum illumination: a bucket's boundaries (e.g. always
+    "68-70°F" at a 2°F width) need to stay the same across different
+    filter picks so two picks stay comparable, and so the label is a clean
+    round number rather than an arbitrary float. The bucket axis itself -
+    every width-wide bucket between the coldest and warmest reading
+    actually present in the currently-filtered trips, including any real
+    gap in between shown at zero rather than omitted - is generated fresh
+    each call (`_water_temp_bucket_axis()`), since (unlike every
+    ORDER_HINTS factor) there's no fixed table to draw it from.
+
+    Two real bugs caught while building this, both fixed before any test
+    was written against them - both surfaced by actually running the new
+    code against real data and against a fully-empty case, not just
+    against hand-picked unit-test fixtures:
+
+    - `_water_temp_bucket_label()` checked `temp_f is None`, but a value
+      pulled out of a pandas Series via `.apply()` represents "missing" as
+      float `NaN`, not Python `None` - `math.floor(nan)` raises
+      `ValueError` outright rather than returning anything usable. Fixed
+      by also checking `pd.isna(temp_f)`.
+    - An entirely empty axis (no trustworthy water-temp readings at all in
+      the filtered trips) built its merge-key column as `pd.DataFrame({col:
+      []})`, which pandas defaults to float64 dtype for an empty list -
+      merging that against `agg`'s own empty, object-dtype `factor_col`
+      column raised `ValueError: You are trying to merge on float64 and
+      object columns`. Fixed by explicitly building that column as
+      `pd.Series(axis_labels, dtype=object)`. Chasing this down surfaced a
+      third, actually pre-existing bug one level up: `trip_count`'s empty-
+      data branch only ever assigned a `"value"` column `if not
+      agg.empty`, so a genuinely empty `trip_count` report reached the new
+      water-temp-bucket axis-merge code with no `"value"` column at all,
+      raising `KeyError: 'value'` - a bug that ORDER_HINTS/date-based
+      factors never happened to exercise before (their axis always has at
+      least one listed value to merge against even with zero trips), but
+      the water-temp bucket axis can legitimately be empty too. Fixed by
+      always assigning `"value"` for that metric, empty or not.
+
+    **Verified:** 9 new unit tests in `tests/test_reports.py` (bucket-
+    label floor/format/boundary/None/NaN/zero-width edge cases; axis-
+    fill including the real gap; `compute_report()` for a custom width,
+    a wider width collapsing buckets together, missing water-temp rows
+    excluded, the default width when none is given, pooled fish-per-hour
+    within one bucket guarding the same masking pattern as entry 161's
+    regression test, and the fully-empty-data case across all 4 metrics -
+    which is exactly what caught the `trip_count`/`KeyError: 'value'` bug
+    above) plus 2 new `AppTest` smoke tests in `tests/test_reports_page.py`
+    (the bucket-width control appears ONLY for this factor; narrowing the
+    width against this repo's own real ~83-89°F on-disk fixture data
+    produces strictly more rows, not fewer). Also verified directly
+    against the real `data`-branch trip history via a scratch script both
+    before writing the fix (confirming the reported problem) and after
+    (width=1 over the real 82-93°F range correctly produces 12 buckets
+    including the real 89-93°F gap at value=0; width=5 collapses the same
+    data to 3 clean buckets), and once more through the actual rendered
+    page (`AppTest`, mocking `get_trip_history()` with the real fetched
+    rows) to confirm the fix holds end-to-end. Full suite `pytest tests/
+    -q` - 570 passed (559 + 9 + 2). Full-page `AppTest` smoke pass across
+    every other page - clean. Verified via a fresh `git clone` into a new
+    temp directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
