@@ -95,6 +95,27 @@ this repo that can override it on this hosting.
   dramatic than it is - every other chart on this page still auto-scales. See
   `core.ui.render_line_chart()` for how the fixed range is drawn (a raw `st.altair_chart()` with an
   explicit `alt.Scale(domain=...)`, since plain `st.line_chart()` has no way to pin its Y axis).
+- **"🎣 Today's Activity"** on the Home page (punch-list #91) - sits right under "Today at a
+  glance" (the old intro paragraph/bullet list above it was removed to make room). Shows a
+  combined roster of every angler who's either got a Spot Session open right now anywhere on the
+  lake (🟢), or has logged at least one row today (⚪) even if that session's already ended -
+  "currently logged in and/or posted a session," per the angler's own framing - sorted active
+  anglers first, then by fish caught today (both the roster order and the "currently logged in"
+  definition were explicit angler decisions when this was built). Below the roster, three award
+  tiles for the day so far: "🎣 Berkley - Biggest Fish of the Day" (the single biggest fish logged
+  today, any angler/species), "🎣 String King - Top Angler of the Day" (highest total weight caught
+  today, across every species), and "🎣 Z-Man - Top Bag Limit Buster" (most total fish caught
+  today) - each shows "None yet" rather than a misleading zero-winner before the day's first fish
+  lands. Below the tiles, a flat leaderboard table (angler, species, # fish, largest, total)
+  grouped by angler with a "Subtotal" row closing out each angler's own species and one final
+  "All anglers - total" row at the bottom. A group-logged small-fish entry's weight is per-fish, not
+  the whole group's combined weight, so every total here multiplies weight by count rather than
+  summing the stored per-fish weight_lb values as-is. Resets at the lake's own local midnight
+  (`core.weather.lake_today()`, America/Chicago) - the **Leaderboard** page (below) still has the
+  full, filterable, all-time rankings. All the actual roster/award/table logic lives in
+  `core/daily_leaderboard.py`, a small Streamlit-free module (unit tested on its own in
+  `tests/test_daily_leaderboard.py`) kept deliberately separate from `pages/8_Leaderboard.py`'s own
+  all-time ranking logic to avoid any regression risk on that already-shipped page.
 - **Time-of-day breakdown** (Dawn / Morning / Midday / Afternoon / Dusk / Night) with the
   best window(s) to fish each day. Every window's real clock range tracks that day's
   actual sunrise/sunset: Dawn and Dusk are a real hour either side of sunrise/sunset,
@@ -1784,6 +1805,10 @@ core/
   dev_tasks.py              Development punch-list read/write/edit/delete (auto-
                            numbered, numbers never reused) + git commit-back, for
                            the Development page
+  daily_leaderboard.py      "Today's Activity" roster/awards/leaderboard-table logic
+                           for the Home page (punch-list #91) - Streamlit-free and
+                           unit tested on its own, kept separate from
+                           pages/8_Leaderboard.py's all-time ranking logic
   anglers.py                "Who's fishing" roster read/add + git commit-back
                            (data/anglers.csv) - punch-list #26's lightweight
                            multi-user support, used by the Spot Session picker

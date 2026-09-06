@@ -10454,6 +10454,133 @@ every real save.
     Also verified via a fresh `git clone` into a new temp directory
     before pushing.
 
+157. **Punch-list #91: added "🎣 Today's Activity" to the Home page -
+    roster, "of the day" award tiles, and a per-angler/per-species
+    leaderboard table, all scoped to today.** Angler's ask, verbatim:
+    "Lets remove the into text and bullets from the top of the page. Then
+    'Today at a glace' can move up. Below that lets show fishing activity
+    for any or all anglers that are currently logged in and/or posted a
+    session. Lets show the 'Berkley - Biggest Fish of the Day', the
+    'String King - Top Angler of the Day' (total lbs/oz), and the 'Z-Man -
+    Top Bag Limit Buster' (total fish caught). Also, let have a Leaderboard
+    under that that has the angler, type of fish caugth, # of fish of that
+    type, largest (lbs/oz) and total lbs/oz caught of that type, with a
+    sub-total and total for type of fish and total of all fish and then the
+    totals for all angler so far on the day."
+
+    Removed the intro `st.markdown()` paragraph + sidebar-navigation bullet
+    list from the top of `home.py` entirely (nothing else referenced it),
+    so "Today at a glance" is now the first content on the page, exactly as
+    asked.
+
+    Two design points weren't fully specified by the request, so I asked
+    the angler directly (`AskUserQuestion`) rather than guessing:
+    - **What counts as "currently logged in"?** Answered: "Open session
+      anywhere + today's posts" - anyone with a Spot Session still open
+      (any spot on the lake, not yet "⏹ End Session"-ed) counts as active,
+      PLUS anyone who logged any trip today even if that session's already
+      ended - one combined "today's activity" roster, not two separate
+      lists.
+    - **Sort order for the roster and leaderboard?** Answered: "Active
+      first, then by fish caught today" - active anglers float to the top;
+      within that, whoever's caught more fish today ranks higher.
+
+    Built a brand-new, deliberately self-contained module,
+    `core/daily_leaderboard.py`, rather than reusing/importing from
+    `pages/8_Leaderboard.py`'s private `_build_frames()`/category-builder
+    helpers - that page's logic is page-local, all-time, and shaped for a
+    flat top-N ranking; this feature is "today only," grouped by angler
+    with subtotals, and no other page needs it, so keeping them independent
+    avoids any regression risk on the already-shipped Leaderboard page at
+    the cost of a little logic duplication (fish-list parsing, count-aware
+    weight math). The new module takes plain trip rows + a plain
+    `today_iso` date string and returns plain dataclasses/dicts - no
+    Streamlit import at all - so it's fully unit-testable without `AppTest`
+    and reusable anywhere else "today's activity" might be needed later.
+
+    Core pieces of `core/daily_leaderboard.py`:
+    - `active_anglers(rows)` - anglers with `conditions["source"] ==
+      "spot_session"` and no `conditions["session_end_time"]` yet, checked
+      across ALL rows (any spot, any date) - mirrors
+      `pages/6_Spot_Session.py`'s own open-session bookkeeping
+      (`session_end_time` is stamped onto every lure in a session group at
+      End Session) but scoped lake-wide rather than per-spot, since this
+      answers "is this angler out on the water right now," not "at this
+      specific spot."
+    - `build_daily_activity(rows, today_iso)` - one `AnglerDayStats` per
+      angler in the combined roster (active now, or has a `trip_date ==
+      today_iso` row), each with `fish_count`, `total_weight_lb`,
+      `biggest_fish`, and a per-species breakdown (`SpeciesStats`: count,
+      biggest, total weight). A currently-active angler with zero fish
+      logged yet today still appears (fish_count 0) - being out there right
+      now is itself worth showing before the first catch. Sorted
+      active-first, then by today's fish count descending, then name -
+      exactly the order the angler picked above. Per-fish total weight is
+      `weight_lb * count`, not a bare sum of `weight_lb` across records -
+      a group-logged small-fish entry's `weight_lb` is an approximate
+      weight PER FISH (same convention `pages/8_Leaderboard.py` already
+      follows for its own "most fish caught" categories), so skipping the
+      multiply would silently undercount every group-logged catch's total
+      weight.
+    - `daily_awards(day_stats)` - the three tiles: biggest single fish
+      today (any angler/species), top angler by total weight today
+      ("String King"), top angler by total fish count today ("Z-Man Top
+      Bag Limit Buster"). Each is `None` (not a misleading zero-winner)
+      whenever nobody's logged a fish yet today.
+    - `leaderboard_table_rows(day_stats)` - the flat display table:
+      species rows per angler (Species / # Fish / Largest / Total, already
+      formatted via `core.activity_log.format_weight_lb_oz()`), a
+      "Subtotal" row closing out each angler's own species, and a final
+      "All anglers - total" row across everyone - read "sub-total and total
+      for type of fish and total of all fish, then totals for all angler"
+      as "per-species rows, an angler subtotal, and a grand total,"
+      grouped by angler rather than as separate per-angler tables since the
+      request described one set of columns ("the angler, type of fish...").
+      An active angler with 0 fish today contributes no rows here (already
+      shown in the roster/tiles above - a "0 fish, 0 lb" row wasn't asked
+      for).
+
+    `home.py` changes: new "🎣 Today's Activity" section inserted right
+    after the existing "Model calibration" caption (end of the "Today at a
+    glance" block) and before the 14-day trend charts - a roster caption
+    (🟢 active / ⚪ posted-today-only, per angler, with today's fish count),
+    the three `st.metric()` award tiles in three columns, then
+    `st.dataframe()` on the leaderboard table (skipped entirely, with a
+    "Nobody's logged a Spot Session yet today" caption instead, when the
+    roster is empty). Independent of the weather-bundle status above it
+    (this reads the trip log, not weather), so a weather outage doesn't
+    hide it.
+
+    **Verified:** new `tests/test_daily_leaderboard.py` (23 tests) covering
+    `active_anglers()` (open/ended/wrong-source/blank-angler/cross-day
+    cases), `build_daily_activity()` (zero-fish active angler still
+    appears, non-active-but-posted-today still appears, wrong-day rows
+    excluded, group-logged weight-by-count math, biggest-fish-across-
+    species tracking, multi-row accumulation, the legacy fish-list-less
+    fallback, the exact sort order, blank-angler skipping, empty input),
+    `daily_awards()` (all-`None` on a fishless day, biggest-fish-across-
+    anglers, top-weight vs. top-count actually differing for the same
+    data), `grand_total()`, and `leaderboard_table_rows()` (empty on no
+    fish, the full species/subtotal/grand-total row shape and ordering,
+    zero-fish active anglers excluded from the table). Full suite `pytest
+    tests/ -q` - 518 passed (495 + 23 new). A scratch `AppTest` script (not
+    committed) drove `home.py` end-to-end under two mocked scenarios
+    (today's activity present; no activity at all today) plus a smoke pass
+    over every other page (7 Day Forecast, Lake Map, Trip History, Lure
+    Inventory, Spot Session, Development, Leaderboard) with the same mocked
+    weather bundle/trip history - confirmed no exceptions anywhere, the new
+    subheader/roster/tiles/table all render with the expected values in the
+    "activity present" case, and the empty-state caption renders correctly
+    with none. That test run had a side effect worth noting for future
+    sessions: running `score_day()` against live-clock "today" (via the 7
+    Day Forecast/Spot Session pages during the smoke pass) wrote a real
+    freeze row into the working copy's `data/segment_score_freeze.csv` -
+    caught via `git status` before committing and reverted with `git
+    checkout -- data/segment_score_freeze.csv`, since `main`'s data files
+    are frozen seed snapshots (punch-list #52) and this was test-run noise,
+    not a real data change. Verified via a fresh `git clone` into a new
+    temp directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
