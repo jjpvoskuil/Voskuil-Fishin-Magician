@@ -1104,12 +1104,23 @@ produced real fish overall by the Total Fish Caught count sitting right next to 
 means a bucket only reads as 0 if it genuinely caught nothing across every trustworthy hour
 logged under it.
 
-**Deliberately out of scope for this first pass:** the predictive half of the original ask
-("predict success in future days given forecasted parameters and/or known moon
-illumination"). The angler's own framing going in was "let's get the basic framework
-together today... I am sure this will iterate out a lot" - this pass is the descriptive/
-correlational half only (what's worked), flagged as such in a caption right on the page.
-Punch-list #92 stays open pending that next iteration.
+**🔮 Predict a future day** (punch-list #92's predictive half, first pass) is a section at the
+bottom of the page: pick a date and get back a prediction for whichever success metric is
+selected above, based on moon illumination alone for this first pass - the one input with
+zero forecast uncertainty (moon phase for a future date is exact closed-form math, unlike
+weather, which is itself only ever a forecast). This is deliberately NOT a fitted
+statistical model - the real logged data currently sits at only ~126 trustworthy trips,
+thin for fitting anything across this page's many candidate factors - it's a transparent
+historical-bucket **lookup**: figure out which moon-illumination bucket the target date's
+night falls into, then report back that same bucket's real historical average from your
+logged trips (honoring whichever Species/date-range/Angler/Segment filters are set above).
+"Here's what happened historically under this same moon phase," not a real forecast - and
+the sample size backing the number is always shown right alongside it, with an explicit
+low-confidence caveat once it drops below 4 trips (the same "wait for enough data before
+trusting a pattern" threshold this app's own weight-calibration engine already uses
+elsewhere). Predicting from forecasted weather (temperature, cloud cover, wind,
+precipitation) is a planned next iteration - the ingredients already exist in
+`core/weather.py`'s forecast bundle, just not wired up to this lookup yet.
 
 ## Tackle Box (lure inventory)
 

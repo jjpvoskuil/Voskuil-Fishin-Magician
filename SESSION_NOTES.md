@@ -11005,6 +11005,103 @@ every real save.
     every other page - clean. Verified via a fresh `git clone` into a new
     temp directory before pushing.
 
+163. **Punch-list #92, first stab at the predictive half: "Predict a future
+    day."** Angler's ask, verbatim: "Should we take a stab at running a
+    forecast model? Maybe on one or two variables first to test it out.
+    Thoughts?"
+
+    Recommended (and confirmed with the angler before building) NOT a
+    fitted statistical model for this first stab: a quick investigation
+    (a sub-agent research pass, not guesswork) confirmed the real live
+    `data`-branch trip history sits at 174 total logged rows, only 126 of
+    which pass `core.calibration.trip_fish_per_hour`'s trustworthy-
+    duration filter - thin for fitting anything across this page's many
+    candidate factors, and firmly overfitting territory for a real
+    regression. Recommended instead a historical-bucket **lookup** (reuse
+    `compute_report()` verbatim: figure out which bucket a future date
+    falls into, report back that bucket's real historical average) -
+    matching this whole app's existing explainable/rule-based design
+    philosophy rather than introducing a new, opaque one. Also recommended
+    starting with moon illumination specifically over sky condition or
+    water temp, since moon phase for a future date is exact closed-form
+    math (`core.astro.moon_phase()`) with zero forecast uncertainty,
+    letting the whole pipeline be validated before weather-forecast
+    accuracy (which degrades with lead time) enters the picture at all -
+    the same research pass confirmed `core.weather.py` already has
+    everything needed for THAT as a next step (`fetch_forecast()`'s hourly
+    rows carry real forecasted cloud cover; `core.onwater.
+    light_condition_for_cloud_pct()` already bridges a raw cloud-cover %
+    to this page's own "Sky Condition" bands; `estimate_water_temp_f()`
+    already works for any future date in the fetched window) - just not
+    wired up yet. The angler confirmed both the variable (moon
+    illumination) and the placement (a new section on this same page,
+    not a separate one) before any code was written.
+
+    New `core.reports.predict_by_moon_illumination(trips_df, fish_df,
+    target_date, metric_key=, species=, date_start=, date_end=, anglers=,
+    segments=)`: computes `target_date`'s real moon-illumination % and bin
+    (reusing `moon_illumination_pct_night_before()`/`_moon_illumination_
+    bin()`, already built for the descriptive side), calls
+    `compute_report()` grouped by `"moon_illumination_bin"` with whichever
+    metric/filters are passed through, and looks up the row matching the
+    target's own bucket - returning a dict with `predicted_value` (`None`
+    when `n == 0` - nothing logged under that bucket yet, not a real 0),
+    `n`, and `low_sample` (`True` when `0 < n < MIN_PREDICTION_SAMPLES`,
+    reusing `core.calibration.MIN_SAMPLES_PER_SIDE` (4) rather than
+    inventing a new threshold - same "enough to show a number, not enough
+    to trust it" idea this app's own weight-calibration engine already
+    applies elsewhere). `target_date` is deliberately NOT restricted to the
+    future - moon math works identically for a past date, useful for
+    sanity-checking a prediction against a day that's already been logged.
+
+    New "🔮 Predict a future day" section on `pages/9_Reports.py`, below
+    the existing chart/table/export: a `date_input` ("Predict for date,"
+    defaulting to tomorrow) plus an `st.metric` showing the predicted value
+    for whichever Success Metric is currently selected above, formatted the
+    same way each metric already reads elsewhere in this app (`format_
+    weight_lb_oz()` for biggest fish, "X.XX fish/hr" for the rate, plain
+    counts otherwise) - and a caption underneath naming the exact moon %/
+    bucket and sample size, with three distinct wordings for "no data at
+    all" (n=0), "backed by too few trips to trust" (low_sample), and a
+    plain confirmation otherwise. Deliberately independent of the "Factor"
+    picker above (always moon illumination for this pass, regardless of
+    what's chosen there) but reuses the Metric/Species/date-range/Angler/
+    Segment filters already set above, so narrowing those narrows the
+    prediction's own historical lookup the same way it already narrows the
+    chart above it.
+
+    One real structural bug caught while wiring this in: the existing
+    `if report.empty: ... st.stop()` gate around the historical chart/
+    table/export section would have taken the ENTIRE rest of the page down
+    with it - including the brand new predict section, which has nothing
+    to do with `report` or the currently-selected Factor - the moment
+    someone picked a Factor/filter combination with no historical data.
+    Fixed by replacing the `st.stop()` with an `if/else`, so an empty
+    historical report just skips that one section instead of blocking
+    everything after it.
+
+    **Verified:** 5 new unit tests in `tests/test_reports.py`
+    (bucket/value match against a real computed bucket - not a hardcoded
+    lunar fact; a genuinely different historical date landing in the SAME
+    bucket as the target - proving the lookup pools by bucket, not by
+    literal calendar date, found dynamically by searching real dates
+    rather than hardcoding one; `low_sample` false right at the threshold;
+    the `n == 0`/`predicted_value is None` no-data case; pooled fish-per-
+    hour plus an angler filter actually changing the result) plus 3 new
+    `AppTest` smoke tests in `tests/test_reports_page.py` (the section
+    renders by default; it still renders when the historical report above
+    it is empty - the regression guard for the `st.stop()` bug above; a
+    starved date range shows a dash, not a crash). Also verified directly
+    against the real `data`-branch trip history via a scratch script
+    (a 1-day-out prediction correctly came back flagged `low_sample` on
+    n=1; several weeks out, comfortably-sampled buckets came back with
+    real pooled rates) and once more through the actual rendered page
+    (`AppTest`, mocking `get_trip_history()` with the real fetched rows),
+    including switching metrics and jumping the target date months out.
+    Full suite `pytest tests/ -q` - 578 passed (570 + 5 + 3). Full-page
+    `AppTest` smoke pass across every other page - clean. Verified via a
+    fresh `git clone` into a new temp directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

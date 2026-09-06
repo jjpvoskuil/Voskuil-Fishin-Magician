@@ -35,12 +35,24 @@ to be grouped by ANY column, not a fixed list of ranking categories), so
 keeping them independent avoids regression risk on that already-shipped
 page even though the two share some parsing logic.
 
-Explicitly OUT of scope for this first pass, per the angler's own framing
+The predictive half of the original ask ("predict success in future days
+given forecasted parameter and/or known moon illumination") was
+deliberately OUT of scope for the first pass, per the angler's own framing
 ("I am sure this will iterate out a lot, but let's get the basic framework
-together today, at the least"): the predictive piece ("predict success in
-future days given forecasted parameters"). Everything below is the
-descriptive/correlational half only - see pages/9_Reports.py's own top-of-
-page caption for how that's flagged to the angler.
+together today, at the least"). First stab at it now lives at the bottom
+of this file (predict_by_moon_illumination()) - deliberately scoped to
+ONE variable, chosen specifically because it's the one input with zero
+forecast uncertainty (moon phase for a future date is exact closed-form
+math, unlike weather, which is itself only a forecast estimate), and
+deliberately a historical-bucket LOOKUP rather than a fitted statistical
+model - see that function's own docstring for the full "why" (short
+version: the real live data has ~126 trustworthy trips total, which is
+thin for fitting anything across this page's many candidate factors, but
+plenty for a simple, transparent "what happened historically under this
+bucket" lookup - matching this whole app's existing explainable,
+not-a-black-box design philosophy rather than introducing a new one).
+Forecasted-weather-based prediction (the OTHER half of the original ask)
+is still out of scope for this pass.
 """
 from __future__ import annotations
 
@@ -52,7 +64,9 @@ from typing import Optional
 import pandas as pd
 
 from core.astro import moon_phase
-from core.calibration import trip_fish_per_hour, MIN_TRUSTED_SESSION_HOURS, MAX_TRUSTED_SESSION_HOURS
+from core.calibration import (
+    trip_fish_per_hour, MIN_TRUSTED_SESSION_HOURS, MAX_TRUSTED_SESSION_HOURS, MIN_SAMPLES_PER_SIDE,
+)
 from core.daily_leaderboard import week_bounds
 from core.lures import LURE_PROFILES
 from core.onwater import water_temp_band, WATER_TEMP_BANDS, LIGHT_CONDITIONS, WIND_BAND_LABELS
@@ -612,3 +626,76 @@ def species_options(fish_df: pd.DataFrame) -> list:
     if fish_df.empty:
         return []
     return sorted(fish_df["species"].dropna().unique().tolist())
+
+
+# --- Prediction, first pass (punch-list #92's other half) ----------------------
+# Reuses core.calibration's own "how much data before I trust this" floor
+# (calibrate_weights() won't nudge a factor at all below this many samples
+# per side) rather than inventing a new threshold - same idea here: enough
+# to show a number, not enough to call it reliable.
+MIN_PREDICTION_SAMPLES = MIN_SAMPLES_PER_SIDE
+
+
+def predict_by_moon_illumination(trips_df: pd.DataFrame, fish_df: pd.DataFrame, target_date: date,
+                                  metric_key: str = "fish_per_hour", species: Optional[str] = None,
+                                  date_start=None, date_end=None, anglers: Optional[list] = None,
+                                  segments: Optional[list] = None) -> dict:
+    """First pass at punch-list #92's predictive half - deliberately scoped
+    to ONE variable ("let's take a stab at one or two variables first to
+    test it out"), and to moon illumination specifically because it's the
+    one input with zero forecast uncertainty: core.astro.moon_phase() is
+    exact closed-form math for any date, past or future, unlike weather
+    (itself only a forecast estimate, with accuracy that degrades the
+    further out you look). This is deliberately NOT a fitted statistical
+    model - the real live data currently sits at ~126 trustworthy trips
+    (core.calibration.trip_fish_per_hour's own plausibility filter), which
+    is thin for fitting anything across this page's many candidate
+    factors, but is plenty for a transparent historical-bucket LOOKUP,
+    reusing compute_report() verbatim: figure out which moon-illumination
+    bucket `target_date` falls into, then hand back that bucket's real
+    historical average from the (optionally filtered) logged trips. This
+    is "here's what happened historically under this same moon phase," not
+    a forecast in the statistical sense - callers should surface `n` (and
+    `low_sample`) right alongside `predicted_value`, never the number
+    alone, so a result backed by only a couple of trips doesn't read as
+    more confident than it is.
+
+    target_date isn't restricted to the future - moon phase math works
+    identically for a past date, which is useful for sanity-checking a
+    prediction against a day that's already been fished and logged.
+
+    species/date_start/date_end/anglers/segments: passed straight through
+    to compute_report() - these scope which HISTORICAL trips the lookup is
+    built from, same meaning as everywhere else on the Reports page (NOT
+    applied to target_date itself, which is just the date being predicted
+    for).
+
+    Returns a dict:
+    - target_date, moon_illumination_pct (the exact value for that night),
+      moon_illumination_bucket (the label it falls into)
+    - metric_key (echoed back, so a caller can format the value correctly)
+    - predicted_value: float|None - None when n == 0 (a bucket nobody has
+      ever logged a trustworthy trip under yet has nothing to predict from)
+    - n: sample size backing predicted_value (trips for fish_per_hour/
+      trip_count, individual fish for total_fish/biggest_fish - same
+      meaning compute_report()'s own "n" column already carries)
+    - low_sample: True when 0 < n < MIN_PREDICTION_SAMPLES - enough to
+      show a number, not enough to lean on it."""
+    target_pct = moon_illumination_pct_night_before(target_date)
+    target_bucket = _moon_illumination_bin(target_pct)
+    report = compute_report(
+        trips_df, fish_df, "moon_illumination_bin", metric_key,
+        species=species, date_start=date_start, date_end=date_end, anglers=anglers, segments=segments,
+    )
+    row = report[report["moon_illumination_bin"] == target_bucket]
+    n = int(row.iloc[0]["n"]) if not row.empty else 0
+    predicted_value = float(row.iloc[0]["value"]) if n > 0 else None
+    return {
+        "target_date": target_date,
+        "moon_illumination_pct": target_pct,
+        "moon_illumination_bucket": target_bucket,
+        "metric_key": metric_key,
+        "predicted_value": predicted_value,
+        "n": n,
+        "low_sample": 0 < n < MIN_PREDICTION_SAMPLES,
+    }

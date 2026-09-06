@@ -20,6 +20,7 @@ afterward, so the LAST fake read stays memoized) can leak into this file
 whenever it runs later in the same test session, making these tests see a
 single fake trip_id-only row instead of this repo's real trip history.
 """
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -118,3 +119,45 @@ def test_narrowing_the_water_temp_bucket_width_produces_more_rows():
     assert narrow_row_count > wide_row_count, (
         "a narrower bucket width over the same real data should produce MORE, not fewer, rows"
     )
+
+
+def test_predict_section_renders_with_default_controls():
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+
+    date_inputs = {d.label: d for d in at.date_input}
+    assert "Predict for date" in date_inputs
+    assert any(m.label.startswith("Predicted ") for m in at.metric), (
+        "expected a 'Predicted <metric>' st.metric in the predict section"
+    )
+
+
+def test_predict_section_still_renders_when_the_historical_report_above_is_empty():
+    # Regression guard: the predict section must NOT be gated behind the
+    # historical chart/table/export block above it (an early st.stop() used
+    # to do exactly that) - it reads directly from trips_df/fish_df, not
+    # from the (possibly empty, under the CURRENT Factor/filters) `report`
+    # variable, so an empty historical report must not take it down too.
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    # A date range with no real trips in it at all forces `report` empty.
+    at.date_input(key="rpt_date_start").set_value(date(2020, 1, 1)).run()
+    at.date_input(key="rpt_date_end").set_value(date(2020, 1, 2)).run()
+    assert not at.exception, f"page raised with an empty historical report: {at.exception}"
+    assert any(m.label.startswith("Predicted ") for m in at.metric), (
+        "the predict section should still render its metric even when the historical report above is empty"
+    )
+
+
+def test_predicting_for_a_date_with_no_matching_bucket_data_shows_a_dash_not_a_crash():
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    # An empty date range (via the historical filters) starves every
+    # moon-illumination bucket of data, so whatever date is predicted for
+    # should come back as "no data" (a dash), not raise.
+    at.date_input(key="rpt_date_start").set_value(date(2020, 1, 1)).run()
+    at.date_input(key="rpt_date_end").set_value(date(2020, 1, 2)).run()
+    assert not at.exception, f"page raised: {at.exception}"
+    predicted_metric = next(m for m in at.metric if m.label.startswith("Predicted "))
+    assert predicted_metric.value == "—"
