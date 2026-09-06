@@ -94,18 +94,35 @@ def trip_fish_per_hour(row: dict) -> Optional[float]:
     entry, not a whole session - see this module's docstring). Returns
     None - never 0 - when the duration is missing or fails the
     plausibility filter, so a row we can't trust is EXCLUDED from
-    calibration rather than silently scored as a real, terrible rate."""
+    calibration rather than silently scored as a real, terrible rate.
+
+    Bug found live (angler noticed the moon-illumination chart's "last 14
+    days" count looked far too low - "I am seeing more than 3 days with
+    morning data"): pages/6_Spot_Session.py stamps lure_start_time/
+    lure_end_time via `time.isoformat()` on a REAL live timestamp
+    (lake_now_naive().time()), which includes microseconds whenever they're
+    non-zero - i.e. on virtually every genuinely live-timed entry
+    ("06:06:37.576926", not "06:06:37"). The old `datetime.strptime(start,
+    "%H:%M:%S")` here couldn't parse that suffix at all and silently
+    excluded the row (via the bare except below) - meaning almost every
+    REAL live-timed session across the whole app, not just this chart, was
+    quietly being dropped from calibrate_weights()/location_adjustments()/
+    calibration_summary() too, ever since live start/end timestamping
+    shipped. Only manually-backfilled rows (whole-second strings with no
+    fractional part) ever survived. `time.fromisoformat()` parses both
+    forms, so this now trusts every row it always should have."""
     conditions = parse_conditions(row)
     start = conditions.get("lure_start_time")
     end = conditions.get("lure_end_time")
     if not start or not end:
         return None
     try:
-        t0 = datetime.strptime(start, "%H:%M:%S")
-        t1 = datetime.strptime(end, "%H:%M:%S")
+        t0 = dtime.fromisoformat(start)
+        t1 = dtime.fromisoformat(end)
     except (ValueError, TypeError):
         return None
-    hours = (t1 - t0).total_seconds() / 3600.0
+    seconds = lambda t: t.hour * 3600 + t.minute * 60 + t.second + t.microsecond / 1e6
+    hours = (seconds(t1) - seconds(t0)) / 3600.0
     if not (MIN_TRUSTED_SESSION_HOURS <= hours <= MAX_TRUSTED_SESSION_HOURS):
         return None
     try:

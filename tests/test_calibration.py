@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from core.calibration import (
     calibrate_weights, calibration_summary, location_adjustments, moon_illumination_dawn_rates,
     trip_fish_per_hour, DAYS_IN_LUNAR_CYCLE, MIN_SAMPLES_PER_SIDE, LOCATION_MIN_SAMPLES,
@@ -88,6 +90,34 @@ def test_trip_fish_per_hour_excludes_implausibly_short_or_long_durations():
     too_long = _timed_row(fish_caught=1, hours=9.0)
     assert trip_fish_per_hour(too_short) is None
     assert trip_fish_per_hour(too_long) is None
+
+
+def test_trip_fish_per_hour_parses_microsecond_suffixed_timestamps():
+    # Real live bug (angler noticed the moon-illumination "last 14 days"
+    # chart undercounting, "I think this might be the 8/23/26 split
+    # again"): pages/6_Spot_Session.py stamps lure_start_time/lure_end_time
+    # via `time.isoformat()` on a real live timestamp, which appends
+    # microseconds whenever they're non-zero ("06:06:37.576926") - true of
+    # virtually every genuinely live-timed entry, as opposed to a
+    # manually-backfilled whole-second one. The old strict
+    # `datetime.strptime(start, "%H:%M:%S")` couldn't parse that suffix and
+    # silently excluded the row - meaning almost every real live-timed
+    # session was quietly dropped from every calibration function in this
+    # module, not just this one test's row.
+    row = {
+        "conditions_json": '{"lure_start_time": "06:06:37.576926", "lure_end_time": "07:24:07.255807"}',
+        "fish_caught": 3,
+    }
+    rate = trip_fish_per_hour(row)
+    assert rate is not None
+    assert rate == pytest.approx(2.3227, rel=1e-3)  # 3 fish / ~1.2916 hours
+
+
+def test_trip_fish_per_hour_still_parses_whole_second_timestamps():
+    # Manually-backfilled/historical rows (no fractional part) must keep
+    # working exactly as before this fix.
+    row = _timed_row(fish_caught=2, hours=1.0)
+    assert trip_fish_per_hour(row) == 2.0
 
 
 def test_calibrate_weights_stays_at_defaults_with_no_trustworthy_duration_data():
