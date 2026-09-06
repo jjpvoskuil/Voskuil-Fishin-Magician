@@ -10384,6 +10384,76 @@ every real save.
     to guard specifically against this regression. Full suite
     `pytest tests/ -q` - 462 passed (461 + 1 new).
 
+156. **Punch-list #90 (FIXED): the "Log a fish" weight/length dropdowns
+    were popping the phone keyboard up over their own option list.**
+    Angler's report, verbatim: "when add a fish to spot session we
+    changed the measurements (lbs, oz, in) into drop downs insead of
+    sliders, which is much easier. However, when I click on the field on
+    my phone it prompts tthe phone to open a keyboard to enter info into
+    the field. Unfortunately, the keyboard is so big it block the
+    dropdown and I can't get to in to pick. ... Maybe making this a not
+    manual key in field, the phone wouldn't prompt the keyboard??"
+
+    Root cause: a plain `st.selectbox` always renders a "type to search"
+    text box at the top of its option list - its default
+    `filter_mode="fuzzy"` - so tapping the dropdown to open it also
+    focuses that search box, which is exactly what triggers a phone's
+    on-screen keyboard; the keyboard then physically covers the option
+    list directly below it. This affects all three dropdowns punch-list
+    #86 introduced (`pages/6_Spot_Session.py`'s `_weight_input()`'s
+    "Weight - lb"/"oz" pair and `_length_input()`'s "Length (in)"), since
+    all three are plain `st.selectbox`es with no way to type a
+    correspondingly-precise search anyway (the options are a fixed short
+    numeric list, not something worth filtering).
+
+    Fix: confirmed directly against the installed Streamlit version
+    (1.63.0 in this sandbox, from this repo's unpinned-upper-bound
+    `streamlit>=1.36`) that `st.selectbox` has a `filter_mode` parameter
+    whose docstring states plainly: "If this is `None`, typing is
+    disabled and the options are not filtered." That's exactly the "not a
+    manual key-in field" the angler asked for - added `filter_mode=None`
+    to all three selectboxes. Checked via `WebFetch` against Streamlit's
+    own 2026 release notes that `filter_mode` shipped in **1.56.0** (March
+    2026) - raised `requirements.txt`'s floor from `streamlit>=1.36` to
+    `streamlit>=1.56` specifically so a future fresh install (this
+    sandbox's own `pip install -r requirements.txt` pulls whatever's
+    newest matching the pin, same as Streamlit Community Cloud does at
+    deploy time) can't silently land on a pre-1.56 version missing this
+    parameter and crash with a `TypeError` on an unrecognized kwarg.
+
+    Deliberately scoped to exactly the three dropdowns the report named
+    ("the measurements (lbs, oz, in)") rather than applied app-wide -
+    every other `st.selectbox` on this page and elsewhere (species,
+    stain color, angler, saved-spot pickers, etc.) has a genuinely
+    variable-length or free-form-ish option list where the search box is
+    arguably still useful, and none of those were reported as having this
+    problem. If the same keyboard-over-dropdown symptom is ever reported
+    on another selectbox, this fix (`filter_mode=None`) is the direct
+    template to reapply there too.
+
+    **Verified:** full suite `pytest tests/ -q` - 495 passed (no new
+    regression tests added; `filter_mode` is a pure widget-rendering
+    parameter with no effect on any value the Python side ever computes
+    or reads back, so there is no new *behavior* for a unit test to pin
+    down - the risk here was entirely "does the frontend still render/
+    behave correctly," which this harness can't observe). A scratch
+    `AppTest` script (not committed) drove a full session build/start and
+    opened the "Log a fish" dialog (`open_fish_dialog_spot1_0`), then read
+    each selectbox's own compiled protobuf directly
+    (`streamlit.proto.SelectWidgetFilterMode_pb2.FILTER_MODE_NONE == 3`,
+    confirmed by importing that proto module directly rather than
+    assumed) and asserted all three ("Weight - lb", "oz", "Length (in)")
+    report `filter_mode == 3` with their expected option counts (12, 16,
+    17) - confirming the parameter is actually wired through to what gets
+    sent to the browser, not just accepted by the Python call with no
+    effect. This is as far as this harness can verify a keyboard/focus
+    interaction (there's no way to simulate a phone's on-screen keyboard
+    or its resulting layout inside `AppTest`) - worth a quick live-phone
+    check once deployed, per this project's usual practice for anything
+    a real touchscreen/keyboard interaction can't be driven through here.
+    Also verified via a fresh `git clone` into a new temp directory
+    before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
