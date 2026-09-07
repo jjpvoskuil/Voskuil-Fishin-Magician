@@ -409,18 +409,31 @@ def _reconstruct_active_session(spot: dict, structure_type: str, trips_at_spot: 
     Also reused read-only by _render_watch_view() below (punch-list #59) to
     build a "just watching" display of someone else's session - that call
     site never stores the result in st.session_state and never calls
-    anything that writes to disk."""
+    anything that writes to disk.
+
+    Punch-list #93: session-level fields (spot/structure/water clarity/
+    base_conditions/predicted_score/segment_name) used to always be taken
+    from `rows[0]` - the FIRST lure ever added, chronologically. That was
+    harmless when nothing about a session could change after Start Session,
+    but now that location AND conditions can both change mid-session (see
+    _relocate_active_session() below - and, retroactively, this was already
+    subtly true for the punch-list #49 "🔄 Conditions changed?" panel, which
+    updates active["base_conditions"] in memory but never rewrote any
+    on-disk row with it), reconstructing from the FIRST row would silently
+    revert a reconnect to the ORIGINAL session-start conditions/location,
+    losing whatever the most recent mid-session update actually said. Fixed
+    by reconstructing those fields from the latest still-OPEN row instead -
+    `_open_session_rows()` only ever returns this group because at least
+    one row lacks lure_end_time, so there's always at least one to use, and
+    every currently-open lure always shares the same current location/
+    conditions (every relocation carries ALL of them over together - see
+    that function). `session_date`/`start_time` still come from the very
+    FIRST row - those describe when the SESSION itself began, which a
+    mid-session relocation or conditions update never changes."""
     rows = _open_session_rows(spot["spot_id"], trips_at_spot, angler)
     if not rows:
         return None
     lures = []
-    base_conditions = None
-    predicted_score = None
-    segment_name = None
-    water_clarity = None
-    start_time_iso = None
-    session_id = None
-    session_date_iso = rows[0][0].get("trip_date") or lake_today().isoformat()
     for t, cond in rows:
         entry_kwargs = dict(
             trip_date=t.get("trip_date"),
@@ -449,29 +462,28 @@ def _reconstruct_active_session(spot: dict, structure_type: str, trips_at_spot: 
             "entry_kwargs": entry_kwargs, "fish": cond.get("fish") or [],
             "retired": bool(cond.get("lure_end_time")),
         })
-        if base_conditions is None:
-            # Every lure's own conditions dict is this same shared snapshot
-            # plus the per-lure keys layered on top (see the Start Session
-            # handler / _add_lure_to_active_session() below) - strip those
-            # back off to recover the shared snapshot, so a lure added
-            # after reconnecting still reuses the real original session
-            # conditions instead of nothing.
-            base_conditions = {k: v for k, v in cond.items() if k not in _PER_LURE_CONDITION_KEYS}
-            predicted_score = entry_kwargs["predicted_score"]
-            segment_name = t.get("segment")
-            water_clarity = t.get("water_clarity")
-            start_time_iso = cond.get("start_time")
-            session_id = t.get("session_id") or ""
+    open_rows = [(t, cond) for t, cond in rows if not cond.get("lure_end_time")]
+    current_t, current_cond = open_rows[-1] if open_rows else rows[-1]
+    # Every lure's own conditions dict is this same shared snapshot plus the
+    # per-lure keys layered on top (see the Start Session handler /
+    # _add_lure_to_active_session() below) - strip those back off to
+    # recover the shared snapshot, so a lure added after reconnecting still
+    # reuses the real current session conditions instead of nothing.
+    base_conditions = {k: v for k, v in current_cond.items() if k not in _PER_LURE_CONDITION_KEYS}
+    first_cond = rows[0][1]
     return {
-        "spot_name": spot["name"],
-        "session_date": session_date_iso,
-        "start_time": start_time_iso or lake_now_naive().time().isoformat(),
-        "segment_name": segment_name,
-        "session_id": session_id,
-        "structure_type": structure_type,
-        "water_clarity": water_clarity,
-        "predicted_score": predicted_score,
-        "base_conditions": base_conditions or {},
+        "spot_id": current_t.get("spot_id") or spot["spot_id"],
+        "spot_name": current_t.get("spot_name") or spot["name"],
+        "session_date": rows[0][0].get("trip_date") or lake_today().isoformat(),
+        "start_time": first_cond.get("start_time") or lake_now_naive().time().isoformat(),
+        "segment_name": current_t.get("segment"),
+        "session_id": current_t.get("session_id") or "",
+        "structure_type": current_t.get("structure_type") or structure_type,
+        "water_clarity": current_t.get("water_clarity"),
+        "predicted_score": (
+            float(current_t["predicted_score"]) if current_t.get("predicted_score") not in (None, "") else None
+        ),
+        "base_conditions": base_conditions,
         "lures": lures,
         "reconstructed": True,
     }
@@ -1712,11 +1724,22 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict, angler: str = "")
     everything about the SESSION as a whole. That snapshot is captured once
     at Start Session and normally reused unchanged for every lure added
     after - EXCEPT fish activity/forage activity/wind/sky, which the
-    "🔄 Conditions changed? Get updated suggestions" panel (punch-list #49)
-    can update mid-session; if the angler has tapped "Update conditions"
-    there, this picks up whatever was most recently saved, not necessarily
-    what was true at Start Session. Water clarity/temp/depth are never
-    touched mid-session, so those always stay what they were at the start."""
+    "🔄 Conditions changed? Get updated suggestions" panel (punch-list #49,
+    extended by #93 to also allow relocating mid-session) can update
+    mid-session; if the angler has tapped "Update conditions" there, this
+    picks up whatever was most recently saved, not necessarily what was
+    true at Start Session. Water clarity/temp/depth are never touched
+    mid-session except by that same panel, so absent a mid-session update
+    those always stay what they were at the start.
+
+    `spot_id` here is ONLY used to look up `_active_session_key()` (the
+    session_state key stays anchored to wherever Start Session happened,
+    per punch-list #93's design) - it is NOT necessarily where this lure
+    is actually being fished right now. The row this function writes uses
+    `active["spot_id"]` (the session's CURRENT location, which
+    `_relocate_active_session()` updates on a mid-session location change),
+    falling back to the passed-in `spot_id` only for older reconstructed
+    sessions that predate that field."""
     active_key = _active_session_key(spot_id, angler)
     active = st.session_state.get(active_key)
     if active is None:
@@ -1745,7 +1768,7 @@ def _add_lure_to_active_session(spot_id: str, lure_stub: dict, angler: str = "")
     entry_kwargs = dict(
         trip_date=active["session_date"],
         segment=active["segment_name"],
-        spot_id=spot_id,
+        spot_id=active.get("spot_id") or spot_id,
         spot_name=active["spot_name"],
         structure_type=active["structure_type"],
         water_clarity=active["water_clarity"],
@@ -1801,6 +1824,138 @@ def _retire_lure(spot_id: str, lure_index: int, angler: str = ""):
         [TRIP_LOG_PATH], f"Retire {lure['label']} from active session ({active.get('spot_name', spot_id)})",
         "Retired locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
     )
+
+
+def _relocate_active_session(
+    spot_id: str, angler: str, new_spot: dict, new_cond_values: dict, session_date, bundle,
+):
+    """Punch-list #93, the angler's own explicit ask: change BOTH the
+    conditions AND the fishing location mid-session, without ending the
+    session or having to re-add any lure already in play. `spot_id` is the
+    page-level spot used only to look up `_active_session_key()` (that key
+    stays anchored to wherever Start Session happened for the rest of this
+    browser session - see that function's own docstring); `new_spot` is
+    the spot row the angler picked in the mid-session panel, which may or
+    may not be the same spot this page itself is showing.
+
+    Rather than overwriting active["base_conditions"] in place (which is
+    all the original punch-list #49 panel did, and which would silently
+    retro-apply the new location/conditions to fish already caught under
+    the old ones), every currently-active (non-retired) lure is "split":
+    its existing TripEntry row is end-stamped and closed out exactly like
+    _retire_lure() does, and a brand-new continuation row is appended
+    carrying the same lure/trailer identity forward, under the new
+    spot_id/conditions and a fresh lure_start_time. Fish already logged
+    stay on the OLD (now-closed, now-retired) row exactly as they were;
+    any fish landed on that same lure from this point on land on the NEW
+    row instead. Both rows - and every other row this session ever
+    writes - share the one session_id, so this is still a single session
+    to Trip History, just one that has now touched more than one location
+    and/or condition set. Retired lures from before this call are left
+    completely alone - there's nothing to split for a lure that's already
+    out of play.
+
+    Returns the list of lure labels that were carried forward (empty list
+    if nothing was active to move), or None if there's no active session
+    to relocate."""
+    active_key = _active_session_key(spot_id, angler)
+    active = st.session_state.get(active_key)
+    if active is None:
+        return None
+    now = lake_now_naive()
+    segment_name = _guess_segment(now.hour, now)
+    new_structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(new_spot.get("location_type"), "Main-lake point")
+    water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result = _compute_scoring(
+        new_cond_values, session_date, bundle, now, segment_name, spot_id=new_spot["spot_id"],
+    )
+    # Preserve the session's ORIGINAL start_time (Start Session's own clock
+    # reading, or whatever an earlier relocation already carried forward) -
+    # a relocation changes location/conditions, not when the session itself
+    # began.
+    original_start_time = None
+    _start_iso = (active.get("base_conditions") or {}).get("start_time")
+    if _start_iso:
+        try:
+            original_start_time = dtime.fromisoformat(_start_iso)
+        except ValueError:
+            original_start_time = None
+    new_base_conditions = _build_base_conditions(
+        new_cond_values, avg_cloud_pct, avg_wind_mph, rt, score_result,
+        original_start_time, segment_name, angler=angler,
+    )
+    end_time = now.time()
+    moved_labels = []
+    for lure in list(active["lures"]):
+        if lure.get("retired"):
+            continue
+        # Close out the OLD row - same fields _retire_lure() stamps, just
+        # inlined here so the close-out and its continuation row land in
+        # the same pass. Any fish already logged on lure["fish"] are never
+        # touched - they stay associated with this now-closed row's
+        # location/conditions, per the angler's own ask.
+        old_entry_kwargs = dict(lure["entry_kwargs"])
+        old_conditions = dict(old_entry_kwargs["conditions"])
+        old_conditions["lure_end_time"] = end_time.isoformat()
+        old_entry_kwargs["conditions"] = old_conditions
+        old_entry = TripEntry(trip_id=lure["trip_id"], logged_at=lure["logged_at"], **old_entry_kwargs)
+        update_trip(old_entry)
+        lure["entry_kwargs"] = old_entry_kwargs
+        lure["retired"] = True
+
+        # New continuation row - same lure/trailer identity carried
+        # forward untouched, fresh lure_start_time, empty fish list, under
+        # the new spot + conditions.
+        new_lure_conditions = dict(new_base_conditions)
+        new_lure_conditions.update({
+            "lure_category": old_conditions.get("lure_category"),
+            "trailer_used": old_conditions.get("trailer_used", False),
+            "trailer_name": old_conditions.get("trailer_name"),
+            "trailer_color": old_conditions.get("trailer_color"),
+            "trailer_category": old_conditions.get("trailer_category"),
+            "lure_start_time": end_time.isoformat(),
+            "lure_end_time": None,
+            "fish": [],
+            "source": "spot_session",
+        })
+        new_entry_kwargs = dict(
+            trip_date=active["session_date"],
+            segment=segment_name,
+            spot_id=new_spot["spot_id"],
+            spot_name=new_spot["name"],
+            structure_type=new_structure_type,
+            water_clarity=water_clarity,
+            lure_used=old_entry_kwargs["lure_used"],
+            color_used=old_entry_kwargs.get("color_used", ""),
+            technique_used=old_entry_kwargs.get("technique_used", ""),
+            fish_caught=0,
+            biggest_fish_lb=None,
+            predicted_score=score_result.score if score_result else None,
+            conditions=new_lure_conditions,
+            notes="",
+            session_id=active.get("session_id", ""),
+        )
+        new_entry = TripEntry(**new_entry_kwargs)
+        append_trip(new_entry)
+        active["lures"].append({
+            "trip_id": new_entry.trip_id, "logged_at": new_entry.logged_at, "label": lure["label"],
+            "item_id": lure.get("item_id"), "entry_kwargs": new_entry_kwargs, "fish": [], "retired": False,
+        })
+        moved_labels.append(lure["label"])
+
+    active["spot_id"] = new_spot["spot_id"]
+    active["spot_name"] = new_spot["name"]
+    active["structure_type"] = new_structure_type
+    active["water_clarity"] = water_clarity
+    active["base_conditions"] = new_base_conditions
+    active["predicted_score"] = score_result.score if score_result else None
+    active["segment_name"] = segment_name
+    st.session_state[active_key] = active
+    _push_or_toast(
+        [TRIP_LOG_PATH],
+        f"Update conditions/location for active session ({new_spot['name']}, {len(moved_labels)} lure(s) carried over)",
+        "Saved locally. No GITHUB_TOKEN configured in Streamlit secrets, so this won't survive an app restart.",
+    )
+    return moved_labels
 
 
 @st.dialog("Log a fish")
@@ -2078,6 +2233,13 @@ def _start_pending_session(
         })
 
     st.session_state[active_session_key] = {
+        # Punch-list #93: the session's own CURRENT location - starts equal
+        # to the page you started it on, but can move to a different
+        # spot_id via _relocate_active_session() below without touching
+        # this active_session_{spot_id}_{angler} session_state KEY itself
+        # (which stays anchored to wherever Start Session happened for the
+        # rest of this browser session - see that function's own docstring).
+        "spot_id": spot["spot_id"],
         "spot_name": spot["name"],
         "session_date": session_date.isoformat(),
         "start_time": start_time.isoformat(),
@@ -2085,10 +2247,10 @@ def _start_pending_session(
         "structure_type": structure_type,
         "water_clarity": water_clarity,
         "predicted_score": score_result.score,
-        # Reused unchanged by _add_lure_to_active_session() for every
-        # lure added after Start Session - this session's conditions
-        # snapshot/time window are locked in once, not re-captured per
-        # lure.
+        # Reused unchanged by _add_lure_to_active_session() for every lure
+        # added after Start Session - UNLESS the angler applies a
+        # mid-session location/conditions update (punch-list #93,
+        # _relocate_active_session() below), which replaces these in place.
         "base_conditions": base_conditions,
         "lures": active_lures,
         "session_id": session_id,
@@ -2233,8 +2395,15 @@ if active is not None:
         )
         st.session_state[active_session_key] = active
     score_bit = f" · predicted score {active['predicted_score']}/10" if active.get("predicted_score") is not None else ""
+    # Punch-list #93: a session can now be relocated mid-session (see the
+    # "🔄 Conditions changed?" panel below), so its CURRENT location can
+    # differ from spot["name"] (the page this session happens to be viewed
+    # from) - surfaced here explicitly rather than leaving the angler to
+    # infer it only from the page header above.
+    _current_spot_name = active.get("spot_name") or spot["name"]
     st.caption(
-        f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"
+        f"Started {active['start_time']} · currently at 📍 {_current_spot_name} · {active['segment_name']} · "
+        f"{active['water_clarity']} water{score_bit}"
     )
     st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
 
@@ -2302,75 +2471,68 @@ if active is not None:
                 fish_count = sum((f.get("count") or 1) for f in lure["fish"])
                 start = lure["entry_kwargs"]["conditions"].get("lure_start_time") or "?"
                 end = lure["entry_kwargs"]["conditions"].get("lure_end_time") or "?"
-                st.caption(f"{lure['label']} - {fish_count} fish - {start} to {end}")
+                # Punch-list #93: a retired lure's own row now records
+                # whichever spot was current when it was fished, which can
+                # legitimately differ from other lures' rows in the same
+                # session once a mid-session relocation happens.
+                _lure_spot = lure["entry_kwargs"].get("spot_name") or spot["name"]
+                st.caption(f"{lure['label']} @ 📍 {_lure_spot} - {fish_count} fish - {start} to {end}")
 
     st.divider()
-    # Punch-list #49: "conditions change on a dime mid-session (fish/forage
-    # activity, wind/clouds) - let me adjust these and see quick new lure
-    # suggestions and why, without ending the session." A live preview, not
-    # a form you submit: every widget below recomputes the score + lure
-    # cards (with per-lure "why") on the spot, prefilled from whatever this
-    # session's conditions currently are. Tapping "Update conditions" is a
-    # separate, deliberate step that bakes the shown values into
-    # active["base_conditions"] - only then does any NEW lure you add (from
-    # here down, or from "Add a lure to this session" below) pick them up;
-    # lures already added keep whatever was true when *they* were added
-    # (see _add_lure_to_active_session()'s own docstring). Only exposes the
-    # fields that genuinely "change on a dime" - water clarity/temp/depth
-    # stay as captured at Start Session, same as before this feature.
+    # Punch-list #49 (extended by #93 - the angler's own explicit ask:
+    # "modify this so that I can change both the conditions and location
+    # without ending the session or having to re enter any lures that I am
+    # using"): moved to a different spot, or conditions shifted mid-session -
+    # adjust either or both here and preview fresh lure suggestions (and
+    # why) right away. Unlike a plain preview, tapping "Update conditions &
+    # location" is a real write: it closes out (end-stamps + retires) every
+    # currently-active lure's existing row and opens a brand-new
+    # continuation row for that same lure under the new spot/conditions
+    # (see _relocate_active_session()'s own docstring for the full "why") -
+    # so fish already logged stay attributed to the location/conditions
+    # that were true when they were caught, while any fish landed from this
+    # point on land on the new row. No lure needs to be re-picked; the same
+    # session_id carries through the whole thing.
     #
-    # Punch-list #56: the score updates live as soon as a condition slider
-    # moves, but the lure suggestion cards below it are tucked into their
-    # OWN nested, collapsed-by-default expander now - most of the time an
-    # angler opens this panel just to nudge a reading and re-check the
-    # score, planning to keep fishing the same lure, and doesn't want a
-    # full recommendation list (with per-lure "why" text) shoving that out
-    # of view every time. "🔄 Update conditions" itself stays OUTSIDE that
-    # nested expander, directly under the score, so updating conditions and
-    # moving on never requires opening the lure suggestions at all.
-    with st.expander("🔄 Conditions changed? Get updated suggestions", expanded=False):
+    # Punch-list #56: the score updates live as soon as a condition changes,
+    # but the lure suggestion cards below it are tucked into their OWN
+    # nested, collapsed-by-default expander - most of the time an angler
+    # opens this panel just to nudge a reading and re-check the score, and
+    # doesn't want a full recommendation list (with per-lure "why" text)
+    # shoving that out of view every time. The update button itself stays
+    # OUTSIDE that nested expander, directly under the score.
+    with st.expander("🔄 Conditions changed? Relocate or get updated suggestions", expanded=False):
         st.caption(
-            "Fish/forage activity, wind, and sky conditions can shift fast mid-session - adjust them here to "
-            "preview fresh lure suggestions (and why) right away. Tap \"Update conditions\" below to also apply "
-            "them to any new lure you add from this point forward; lures you've already added keep what was "
-            "true when you added them."
+            "Moved to a different spot, or conditions shifted mid-session? Adjust either (or both) below, then "
+            "tap \"Update conditions & location\" to apply them. Every lure currently in play carries forward "
+            "automatically - you never need to re-pick a lure you're already using - while fish already logged "
+            "stay right where they were caught."
         )
         mc_ns = f"midsession_{spot['spot_id']}_{_angler_session_slug(resolved_angler)}"
         mc_base = active.get("base_conditions") or {}
+        current_relocate_spot_id = active.get("spot_id") or spot["spot_id"]
 
-        fa_key = f"{mc_ns}_fish_activity"
-        st.session_state.setdefault(fa_key, mc_base.get("fish_activity") or "Moderate")
-        mid_fish_activity = st.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, key=fa_key)
-        fo_key = f"{mc_ns}_forage_activity"
-        st.session_state.setdefault(fo_key, mc_base.get("forage_activity") or "Moderate")
-        mid_forage_activity = st.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, key=fo_key)
-
-        mw1, mw2 = st.columns(2)
-        wb_key = f"{mc_ns}_wind_band"
-        st.session_state.setdefault(wb_key, mc_base.get("wind_band") or WIND_BAND_LABELS[1])
-        mid_wind_band = mw1.selectbox("Wind", WIND_BAND_LABELS, help=_wind_help, key=wb_key)
-        wd_key = f"{mc_ns}_wind_dir"
-        st.session_state.setdefault(wd_key, mc_base.get("wind_direction") or "SW")
-        mid_wind_direction = mw2.selectbox("Wind direction", WIND_DIRECTIONS, key=wd_key)
-
-        lc_key = f"{mc_ns}_light_condition"
-        st.session_state.setdefault(lc_key, mc_base.get("light_condition") or LIGHT_CONDITIONS[2])
-        mid_light_condition = st.selectbox(
-            "Sky conditions", LIGHT_CONDITIONS,
-            help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
-            key=lc_key,
+        mc_spot_default_idx = next(
+            (i for i, s in enumerate(sorted_spots) if s["spot_id"] == current_relocate_spot_id), 0,
         )
+        mc_spot_key = f"{mc_ns}_spot_idx"
+        st.session_state.setdefault(mc_spot_key, mc_spot_default_idx)
+        mc_spot_idx = st.selectbox(
+            "📍 Location", options=range(len(sorted_spots)), format_func=lambda i: sorted_spots[i]["name"],
+            key=mc_spot_key,
+        )
+        mid_spot = sorted_spots[mc_spot_idx]
+        mid_structure_type = LOCATION_TYPE_TO_STRUCTURE_TYPE.get(mid_spot.get("location_type"), "Main-lake point")
+        if mid_spot["spot_id"] != current_relocate_spot_id:
+            st.caption(f"📍 This session will move to **{mid_spot['name']}** ({mid_structure_type}) once you tap Update below.")
 
-        mid_cond = dict(mc_base)
-        mid_cond.update({
-            "fish_activity": mid_fish_activity, "forage_activity": mid_forage_activity,
-            "wind_band": mid_wind_band, "wind_direction": mid_wind_direction,
-            "light_condition": mid_light_condition,
-        })
+        mid_weather_defaults = _weather_defaults(bundle, session_date, lake_now_naive())
+        mid_cond = render_conditions_block(mc_ns, mid_weather_defaults, prefill=mc_base)
+
         _mid_now = lake_now_naive()
         _mid_segment = _guess_segment(_mid_now.hour, _mid_now)
         mid_water_clarity, mid_season, mid_avg_cloud_pct, mid_avg_wind_mph, mid_rt, mid_score_result = _compute_scoring(
-            mid_cond, session_date, bundle, _mid_now, _mid_segment, spot_id=spot["spot_id"],
+            mid_cond, session_date, bundle, _mid_now, _mid_segment, spot_id=mid_spot["spot_id"],
         )
 
         st.divider()
@@ -2381,8 +2543,8 @@ if active is not None:
         )
         mm2.write(
             f"**Season:** {mid_season.replace('_', ' ').title()}  \n"
-            f"**Structure:** {active['structure_type']}  \n"
-            f"**Water clarity:** {mid_water_clarity} (unchanged from session start)"
+            f"**Structure:** {mid_structure_type}  \n"
+            f"**Water clarity:** {mid_water_clarity}"
         )
         if mid_score_result.notes:
             st.caption(" · ".join(mid_score_result.notes))
@@ -2399,27 +2561,47 @@ if active is not None:
             # #42), and recommend() does an unguarded `<= 68` comparison on
             # it that crashes outright on None.
             mid_season, mid_cond.get("water_temp_f", 85.0), _mid_segment, mid_rt["pressure_trend_24h"],
-            structure_type=active["structure_type"], water_clarity=mid_water_clarity,
+            structure_type=mid_structure_type, water_clarity=mid_water_clarity,
             fish_depth_ft=mid_cond.get("fish_depth_ft"), forage=mid_cond.get("forage_seen"),
-            inventory=mid_inventory, trip_history=get_trip_history(), spot_id=spot["spot_id"],
-            fish_activity=mid_fish_activity, forage_activity=mid_forage_activity,
-            wind_mph=wind_mph_for_band(mid_wind_band),
+            inventory=mid_inventory, trip_history=get_trip_history(), spot_id=mid_spot["spot_id"],
+            fish_activity=mid_cond.get("fish_activity"), forage_activity=mid_cond.get("forage_activity"),
+            wind_mph=wind_mph_for_band(mid_cond.get("wind_band")),
         )
         with st.expander("🎣 See updated lure suggestions", expanded=False):
             render_lure_recommendation(mid_rec, inventory=mid_inventory)
 
         if st.button(
-            "🔄 Update conditions", key=f"{mc_ns}_apply", type="primary",
-            help="Any lure you add from now on will use these readings; lures already added are untouched.",
+            "🔄 Update conditions & location", key=f"{mc_ns}_apply", type="primary",
+            help=(
+                "Closes out every lure currently in play and re-opens it fresh under these readings/location - "
+                "fish already logged keep the original location/conditions; you don't need to re-add any lure."
+            ),
         ):
-            mid_cond.update({
-                "avg_cloud_pct": mid_avg_cloud_pct, "avg_wind_mph": mid_avg_wind_mph,
-                "pressure_trend_24h": mid_rt["pressure_trend_24h"] if mid_rt else None,
-                "wind_band_logged": mid_wind_band,
-            })
-            active["base_conditions"] = mid_cond
-            st.session_state[active_session_key] = active
-            st.success("Saved - any lure you add from here on will use these updated conditions.")
+            moved = _relocate_active_session(
+                spot["spot_id"], resolved_angler, mid_spot, mid_cond, session_date, bundle,
+            )
+            if moved is not None:
+                # Punch-list #93: st.rerun() right after this - like "🔄
+                # Change" already does - so the "Session in progress"
+                # caption, the lure list, and the "Retired lures" expander
+                # all immediately reflect the new location/conditions
+                # rather than lagging a click behind. A plain st.success()
+                # here would never survive that rerun (its output belongs
+                # to the run being thrown away); st.toast() is what
+                # _push_or_toast() itself already uses for exactly this
+                # reason, and does survive it.
+                if mid_spot["spot_id"] != current_relocate_spot_id:
+                    st.toast(
+                        f"Moved to {mid_spot['name']} with updated conditions - {len(moved)} lure(s) carried "
+                        "forward. Fish already logged stay attributed to the original location/conditions.",
+                        icon="📍",
+                    )
+                else:
+                    st.toast(
+                        f"Conditions updated - {len(moved)} lure(s) carried forward under the new readings.",
+                        icon="🔄",
+                    )
+                st.rerun()
 
     st.divider()
     with st.expander("➕ Add a lure to this session"):
