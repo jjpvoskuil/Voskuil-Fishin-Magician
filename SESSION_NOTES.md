@@ -11317,6 +11317,106 @@ every real save.
     clean. Verified via a fresh `git clone` into a new temp directory
     before pushing.
 
+167. **Punch-list #93: mid-session relocation on Spot Session - change
+    location AND conditions without ending the session or re-adding a
+    lure.** Angler's ask, verbatim: "In spot session, during a session I
+    can now change conditions mid session. Lets modify this so that I can
+    change both the conditions and location without ending the session or
+    having to re enter any lures that I am using. All fishing activity
+    will still be kept under the same session but with potential new
+    location(s) and conditions. Any fish caught prior to a change should
+    be associated with the original location and conditions and any new
+    fish caught will be associated with the cooresponding new locaation
+    and/or conditions."
+
+    Extends the existing punch-list #49 mid-session "🔄 Conditions
+    changed?" panel rather than replacing it. Root design question was
+    what happens to a lure already in play the moment location/conditions
+    change - the answer had to satisfy "same session throughout" AND
+    "correct catch attribution" AND "no re-adding a lure" simultaneously.
+    Landed on a "split" model: every currently-active (non-retired) lure's
+    existing trip-log row gets end-stamped and retired - the exact same
+    operation "🔄 Change" already performs - and a brand-new continuation
+    row is appended for that same lure/trailer identity, under the new
+    spot_id/conditions, with a fresh `lure_start_time` and an empty fish
+    list. Both rows carry the one `session_id` this session was assigned
+    at Start Session, so Trip History still sees a single session even
+    after it's touched multiple spots. Applies to a conditions-only
+    update too (location left unchanged) - "conditions changed, and fish
+    caught after that change should read as under the new conditions"
+    is exactly as true when only the weather reading moved as when the
+    angler physically relocated, and the previous #49 behavior (silently
+    overwrite `active["base_conditions"]` in place, only affecting lures
+    added AFTER the update, never touching an already-active lure's own
+    already-saved row) never actually delivered that for the case this
+    same panel has supported since #49 shipped - fixed as part of this
+    same change since the data model needed splitting either way.
+
+    Found and fixed one adjacent latent bug while rewriting the pieces
+    this depends on: `_reconstruct_active_session()` (the reconnect-after-
+    session_state-loss path, punch-list #29) derived every session-level
+    field - location, structure_type, water_clarity, base_conditions,
+    predicted_score, segment_name - from `rows[0]`, the very FIRST lure
+    this session ever wrote, rather than the most recently-touched OPEN
+    row. That was already wrong for plain #49 conditions updates (a
+    reconnect would silently revert to Start Session's original readings,
+    discarding whatever the angler had since saved via "🔄 Update
+    conditions"), and would have been actively dangerous for #93 (a
+    reconnect after a relocation reconstructing the ORIGINAL location
+    instead of the current one). Fixed by deriving those fields from
+    whichever row is still open (or, if every row got closed by an
+    especially fast reconnect race, the most recently-written row) instead
+    of the first one ever written.
+
+    Implementation: `_active_session_key()` (the session_state key) stays
+    anchored to wherever Start Session physically happened, for the whole
+    life of the browser session, unchanged - only a new `active["spot_id"]`
+    field (the session's CURRENT true location) moves. New
+    `_relocate_active_session(spot_id, angler, new_spot, new_cond_values,
+    session_date, bundle)` does the actual split/write (mirrors
+    `_retire_lure()`'s own close-out logic inline, then appends the
+    continuation row via the same `TripEntry`/`append_trip()` pattern every
+    other add-a-lure path uses) and preserves the session's ORIGINAL
+    `start_time` in the new `base_conditions` - a relocation changes where/
+    how you're fishing, not when the session itself began.
+    `_add_lure_to_active_session()` (adding a brand-new lure mid-session,
+    independent of any relocation) now writes `active.get("spot_id") or
+    spot_id` instead of the page-level `spot_id` it used to hard-code, so a
+    lure added after a relocation lands at the session's current location,
+    not wherever the page you're viewing happens to be. The mid-session
+    panel itself was rebuilt to reuse the exact same full
+    `render_conditions_block()` Start Session's own form uses (water temp,
+    visibility/stain, wind, sky, precipitation, forage, activity, fish
+    depth - not the old narrow 5-field subset), plus a new "📍 Location"
+    selectbox defaulting to the session's current spot. Its "Update"
+    button's own success feedback had to switch from `st.success()` to
+    `st.toast()` mid-build: `st.rerun()` (needed so the "Session in
+    progress" caption/lure list/"Retired lures" expander all reflect the
+    new location immediately, the same reason "🔄 Change" already calls
+    it) discards whatever a plain `st.success()` would have shown in that
+    same run, while `st.toast()` - the same mechanism `_push_or_toast()`
+    already relies on for this exact reason - survives it. Also updated:
+    the "Session in progress" caption now shows the CURRENT location
+    (which can differ from the page's own header once relocated), and the
+    "Retired lures" expander now shows which spot each closed-out row was
+    actually fished at.
+
+    **Verified:** 5 new `AppTest` tests in a new `tests/
+    test_spot_session_relocate.py` - the location picker defaults to the
+    session's current spot; a full relocate carries the active lure
+    forward as a closed-old-row + fresh-new-row pair without ending the
+    session or changing session_id, with no re-add needed
+    (`open_fish_dialog_spot1_1` immediately clickable); a fish logged
+    before relocating (simulated by writing directly into session_state
+    the same shape `_record_fish()` itself produces, since the real "Log a
+    fish" dialog can't be driven through AppTest - see that file's own
+    docstring) stays on the old row while the new row starts empty; a
+    conditions-only update (same spot picked) still splits the lure; the
+    "Retired lures" expander and the current-location caption both show
+    the right spot names post-relocation. Full suite `pytest tests/ -q` -
+    597 passed (592 + 5). Verified via a fresh `git clone` into a new temp
+    directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

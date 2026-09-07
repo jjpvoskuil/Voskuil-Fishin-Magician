@@ -832,25 +832,37 @@ go, so a reconnect at any point - even before picking a single lure - restores e
 where you left off instead of a blank form. Clears itself automatically once you actually
 hit "Start Session," since the session is durably saved from that point on anyway.
 
-**Conditions can change mid-session (punch-list #49).** Fish/forage activity and wind
-can shift fast once you're actually out there, so an active session now has its own
-"🔄 Conditions changed? Get updated suggestions" panel (right below the lure list,
-above "➕ Add a lure to this session") - a live preview, not a form you submit: adjust
-fish activity, forage activity, wind, or sky conditions and the score plus lure cards
-(with the same per-lure "why" from above) refresh immediately, no page reload needed.
-Tapping "🔄 Update conditions" is a separate, deliberate step: only then do the shown
-values get baked into the session's own conditions, so any *new* lure you add from that
-point on - from this panel or from "➕ Add a lure to this session" below it - carries
-them forward; lures you already added keep exactly what was true when you added them,
-untouched. Water clarity, water temp, and fish depth are deliberately left out of this
-panel and stay whatever they were at Start Session - those don't swing session-to-
-session the way activity and wind do, and changing them mid-session would call the
-whole session's premise into question in a way this panel isn't meant to. The updated
-lure recommendation cards live in their own **"🎣 See updated lure suggestions"**
-sub-section, collapsed by default (punch-list #56) - the score updates live without
-opening it, and "🔄 Update conditions" sits right below the score rather than inside
-that sub-section, so a quick "just log this new reading, keep fishing what I've got"
-update never requires scrolling past a full lure list you didn't ask to see.
+**Conditions can change mid-session (punch-list #49) - and so can location, without
+ending the session or re-adding a single lure (punch-list #93).** Fish/forage activity,
+wind, and sky can shift fast once you're actually out there, and sometimes you move to a
+different spot entirely without ever tapping "⏹ End Session" - so an active session now
+has its own "🔄 Conditions changed? Relocate or get updated suggestions" panel (right
+below the lure list, above "➕ Add a lure to this session"). It starts with a **"📍
+Location"** picker (defaulting to wherever the session is currently at, which after a
+relocation can differ from whichever spot's own page you happen to be viewing this from)
+followed by the same full conditions form Start Session itself uses - water temp,
+visibility/stain, wind, sky, precipitation, forage seen, fish/forage activity, fish
+depth, all of it, not just a handful of fields - prefilled from the session's own current
+readings. It's a live preview as you adjust it: the score plus lure cards (with the same
+per-lure "why" from above) refresh immediately, no page reload needed.
+
+Tapping **"🔄 Update conditions & location"** is the real write, and it's not a plain
+in-place overwrite: every lure currently in play gets closed out (the same end-stamp-and-
+retire "🔄 Change" already does to its existing trip-log row) and immediately reopened as
+a fresh continuation row under the new spot/conditions - so you never have to re-pick a
+lure you're already using, the session never ends, and the same session_id runs through
+the whole thing start to finish. Fish already logged stay exactly where they were caught
+- attributed to whichever location/conditions were true at the time - while anything you
+land from that point on lands on the new row instead. This happens even if you only
+changed conditions and left the location alone, since a plain conditions update needs the
+exact same before/after split to keep catch attribution honest. The "Session in progress"
+caption and the "Retired lures" list both show the session's current (and, for retired
+lures, each one's own) location, since a relocated session can genuinely have touched more
+than one spot by the time it ends. The updated lure recommendation cards live in their own
+**"🎣 See updated lure suggestions"** sub-section, collapsed by default (punch-list #56) -
+the score updates live without opening it, and the update button sits right below the
+score rather than inside that sub-section, so a quick "just log this new reading" update
+never requires scrolling past a full lure list you didn't ask to see.
 
 **Weight and length are plain dropdowns now, not sliders (punch-list #86).**
 The "📷 Log a fish" popup used to size a catch with a 1-oz-increment weight
