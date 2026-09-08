@@ -15,7 +15,7 @@ from core.daily_leaderboard import (
     build_daily_activity, build_weekly_activity, daily_awards, leaderboard_table_rows, week_bounds,
 )
 from core.activity_log import format_weight_lb_oz
-from core.ui import inject_mobile_css, inject_compact_metric_css
+from core.ui import inject_mobile_css, inject_compact_metric_css, render_score_breakdown, render_day_score_breakdown
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
@@ -135,7 +135,14 @@ if today or lake_level or water_quality_display:
         cols = st.columns(n_cols)
         i = 0
         if today:
-            cols[i].metric("Activity score", f"{today.overall_score} / 10"); i += 1
+            with cols[i]:
+                st.metric("Activity score", f"{today.overall_score} / 10")
+                # Punch-list #94: "how was this derived" for the day-level
+                # score - see render_day_score_breakdown()'s own docstring
+                # for why this is a different (plain segment-average)
+                # explanation than the per-segment factor breakdown below.
+                render_day_score_breakdown(today, key="home_activity_score_breakdown")
+            i += 1
             cols[i].metric("Est. water temp", f"{today.water_temp_f}°F"); i += 1
             cols[i].metric("Moon phase", today.moon.name); i += 1
             cols[i].metric("Pressure trend (24h)", f"{today.pressure_trend_24h:+.1f} hPa"); i += 1
@@ -189,6 +196,11 @@ if today:
     best_segment = max(today.segments, key=lambda s: s.score)
     st.info(f"Best window today: **{best_segment.name}** ({best_segment.start.strftime('%-I:%M %p')} - "
             f"{best_segment.end.strftime('%-I:%M %p')}), score {best_segment.score}/10")
+    # Punch-list #94: this segment's own factor breakdown (pressure trend,
+    # moon, wind, season, etc.) - the SAME breakdown the 7-Day Forecast
+    # page shows for this identical segment, since both are built by the
+    # same core.scoring.score_day().
+    render_score_breakdown(best_segment.breakdown, best_segment.score, key="home_best_window_score_breakdown")
 
     if today.warnings:
         for w in today.warnings:

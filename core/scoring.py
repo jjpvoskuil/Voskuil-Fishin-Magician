@@ -598,6 +598,34 @@ def manual_segment_score(
     return ManualScoreResult(score=score, notes=notes, moon=moon, warnings=warnings, breakdown=breakdown)
 
 
+def format_score_breakdown(breakdown: list, final_score: float) -> str:
+    """Renders a `breakdown` list (the same `[(label, delta, detail), ...]`
+    shape `_segment_score()` returns and both `SegmentForecast.breakdown`
+    and `ManualScoreResult.breakdown` carry - the 7-Day Forecast/Home
+    "score_day()" path and Spot Session's own on-the-water
+    "manual_segment_score()" path both produce the identical shape) as one
+    markdown block: every factor that nudged the score away from the
+    neutral 5.0 base, in the order it was applied, plus a closing note
+    when the raw total needed clamping into the 1-10 range.
+
+    Moved here (was Spot Session's own page-local `_score_breakdown_help()`,
+    punch-list #56) so every page that displays a predicted score - Home,
+    7-Day Forecast, and Spot Session alike - can show the identical "how
+    was this derived" content via `core.ui.render_score_breakdown()`,
+    punch-list #94's own "any area that shows a predicted score" ask,
+    rather than duplicating this formatting per page."""
+    lines = ["**How this score was derived:**", ""]
+    raw_total = 0.0
+    for label, delta, detail in breakdown:
+        raw_total += delta
+        sign = "+" if delta >= 0 else ""
+        lines.append(f"- {label}: {sign}{delta:g} — {detail}")
+    if round(raw_total, 1) != final_score:
+        lines.append("")
+        lines.append(f"Raw total {raw_total:g} is clamped to the 1-10 range → **{final_score}/10**.")
+    return "\n".join(lines)
+
+
 def segment_time_ranges(bundle: Optional[WeatherBundle], d: date) -> Optional[dict]:
     """Real per-segment (Dawn/Morning/.../Night) start/end datetimes for date
     `d`, derived from the weather bundle's actual sunrise/sunset for that

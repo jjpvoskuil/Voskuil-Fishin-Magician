@@ -29,7 +29,10 @@ from core.activity_log import (
     weight_lb_for_dropdown, length_in_for_dropdown,
 )
 from core.lures import recommend, FORAGE_OPTIONS, is_trailer_eligible, curate_recommendation
-from core.ui import render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css
+from core.ui import (
+    render_lure_block, render_lure_recommendation, render_square_thumbnail, inject_mobile_css,
+    render_score_breakdown,
+)
 from core.storage import (
     TripEntry, TRIP_LOG_PATH, append_trip, commit_and_push_data, push_pending_data,
     read_all_trips, update_trip, delete_trip, parse_conditions,
@@ -512,6 +515,13 @@ def _render_watch_view(spot: dict, structure_type: str, watched_angler: str):
     st.caption(
         f"Started {active['start_time']} · {active['segment_name']} · {active['water_clarity']} water{score_bit}"
     )
+    # No "ℹ️ How this score was derived" popover here (punch-list #94) -
+    # this view always goes through _reconstruct_active_session(), which
+    # (like every reconnect) never has the factor breakdown to show;
+    # recomputing it fresh here would silently describe a DIFFERENT
+    # score than the frozen predicted_score above (pressure trend, moon
+    # window etc. keep moving), which would be actively misleading rather
+    # than just unavailable.
     st.caption("Read-only - refreshes automatically every 20 seconds, no login and nothing you can accidentally change.")
     total_fish = 0
     for lure in active["lures"]:
@@ -963,19 +973,6 @@ def _compute_scoring(cond_values: dict, session_date, bundle, at_time: datetime,
         location_adjustment_n=loc_entry["n"] if loc_entry else None,
     )
     return water_clarity, season, avg_cloud_pct, avg_wind_mph, rt, score_result
-
-
-def _score_breakdown_help(breakdown: list, final_score: float) -> str:
-    lines = ["**How this score was derived:**", ""]
-    raw_total = 0.0
-    for label, delta, detail in breakdown:
-        raw_total += delta
-        sign = "+" if delta >= 0 else ""
-        lines.append(f"- {label}: {sign}{delta:g} — {detail}")
-    if round(raw_total, 1) != final_score:
-        lines.append("")
-        lines.append(f"Raw total {raw_total:g} is clamped to the 1-10 range → **{final_score}/10**.")
-    return "\n".join(lines)
 
 
 def _build_base_conditions(cond_values: dict, avg_cloud_pct, avg_wind_mph, rt, score_result, start_time, segment_name, angler: str = None):
@@ -1948,6 +1945,16 @@ def _relocate_active_session(
     active["water_clarity"] = water_clarity
     active["base_conditions"] = new_base_conditions
     active["predicted_score"] = score_result.score if score_result else None
+    # Punch-list #94: kept in session_state only (never written to
+    # trip_log.csv - predicted_score itself is the only piece of this
+    # that's ever persisted there) purely so the "Session in progress"
+    # caption's own "ℹ️ How this score was derived" popover has something
+    # to show without recomputing anything. Lost on a reconnect the same
+    # way every other in-memory-only `active` field is - see
+    # _reconstruct_active_session()'s own docstring - which just means
+    # that popover quietly won't appear until the next relocate/update;
+    # no worse than before this existed.
+    active["predicted_score_breakdown"] = score_result.breakdown if score_result else []
     active["segment_name"] = segment_name
     st.session_state[active_key] = active
     _push_or_toast(
@@ -2247,6 +2254,11 @@ def _start_pending_session(
         "structure_type": structure_type,
         "water_clarity": water_clarity,
         "predicted_score": score_result.score,
+        # Punch-list #94: session_state-only, feeds the "Session in
+        # progress" caption's "ℹ️ How this score was derived" popover -
+        # see _relocate_active_session()'s own comment on this same field
+        # for why it's never written to trip_log.csv.
+        "predicted_score_breakdown": score_result.breakdown,
         # Reused unchanged by _add_lure_to_active_session() for every lure
         # added after Start Session - UNLESS the angler applies a
         # mid-session location/conditions update (punch-list #93,
@@ -2405,6 +2417,14 @@ if active is not None:
         f"Started {active['start_time']} · currently at 📍 {_current_spot_name} · {active['segment_name']} · "
         f"{active['water_clarity']} water{score_bit}"
     )
+    # Punch-list #94: only present for a session that hasn't needed
+    # _reconstruct_active_session() to rebuild it from disk since its
+    # score was last set (Start Session, or a #93 relocate/conditions
+    # update) - see "predicted_score_breakdown"'s own comment above.
+    render_score_breakdown(
+        active.get("predicted_score_breakdown") or [], active.get("predicted_score"),
+        key=f"active_session_score_breakdown_{spot['spot_id']}",
+    )
     st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
 
     # Punch-list #58: persistent save-health warning + silent 30s background
@@ -2537,10 +2557,9 @@ if active is not None:
 
         st.divider()
         mm1, mm2 = st.columns([1, 2])
-        mm1.metric(
-            f"{_mid_segment} activity score", f"{mid_score_result.score}/10",
-            help=_score_breakdown_help(mid_score_result.breakdown, mid_score_result.score),
-        )
+        with mm1:
+            st.metric(f"{_mid_segment} activity score", f"{mid_score_result.score}/10")
+            render_score_breakdown(mid_score_result.breakdown, mid_score_result.score, key=f"{mc_ns}_score_breakdown")
         mm2.write(
             f"**Season:** {mid_season.replace('_', ' ').title()}  \n"
             f"**Structure:** {mid_structure_type}  \n"
@@ -2740,10 +2759,11 @@ else:
     # session build.
     with st.expander("Suggestions for right now", expanded=False):
         m1, m2 = st.columns([1, 2])
-        m1.metric(
-            f"{_preview_segment} activity score", f"{score_result.score}/10",
-            help=_score_breakdown_help(score_result.breakdown, score_result.score),
-        )
+        with m1:
+            st.metric(f"{_preview_segment} activity score", f"{score_result.score}/10")
+            render_score_breakdown(
+                score_result.breakdown, score_result.score, key=f"preview_score_breakdown_{spot['spot_id']}",
+            )
         m2.write(
             f"**Season:** {season.replace('_', ' ').title()}  \n"
             f"**Structure:** {structure_type} (from this spot's saved type)  \n"
