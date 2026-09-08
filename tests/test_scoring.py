@@ -3,6 +3,7 @@ from core.weather import WeatherBundle, WATER_TEMP_TREND_PAST_DAYS
 from core.scoring import (
     score_week, score_day, manual_segment_score, realtime_context_from_bundle,
     segment_time_ranges, lake_now_naive, SEGMENTS, _segment_windows,
+    aggregate_day_overall, SegmentForecast,
 )
 from core import onwater
 from core import astro
@@ -553,3 +554,64 @@ def test_score_day_light_rain_bonus_is_a_shared_enhancement():
         any(label == "Precipitation" and delta > 0 for label, delta, _ in seg.breakdown)
         for seg in day.segments
     )
+
+
+def _fake_segment(breakdown):
+    """Minimal SegmentForecast for directly unit-testing
+    aggregate_day_overall() with a controlled breakdown, without going
+    through a full score_day() weather bundle."""
+    return SegmentForecast(
+        name="Test", start=datetime(2026, 1, 1, 0, 0), end=datetime(2026, 1, 1, 1, 0),
+        score=0.0, solunar_overlap=None, notes=[], breakdown=breakdown,
+    )
+
+
+def test_aggregate_day_overall_zero_fills_a_factor_that_only_applies_to_some_segments():
+    # Punch-list #94 follow-up: "average the individual scoring elements
+    # across all periods of the day" - a factor that only fires in SOME
+    # segments (e.g. Solunar, which depends on each segment's own window
+    # overlap) must still be divided by the TOTAL segment count, not just
+    # the count where it actually applied - otherwise a rare-but-real
+    # factor would be inflated relative to one applied in every segment.
+    segments = [
+        _fake_segment([("Base", 5.0, "base"), ("Solunar", 3.0, "major overlap")]),
+        _fake_segment([("Base", 5.0, "base"), ("Solunar", 3.0, "major overlap")]),
+        _fake_segment([("Base", 5.0, "base")]),
+        _fake_segment([("Base", 5.0, "base")]),
+        _fake_segment([("Base", 5.0, "base")]),
+        _fake_segment([("Base", 5.0, "base")]),
+    ]
+    score, breakdown = aggregate_day_overall(segments)
+    deltas = {label: delta for label, delta, _ in breakdown}
+    assert deltas["Base"] == 5.0
+    # 3.0 + 3.0 across all 6 segments (zero-filled for the 4 where it
+    # didn't apply) = 1.0, NOT 3.0 (which dividing by just the 2 segments
+    # where it applied would wrongly give).
+    assert deltas["Solunar"] == 1.0
+    assert score == round(5.0 + 1.0, 1)
+
+    solunar_detail = next(detail for label, _, detail in breakdown if label == "Solunar")
+    assert "only actually applied in 2 of them" in solunar_detail
+    base_detail = next(detail for label, _, detail in breakdown if label == "Base")
+    assert "consistently across all 6" in base_detail
+
+
+def test_aggregate_day_overall_matches_averaging_each_segments_raw_total_before_clamping():
+    # By linearity, averaging each factor's own delta across segments is
+    # mathematically equivalent to averaging each segment's own raw
+    # (unclamped, unrounded) total and clamping once at the end - the
+    # actual fix versus the old approach of clamping/rounding each
+    # segment first and THEN averaging those already-bounded scores.
+    segments = [
+        _fake_segment([("Base", 5.0, "base"), ("Wind", 2.0, "calm")]),
+        _fake_segment([("Base", 5.0, "base"), ("Wind", -1.0, "gusty")]),
+        _fake_segment([("Base", 5.0, "base"), ("Wind", 4.0, "ideal")]),
+    ]
+    score, breakdown = aggregate_day_overall(segments)
+    raw_totals = [sum(delta for _, delta, _ in seg.breakdown) for seg in segments]
+    expected = round(max(1.0, min(10.0, sum(raw_totals) / len(raw_totals))), 1)
+    assert score == expected
+
+
+def test_aggregate_day_overall_returns_neutral_default_for_no_segments():
+    assert aggregate_day_overall([]) == (5.0, [])

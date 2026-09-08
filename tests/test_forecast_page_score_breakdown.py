@@ -1,7 +1,19 @@
 """Tests for punch-list #94 on the 7-Day Forecast page: every predicted
 score shown (each day's overall_score summary tile, and each time-of-day
-segment's own score inside a day's detail expander) gets an "ℹ️ How this
-score was derived" st.popover right next to it.
+segment's own score inside a day's detail expander) gets an icon-only "ℹ️"
+st.popover right next to it that details how the score was derived.
+
+Plus its two same-session follow-ups: (1) "Lets maybe just have a small
+box with the 'i' icon instead of that and the txt" - the popover has no
+visible text label, just the ℹ️ icon (help="How this score was derived"
+is set instead, for the hover tooltip). (2) "for the full day score in
+the 7 day forecast, maybe average the individual scoring elements across
+all periods of the day instead of averaging the period of the day
+scores" - each day's overall_score/overall_breakdown now come from
+core.scoring.aggregate_day_overall(), which averages each scoring
+factor's own delta across the day's 6 segments, so the day-level popover
+shows a real factor breakdown (starting with "Base") just like a single
+segment's own breakdown, not a per-segment score list.
 
 The per-segment popover is deliberately a popover, not another
 st.expander: it renders nested inside each day's own st.expander (the
@@ -80,13 +92,23 @@ def _run_forecast(monkeypatch):
 
 def test_each_day_summary_tile_has_a_breakdown_popover(monkeypatch):
     at = _run_forecast(monkeypatch)
-    popover_keys = [p.key for p in at.get("popover")]
-    assert any(k and k.startswith("week_day_score_breakdown_") for k in popover_keys), (
-        f"expected one day-level breakdown popover per day in the top summary row, got keys: {popover_keys}"
+    popovers = at.get("popover")
+    day_popovers = [p for p in popovers if p.key and p.key.startswith("week_day_score_breakdown_")]
+    assert day_popovers, (
+        f"expected one day-level breakdown popover per day in the top summary row, got keys: "
+        f"{[p.key for p in popovers]}"
     )
+    # Punch-list #94 follow-up: icon-only, no visible text label.
+    assert all(p.proto.popover.label == "" and p.proto.popover.icon == "ℹ️" for p in day_popovers)
+
     all_markdown = [m.value for m in at.markdown]
-    assert any("Average of this day's" in t for t in all_markdown), (
-        f"expected day-level (segment-average) breakdown content, got: {all_markdown}"
+    # Punch-list #94 follow-up: the day-level score now averages each
+    # scoring FACTOR's own delta across the day's segments (core.scoring.
+    # aggregate_day_overall()), not the segments' own scores - so it
+    # shows the same factor-breakdown shape (starting with "Base") as any
+    # single segment's own breakdown.
+    assert any("**How this score was derived:**" in t and "- Base:" in t for t in all_markdown), (
+        f"expected factor-breakdown content for the day-level score, got: {all_markdown}"
     )
 
 

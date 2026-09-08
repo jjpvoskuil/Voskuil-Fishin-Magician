@@ -32,7 +32,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from .scoring import lake_now_naive
+from .scoring import lake_now_naive, aggregate_day_overall
 from .storage import data_write_lock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -158,15 +158,19 @@ def apply_freeze(day_forecast, now=None, path: Path = FREEZE_PATH) -> list:
                 newly_frozen_names.append(seg.name)
 
         if any_segment_changed:
-            # A past segment's score just got overridden back to its frozen
-            # value, which score_day()'s freshly computed overall_score (the
-            # plain average of all segment scores, before this override ran)
-            # no longer reflects - recompute it the same way score_day() does,
-            # from the now-correct (mix of frozen-past + live-future) segment
-            # scores, so the day-level number a reader sees stays consistent
-            # with the segment cards underneath it.
-            avg = sum(s.score for s in day_forecast.segments) / len(day_forecast.segments)
-            day_forecast.overall_score = round(max(1.0, min(10.0, avg)), 1)
+            # A past segment's score (and breakdown) just got overridden
+            # back to its frozen value, which score_day()'s freshly
+            # computed overall_score/overall_breakdown (aggregated from
+            # the segments' breakdowns BEFORE this override ran - see
+            # core.scoring.aggregate_day_overall()) no longer reflects -
+            # recompute both the same way score_day() does, from the
+            # now-correct (mix of frozen-past + live-future) segment
+            # breakdowns, so the day-level number AND its own "how this
+            # was derived" popover stay consistent with the segment cards
+            # underneath it.
+            day_forecast.overall_score, day_forecast.overall_breakdown = aggregate_day_overall(
+                day_forecast.segments,
+            )
 
         if new_rows_for_today:
             # Keep only today's rows (existing + new) - anything for another

@@ -69,27 +69,38 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
-- **Every predicted score has an "ℹ️ How this score was derived" button right next to it
-  (punch-list #94).** Angler's ask, verbatim: "In any area that shows a fishing predicted score
-  for the day or period, can you add a collapsable box or similar next to the score that details
-  how the score was derived." A small popover (`st.popover`, not `st.expander` - it can be
-  dropped in anywhere a score is shown, including already nested inside another `st.expander`,
-  without fighting for layout width or hitting nested-container restrictions) lists exactly which
-  factors nudged the score away from the neutral 5.0 base and by how much - the same breakdown
-  data `core.scoring._segment_score()` has always computed, now surfaced everywhere a score is
-  shown rather than only via Spot Session's own hover tooltip (its original home, punch-list #56).
-  Covers: the Home page's "Activity score" tile and "Best window today" box; every day's summary
-  tile and every time-of-day segment's own score on the 7-Day Forecast page; and Spot Session's
-  pre-session preview, mid-session "🔄 Conditions changed?" live preview, and the "Session in
-  progress" caption once a session is running. A day-level score (Home's "Activity score", each
-  7-Day Forecast day's summary tile) is a plain average of that day's own 6 time-of-day segment
-  scores, not itself a factor breakdown - its popover lists each segment's own score instead,
-  since each segment's own factor breakdown is shown separately, right next to that segment's own
-  score. One exception: Spot Session's "👀 Watching \<angler\>'s session" spectator view doesn't
-  get this popover - that view is always rebuilt from already-saved trip-log rows (the factor
-  breakdown itself was never written to disk, only the final score), and recomputing it fresh
-  would silently describe a different score than the one actually shown (pressure trend/moon
-  window keep moving) rather than the one that was actually predicted.
+- **Every predicted score has a small "ℹ️" icon button right next to it that details how the
+  score was derived (punch-list #94).** Angler's ask, verbatim: "In any area that shows a fishing
+  predicted score for the day or period, can you add a collapsable box or similar next to the
+  score that details how the score was derived." A small popover (`st.popover`, not `st.expander`
+  - it can be dropped in anywhere a score is shown, including already nested inside another
+  `st.expander`, without fighting for layout width or hitting nested-container restrictions) lists
+  exactly which factors nudged the score away from the neutral 5.0 base and by how much - the same
+  breakdown data `core.scoring._segment_score()` has always computed, now surfaced everywhere a
+  score is shown rather than only via Spot Session's own hover tooltip (its original home,
+  punch-list #56). The popover is icon-only (follow-up ask, same session: "Lets maybe just have a
+  small box with the 'i' icon instead of that and the txt") - no visible text label, just the ℹ️
+  icon with a "How this score was derived" hover tooltip. Covers: the Home page's "Activity score"
+  tile and "Best window today" box; every day's summary tile and every time-of-day segment's own
+  score on the 7-Day Forecast page; and Spot Session's pre-session preview, mid-session "🔄
+  Conditions changed?" live preview, and the "Session in progress" caption once a session is
+  running. A day-level score (Home's "Activity score", each 7-Day Forecast day's summary tile) has
+  its own real factor breakdown too (`core.scoring.aggregate_day_overall()`, another follow-up ask
+  from the same session: "for the full day score in the 7 day forecast, maybe average the
+  individual scoring elements across all periods of the day instead of averaging the period of the
+  day scores") - each scoring factor's own delta (pressure trend, moon phase, solunar, cloud
+  cover, wind, season, precipitation, water temperature, etc.) is averaged across the day's 6
+  time-of-day segments (zero-filled for a segment a factor didn't apply to, so a factor that only
+  fires in some windows - like solunar - isn't inflated relative to one applied everywhere), and
+  the day's score is derived from those averaged deltas, mathematically equivalent to averaging
+  each segment's own raw total before a single day-level clamp rather than averaging 6 already
+  individually-clamped/rounded segment scores. The result is the same factor-breakdown shape
+  (starting with "Base") as any single segment's own popover, not a per-segment score list. One
+  exception: Spot Session's "👀 Watching \<angler\>'s session" spectator view doesn't get this
+  popover - that view is always rebuilt from already-saved trip-log rows (the factor breakdown
+  itself was never written to disk, only the final score), and recomputing it fresh would silently
+  describe a different score than the one actually shown (pressure trend/moon window keep moving)
+  rather than the one that was actually predicted.
 - **"Today at a glance"** on the Home page - up to seven metric tiles in one compact row (smaller
   metric font than Streamlit's default so all seven fit across a normal page width - see
   `core.ui.inject_compact_metric_css()`): activity score, estimated water temp, moon phase, and

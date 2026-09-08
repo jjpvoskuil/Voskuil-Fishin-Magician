@@ -239,21 +239,28 @@ def render_score_breakdown(breakdown: list, final_score: float, key: str):
     """Punch-list #94, the angler's own ask: "In any area that shows a
     fishing predicted score for the day or period, add a collapsable box
     or similar next to the score that details how the score was derived."
-    A small "ℹ️ How this score was derived" `st.popover` - not
-    `st.expander` - so this can be dropped in literally anywhere a score
-    is shown, including already nested inside another `st.expander` (e.g.
-    the 7-Day Forecast page's per-day detail panel), a `st.columns()`
-    slot, or a plain caption line, without fighting for layout width or
-    (on older Streamlit behavior some pages here still assume) nested-
-    expander restrictions. Content is `core.scoring.format_score_
+    A small icon-only "ℹ️" `st.popover` - not `st.expander`, and not a
+    text-labeled button (a follow-up angler ask: "Lets maybe just have a
+    small box with the 'i' icon instead of that and the txt") - so this
+    can be dropped in literally anywhere a score is shown, including
+    already nested inside another `st.expander` (e.g. the 7-Day Forecast
+    page's per-day detail panel), a `st.columns()` slot, or a plain
+    caption line, without fighting for layout width or (on older
+    Streamlit behavior some pages here still assume) nested-expander
+    restrictions, and without taking up space for a text label next to a
+    compact metric tile. Content is `core.scoring.format_score_
     breakdown()`'s shared text, so every page shows the identical
-    explanation for the identical `[(label, delta, detail), ...]` shape.
+    explanation for the identical `[(label, delta, detail), ...]` shape -
+    this covers a single time-of-day segment's own factor breakdown AND a
+    whole day's aggregated one (`core.scoring.aggregate_day_overall()`
+    produces that same shape too, so a day-level score uses this exact
+    same function, no separate "day" variant needed).
 
     `key` is required, not optional - this is normally called once per
     loop iteration (once per day, per time segment, per lure suggestion),
-    and every one of those would otherwise render the exact same "ℹ️ How
-    this score was derived" label, which Streamlit rejects as a duplicate
-    widget ID without a caller-supplied key to tell them apart.
+    and every one of those would otherwise render the exact same
+    icon-only popover, which Streamlit rejects as a duplicate widget ID
+    without a caller-supplied key to tell them apart.
 
     A no-op if `breakdown` is empty (e.g. a session reconstructed after a
     reconnect, where the original score's factor list was never persisted
@@ -262,28 +269,8 @@ def render_score_breakdown(breakdown: list, final_score: float, key: str):
     popover that looks broken."""
     if not breakdown:
         return
-    with st.popover("ℹ️ How this score was derived", key=key):
+    with st.popover("", icon="ℹ️", key=key, help="How this score was derived"):
         st.markdown(format_score_breakdown(breakdown, final_score))
-
-
-def render_day_score_breakdown(day, key: str):
-    """Sibling to render_score_breakdown() above, for a `DayForecast`'s own
-    `overall_score` (Home's "Activity score" tile, the 7-Day Forecast
-    page's per-day summary row) - that number is a plain average of the
-    day's own time-of-day segment scores, not itself a factor-weighted
-    breakdown (each segment has its OWN factor breakdown, shown via
-    render_score_breakdown() right next to that segment's own score
-    elsewhere on the page), so this shows a different, simpler "how
-    derived": which segment scored what, averaged into the one number
-    shown. Same required-`key` reasoning as render_score_breakdown()."""
-    if not getattr(day, "segments", None):
-        return
-    with st.popover("ℹ️ How this score was derived", key=key):
-        st.markdown(
-            f"**Average of this day's {len(day.segments)} time-of-day windows:**\n\n"
-            + "\n".join(f"- {seg.name}: {seg.score}/10" for seg in day.segments)
-            + f"\n\n**Average → {day.overall_score}/10**"
-        )
 
 
 def render_line_chart(col, series, y_domain: tuple | None = None):

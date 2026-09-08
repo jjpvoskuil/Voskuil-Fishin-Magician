@@ -192,6 +192,7 @@ class DayForecast:
     segments: list  # list[SegmentForecast]
     weather_summary: dict
     warnings: list
+    overall_breakdown: list = field(default_factory=list)  # [(label, delta, detail), ...] - see aggregate_day_overall()
 
 
 def _segment_windows(sunrise: datetime, sunset: datetime, d: date):
@@ -234,6 +235,78 @@ def _overlaps(a_start, a_end, b_start, b_end) -> bool:
 
 def _clamp(v, lo=1.0, hi=10.0):
     return max(lo, min(hi, v))
+
+
+def aggregate_day_overall(segments: list) -> tuple:
+    """Combines a day's own per-segment breakdowns into ONE day-level
+    score + breakdown - punch-list #94 follow-up, the angler's own ask:
+    "for the full day score in the 7 day forecast, maybe average the
+    individual scoring elements across all periods of the day instead of
+    averaging the period of the day scores." Averages each individual
+    scoring FACTOR's own delta (Pressure trend, Moon phase, Solunar,
+    Cloud cover, Wind, Season, Precipitation, Water temperature, ...)
+    across every one of the day's time-of-day segments, then sums those
+    averaged deltas into one day-level score - rather than the old
+    approach of averaging the segments' own already-clamped, already-
+    rounded 1-10 scores. The two aren't the same number: clamping/
+    rounding each segment BEFORE averaging (the old way) can silently
+    bias the day-level number whenever any one segment's raw total would
+    have landed outside the 1-10 range or picked up rounding drift -
+    averaging the raw factor contributions first and clamping only ONCE,
+    for the whole day, doesn't have that problem.
+
+    A segment a given factor never actually applied to (e.g. a Solunar
+    bonus that only overlaps two of the day's six windows) contributes a
+    plain 0 for that factor in THIS segment, not "not counted" - dividing
+    by every segment (not just the ones where it fired) is what makes the
+    result "how much did Solunar contribute to the DAY overall", not an
+    inflated "when it happens, how much" average.
+
+    Each averaged delta is rounded to 2 decimal places for a readable
+    breakdown line (weights are already round, human-chosen numbers - a
+    repeating decimal from a plain /6 division would read as false
+    precision, not a more accurate score) - and the day's own final score
+    is derived from THOSE rounded values (clamped once, rounded to 1
+    decimal place), not from a separate, more-precise sum, so the
+    breakdown's own numbers always add up to exactly the score shown next
+    to them (same self-consistency format_score_breakdown() already
+    checks for and calls out when clamping bites).
+
+    Returns (score, breakdown) in the same `(float, [(label, delta,
+    detail), ...])` shape every other score/breakdown pair in this module
+    uses - `format_score_breakdown()` renders it exactly like a single
+    segment's own breakdown, no special-casing needed by callers."""
+    if not segments:
+        return 5.0, []
+    n = len(segments)
+    sums: dict = {}
+    counts: dict = {}
+    order: list = []
+    for seg in segments:
+        for label, delta, _detail in seg.breakdown:
+            if label not in sums:
+                sums[label] = 0.0
+                counts[label] = 0
+                order.append(label)
+            sums[label] += delta
+            counts[label] += 1
+
+    breakdown = []
+    raw_total = 0.0
+    for label in order:
+        avg_delta = round(sums[label] / n, 2)
+        raw_total += avg_delta
+        applied_n = counts[label]
+        if applied_n == n:
+            detail = f"Applied consistently across all {n} time-of-day windows today."
+        else:
+            detail = (
+                f"Averaged across all {n} time-of-day windows today - only actually applied in {applied_n} of them."
+            )
+        breakdown.append((label, avg_delta, detail))
+
+    score = round(_clamp(raw_total), 1)
+    return score, breakdown
 
 
 def _segment_score(
@@ -494,7 +567,7 @@ def score_day(
             )
         )
 
-    overall = round(_clamp(sum(s.score for s in segments) / len(segments)), 1)
+    overall, overall_breakdown = aggregate_day_overall(segments)
 
     return DayForecast(
         the_date=d,
@@ -515,6 +588,7 @@ def score_day(
             "temp_lo_f": daily.get("temperature_2m_min"),
         },
         warnings=warnings,
+        overall_breakdown=overall_breakdown,
     )
 
 
