@@ -69,6 +69,27 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
+- **Every predicted score has an "ℹ️ How this score was derived" button right next to it
+  (punch-list #94).** Angler's ask, verbatim: "In any area that shows a fishing predicted score
+  for the day or period, can you add a collapsable box or similar next to the score that details
+  how the score was derived." A small popover (`st.popover`, not `st.expander` - it can be
+  dropped in anywhere a score is shown, including already nested inside another `st.expander`,
+  without fighting for layout width or hitting nested-container restrictions) lists exactly which
+  factors nudged the score away from the neutral 5.0 base and by how much - the same breakdown
+  data `core.scoring._segment_score()` has always computed, now surfaced everywhere a score is
+  shown rather than only via Spot Session's own hover tooltip (its original home, punch-list #56).
+  Covers: the Home page's "Activity score" tile and "Best window today" box; every day's summary
+  tile and every time-of-day segment's own score on the 7-Day Forecast page; and Spot Session's
+  pre-session preview, mid-session "🔄 Conditions changed?" live preview, and the "Session in
+  progress" caption once a session is running. A day-level score (Home's "Activity score", each
+  7-Day Forecast day's summary tile) is a plain average of that day's own 6 time-of-day segment
+  scores, not itself a factor breakdown - its popover lists each segment's own score instead,
+  since each segment's own factor breakdown is shown separately, right next to that segment's own
+  score. One exception: Spot Session's "👀 Watching \<angler\>'s session" spectator view doesn't
+  get this popover - that view is always rebuilt from already-saved trip-log rows (the factor
+  breakdown itself was never written to disk, only the final score), and recomputing it fresh
+  would silently describe a different score than the one actually shown (pressure trend/moon
+  window keep moving) rather than the one that was actually predicted.
 - **"Today at a glance"** on the Home page - up to seven metric tiles in one compact row (smaller
   metric font than Streamlit's default so all seven fit across a normal page width - see
   `core.ui.inject_compact_metric_css()`): activity score, estimated water temp, moon phase, and

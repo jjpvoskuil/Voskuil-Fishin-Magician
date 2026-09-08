@@ -11417,6 +11417,96 @@ every real save.
     597 passed (592 + 5). Verified via a fresh `git clone` into a new temp
     directory before pushing.
 
+168. **Punch-list #94: an "ℹ️ How this score was derived" box next to
+    every predicted score in the app.** Angler's ask, verbatim: "In any
+    area that shows a fishing predicted score for the day or period, can
+    you add a collapsable box or similar next to the score that details
+    how the score was derived."
+
+    Surveyed every place a 1-10 activity score is actually shown before
+    writing any code: Home's "Activity score" tile and "Best window
+    today" info box; the 7-Day Forecast page's per-day summary row and
+    per-segment metric (inside each day's own detail expander); and Spot
+    Session's pre-session "Suggestions for right now" preview, its
+    mid-session "🔄 Conditions changed?" live preview (which already had a
+    factor breakdown, just as a `st.metric(help=...)` hover tooltip -
+    punch-list #56 - rather than something clickable/visible on tap), and
+    the "Session in progress" caption (which had no breakdown at all).
+    Deliberately left the Reports page's "🔮 Predict a future day" section
+    alone - its "Predicted Fish per Hour/Total Fish/etc." numbers are a
+    completely different kind of prediction (a historical-bucket lookup
+    for a chosen SUCCESS METRIC, `core.reports.predict_by_moon_
+    illumination()`/`predict_by_pressure_trend()`, punch-list #92) than
+    the 1-10 activity-score formula this ask is about, and it already has
+    its own "how derived" explanation inline (bucket, n trips, low-sample
+    warning) right next to each prediction.
+
+    Used `st.popover`, not another `st.expander`, for the actual
+    "collapsable box" - checked first (a real concern, since this app's
+    Streamlit version turned out to allow nested `st.expander` after all,
+    contrary to the older restriction some of this page's own comments
+    still assumed) but `st.popover` composes into literally any container
+    (already-nested inside another expander, a `st.columns()` slot, a
+    plain caption line) without fighting for layout width, so one
+    mechanism works identically everywhere rather than needing a
+    popover-vs-expander decision per call site.
+
+    New shared building blocks rather than duplicating this per page:
+    `core.scoring.format_score_breakdown(breakdown, final_score)` (moved
+    from Spot Session's own page-local `_score_breakdown_help()` -
+    identical logic, just promoted since every page needed it) formats
+    the `[(label, delta, detail), ...]` shape `SegmentForecast.breakdown`/
+    `ManualScoreResult.breakdown` both already carry; `core.ui.
+    render_score_breakdown(breakdown, final_score, key)` wraps that in the
+    shared popover (`key` is a REQUIRED argument, not optional - every
+    call site here is inside a loop over days/segments/lures, and Streamlit
+    rejects duplicate widget IDs from two popovers sharing the same
+    label with no key to tell them apart); `core.ui.
+    render_day_score_breakdown(day, key)` is the sibling for a
+    `DayForecast.overall_score` (Home's "Activity score" tile, each 7-Day
+    Forecast day's summary tile) - that number is a plain average of the
+    day's own 6 segment scores, not a factor breakdown of its own, so its
+    popover lists each segment's own score/name instead of factor deltas.
+
+    Spot Session's "Session in progress" caption needed one more piece of
+    plumbing: its predicted_score was already tracked in the in-memory
+    `active` session dict, but the factor breakdown behind it never was.
+    Added `active["predicted_score_breakdown"]`, set alongside
+    `predicted_score` in both `_start_pending_session()` and punch-list
+    #93's `_relocate_active_session()` - session_state-only, never written
+    to `trip_log.csv` (matches every other in-memory-only `active` field).
+    Deliberately NOT added to `_reconstruct_active_session()` (the
+    reconnect-after-session_state-loss path) or `_render_watch_view()` (the
+    spectator view, which always goes through that same reconstruction):
+    neither has the original breakdown available (it was never persisted
+    to disk, only the final score was), and RECOMPUTING it fresh at
+    reconnect/watch time would silently describe a DIFFERENT score than
+    the one actually shown - pressure trend and the solunar window keep
+    moving - which is actively misleading rather than just unavailable.
+    `render_score_breakdown()` is a no-op on an empty breakdown list, so
+    this degrades to "no popover" rather than a crash or stale content in
+    exactly that case.
+
+    **Verified:** 7 new `AppTest` tests across three new files -
+    `tests/test_home_score_breakdown.py` (2: the Activity score tile's
+    day-level popover; the Best-window box's factor-level popover),
+    `tests/test_forecast_page_score_breakdown.py` (2: one breakdown
+    popover per day in the top summary row; one per time-of-day segment
+    inside each day's detail expander - confirming the popover renders
+    correctly even nested inside that expander), `tests/
+    test_spot_session_score_breakdown.py` (3: the pre-session preview, the
+    mid-session live-preview panel, and the "Session in progress" caption
+    right after Start Session, when predicted_score_breakdown is freshly
+    set). Each new fixture file builds its own small real `WeatherBundle`
+    (same anchored-at-`lake_today()` approach `tests/test_scoring.py`'s
+    own `_fake_bundle_with_air_temp()` uses) so `score_day()` genuinely
+    succeeds rather than mocking around it. Full suite `pytest tests/ -q`
+    - 604 passed (597 + 7). Full-page `AppTest` smoke pass (a fresh
+    `py_compile` plus a live `import core.ui; import core.scoring` check
+    for the new cross-module import) across every other page - clean.
+    Verified via a fresh `git clone` into a new temp directory before
+    pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
