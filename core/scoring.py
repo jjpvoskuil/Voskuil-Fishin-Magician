@@ -88,8 +88,29 @@ DEFAULT_WEIGHTS = {
     # new/full) rather than dropped outright, since it's a near-universal
     # angler belief worth a token acknowledgment - but the magnitude is cut by
     # more than half from before to reflect how weak the evidence actually is.
+    # Dawn/Morning only (see moon_dawn_* below) now use a different, continuous
+    # curve instead of these two - these two still apply as-is to every other
+    # segment (Midday/Afternoon/Dusk/Night).
     "moon_new_full_bonus": 0.6,
     "moon_quarter_penalty": -0.5,
+    # Punch-list #95: Dawn/Morning-specific continuous moon-illumination curve,
+    # replacing the two flat windows above for just those two segments - the
+    # angler's own read of the water this season, verbatim: "we do seem to
+    # have better activity as the night before moon illumination decreases by
+    # day." Unlike moon_new_full_bonus/moon_quarter_penalty (a token nod to
+    # solunar lore, deliberately weighted small per the 2023 study above),
+    # this is the angler's own real-world observation, not folklore, so it's
+    # NOT a token weight - see _dawn_moon_illumination_delta()'s own docstring
+    # for the shape (best right at new moon, worst right at full moon, sliding
+    # continuously with illumination % in between - not two narrow windows)
+    # and for why it's a hand-set curve informed by, but not literally
+    # regression-fit to, the angler's own still-thin logged data. Sized to a
+    # peak-to-trough swing 0.25 points wider than the old moon_new_full_bonus/
+    # moon_quarter_penalty range (1.1) - the angler's own explicit ask, taken
+    # from water_temp_hot_floor_penalty below (was heading toward -1.75,
+    # shaved to -1.5).
+    "moon_dawn_new_bonus": 0.85,
+    "moon_dawn_full_penalty": -0.5,
     # Cloud cover: bass are light-sensitive sight predators, and "bluebird
     # skies = tough bite" is near-universal in professional bass-fishing
     # sources (e.g. Bassmaster's cold-front coverage) - genuinely two-sided
@@ -127,13 +148,102 @@ DEFAULT_WEIGHTS = {
     "water_temp_cold_penalty": -1.0,
     "water_temp_prespawn_bonus": 0.3,
     "water_temp_prime_bonus": 1.0,
-    "water_temp_extreme_penalty": -1.2,
+    # Punch-list #95: the old "Summer Stratified" (77-84F, neutral) / "Extreme
+    # Thermal Load" (84F+, flat water_temp_extreme_penalty -1.2 regardless of
+    # how far above 84F) bands are gone - replaced by a continuous gradient
+    # from WATER_TEMP_HOT_START_F up to WATER_TEMP_HOT_FLOOR_F (see
+    # _water_temp_hot_penalty()). Real late-summer Nolin surface readings
+    # this season ran 80-93F, with the angler's own read of the water being
+    # "better activity as the temperature goes towards 80 degrees and vice
+    # versa" - a real, continuous gradient, not the old cliff. This floor is
+    # a bit deeper than the old flat -1.2 (a smooth worst-case at the top of
+    # the observed range is more defensible than a same-magnitude flat
+    # penalty starting right at 84F), minus 0.25 shifted over to
+    # moon_dawn_new_bonus/moon_dawn_full_penalty above, per the angler's own
+    # explicit ask.
+    "water_temp_hot_floor_penalty": -1.5,
     # Water clarity - manual-entry-only, same reasoning as the water-temp weights.
     "water_clarity_stained_bonus": 0.4,
     "water_clarity_muddy_penalty": -0.3,
     # Forage observed nearby - manual-entry-only, same reasoning.
     "forage_present_bonus": 0.3,
 }
+
+# Punch-list #95: where the continuous hot-water penalty starts (still
+# neutral at/below this) and where it bottoms out (never extrapolated
+# further, even if a reading someday comes in hotter) - see
+# _water_temp_hot_penalty(). 80F is the angler's own reference point ("as
+# the temperature goes towards 80 degrees" is favorable); 93F is the top of
+# what's actually been measured on this lake so far this season - deliberately
+# NOT guessed past that, per the angler's own "we don't have data below the
+# low 80 degree mark... may have to adjust this further next season" caveat
+# (which cuts both ways - there's equally no data above 93F yet either).
+WATER_TEMP_HOT_START_F = 80.0
+WATER_TEMP_HOT_FLOOR_F = 93.0
+
+
+def _water_temp_hot_penalty(water_temp_f: float, w: dict) -> float:
+    """Continuous heat/oxygen-stress penalty for water at or above
+    WATER_TEMP_HOT_START_F - punch-list #95, replacing the old flat cliff at
+    84F (see DEFAULT_WEIGHTS' water_temp_hot_floor_penalty comment). 0 at/
+    below WATER_TEMP_HOT_START_F, ramping linearly to
+    w["water_temp_hot_floor_penalty"] by WATER_TEMP_HOT_FLOOR_F, then held
+    flat past that rather than extrapolated further."""
+    if water_temp_f <= WATER_TEMP_HOT_START_F:
+        return 0.0
+    span = WATER_TEMP_HOT_FLOOR_F - WATER_TEMP_HOT_START_F
+    frac = min(1.0, (water_temp_f - WATER_TEMP_HOT_START_F) / span)
+    return round(w["water_temp_hot_floor_penalty"] * frac, 3)
+
+
+def _dawn_moon_illumination_delta(moon: "astro.MoonPhase", w: dict) -> tuple:
+    """Punch-list #95: Dawn/Morning-only continuous moon curve, replacing the
+    old binary new/full/quarter windows for just these two segments - the
+    angler's own field read this season, verbatim: "we do seem to have
+    better activity as the night before moon illumination decreases by day."
+    Two real differences from the old model: (1) continuous across the whole
+    ~29.5-day cycle - best right at new moon, worst right at full moon,
+    sliding linearly with illumination % in between - rather than two narrow
+    +/-2-day windows with dead space between them; and (2) it deliberately
+    evaluates illumination the evening BEFORE this segment's own date, not
+    the moon phase already resolved for "tonight" - a Dawn/Morning bite
+    responds to the moonlight that was actually out overnight, which for a
+    session that already happened this morning is last night, not tonight
+    (the same fix core.calibration._day_of_cycle_for_date() already made for
+    its own exploratory dawn-rate chart - see that function's docstring for
+    why). `moon.age_days` already IS the age at whatever clock time the
+    caller anchored it to (18:00 on the segment's own date for score_day(),
+    or the angler's own entered/at_time for manual_segment_score()) -
+    subtracting exactly 1.0 day (mod the synodic month) reproduces the age
+    24h earlier without a second astro.moon_phase() call.
+
+    Deliberately a hand-set curve, not a literal fit to logged trip data,
+    even though real data was checked first (49 trustworthy Dawn/Morning
+    trips logged Aug 2026) before picking these numbers: that data currently
+    covers only about half the lunar cycle, in one continuous 15-calendar-day
+    stretch (so lunar position is heavily confounded with whatever else was
+    going on those two weeks); several individual days-of-cycle are only 1-4
+    trips deep, still dominated by one big or one skunked outing even after
+    dropping each bucket's single highest and lowest reading; and the one
+    bucket with a genuinely trustworthy sample size (day 9 of the cycle,
+    ~67% illumination, n=11) actually ran counter to this curve's own
+    direction (above-baseline catch rate at fairly high illumination, not
+    below it). Given that, baking the raw trimmed numbers directly into a
+    live score would mean encoding a two-week calendar coincidence as "the
+    moon's effect," not a real signal - so this stays sized to the angler's
+    own stated read of the water (see DEFAULT_WEIGHTS' moon_dawn_* comment
+    for the actual weight budget), with the trimmed-data check kept in mind
+    as something to revisit once dawn/morning trips genuinely cover the
+    full cycle with real sample sizes per day to check this curve against."""
+    night_before_age = (moon.age_days - 1.0) % astro.SYNODIC_MONTH
+    illum = astro.illumination_pct_for_age(night_before_age)
+    bonus, penalty = w["moon_dawn_new_bonus"], w["moon_dawn_full_penalty"]
+    d = round(bonus - (bonus - penalty) * (illum / 100.0), 3)
+    note = (
+        f"Moon was ~{illum:.0f}% illuminated last night - dawn/morning activity has "
+        f"tracked better on darker nights this season."
+    )
+    return d, note
 
 
 def season_stage(day_of_year: int, water_temp_f: float) -> str:
@@ -370,9 +480,16 @@ def _segment_score(
         d = w["pressure_rising_slow"]
         score += d; breakdown.append(("Pressure trend", d, "Slowly rising pressure."))
 
-    # Moon - a small, genuinely two-sided nudge (see DEFAULT_WEIGHTS comment on
-    # why this is deliberately a token amount, not a load-bearing factor).
-    if moon.is_new_or_full_window:
+    # Moon - Dawn/Morning get their own continuous last-night's-illumination
+    # curve (punch-list #95, see _dawn_moon_illumination_delta()); every
+    # other segment keeps the original small, genuinely two-sided binary-
+    # window nudge (see DEFAULT_WEIGHTS comment on why that one stays a
+    # token amount, not a load-bearing factor).
+    if name in ("Dawn", "Morning"):
+        d, note = _dawn_moon_illumination_delta(moon, w)
+        if d != 0:
+            score += d; notes.append(note); breakdown.append(("Moon phase", d, note))
+    elif moon.is_new_or_full_window:
         d = w["moon_new_full_bonus"]
         note = f"{moon.name} - near new/full moon, per solunar lore (mixed real-world evidence)."
         score += d; notes.append(note); breakdown.append(("Moon phase", d, note))
@@ -443,12 +560,22 @@ def _segment_score(
             "Cold / Lethargic": "water_temp_cold_penalty",
             "Pre-Spawn Transition": "water_temp_prespawn_bonus",
             "Peak Optimal Prime": "water_temp_prime_bonus",
-            "Extreme Thermal Load": "water_temp_extreme_penalty",
         }.get(band)
         if temp_weight_key:
             d = w[temp_weight_key]
             note = f"Water temp is in the {band} range."
             score += d; notes.append(note); breakdown.append(("Water temperature", d, note))
+        else:
+            # "Summer Stratified" / "Extreme Thermal Load" (punch-list #95):
+            # a continuous gradient now instead of a flat cliff at 84F - see
+            # _water_temp_hot_penalty()'s own docstring.
+            d = _water_temp_hot_penalty(water_temp_f, w)
+            if d != 0:
+                note = (
+                    f"Water temp ~{water_temp_f:.0f}F - heat/oxygen-stress penalty grows "
+                    f"the closer it gets to {WATER_TEMP_HOT_FLOOR_F:.0f}F."
+                )
+                score += d; notes.append(note); breakdown.append(("Water temperature", d, note))
 
     # Water clarity - manual-entry-only, see docstring above.
     if water_clarity is not None:

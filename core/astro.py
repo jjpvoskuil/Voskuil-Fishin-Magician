@@ -34,6 +34,19 @@ PHASE_NAMES = [
 ]
 
 
+def illumination_pct_for_age(age_days: float) -> float:
+    """0-100% illuminated for a given moon age (days since the reference new
+    moon - 0 = new, ~SYNODIC_MONTH/2 = full, wraps at SYNODIC_MONTH). Same
+    cosine approximation moon_phase() already used inline - promoted to a
+    public, reusable function (punch-list #95) since both core.calibration
+    (bucketing real trip data by day-of-lunar-cycle) and core.scoring (the
+    new Dawn/Morning-only illumination curve, evaluated at "last night's"
+    age rather than "right now") now need to evaluate it at an age that
+    isn't necessarily the one moon_phase() itself just computed."""
+    fraction = (age_days % SYNODIC_MONTH) / SYNODIC_MONTH
+    return (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
+
+
 def julian_day(dt_utc: datetime) -> float:
     dt_utc = dt_utc.astimezone(timezone.utc)
     y, m = dt_utc.year, dt_utc.month
@@ -65,7 +78,7 @@ def moon_phase(dt_utc: datetime) -> MoonPhase:
     jd = julian_day(dt_utc)
     age = (jd - REF_NEW_MOON_JD) % SYNODIC_MONTH
     fraction = age / SYNODIC_MONTH
-    illum = (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
+    illum = illumination_pct_for_age(age)
     name = next(n for lo, hi, n in PHASE_NAMES if lo <= fraction < hi)
     near_new = age <= 2 or age >= SYNODIC_MONTH - 2
     near_full = abs(age - SYNODIC_MONTH / 2) <= 2
