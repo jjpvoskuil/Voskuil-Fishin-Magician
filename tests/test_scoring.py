@@ -469,16 +469,42 @@ def test_manual_segment_score_moon_is_now_genuinely_two_sided():
     # 2026 rebalance: moon phase went from a one-way "bonus near new/full,
     # nothing otherwise" to a real two-sided nudge with a matching penalty
     # near the quarter moons - see core/scoring.py's module docstring for why.
+    # Punch-list #95: this binary window model is now Midday/Afternoon/Dusk/
+    # Night only - Dawn/Morning get their own continuous curve instead (see
+    # test_manual_segment_score_dawn_moon_curve_* below), so this uses
+    # "Midday" rather than "Dawn" to keep testing the thing it's actually
+    # named for.
     near_full = astro.MoonPhase(14.5, 0.5, 100.0, "Full Moon", is_new_or_full_window=True, is_quarter_window=False)
     near_quarter = astro.MoonPhase(7.4, 0.25, 50.0, "First Quarter", is_new_or_full_window=False, is_quarter_window=True)
     neither = astro.MoonPhase(11.0, 0.37, 75.0, "Waxing Gibbous", is_new_or_full_window=False, is_quarter_window=False)
-    bonus_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_full)
-    penalty_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_quarter)
-    neutral_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=neither)
+    bonus_result = manual_segment_score("Midday", "summer_peak", 40, 7, moon=near_full)
+    penalty_result = manual_segment_score("Midday", "summer_peak", 40, 7, moon=near_quarter)
+    neutral_result = manual_segment_score("Midday", "summer_peak", 40, 7, moon=neither)
     assert bonus_result.score > neutral_result.score > penalty_result.score
     assert any(label == "Moon phase" and delta > 0 for label, delta, _ in bonus_result.breakdown)
     assert any(label == "Moon phase" and delta < 0 for label, delta, _ in penalty_result.breakdown)
     assert not any(label == "Moon phase" for label, _, _ in neutral_result.breakdown)
+
+
+def test_manual_segment_score_dawn_moon_curve_is_continuous_and_favors_darker_nights():
+    # Punch-list #95: Dawn/Morning use a continuous last-night's-illumination
+    # curve instead of the binary new/full/quarter windows above - verbatim
+    # angler ask: "we do seem to have better activity as the night before
+    # moon illumination decreases by day." moon.age_days is what actually
+    # drives this (see _dawn_moon_illumination_delta()) - age/fraction/name
+    # are set consistently with illumination_pct here but aren't otherwise
+    # read by the function under test.
+    near_new = astro.MoonPhase(1.0, 0.03, 3.0, "New Moon", is_new_or_full_window=True, is_quarter_window=False)
+    near_full = astro.MoonPhase(15.5, 0.52, 98.0, "Full Moon", is_new_or_full_window=True, is_quarter_window=False)
+    bright_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_full)
+    dark_result = manual_segment_score("Dawn", "summer_peak", 40, 7, moon=near_new)
+    assert dark_result.score > bright_result.score
+    assert any(label == "Moon phase" and delta > 0 for label, delta, _ in dark_result.breakdown)
+    assert any(label == "Moon phase" and delta < 0 for label, delta, _ in bright_result.breakdown)
+    # "Morning" gets the identical treatment; every other segment still uses
+    # the old binary model (see the test above), unaffected by this curve.
+    morning_dark = manual_segment_score("Morning", "summer_peak", 40, 7, moon=near_new)
+    assert any(label == "Moon phase" and delta > 0 for label, delta, _ in morning_dark.breakdown)
 
 
 def test_manual_segment_score_cloud_cover_is_now_genuinely_two_sided():

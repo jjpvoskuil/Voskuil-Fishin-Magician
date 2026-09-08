@@ -69,6 +69,46 @@ this repo that can override it on this hosting.
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
   moon phase, solunar major/minor windows, cloud cover, wind, and season/water-temp estimate.
+- **Water temperature above 80F is a continuous gradient, not a cliff (punch-list #95).**
+  Angler's own late-summer read of the water: "we do seem to have better activity as the
+  temperature goes towards 80 degrees and vice versa" - real Nolin surface readings this season
+  ran 80-93F. The old model treated everything above 84F as one flat penalty (`water_temp_extreme_
+  penalty`, -1.2) regardless of whether it was 85F or 95F - a cliff, not a gradient, and it stacked
+  with the separate `season_summer_midday_penalty` (-1.5, Midday/Afternoon in summer) for a
+  combined -2.7 on a hot midday even at just-over-84F. Replaced with `core.scoring.
+  _water_temp_hot_penalty()`: still neutral at/below `WATER_TEMP_HOT_START_F` (80F, the angler's
+  own reference point), then ramps linearly down to `water_temp_hot_floor_penalty` (-1.5) by
+  `WATER_TEMP_HOT_FLOOR_F` (93F, the top of what's actually been measured on this lake so far this
+  season), held flat past that rather than extrapolated further. Cold/Pre-Spawn Transition/Peak
+  Optimal Prime bands (<=76F) are untouched - no logged data yet says otherwise, and the angler's
+  own words: "we may have to adjust this further next season" once real spring/fall/winter
+  readings exist. `core.onwater.water_temp_band()`'s discrete labels (still shown on Spot Session
+  and used by the Reports page's correlation buckets) are unchanged - only the *scoring* formula
+  moved off them for the hot end.
+- **Moon illumination now has its own continuous curve for Dawn/Morning specifically
+  (punch-list #95).** Angler's own read of the water: "we do seem to get better activity as the
+  night before moon illumination decreases by day" - and, since there's much less logged data for
+  the rest of the day, "let's just have it affect dawn/morning." `core.scoring.
+  _dawn_moon_illumination_delta()` replaces the old binary near-new/full-moon bonus / near-quarter
+  penalty for just Dawn and Morning: continuous across the whole ~29.5-day cycle (best right at new
+  moon, worst right at full moon, sliding linearly with illumination % in between, not two narrow
+  +/-2-day windows), and evaluated at the moon's illumination the evening BEFORE the segment's own
+  date - not "tonight" - since a Dawn/Morning bite responds to the moonlight that was actually out
+  overnight (the same day-offset fix `core.calibration._day_of_cycle_for_date()` already made for
+  its own exploratory dawn-rate chart; both now share `core.astro.illumination_pct_for_age()`
+  rather than each having their own copy of the formula). Midday/Afternoon/Dusk/Night keep the
+  original binary-window model, unchanged. 49 trustworthy logged Dawn/Morning trips (Aug 2026)
+  were checked, trimming each day-of-cycle bucket's single highest/lowest reading, before picking
+  this curve's numbers - but that data currently covers barely half the lunar cycle in one
+  continuous 15-calendar-day stretch (so lunar position is heavily confounded with whatever else
+  was going on those two weeks), several buckets are still just 1-4 trips deep even after
+  trimming, and the one bucket with a genuinely trustworthy sample (day 9 of the cycle, ~67%
+  illumination, n=11) actually ran counter to this curve's own direction. Given that, the curve
+  shipped is a hand-set one sized to the angler's own stated read of the water (peak bonus +0.85 at
+  new moon, penalty -0.5 at full moon - a 1.35-point swing, 0.25 wider than the old binary model's
+  1.1-point range, taken from `water_temp_hot_floor_penalty` above per the angler's own explicit
+  ask), not a literal fit to the still-thin logged data - revisit once Dawn/Morning trips cover the
+  full cycle with real sample sizes per day to check this curve against.
 - **Every predicted score has a small "ℹ️" icon button right next to it that details how the
   score was derived (punch-list #94).** Angler's ask, verbatim: "In any area that shows a fishing
   predicted score for the day or period, can you add a collapsable box or similar next to the

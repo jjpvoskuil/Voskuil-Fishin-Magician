@@ -11578,6 +11578,102 @@ every real save.
     writes). Verified via a fresh `git clone` into a new temp directory
     before pushing.
 
+170. **Punch-list #95: water-temp scoring becomes a continuous gradient
+    above 80F, and Dawn/Morning gets its own continuous moon-illumination
+    curve instead of the binary new/full/quarter model.** Angler's asks,
+    verbatim, after a full late-summer season of real fishing: "we are
+    setting a pretty heavy penalty for high water temperatures... bass
+    must be able to adapt... we do seem to have better activity as the
+    temperature goes towards 80 degrees and vice versa. Maybe we can
+    adjust the scoring based on the season temperature range." And: "it
+    does seem that we get better activity as the night before moon
+    illumination decreases by day. I'd like to adjust this scoring to
+    adjust based on each day of the moon phases through the entire ~29
+    day cycle... let's just have it affect dawn/morning, as we have much
+    less data on the rest of the day... using our actual data is a good
+    idea, but lets throw out the high and low value points... I would
+    also add another .25 point to the illumination range and take it
+    from water temp."
+
+    **Water temperature:** the old model had a real cliff - "Summer
+    Stratified" (77-84F) was flatly neutral, then anything above 84F got
+    one flat `water_temp_extreme_penalty` (-1.2) whether it was 85F or
+    95F. That also silently stacked with `season_summer_midday_penalty`
+    (-1.5, Midday/Afternoon in summer) for a combined -2.7 just over 84F
+    - likely a real part of why the penalty felt too heavy. Replaced with
+    `_water_temp_hot_penalty()`: neutral at/below `WATER_TEMP_HOT_START_F`
+    (80F - the angler's own reference point), ramping linearly to
+    `water_temp_hot_floor_penalty` by `WATER_TEMP_HOT_FLOOR_F` (93F - the
+    top of what's actually been measured on this lake this season), held
+    flat past that rather than extrapolated further. Cold/Pre-Spawn/Prime
+    bands (<=76F) untouched - no logged data yet contradicts those, and
+    per the angler's own words there's equally no data below 80F OR above
+    93F yet, so neither direction gets guessed past what's been measured.
+    `core.onwater.water_temp_band()`'s discrete labels are unchanged
+    (still used for the Spot Session caption and Reports' correlation
+    buckets) - only scoring moved off the discrete lookup.
+
+    **Moon illumination (Dawn/Morning only):** real data was checked
+    before picking numbers, not guessed blind - pulled every trustworthy
+    logged Dawn/Morning trip (49 of them, all from Aug 2026), bucketed by
+    day of the ~29.5-day lunar cycle, and trimmed each bucket's single
+    highest and lowest fish-per-hour reading per the angler's own ask.
+    The honest finding: that data currently covers only about half the
+    cycle (days 0-9 and 25-29), entirely within one continuous
+    15-calendar-day stretch - meaning lunar position is heavily
+    confounded with whatever else was going on those two weeks. Several
+    buckets are still just 1-4 trips deep even after trimming (day 29:
+    only 4 raw points, and even after dropping the top/bottom one, the
+    remaining pair still included a 12-fish/hour outlier). The ONE bucket
+    with a genuinely trustworthy sample (day 9, ~67% illumination, n=11,
+    trimmed to 9) actually ran counter to the angler's own hypothesis -
+    an above-baseline catch rate at fairly high illumination, not below
+    it. A weighted least-squares single-cosine fit through the trimmed
+    per-day medians was tried as a sanity check and confirmed this isn't
+    usable yet either - it's dominated by the same small-sample noise,
+    landing its "best day" squarely in the 15-day dead zone with zero
+    real observations at all.
+
+    Given that, baking the raw trimmed numbers directly into a live score
+    would encode a two-week calendar coincidence as "the moon's effect,"
+    not a real signal - so `_dawn_moon_illumination_delta()` ships as a
+    hand-set curve matching the angler's own stated read of the water
+    (continuous across the full cycle - best right at new moon, worst
+    right at full moon, sliding linearly with illumination % in between,
+    not two narrow +/-2-day windows - and evaluated at the moon's
+    illumination the evening BEFORE the segment's own date, not "tonight,"
+    fixing the same day-offset issue `core.calibration.
+    _day_of_cycle_for_date()` already flagged for its own exploratory
+    chart: a Dawn/Morning bite responds to the moonlight actually out
+    overnight). Both modules now share one formula -
+    `core.astro.illumination_pct_for_age()`, promoted out of
+    `core.calibration`'s previously-private copy and out of `astro.
+    moon_phase()`'s own inline calculation - instead of three near-
+    duplicate copies. Sized to a 1.35-point peak-to-trough swing (+0.85
+    at new moon, -0.5 at full moon) - 0.25 points wider than the old
+    binary model's 1.1-point range, taken directly from
+    `water_temp_hot_floor_penalty` above (which would otherwise have
+    floored around -1.75) per the angler's own explicit ask.
+    Midday/Afternoon/Dusk/Night keep the original
+    `moon_new_full_bonus`/`moon_quarter_penalty` binary-window model,
+    completely unchanged - there's still no logged data to justify
+    replacing it outside Dawn/Morning. Revisit the Dawn/Morning curve's
+    actual shape once trips genuinely cover the full cycle with real
+    sample sizes per day to check it against.
+
+    **Verified:** `test_manual_segment_score_moon_is_now_genuinely_two_
+    sided` (an existing test) moved from "Dawn" to "Midday" so it keeps
+    testing the still-unchanged binary model rather than the segment that
+    changed out from under it; added `test_manual_segment_score_dawn_
+    moon_curve_is_continuous_and_favors_darker_nights` confirming Dawn
+    AND Morning both get the new continuous treatment and a darker
+    night-before genuinely outscores a brighter one. Manual sanity script
+    confirmed the water-temp gradient is monotonic and caps correctly at
+    the floor, and that Midday/Afternoon/Dusk/Night's moon breakdown is
+    untouched. Full suite `pytest tests/ -q` - 608 passed (607 + 1).
+    `git status --porcelain` clean after the run. Verified via a fresh
+    `git clone` into a new temp directory before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

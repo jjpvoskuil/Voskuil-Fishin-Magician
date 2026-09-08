@@ -47,7 +47,7 @@ from datetime import datetime, timedelta
 from datetime import time as dtime
 from typing import Optional
 
-from .astro import SYNODIC_MONTH, moon_phase
+from .astro import SYNODIC_MONTH, moon_phase, illumination_pct_for_age
 from .scoring import DEFAULT_WEIGHTS
 from .storage import parse_conditions
 
@@ -256,9 +256,11 @@ def _illumination_pct_for_age(age_days: float) -> float:
     (0% at new moon, 100% at full moon), applied directly to a whole day-of-
     cycle number rather than averaged across whatever few real trips happen
     to land in that bucket - so every bucket's label is a fixed, reproducible
-    number, not a noisy sample statistic."""
-    fraction = age_days / SYNODIC_MONTH
-    return (1 - math.cos(2 * math.pi * fraction)) / 2 * 100
+    number, not a noisy sample statistic. Punch-list #95: now a thin wrapper
+    around core.astro.illumination_pct_for_age() - promoted there so
+    core.scoring's new Dawn/Morning illumination curve could reuse the exact
+    same formula instead of a third copy."""
+    return illumination_pct_for_age(age_days)
 
 
 def _day_of_cycle_for_date(trip_date) -> int:
