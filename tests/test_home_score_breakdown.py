@@ -1,16 +1,23 @@
 """Tests for punch-list #94: "In any area that shows a fishing predicted
 score for the day or period, add a collapsable box or similar next to the
-score that details how the score was derived."
+score that details how the score was derived" - plus its two follow-up
+asks, "Lets maybe just have a small box with the 'i' icon instead of that
+and the txt" (an icon-only st.popover, no visible text label) and "for the
+full day score in the 7 day forecast, maybe average the individual
+scoring elements across all periods of the day instead of averaging the
+period of the day scores" (core.scoring.aggregate_day_overall()).
 
 Home page ("Today at a glance") shows a predicted score in two places:
-the "Activity score" tile (today.overall_score - a plain average of the
-day's 6 time-of-day segment scores) and the "Best window today" info box
-(best_segment.score - one segment's own factor-weighted breakdown). Both
-now get an "ℹ️ How this score was derived" st.popover right next to them
-(core.ui.render_day_score_breakdown() / render_score_breakdown()) - a
-popover rather than st.expander so this can be dropped in anywhere a
-score is shown without fighting for layout width, including compact
-metric-tile columns like this page's "today_at_a_glance_metrics" row.
+the "Activity score" tile (today.overall_score - now the day's own
+factor-averaged breakdown, not a plain average of its 6 segment scores)
+and the "Best window today" info box (best_segment.score - one segment's
+own factor-weighted breakdown). Both now get the identical icon-only "ℹ️"
+st.popover right next to them (core.ui.render_score_breakdown(), the same
+function for both - a day-level score has its own real breakdown now, so
+no separate "day" helper is needed) - a popover rather than st.expander
+so this can be dropped in anywhere a score is shown without fighting for
+layout width, including compact metric-tile columns like this page's
+"today_at_a_glance_metrics" row.
 
 Uses AppTest (streamlit.testing.v1). Every real file write/network call
 (core.storage.commit_and_push_data, core.water_quality_log.append_if_new
@@ -89,13 +96,27 @@ def test_activity_score_tile_has_a_breakdown_popover(monkeypatch):
     metrics = {m.label: m for m in at.metric}
     assert "Activity score" in metrics
 
-    popover_labels = [p.proto.popover.label for p in at.get("popover")]
-    assert "ℹ️ How this score was derived" in popover_labels, (
-        f"expected a score-breakdown popover next to the Activity score tile, got: {popover_labels}"
+    popovers = at.get("popover")
+    activity_popover = next((p for p in popovers if p.key == "home_activity_score_breakdown"), None)
+    assert activity_popover is not None, (
+        f"expected an icon-only score-breakdown popover next to the Activity score tile, got keys: "
+        f"{[p.key for p in popovers]}"
     )
+    # Punch-list #94 follow-up: icon-only now ("Lets maybe just have a
+    # small box with the 'i' icon instead of that and the txt") - no
+    # visible text label, just the ℹ️ icon.
+    assert activity_popover.proto.popover.label == ""
+    assert activity_popover.proto.popover.icon == "ℹ️"
+
     all_markdown = [m.value for m in at.markdown]
-    assert any("Average of this day's" in t and "time-of-day windows" in t for t in all_markdown), (
-        f"expected the day-level (segment-average) breakdown content, got: {all_markdown}"
+    # Punch-list #94 follow-up: the day-level score now averages each
+    # scoring FACTOR's own delta across the day's segments (core.scoring.
+    # aggregate_day_overall()), not the segments' own scores - so its
+    # popover shows the same factor-breakdown shape (starting with the
+    # shared "Base" line) as any single segment's own breakdown, not a
+    # per-segment score list.
+    assert any("**How this score was derived:**" in t and "- Base:" in t for t in all_markdown), (
+        f"expected factor-breakdown content for the day-level score, got: {all_markdown}"
     )
 
 
@@ -104,11 +125,16 @@ def test_best_window_info_box_has_a_factor_breakdown_popover(monkeypatch):
     infos = [i.value for i in at.info]
     assert any("Best window today" in i for i in infos), f"expected the best-window info box, got: {infos}"
 
+    popovers = at.get("popover")
+    best_window_popover = next((p for p in popovers if p.key == "home_best_window_score_breakdown"), None)
+    assert best_window_popover is not None, (
+        f"expected an icon-only score-breakdown popover next to the best-window box, got keys: "
+        f"{[p.key for p in popovers]}"
+    )
+    assert best_window_popover.proto.popover.label == ""
+    assert best_window_popover.proto.popover.icon == "ℹ️"
+
     breakdown_texts = [m.value for m in at.markdown if "How this score was derived" in m.value]
-    # The Activity score tile's own day-level breakdown is one of these;
-    # the best-window one is the OTHER, factor-level breakdown (starts
-    # with the shared "Base" line every core.scoring._segment_score()
-    # breakdown always opens with).
     assert any("- Base:" in t for t in breakdown_texts), (
         f"expected a factor-level breakdown (starting with the 'Base' line) for the best window, got: {breakdown_texts}"
     )

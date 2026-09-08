@@ -6,7 +6,17 @@ from core.scoring import SegmentForecast
 
 def _make_day(the_date, segment_defs, overall=5.0):
     """segment_defs: list of (name, start, end, score) - builds a minimal
-    fake object with just the attributes apply_freeze()/its caller touch."""
+    fake object with just the attributes apply_freeze()/its caller touch.
+
+    Punch-list #94 follow-up: core.scoring.aggregate_day_overall() (what
+    apply_freeze() now calls to recompute overall_score after a freeze
+    override) derives everything from each segment's own `breakdown` list,
+    not from `.score` directly - so each fake segment here is given a
+    synthetic two-line breakdown (a constant "Base" of 5.0 - the same
+    starting point every real breakdown opens with - plus one "Test
+    factor" line making up the rest of `score`) that sums to exactly
+    `score`, keeping these tests' plain score-in/score-out arithmetic
+    working the same as before this change."""
     class _FakeDay:
         pass
 
@@ -14,7 +24,10 @@ def _make_day(the_date, segment_defs, overall=5.0):
     day.the_date = the_date
     day.overall_score = overall
     day.segments = [
-        SegmentForecast(name=name, start=start, end=end, score=score, solunar_overlap=None, notes=[], breakdown=[])
+        SegmentForecast(
+            name=name, start=start, end=end, score=score, solunar_overlap=None, notes=[],
+            breakdown=[("Base", 5.0, "base"), ("Test factor", round(score - 5.0, 2), "test delta")],
+        )
         for name, start, end, score in segment_defs
     ]
     return day

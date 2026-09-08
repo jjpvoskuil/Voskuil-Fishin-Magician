@@ -15,7 +15,7 @@ from core.daily_leaderboard import (
     build_daily_activity, build_weekly_activity, daily_awards, leaderboard_table_rows, week_bounds,
 )
 from core.activity_log import format_weight_lb_oz
-from core.ui import inject_mobile_css, inject_compact_metric_css, render_score_breakdown, render_day_score_breakdown
+from core.ui import inject_mobile_css, inject_compact_metric_css, render_score_breakdown
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
@@ -137,11 +137,11 @@ if today or lake_level or water_quality_display:
         if today:
             with cols[i]:
                 st.metric("Activity score", f"{today.overall_score} / 10")
-                # Punch-list #94: "how was this derived" for the day-level
-                # score - see render_day_score_breakdown()'s own docstring
-                # for why this is a different (plain segment-average)
-                # explanation than the per-segment factor breakdown below.
-                render_day_score_breakdown(today, key="home_activity_score_breakdown")
+                # Punch-list #94 (follow-up: averages each factor's own
+                # delta across the day's 6 segments instead of averaging
+                # the segments' own scores - see core.scoring.
+                # aggregate_day_overall()'s docstring for why).
+                render_score_breakdown(today.overall_breakdown, today.overall_score, key="home_activity_score_breakdown")
             i += 1
             cols[i].metric("Est. water temp", f"{today.water_temp_f}°F"); i += 1
             cols[i].metric("Moon phase", today.moon.name); i += 1

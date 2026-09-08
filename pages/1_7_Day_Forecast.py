@@ -7,7 +7,7 @@ from core.scoring import score_week, effective_season_and_temp
 from core.lures import recommend
 from core.ui import (
     render_lure_recommendation, render_lake_setup_sidebar, inject_mobile_css,
-    render_score_breakdown, render_day_score_breakdown,
+    render_score_breakdown,
 )
 from core.weather import lake_today
 from core.storage import commit_and_push_data
@@ -75,10 +75,10 @@ cols = st.columns(len(week))
 for col, day in zip(cols, week):
     with col:
         st.metric(day.the_date.strftime("%a %m/%d"), f"{day.overall_score}/10")
-        # Punch-list #94: "how was this derived" - this is the average of
-        # the day's own 6 time-of-day segment scores; each segment's own
-        # factor breakdown is shown next to its own score further down.
-        render_day_score_breakdown(day, key=f"week_day_score_breakdown_{day.the_date.isoformat()}")
+        # Punch-list #94 (follow-up: each factor's own delta averaged
+        # across the day's 6 segments, not the segments' own scores - see
+        # core.scoring.aggregate_day_overall()'s docstring for why).
+        render_score_breakdown(day.overall_breakdown, day.overall_score, key=f"week_day_score_breakdown_{day.the_date.isoformat()}")
 
 st.divider()
 

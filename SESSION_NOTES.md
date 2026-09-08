@@ -11507,6 +11507,77 @@ every real save.
     Verified via a fresh `git clone` into a new temp directory before
     pushing.
 
+169. **Punch-list #94 follow-up (same session): icon-only popover, and
+    the day-level score now averages scoring FACTORS across periods
+    instead of averaging segment scores.** Angler's ask, verbatim right
+    after 168 shipped: "Lets maybe just have a small box with the 'i'
+    icon instead of that and the txt. Also, for the full day score in
+    the 7 day forecast, maybe average the individual scoring elements
+    across all periods of the day instead of averaging the period of the
+    day scores."
+
+    Two changes. (1) `core.ui.render_score_breakdown()`'s `st.popover`
+    call dropped its visible text label - `st.popover("ℹ️ How this score
+    was derived", key=key)` became `st.popover("", icon="ℹ️", key=key,
+    help="How this score was derived")` (the label moves to a hover
+    tooltip via `help=`) - a one-line change that every existing call
+    site picked up automatically since the function's own signature
+    didn't change.
+
+    (2) New `core.scoring.aggregate_day_overall(segments)`: instead of
+    `score_day()` averaging each of a day's 6 time-of-day segments' own
+    already-clamped, already-rounded 1-10 scores, it now sums each
+    scoring FACTOR's own delta (Pressure trend, Moon phase, Solunar,
+    Cloud cover, Wind, Season, Precipitation, Water temperature, etc.)
+    across all 6 segments and divides by 6 - zero-filling for a segment a
+    factor didn't apply to (so Solunar, which only fires for segments
+    whose window actually overlaps a major/minor period, isn't inflated
+    relative to Base/Cloud cover/Wind, which apply to every segment) -
+    then clamps/rounds ONCE at the day level from those averaged deltas.
+    By linearity this is mathematically equivalent to averaging each
+    segment's own RAW (unclamped, unrounded) total and clamping once at
+    the end, rather than clamping/rounding each segment first and then
+    averaging 6 already-bounded numbers - a genuine fix, not just a
+    display change, since per-segment clamping before averaging can bias
+    the day score whenever any segment's raw total would have landed
+    outside [1, 10]. `score_day()` now stores the result on two new/
+    reused `DayForecast` fields: `overall_score` (unchanged type/name)
+    and a new `overall_breakdown` (the same `[(label, delta, detail),
+    ...]` shape every segment's own `breakdown` already has). `core.
+    forecast_freeze.apply_freeze()` had its own separate inline formula
+    for recomputing `overall_score` after a freeze override
+    (`sum(s.score...)/len(...)`) - updated to call the same shared
+    `aggregate_day_overall()` instead, so the freeze path and the fresh
+    `score_day()` path can never drift out of sync again.
+
+    Because a day-level score now has a REAL factor breakdown of its
+    own, `core.ui.render_day_score_breakdown()` (168's sibling helper
+    that listed each segment's own score/name instead of factor deltas)
+    became redundant and was removed entirely - Home's "Activity score"
+    tile and each 7-Day Forecast day's summary tile now call the exact
+    same `render_score_breakdown(breakdown, score, key)` every segment-
+    level popover already used, so every score display in the app is
+    genuinely rendered by one function.
+
+    **Verified:** updated the 3 existing AppTest files 168 added
+    (`test_home_score_breakdown.py`, `test_forecast_page_score_
+    breakdown.py`, `test_forecast_freeze.py`'s `_make_day()` fixture,
+    which now synthesizes a `breakdown` per fake segment since the
+    aggregation logic reads from `breakdown` rather than `.score`
+    directly) to assert the icon-only styling (`popover.label == ""`,
+    `popover.icon == "ℹ️"`) and the new factor-breakdown content for
+    day-level scores. Added 3 new direct unit tests in `tests/
+    test_scoring.py` pinning down `aggregate_day_overall()`'s own math
+    with a controlled fixture: a factor applying to only some segments is
+    zero-filled (divided by the total segment count, not just the count
+    where it applied); the result matches averaging each segment's own
+    raw pre-clamp total; an empty segment list returns the same neutral
+    `(5.0, [])` default `score_day()` itself falls back to. Full suite
+    `pytest tests/ -q` - 607 passed (604 + 3). `git status --porcelain`
+    clean after the run (no stray `data/segment_score_freeze.csv`
+    writes). Verified via a fresh `git clone` into a new temp directory
+    before pushing.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
