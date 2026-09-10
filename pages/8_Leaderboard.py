@@ -87,7 +87,6 @@ st.markdown(
     }
     .stringer-mono { font-family: "IBM Plex Mono", monospace; }
     .stringer-unit { color: var(--stringer-muted); font-size: 0.78em; }
-
     /* Top brand row: wordmark + rolling season-date chip. */
     .stringer-topbar {
         display:flex; align-items:center; justify-content:space-between;
@@ -98,7 +97,6 @@ st.markdown(
         font-family:"IBM Plex Mono", monospace; font-size:.72rem; color:var(--stringer-muted);
         background:var(--stringer-surface-sunk); padding:5px 10px; border-radius:100px; white-space:nowrap;
     }
-
     /* Hero ring card - the whole st.container(key="stringer_hero") becomes
        one visual card; the buttons/columns inside it are real Streamlit
        widgets (needed for the prev/next/dot rerun interactivity), the ring
@@ -125,7 +123,6 @@ st.markdown(
         color:var(--stringer-ink) !important; font-size:.6rem !important; padding:2px !important;
         min-height:0 !important;
     }
-
     .stringer-ring-wrap { position:relative; width:190px; height:190px; margin:0 auto; }
     .stringer-ring-wrap svg { width:100%; height:100%; transform:rotate(-90deg); }
     .stringer-ring-center {
@@ -139,7 +136,6 @@ st.markdown(
     .stringer-hero-secondary { margin-top:10px; }
     .stringer-hero-label { font-size:.72rem; color:var(--stringer-muted); font-weight:600; margin-bottom:2px; }
     .stringer-hero-big { font-size:1.15rem; font-weight:800; color:var(--stringer-ink); }
-
     /* Ranked-list panel. */
     .stringer-panel { background:var(--stringer-surface); border-radius:16px; overflow:hidden; margin-bottom:14px; }
     .stringer-panel-head {
@@ -162,7 +158,6 @@ st.markdown(
     }
     .stringer-row-tag { display:block; margin-top:2px; font-size:.62rem; color:var(--stringer-muted); text-align:right; }
     .stringer-empty { padding:16px; font-size:.85rem; color:var(--stringer-muted); }
-
     /* Underline tab bar (st.tabs, restyled via BaseWeb's own stable
        data-baseweb hooks) - not live-DOM-verified against a real browser
        in this sandbox (no browser attached here), same caveat SESSION_NOTES
@@ -178,7 +173,6 @@ st.markdown(
     .st-key-stringer_tabs [data-baseweb="tab"][aria-selected="true"] { color:var(--stringer-ink) !important; }
     .st-key-stringer_tabs [data-baseweb="tab-highlight"] { background-color:var(--stringer-accent) !important; }
     .st-key-stringer_tabs [data-baseweb="tab-border"] { background-color:transparent !important; }
-
     /* Glance panel: season activity chart + species mix. */
     .stringer-glance {
         background:var(--stringer-surface); border-radius:16px; padding:14px 16px 16px;
@@ -351,11 +345,10 @@ with st.container(key="stringer_tabs"):
                         <div class="stringer-row-secondary">{r['secondary']}</div>
                     </div>
                     <div>
-                        <div class="stringer-row-num">{_style_units(r['num'])}</div>
-                        {tag_html}
+                        <div class="stringer-row-num">{_style_units(r['num'])}</div>{tag_html}
                     </div>
                 </div>
-                """)
+                """.strip())
             st.markdown(
                 f"""
                 <div class="stringer-panel">
@@ -414,7 +407,7 @@ if not _dates.empty:
                 <div class="stringer-species-track"><div class="{fill_cls}" style="width:{width_pct:.1f}%"></div></div>
                 <div class="stringer-species-count">{count}</div>
             </div>
-            """
+            """.strip()
     else:
         _species_rows = '<div class="stringer-empty">No per-fish detail logged yet.</div>'
 

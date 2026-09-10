@@ -11913,6 +11913,100 @@ every real save.
     isn't lost the way #96's own Phase 2+ note originally became #97 -
     same pattern, one punch-list item per phase.
 
+174. **Live bug, same session: The Stringer's own CSS was rendering as
+    literal visible text on the deployed page.** Exactly the "worth a real
+    look before calling Phase 2 done" caveat entry 173 flagged, confirmed
+    the very next message - the angler sent screenshots of the deployed
+    page showing the entire `<style>` block's contents (variable
+    declarations, every `.stringer-*` rule) printed out as plain readable
+    paragraph text instead of being applied.
+
+    **Capability correction for future sessions: this sandbox CAN do a
+    real pixel-level browser check after all**, contradicting entries 171/
+    173's own "no browser attached" assumption - that assumption was never
+    actually tested, just inferred from "no obvious browser tool." Chromium
+    and Playwright are pre-installed here (`/opt/pw-browsers`,
+    `PLAYWRIGHT_BROWSERS_PATH` already set). `streamlit run app.py
+    --server.headless true --server.port <N>` boots the real app on
+    localhost with zero secrets needed for a logged-out check, and a
+    throwaway Playwright script (`chromium.launch()`, `page.goto("http://
+    localhost:<N>/<PageName>")`, `page.screenshot()` / `page.content()`)
+    gets an actual rendered screenshot AND the real post-JS DOM - not just
+    AppTest's element tree, which only captures what Python *passed to*
+    `st.markdown()`, never what the browser actually did with it (this
+    exact bug shipped through AppTest, full pytest, and a full nav walk
+    with zero red flags, precisely because none of those render HTML at
+    all). **This should be the go-to verification step for any future
+    `unsafe_allow_html=True` work**, not just a fallback - run it before
+    calling CSS/HTML changes done, the same way a fresh clone is already
+    routine before a push.
+
+    **Root cause, isolated by bisection (trimming the injected markdown
+    string down in a scratch test page until the bug appeared/disappeared,
+    screenshotting each step):** a blank line inside an `unsafe_allow_html`
+    string that does NOT start with the raw-text tag itself (`<style>`/
+    `<script>`/`<pre>`/`<textarea>`) as its very first content - i.e. any
+    case where that tag is preceded by other markup, like this page's own
+    `<link>` Google-Fonts tags right before `<style>` - gets treated by
+    Streamlit's markdown-to-HTML pipeline as ending that raw block early,
+    right at the blank line. Everything after it is then parsed as a plain
+    paragraph instead of raw HTML, so the remaining CSS - which doesn't
+    start with anything that looks like a tag - prints as literal text.
+    Confirmed by isolation: the exact same CSS content, blank lines and
+    all, renders perfectly fine when `<style>` is the very first thing in
+    the string (this is why `core/nav.py`'s bottom-nav CSS, which opens
+    directly with `<style>`, was never affected and is NOT part of this
+    fix); it only breaks once something else - even a single wrapper
+    `<div>` - comes first. A second, related variant hit the per-row
+    ranked-list HTML too: `core/stringer.py`'s row template had `{tag_html}`
+    (empty for un-tagged rows, e.g. every row without a "PB"-style badge)
+    sitting alone on its own line - once empty, that line was
+    whitespace-only, and because of how the surrounding f-string's
+    multi-level indentation interacts with `textwrap.dedent()` (Streamlit's
+    `clean_text()` dedents the *whole* combined string, so a deeply-nested
+    inner `<div>` can end up sitting at exactly Markdown's 4-space
+    "indented code block" threshold relative to the rest once the shared
+    margin is stripped), the very next line (a real closing `</div>`)
+    got swallowed into an indented code block and rendered as a literal
+    `</div>` next to every single ranked-list row's number.
+
+    **Fix - both are "no whitespace-only lines inside injected HTML,"
+    same underlying rule:** removed every blank line from inside the
+    `<style>...</style>` block in `pages/8_Leaderboard.py` (six of them,
+    used purely as visual section breaks between CSS rule groups - the
+    CSS itself doesn't need them, only human readability did, and a
+    same-line comment achieves the same readability without an empty
+    line). For the row template, moved `{tag_html}` onto the same line as
+    the `</div>` before it instead of its own line, so that line is never
+    blank even when `tag_html` is `""`; the same fix (`.strip()` on the
+    per-row/per-species-row fragment before appending) removes the
+    matching risk of a whitespace-only *seam* forming where consecutive
+    joined rows meet. **Standing rule for any future `st.markdown(...,
+    unsafe_allow_html=True)` work in this app:** never leave a truly blank
+    or whitespace-only line anywhere inside the HTML/CSS payload - use a
+    same-line comment or just remove the visual gap instead - and put any
+    `<style>`/`<script>`/`<pre>`/`<textarea>` tag first in its own
+    `st.markdown()` call whenever practical, rather than sharing one call
+    with `<link>` tags or other markup ahead of it.
+
+    **Verified:** rebuilt the exact bug in the Playwright harness above
+    before touching any code (confirmed both the `<style>`-leak and the
+    `</div>`-leak reproduce standalone, isolated the trigger for each by
+    bisection, confirmed the fix on each in isolation first), then
+    re-ran it against the real page after the fix - the full CSS block
+    (verified by length: matches the source exactly, nothing truncated)
+    now renders as an actual stylesheet with zero leaked text anywhere on
+    the page, and every ranked-list row (tagged and un-tagged) renders
+    clean. Also re-ran the full suite (`pytest tests/ -q` - 645 passed,
+    unchanged), the full 9-page `AppTest` nav walk (zero exceptions, same
+    pre-existing Open-Meteo sandbox gap on the 7-Day Forecast page), and a
+    fresh `git clone` into a new temp directory before pushing. One
+    unrelated local artifact caught and reverted before committing:
+    running the app locally during this check wrote a fresh
+    `data/segment_score_freeze.csv` row (today's sandbox-local score,
+    computed from a fake/local weather mock) - not a real angler trip, not
+    part of this fix, `git checkout --` on that one file before staging.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
