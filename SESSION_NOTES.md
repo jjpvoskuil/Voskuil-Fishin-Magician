@@ -12304,3 +12304,17 @@ every real save.
 - Streamlit secrets (`GITHUB_TOKEN`) let the *deployed* app commit trip-log
   entries back on its own - separate from the PAT Claude uses locally
   during a dev session.
+- **Pushing via the inline PAT URL above does NOT update this working
+  copy's local `origin/main`/`origin/data` tracking refs** - those only
+  move on an explicit `git fetch origin <branch>`, since the inline-URL
+  push never goes through the configured `origin` remote by name. Bit a
+  same-session data-branch sync once already (this file's own entry on
+  the punch-list #97/#98 dev_tasks.csv sync): a second `git checkout
+  origin/main -- ...` right after an earlier `main` push silently
+  no-op'd because `origin/main` here was still pinned to this session's
+  original `git clone` snapshot from before any of this session's own
+  pushes. Always `git fetch origin main` (and `git fetch origin data`
+  when working with that branch) immediately before reading `origin/main`
+  or `origin/data` for anything - a checkout, a diff, a "verify the push
+  landed" check - rather than assuming a ref this same session pushed to
+  earlier is already current.
