@@ -157,6 +157,24 @@ def render_bottom_nav(active_path: str) -> None:
             padding-top: 6px !important;
             padding-bottom: 6px !important;
         }}
+        /* Punch-list #96 polish round 4: Streamlit Community Cloud's own
+           free-tier chrome (an avatar + "Hosted with Streamlit" badge) is
+           fixed-position in the OUTER page, outside this app's own iframe
+           entirely - confirmed live (inspecting this app's DOM from inside
+           the iframe can't even see it, let alone restyle or hide it; it's
+           not ours to touch, and Streamlit doesn't allow removing it on the
+           free tier anyway). It sits in that bottom-right corner regardless
+           of what we do, so the fix is to not compete for that same real
+           estate: lift our whole bar up off the true viewport bottom edge
+           so the badge has its own clear strip below us instead of
+           overlapping our last one or two tabs. `st.bottom`'s actual
+           pinning element is `[data-testid="stBottom"]`
+           (`position: sticky; bottom: 0`) - found by walking up from
+           stBottomBlockContainer in the live DOM rather than guessing,
+           since stBottomBlockContainer itself is just `position: static`. */
+        [data-testid="stBottom"] {{
+            bottom: 44px !important;
+        }}
         /* Punch-list #96 polish round 3: force the nav's own row of 6
            columns to stay a single line at every viewport width, instead
            of following core.ui.inject_mobile_css()'s site-wide rule (every
@@ -201,35 +219,40 @@ def render_bottom_nav(active_path: str) -> None:
         }}
         .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] {{
             justify-content: center !important;
+            align-items: center !important;
             text-decoration: none !important;
             color: #B7C0B8 !important;
-            font-size: 0.8rem !important;
-            padding-left: 2px !important;
-            padding-right: 2px !important;
+            padding: 9px 2px !important;
+        }}
+        /* Punch-list #96 polish round 4: labels removed from the bar itself
+           - on a phone, "Leaderboard"/"Tackle Box" etc. at 6-across had no
+           room to breathe and ran into the next tab regardless of font
+           size (confirmed live: shrinking text in round 2/3 wasn't enough,
+           it needed to not be there at all). Icon-only is also just the
+           standard mobile tab-bar pattern (iOS/Android system nav, the
+           DeerCast/Tonal references the angler shared) rather than a
+           workaround - the label still exists in the DOM (st.page_link
+           still gets a real `label=`) for accessibility, it's only ever
+           visually hidden here; the "☰ More" popover keeps full text
+           labels for every page, since that list isn't space-constrained
+           the same way. */
+        .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] [data-testid="stMarkdownContainer"] {{
+            display: none !important;
         }}
         /* Material icons (unlike emoji) render as a font glyph that
            respects CSS `color`, but Streamlit sets its own explicit color
            on the icon span that otherwise wins over the rule above just
            by DOM order - repeat it directly on the icon so label and icon
-           always match, inactive or active. Sized up from Streamlit's tiny
-           14px default (confirmed via the live DOM) so the icon actually
-           carries visual weight instead of reading as a faint speck above
-           the label. */
+           always match, inactive or active. Sized well up from Streamlit's
+           tiny 14px default (confirmed via the live DOM) - icon-only can
+           afford to run bigger than when it had to share room with text. */
         .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] [data-testid="stIconMaterial"] {{
             color: #B7C0B8 !important;
-            font-size: 22px !important;
+            font-size: 26px !important;
         }}
         @media (max-width: 480px) {{
-            /* Same 6-column bar, much less width to work with - shrink
-               text and tighten padding further rather than let anything
-               truncate or re-trigger a wrap. */
-            .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] {{
-                font-size: 0.66rem !important;
-                padding-left: 0px !important;
-                padding-right: 0px !important;
-            }}
             .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] [data-testid="stIconMaterial"] {{
-                font-size: 19px !important;
+                font-size: 24px !important;
             }}
         }}
         /* The "☰ More" popover trigger is a real Streamlit button under the
@@ -267,11 +290,11 @@ def render_bottom_nav(active_path: str) -> None:
         .st-key-app_bottom_nav [data-testid="stPopoverButton"] p {{
             text-align: center !important;
             font-weight: 700 !important;
-            font-size: 1.3rem !important;
+            font-size: 1.6rem !important;
         }}
         @media (max-width: 480px) {{
             .st-key-app_bottom_nav [data-testid="stPopoverButton"] p {{
-                font-size: 1.1rem !important;
+                font-size: 1.45rem !important;
             }}
         }}
         {active_css}
