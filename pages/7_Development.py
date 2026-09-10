@@ -32,9 +32,11 @@ from core.dev_tasks import (
 )
 from core.storage import commit_and_push_data, last_boot_sync_status
 from core.ui import inject_mobile_css
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Development - Nolin Lake", page_icon="🛠️", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/7_Development.py")
 st.title("🛠️ Development")
 
 # Punch-list #85: every action on this page (Add/Done-toggle/Edit/Delete)

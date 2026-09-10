@@ -16,9 +16,11 @@ from core.daily_leaderboard import (
 )
 from core.activity_log import format_weight_lb_oz
 from core.ui import inject_mobile_css, inject_compact_metric_css, render_score_breakdown
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Voskuil Fishin' Magician", page_icon="🎣", layout="wide")
 inject_mobile_css()
+render_bottom_nav("home.py")
 
 st.title("🎣 Voskuil Fishin' Magician")
 st.caption("Largemouth bass fishing forecasts for Nolin River Lake, KY")

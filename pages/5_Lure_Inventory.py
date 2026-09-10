@@ -13,6 +13,7 @@ from core.lure_vision import identify_lure_photo
 from core.lures import LURE_CATEGORY_OPTIONS, LURE_PROFILES, find_inventory_gaps, guess_category_from_text
 from core.storage import commit_and_push_data
 from core.ui import render_cabelas_suggestions, render_square_thumbnail, inject_mobile_css
+from core.nav import render_bottom_nav
 
 CARD_THUMBNAIL_PX = 160
 SCAN_THUMBNAIL_PX = 110
@@ -38,6 +39,7 @@ _TEXT_SEARCH_STATE_KEYS = (
 
 st.set_page_config(page_title="Tackle Box - Nolin Lake", page_icon="🧰", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/5_Lure_Inventory.py")
 st.title("🧰 Tackle Box")
 st.caption(
     "Your tackle box, tracked: brand, full description, a photo, the last price you paid, and "

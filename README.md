@@ -529,6 +529,17 @@ this repo that can override it on this hosting.
   back to showing - with a note that they're saved picks, not a live check - whenever
   the live lookup comes back empty, so the block still shows real photos/brand/price
   instead of just a link. See "How the Cabela's lookup works" below.
+- **Custom bottom nav bar instead of Streamlit's default sidebar page list
+  (punch-list #96, Phase 1 of an ongoing visual redesign).** `app.py`'s
+  `st.navigation(..., position="hidden")` turns off Streamlit's own
+  auto-generated nav; `core/nav.py`'s `render_bottom_nav()` (called from
+  every page) renders a dark sticky bar instead - direct links to Today,
+  Forecast, Session, Tackle Box, and Leaderboard, plus a "☰" menu listing
+  all 9 pages. A page's own `st.sidebar` content (the 7-Day Forecast's
+  Lake Setup Options) is unaffected - that's a separate mechanism from
+  the page-list UI this replaces. See SESSION_NOTES entry 171 for the
+  full story, including one real Streamlit API compatibility fix needed
+  to keep the existing test suite passing.
 
 ## How the model works (and its limits)
 

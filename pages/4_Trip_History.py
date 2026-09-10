@@ -173,9 +173,11 @@ from core.activity_log import (
 from core.scoring import SEGMENTS, segment_time_ranges
 from core.weather import lake_today
 from core.ui import inject_mobile_css
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Trip History - Nolin Lake", page_icon="📊", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/4_Trip_History.py")
 st.title("📊 Trip History")
 st.caption("Filter down to the sessions you want, then open one to see (and edit) everything about it.")
 
