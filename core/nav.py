@@ -157,24 +157,45 @@ def render_bottom_nav(active_path: str) -> None:
             padding-top: 6px !important;
             padding-bottom: 6px !important;
         }}
-        /* Punch-list #96 polish round 2: force the nav's own row of 6
+        /* Punch-list #96 polish round 3: force the nav's own row of 6
            columns to stay a single line at every viewport width, instead
            of following core.ui.inject_mobile_css()'s site-wide rule (every
            page calls that right before this one) that WRAPS any 3+ column
            row and gives each column a 120px minimum once the screen drops
            below 700px - correct for the wide data/metric rows it was
            written for, wrong for a tab bar, which must never wrap onto a
-           second row. Confirmed live on a phone (390px) this was exactly
-           why the bar was splitting into 3 rows. The extra class-scoped
-           selector here beats that site-wide rule on specificity, so this
-           works regardless of which <style> block landed in the DOM last.
-           `flex: 1 1 0` + `min-width: 0` lets all 6 columns shrink evenly
-           to fit instead of each fighting for its own minimum. */
-        .st-key-app_bottom_nav [data-testid="stHorizontalBlock"] {{
+           second row.
+
+           Round 2 tried to override this with a plain `.st-key-app_bottom_nav
+           [data-testid=...]` selector and it silently DIDN'T WORK on a real
+           phone (confirmed - the bar was still splitting into rows after
+           that "fix" shipped) - worked out why by actually computing CSS
+           specificity instead of assuming a scoped class selector would
+           obviously win: inject_mobile_css()'s min-width rule is
+           `[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]
+           :nth-child(3)) > div[data-testid="stColumn"]`, which - :has()'s
+           specificity is that of its most specific argument, added to the
+           rest of the selector - works out to (0,4,1); round 2's override
+           was only (0,2,0). Both rules carry !important, so on a genuine
+           specificity loss the LOWER-specificity rule never applies,
+           regardless of which <style> tag is later in the DOM. Source order
+           only matters as a tie-breaker, and this wasn't a tie.
+
+           Fixed for real this time by deliberately out-specifying it:
+           `[data-testid="stBottomBlockContainer"]` (a real ancestor - this
+           bar lives inside st.bottom, i.e. exactly that container) plus the
+           nav's own class repeated 3x (repeating a class selector is valid
+           CSS and each repetition counts toward specificity separately -
+           not a typo) pushes this to (0,5,0)/(0,5,1), which beats (0,3,0)
+           and (0,4,1) outright on the class/attribute tier alone, no
+           tie-breaking required either way. */
+        [data-testid="stBottomBlockContainer"] .st-key-app_bottom_nav.st-key-app_bottom_nav.st-key-app_bottom_nav
+            [data-testid="stHorizontalBlock"] {{
             flex-wrap: nowrap !important;
             gap: 0px !important;
         }}
-        .st-key-app_bottom_nav [data-testid="stColumn"] {{
+        [data-testid="stBottomBlockContainer"] .st-key-app_bottom_nav.st-key-app_bottom_nav.st-key-app_bottom_nav
+            [data-testid="stColumn"] {{
             min-width: 0 !important;
             flex: 1 1 0 !important;
         }}
