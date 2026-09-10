@@ -299,6 +299,21 @@ def render_bottom_nav(active_path: str) -> None:
         }}
         {active_css}
         </style>
+        <!-- Punch-list #96 polish round 5: the 44px gap opened up above by
+             lifting [data-testid="stBottom"] off the true viewport bottom
+             (so Streamlit Community Cloud's own badge/avatar - outside this
+             app's iframe, not ours to touch - has clear room below our bar
+             instead of overlapping it) was showing the page's own light
+             background through that strip, which read as a stray white bar
+             under the dark nav rather than an intentional gap. This fills
+             just that strip with the same dark color, fixed to the true
+             viewport bottom (independent of stBottom's own position, so it
+             stays put under the gap regardless). z-index kept below
+             stBottom's own (99) so it never sits on top of the real nav
+             bar, and pointer-events is off since nothing interactive
+             belongs in a decorative fill strip. -->
+        <div style="position:fixed;left:0;right:0;bottom:0;height:44px;
+                    background:#10140F;z-index:50;pointer-events:none;"></div>
         """,
         unsafe_allow_html=True,
     )
