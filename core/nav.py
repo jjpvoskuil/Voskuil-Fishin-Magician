@@ -157,19 +157,59 @@ def render_bottom_nav(active_path: str) -> None:
             padding-top: 6px !important;
             padding-bottom: 6px !important;
         }}
+        /* Punch-list #96 polish round 2: force the nav's own row of 6
+           columns to stay a single line at every viewport width, instead
+           of following core.ui.inject_mobile_css()'s site-wide rule (every
+           page calls that right before this one) that WRAPS any 3+ column
+           row and gives each column a 120px minimum once the screen drops
+           below 700px - correct for the wide data/metric rows it was
+           written for, wrong for a tab bar, which must never wrap onto a
+           second row. Confirmed live on a phone (390px) this was exactly
+           why the bar was splitting into 3 rows. The extra class-scoped
+           selector here beats that site-wide rule on specificity, so this
+           works regardless of which <style> block landed in the DOM last.
+           `flex: 1 1 0` + `min-width: 0` lets all 6 columns shrink evenly
+           to fit instead of each fighting for its own minimum. */
+        .st-key-app_bottom_nav [data-testid="stHorizontalBlock"] {{
+            flex-wrap: nowrap !important;
+            gap: 0px !important;
+        }}
+        .st-key-app_bottom_nav [data-testid="stColumn"] {{
+            min-width: 0 !important;
+            flex: 1 1 0 !important;
+        }}
         .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] {{
             justify-content: center !important;
             text-decoration: none !important;
-            color: #828C84 !important;
+            color: #B7C0B8 !important;
             font-size: 0.8rem !important;
+            padding-left: 2px !important;
+            padding-right: 2px !important;
         }}
         /* Material icons (unlike emoji) render as a font glyph that
            respects CSS `color`, but Streamlit sets its own explicit color
            on the icon span that otherwise wins over the rule above just
            by DOM order - repeat it directly on the icon so label and icon
-           always match, inactive or active. */
+           always match, inactive or active. Sized up from Streamlit's tiny
+           14px default (confirmed via the live DOM) so the icon actually
+           carries visual weight instead of reading as a faint speck above
+           the label. */
         .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] [data-testid="stIconMaterial"] {{
-            color: #828C84 !important;
+            color: #B7C0B8 !important;
+            font-size: 22px !important;
+        }}
+        @media (max-width: 480px) {{
+            /* Same 6-column bar, much less width to work with - shrink
+               text and tighten padding further rather than let anything
+               truncate or re-trigger a wrap. */
+            .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] {{
+                font-size: 0.66rem !important;
+                padding-left: 0px !important;
+                padding-right: 0px !important;
+            }}
+            .st-key-app_bottom_nav [data-testid="stPageLink-NavLink"] [data-testid="stIconMaterial"] {{
+                font-size: 19px !important;
+            }}
         }}
         /* The "☰ More" popover trigger is a real Streamlit button under the
            hood, so it ships with that widget's default white fill + grey
@@ -185,14 +225,33 @@ def render_bottom_nav(active_path: str) -> None:
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
-            color: #828C84 !important;
+            color: #B7C0B8 !important;
+            padding-left: 2px !important;
+            padding-right: 2px !important;
         }}
+        /* st.popover always appends its own "expand_more" chevron after the
+           label - harmless spacious desktop, but one more thing competing
+           for room in a 6-column bar on a phone, and "☰" already says
+           "more" on its own. Hidden rather than sized/colored, to win back
+           that space for the other five tabs. */
         .st-key-app_bottom_nav [data-testid="stPopoverButton"] [data-testid="stIconMaterial"] {{
-            color: #828C84 !important;
+            display: none !important;
+        }}
+        @media (max-width: 480px) {{
+            .st-key-app_bottom_nav [data-testid="stPopoverButton"] {{
+                padding-left: 0px !important;
+                padding-right: 0px !important;
+            }}
         }}
         .st-key-app_bottom_nav [data-testid="stPopoverButton"] p {{
             text-align: center !important;
             font-weight: 700 !important;
+            font-size: 1.3rem !important;
+        }}
+        @media (max-width: 480px) {{
+            .st-key-app_bottom_nav [data-testid="stPopoverButton"] p {{
+                font-size: 1.1rem !important;
+            }}
         }}
         {active_css}
         </style>
