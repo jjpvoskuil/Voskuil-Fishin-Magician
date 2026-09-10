@@ -11674,6 +11674,91 @@ every real save.
     `git status --porcelain` clean after the run. Verified via a fresh
     `git clone` into a new temp directory before pushing.
 
+171. **Punch-list #96: site-wide nav redesign, Phase 1 - custom bottom bar
+    replaces the sidebar page list.** The angler's ask, after iterating on a
+    visual-only mockup of the Leaderboard page in a separate tool first
+    (see the "app-store polish" conversation - a Reflex-vs-better-CSS
+    question turned into a live redesign exercise once a Tonal-style
+    mockup landed well): "get rid of the ugly left side bar menu," replace
+    it with a bottom tab bar (Today, Forecast, Session, Tackle Box,
+    Leaderboard) kept identical on every page, plus a way to reach the
+    other four pages (Lake Map, Trip History, Reports, Development)
+    - and, a follow-up correction once that plan was described back to
+    him: that access point should list *every* page, not just the four
+    left off the bar, "so we have the option to go to any of our pages."
+
+    Turned off Streamlit's own auto-generated sidebar page list via
+    `st.navigation(pages, position="hidden")` in `app.py` (confirmed this
+    parameter exists and takes `'sidebar' | 'hidden' | 'top'` by
+    inspecting the installed Streamlit 1.63.0's real signature, not
+    assumed from memory of an older version) - this only turns off that
+    auto nav UI, nothing else; a page's own `st.sidebar` content (the
+    7-Day Forecast's Lake Setup Options, `core.ui.
+    render_lake_setup_sidebar()`) is a completely separate mechanism and
+    keeps working untouched. New `core/nav.py`: `ALL_PAGES` (the 9 pages,
+    same order the old sidebar showed) is the one source of truth both
+    `app.py`'s `st.navigation()` call and this module build from;
+    `PRIMARY_PAGES` (the 5 on the bar) is derived from it by path, not
+    hand-duplicated. `render_bottom_nav(active_path)` - called from every
+    page right after its existing `inject_mobile_css()` line, same
+    calling spot every page already had - renders the bar inside
+    `st.bottom` (used as `with st.bottom:`, exactly like `with
+    st.sidebar:` - confirmed live it's a container proxy, not a callable,
+    after an initial `st.bottom()` attempt raised `TypeError: 'Bottom
+    ContainerProxy' object is not callable` against the real installed
+    package): 5 `st.page_link`s plus a 6th "☰" `st.popover` listing all 9
+    pages (the angler's follow-up ask above). Restyled from Streamlit's
+    default (theme-colored bar, top border) to a plain dark bar via CSS
+    keyed off real confirmed testids - `stBottomBlockContainer`,
+    `stPageLink-NavLink`, `stPopoverButton` - found by grepping the
+    installed package's own frontend JS bundle
+    (`static/static/js/PageLink.*.js`) for their literal string constants
+    rather than guessing them the way `core.ui.inject_mobile_css()`'s own
+    docstring describes checking against a live DOM; that same grep also
+    turned up that Streamlit already auto-bolds whichever `st.page_link`
+    points at the current page (an internal `isCurrentPage`/`boldLabel`
+    prop), so this CSS's own active-tab highlight (a color change, keyed
+    by column position from the `active_path` argument) is a deliberate
+    reinforcement on top of that, not a replacement for it - bold alone
+    against a dark bar seemed likely to be too subtle sight-unseen.
+
+    One real compatibility issue found and fixed: `st.page_link()`
+    validates its target against whatever page list `st.navigation()`
+    registered for the CURRENT run, and this app's ~600-test suite mostly
+    exercises one page at a time via `AppTest.from_file("pages/whatever.
+    py")` directly (confirmed via `grep -rn "AppTest.from_file"` - only
+    `tests/test_app.py`'s own 3 tests go through `app.py`/`st.navigation()`
+    at all) - which never sets up that page list, so the very first
+    `st.page_link()` call raised `StreamlitPageNotFoundError` and broke
+    37 previously-passing tests on first run. Rather than rewrite ~30
+    test files to route through `app.py` + `AppTest.switch_page()` (a much
+    bigger, separate change than "Phase 1: nav shell," and not what was
+    asked for today), `render_bottom_nav()` catches that one specific
+    exception and returns - a no-op exactly where a real navigation
+    context doesn't exist, matching this app's established "degrade
+    quietly outside the context this depends on" contract (same shape as
+    `core.appstate.github_token()`'s own doc-commented fallback) rather
+    than raising and failing every other page's content tests over chrome
+    those tests aren't testing.
+
+    **Verified:** full suite back to 608 passed after that fix (no test
+    file edits needed). Directly exercised real navigation too (not just
+    "tests still pass") - a manual `AppTest.from_file("app.py")` +
+    `at.switch_page(...)` loop through all 9 pages hit zero exceptions
+    everywhere except the 7-Day Forecast page's pre-existing, unrelated
+    `api.open-meteo.com` fetch (blocked by this sandbox's own outbound
+    proxy, not by anything touched here - see this file's own prior
+    entries on that same sandbox limitation). Could NOT get a pixel-level
+    visual check in this pass: this dev sandbox has no browser attached
+    to a live Streamlit render, and Streamlit's `AppTest` has no typed
+    getter for `page_link`/`popover`/`st.bottom`'s own block at all (its
+    exposed attributes were enumerated directly via `dir(at)` to confirm
+    this, rather than assumed) - so the bar's actual on-screen look
+    (spacing, dark-bar contrast, whether the "☰" popover opens sanely on a
+    phone width) still needs a real look at the deployed app before
+    calling Phase 1 fully done. Flagged to the angler as the next thing to
+    check.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

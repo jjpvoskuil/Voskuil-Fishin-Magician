@@ -38,9 +38,11 @@ from core.storage import (
     read_all_trips, update_trip, delete_trip, parse_conditions,
 )
 from core.weather import lake_today, hourly_rows_for_date, estimate_water_temp_f
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/6_Spot_Session.py")
 st.title("🎯 Spot Session")
 
 # Punch-list #62: a persistent (not a toast, so it can't be missed/scrolled

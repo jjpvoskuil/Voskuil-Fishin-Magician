@@ -40,9 +40,11 @@ from core.reports import (
 from core.scoring import SEGMENTS
 from core.storage import sync_data_from_data_branch
 from core.ui import inject_mobile_css
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Reports - Nolin Lake", page_icon="📈", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/9_Reports.py")
 st.title("📈 Reports")
 
 st.caption(

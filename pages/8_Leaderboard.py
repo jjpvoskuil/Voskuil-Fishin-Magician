@@ -45,9 +45,11 @@ from core.lures import LURE_PROFILES
 from core.activity_log import format_weight_lb_oz
 from core.ui import inject_mobile_css
 from core.storage import parse_conditions, sync_data_from_data_branch
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="Leaderboard - Nolin Lake", page_icon="🏆", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/8_Leaderboard.py")
 st.title("🏆 Leaderboard")
 
 # Punch-list #61: get_trip_history() is a 5-minute st.cache_data cache (see

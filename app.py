@@ -181,15 +181,26 @@ except RuntimeError:
     # nothing got cached above.
     pass
 
-pg = st.navigation([
-    st.Page("home.py", title="Today", icon="🎣", default=True),
-    st.Page("pages/1_7_Day_Forecast.py", title="7 Day Forecast", icon="📅"),
-    st.Page("pages/2_Lake_Map.py", title="Lake Map", icon="🗺️"),
-    st.Page("pages/6_Spot_Session.py", title="Spot Session", icon="🎯"),
-    st.Page("pages/4_Trip_History.py", title="Trip History", icon="📊"),
-    st.Page("pages/8_Leaderboard.py", title="Leaderboard", icon="🏆"),
-    st.Page("pages/9_Reports.py", title="Reports", icon="📈"),
-    st.Page("pages/5_Lure_Inventory.py", title="Tackle Box", icon="🧰"),
-    st.Page("pages/7_Development.py", title="Development", icon="🛠️"),
-])
+pg = st.navigation(
+    [
+        st.Page("home.py", title="Today", icon="🎣", default=True),
+        st.Page("pages/1_7_Day_Forecast.py", title="7 Day Forecast", icon="📅"),
+        st.Page("pages/2_Lake_Map.py", title="Lake Map", icon="🗺️"),
+        st.Page("pages/6_Spot_Session.py", title="Spot Session", icon="🎯"),
+        st.Page("pages/4_Trip_History.py", title="Trip History", icon="📊"),
+        st.Page("pages/8_Leaderboard.py", title="Leaderboard", icon="🏆"),
+        st.Page("pages/9_Reports.py", title="Reports", icon="📈"),
+        st.Page("pages/5_Lure_Inventory.py", title="Tackle Box", icon="🧰"),
+        st.Page("pages/7_Development.py", title="Development", icon="🛠️"),
+    ],
+    # Punch-list #96: turns off Streamlit's own auto-generated sidebar page
+    # list (the angler's own "ugly left side bar menu" ask) - each page's
+    # OWN st.sidebar content (e.g. the 7-Day Forecast's Lake Setup Options)
+    # is a completely separate mechanism from this nav UI and is unaffected;
+    # this list of st.Page()s is still the real source of truth Streamlit
+    # itself uses to route between pages, it just no longer draws its own
+    # nav chrome for it - core.nav.render_bottom_nav() (called from every
+    # page, right after inject_mobile_css()) is the real replacement UI.
+    position="hidden",
+)
 pg.run()

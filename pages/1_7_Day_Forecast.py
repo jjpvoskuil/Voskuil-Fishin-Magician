@@ -12,9 +12,11 @@ from core.ui import (
 from core.weather import lake_today
 from core.storage import commit_and_push_data
 from core.forecast_freeze import apply_freeze, FREEZE_PATH
+from core.nav import render_bottom_nav
 
 st.set_page_config(page_title="7 Day Forecast - Nolin Lake", page_icon="📅", layout="wide")
 inject_mobile_css()
+render_bottom_nav("pages/1_7_Day_Forecast.py")
 st.title("📅 7-Day Largemouth Bass Forecast")
 
 today = lake_today()
