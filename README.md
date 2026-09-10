@@ -1126,6 +1126,11 @@ round. Keeps the same **"🔄 Refresh from GitHub"** button (punch-list #61) for
 reason every other trip-history page has one: this server only syncs from GitHub once at
 boot, and the trip cache itself is separately held for 5 minutes.
 
+(Live-verified against a real rendered page, not just AppTest, after a same-session bug where
+this page's own injected CSS briefly showed up as literal on-screen text instead of being
+applied - see SESSION_NOTES.md entry 174 for the root cause and the "no blank lines inside
+`unsafe_allow_html` content" rule that came out of it.)
+
 ## Reports (punch-list #92, first pass)
 
 A dynamic, "pick any two things and see how they line up" analysis page (`pages/9_Reports.py`,
