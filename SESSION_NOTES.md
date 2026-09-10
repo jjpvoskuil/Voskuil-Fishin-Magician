@@ -11793,6 +11793,126 @@ every real save.
     that change to BOTH `main` and `data` in the same session, or this
     same silent drift will recur.
 
+173. **Punch-list #97 Phase 2: pages/8_Leaderboard.py rebuilt as "The
+    Stringer."** Angler's ask (already fully scoped in the punch-list text
+    itself from a prior design-critique session - "reuse, don't relitigate"
+    per that item's own explicit note): replace the old flat 14-category
+    dropdown + angler/species-filtered dataframe with the validated "The
+    Stringer" mockup - a cyclable ring-chart hero over 2-3 real season
+    stats, an underline tab bar over 6 curated rankings, and a "season
+    activity + species mix" glance panel underneath. Fetched the mockup
+    artifact linked from #97 (`Artifact` tool, `action: "read"`) to get its
+    exact markup/CSS/palette rather than re-deriving the design from the
+    punch-list's prose description alone.
+
+    **New `core/stringer.py`** (Streamlit-free, unit tested on its own in
+    `tests/test_stringer.py` - 31 tests - same split as
+    `core/daily_leaderboard.py`/`core/reports.py`, built independently
+    rather than reusing the old page's private frame builder, so nothing
+    here could regress those two already-shipped modules or vice versa).
+    `build_frames()` extends the old page's fish_df/trips_df builder with
+    two things it didn't carry: each fish/trip row's lure `color` (needed
+    to rank "Hot Lures" by lure+color pair, not just lure name - a Blue
+    Chrome Spook and any other color of the same Spook now rank
+    separately) and a `session_key` (a real `session_id` when the row has
+    one, else that row's own `trip_id` as a singleton "session" -
+    deliberately NOT reproducing Trip History's own more elaborate legacy
+    date+segment+angler+time-gap backfill clustering for pre-#55 rows,
+    since duplicating that heuristic here risks a second, possibly-
+    diverging opinion about which old rows belong together for what's
+    meant to be a simple highlight reel - see `_session_key()`'s own
+    docstring). Hero stats (`hero_states()`) are built to degrade
+    gracefully: a state is only added to the list when its underlying data
+    actually exists (e.g. "Days on the Water" needs dated trips; the
+    spot/species share states need per-fish detail), so a thin dataset
+    shows fewer, still-honest stats rather than a fake 0%. Every one of
+    the 6 tabs (`biggest_fish`, `longest_fish`, `top_anglers`, `hot_lures`,
+    `top_spots`, `top_sessions`) is capped at `TOP_N=10` and returns plain
+    `{"primary", "secondary", "num", "tag"}` dicts - no HTML in this
+    module, matching this app's convention of keeping data logic
+    Streamlit/markup-free; the page does all HTML rendering. `top_anglers`
+    multiplies each fish's weight by its own `count` before summing
+    (matching `core.daily_leaderboard`'s same "a group-logged small-fish
+    entry's weight is per-fish, not the group's" convention) and falls
+    back to "N fish logged, no weight data yet" when an angler's total
+    comes back zero, rather than showing a bogus "0 lb total."
+
+    **`pages/8_Leaderboard.py` rewritten as the rendering layer only.**
+    Real Streamlit widgets (buttons for ‹/›/dots, `st.tabs()` for the
+    category bar, `st.container(key=...)` wrappers) provide the
+    interactivity; the ring SVG, ranked-list rows, and glance-panel chart
+    are each one injected HTML/CSS block per `st.markdown(...,
+    unsafe_allow_html=True)` call, built from real computed values (no
+    client-side JS at all, consistent with this app's "every interaction
+    is a live round trip to the Python server" architecture everywhere
+    else). Fonts (Plus Jakarta Sans + IBM Plex Mono) and the mockup's exact
+    color palette are declared as new `--stringer-*` CSS custom properties
+    on `:root` - additive only (harmless on every other page, which never
+    references them), NOT a site-wide re-theme from inside one page's
+    code; Phase 3+ (new punch-list #98 below) is where the rest of the app
+    picks up this design language, one page at a time, per #97's own
+    explicit scoping note ("Reports, Trip History, Lake Map, Development
+    not yet scoped"). The underline tab bar is restyled via BaseWeb's
+    `data-baseweb="tab-list"/"tab"/"tab-highlight"` hooks (the library
+    backing `st.tabs()`) rather than Streamlit's own testids, since this
+    is the first page in this app to use `st.tabs()` at all.
+
+    **One real bug caught before shipping, by AppTest, not manual
+    inspection:** the ring's ‹/›/dot buttons initially updated
+    `st.session_state["stringer_ring_idx"]` and just let the rest of that
+    same script run finish, rather than calling `st.rerun()` - since the
+    dots sit BELOW the ring/title in the layout, a click on a dot could
+    only affect what got rendered *after* it that same run, leaving the
+    title above showing the PREVIOUS stat for one extra click (confirmed
+    directly: clicking dot 0 from stat 2 rendered stat 2's own title again,
+    only moving to stat 0 on the click after that). Fixed by calling
+    `st.rerun()` immediately after every one of these buttons' own
+    `session_state` mutation - the same pattern `pages/7_Development.py`
+    and `pages/6_Spot_Session.py` already use after their own mutations -
+    so every click forces a clean, single fresh run that renders title/
+    ring/dots all from one already-final index, never a stale title next
+    to an updated ring.
+
+    **Verified:** full suite `pytest tests/ -q` - 645 passed (639 + 6 new
+    `tests/test_leaderboard_page.py` AppTest smoke tests: page renders with
+    all 6 tabs, every tab renders a panel with no exception, ring next ->
+    dot 0 -> prev moves to the right stat each time confirming the rerun
+    fix above, empty trip history shows an info message not a crash, the
+    refresh button behaves with no GitHub token configured, season chip +
+    glance panel both render). Also re-ran this app's standing full-
+    navigation check (`AppTest.from_file("app.py")` + real
+    `switch_page()` through all 9 pages) - zero exceptions anywhere except
+    the pre-existing, unrelated Open-Meteo sandbox network restriction on
+    the 7-Day Forecast page (same sandbox limitation prior entries already
+    document, untouched by this change). Verified via a fresh `git clone`
+    into a new temp directory before pushing.
+
+    **Could NOT get a pixel-level visual check in this pass** - same
+    standing limitation entry 171 already flagged for the bottom nav bar's
+    own first pass: this sandbox has no browser attached to a live
+    Streamlit render. The BaseWeb tab-restyle selectors and the ring/
+    panel/glance-panel CSS are a best-effort translation of the validated
+    mockup's exact markup, not confirmed pixel-for-pixel against a real
+    deployed render yet - worth a real look (phone width especially,
+    given the ring/dots/tab bar are all new interactive chrome) before
+    calling Phase 2 fully done, same as Phase 1 needed.
+
+    **Scope note, not an oversight:** the old page's angler/species filters
+    and its 10 non-migrated categories (biggest-by-species, rate-by-lure/
+    spot/angler, by-day-count) are gone outright, not hidden or demoted -
+    this was the explicit, already-validated design direction (#97's own
+    "reuse, don't relitigate" framing), with deep ad hoc filtering now
+    living on the Reports page instead. If any specific old category turns
+    out to be missed in practice, it's a fast re-add to `core/stringer.py`
+    (the old logic is still in git history on `main` before this commit),
+    not a sign this was the wrong call.
+
+    Marked punch-list **#97 Done** for this Phase-2 scope; added **#98**
+    (open) to carry forward the same item's own "Phase 3+: apply this
+    design language to the rest of the app" text verbatim, so that thread
+    isn't lost the way #96's own Phase 2+ note originally became #97 -
+    same pattern, one punch-list item per phase.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

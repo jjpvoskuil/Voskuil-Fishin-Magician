@@ -1084,37 +1084,47 @@ parse_conditions()`, which always hands back a dict. Found while investigating a
 data has no rows shaped that way, so it couldn't be reproduced end-to-end against real
 data, but the defect itself was real and is fixed regardless.
 
-## Leaderboard (punch-list #54)
+## The Stringer / Leaderboard (punch-list #97 Phase 2, replacing #54)
 
-Ranks your logged trip history (same source as Trip History) a bunch of different ways -
-pick a category, optionally filter to one angler and/or species, pick a sort direction and
-how many rows to show, and see the ranked list plus a quick bar chart. Fourteen categories
-across five groups:
+`pages/8_Leaderboard.py` was rebuilt from a flat "pick a category from a dropdown, see a
+filterable dataframe" page (14 categories, angler/species filters, a bar chart - punch-list
+#54, see git history if that's ever needed again) into **"The Stringer"** - a curated
+highlight-reel view matching a validated visual-redesign mockup (Tonal-fitness-app-inspired;
+full design-critique history in SESSION_NOTES.md entries 171/172, punch-list #97). Deep,
+flexible ad hoc filtering/correlation now lives on the **Reports** page (below) instead - this
+page trades that breadth for a tighter, more scannable "what's the story this season" read,
+always over your whole logged trip history (no angler/species filters here anymore).
 
-- **Fish:** biggest fish (by weight), longest fish (by length), biggest fish by species
-  (one row per species, not a top-N ranking - a quick "what's the best of each kind"
-  summary).
-- **By lure:** most fish caught, best fish-per-use rate (total fish ÷ times that lure's been
-  used - the "Uses" column is right there so a rate from one lucky use doesn't read as
-  reliable as one from twenty), biggest single fish caught.
-- **By spot:** the same three, by location instead of lure.
-- **By angler:** the same three, by "Who's fishing."
-- **By day / by trip:** most fish caught in a single day (with who caught them, when more
-  than one angler contributed), and most fish caught on a single lure use (one trip_log
-  row).
+Three pieces, all built from real `data/trip_log.csv` rows via `core/stringer.py`
+(Streamlit-free, unit tested on its own in `tests/test_stringer.py` - same split as
+`core/daily_leaderboard.py`/`core/reports.py`, so a bug here can't regress either of those
+already-shipped pages and vice versa):
 
-The Angler filter is hidden (not just left at "All") on the three "by angler" categories,
-since filtering to one angler while ranking by angler would be a redundant no-op. The
-Species filter only applies to the three fish-level categories above - trips logged before
-the Spot Session redesign have no per-fish species detail at all, only a flat fish-count
-column, so filtering the lure/spot/angler/day aggregates by species would silently make
-older trips disappear from those rankings with nothing to explain why. Read entirely from
-`data/trip_log.csv` (via the same cached `get_trip_history()` every other page uses) -
-this page never writes anything. Has its own **"🔄 Refresh from GitHub"** button
-(punch-list #61) for the same two reasons Trip History's copy exists: this server only
-syncs from GitHub once at boot, and the trip cache itself is separately held for 5
-minutes - press it if you know a trip was saved (here, on Trip History, or from a Spot
-Session elsewhere) but the rankings still look stale.
+- **A cyclable ring-chart hero** - up to 3 season stats (days on the water as a fraction of
+  the season, the top spot's share of every catch, the top species' share), tapped through
+  with ‹/› chevrons or the dot indicators below the ring. Each stat only appears when there's
+  real data to show it (e.g. a brand-new install with trips logged but no per-fish detail yet
+  shows just "Days on the Water," not two broken 0% rings). The season chip at the top always
+  spans your actual earliest-to-latest logged trip date - never a hardcoded window.
+- **An underline tab bar over six ranked lists** - Biggest Fish, Top Anglers, Hot Lures (by
+  lure *and color* - a Blue Chrome Spook ranks separately from the same lure in another
+  color), Top Spots (ranked by biggest fish landed there), Longest Fish, and Top Sessions
+  (real Spot Session outings, grouped by `session_id` - a session logged before that field
+  existed shows as its own single-lure "session" rather than being guessed back together;
+  see `core.stringer._session_key()`'s own docstring for why that's a deliberate, narrower
+  choice than Trip History's own legacy-session backfill). Each row shows a rank, the headline
+  fact, a line of supporting context, and the ranked number itself - capped at the top 10 per
+  tab.
+- **A "season activity + species mix" glance panel** underneath - a day-by-day fish-count bar
+  chart across the whole logged season (peak day highlighted) and a species breakdown, both
+  built fresh from the same real data every time.
+
+Design language (Plus Jakarta Sans + IBM Plex Mono, one muted teal accent reserved for data,
+near-flat cards, no gradients/illustrated icons) is scoped to this page's own cards for now -
+applying it site-wide is Phase 3+ (punch-list #98), one page at a time, not part of this
+round. Keeps the same **"🔄 Refresh from GitHub"** button (punch-list #61) for the same
+reason every other trip-history page has one: this server only syncs from GitHub once at
+boot, and the trip cache itself is separately held for 5 minutes.
 
 ## Reports (punch-list #92, first pass)
 
@@ -1129,8 +1139,7 @@ fish/forage activity, angler, day of week, or date daily/weekly) and a **success
 (total fish caught, fish per hour, biggest fish, or # trips - defaults to **Fish per Hour**,
 see why below), then narrow it down with an optional species filter
 (only applies to the two metrics computed per-catch - disabled, with a tooltip, for the two
-that are inherently per-trip, mirroring Leaderboard's own disabled-when-not-applicable
-pattern), a date range, an angler multiselect, and a time-segment multiselect (defaults to
+that are inherently per-trip), a date range, an angler multiselect, and a time-segment multiselect (defaults to
 **Dawn + Morning** - real logged trip history is heavily lopsided toward those two right now,
 so starting there gives a cleaner, more representative read than pooling in the handful of
 Midday/Dusk/Night trips too; still just a default, clear it to pool every segment together).
@@ -1152,7 +1161,7 @@ Everything else reuses this app's existing categorical vocabulary and classifier
 binning logic for factors that are already plain categorical strings in the conditions
 dict. Read entirely from `data/trip_log.csv` (same cached `get_trip_history()` every other
 page uses, with its own **"🔄 Refresh from GitHub"** button for the same staleness reasons
-Leaderboard's copy exists) - this page never writes anything.
+The Stringer's copy exists) - this page never writes anything.
 
 **Water Temp (custom range)** (punch-list #92 follow-up) exists alongside the fixed
 **Water Temp Band** factor for the same reason moon illumination needed its own binning:
@@ -1962,8 +1971,9 @@ pages/ (sidebar order set by app.py's st.navigation list, not these numeric
   6_Spot_Session.py       Per-spot on-the-water conditions -> suggestions -> log activity
   4_Trip_History.py      Filterable log of every trip (Spot Session is now the only
                          way to log one) + per-trip details + calibration status
-  8_Leaderboard.py        Ranks trip history different ways - biggest/longest fish,
-                         most fish by lure/spot/angler/day, best fish-per-use rates
+  8_Leaderboard.py        "The Stringer" - cyclable ring-chart season stats + a 6-tab
+                         ranked highlight reel (biggest/longest fish, top anglers/
+                         lures/spots/sessions), punch-list #97 Phase 2
   9_Reports.py            Dynamic factor-vs-success-metric correlation/analysis page,
                          with a chart and Excel export (punch-list #92, first pass)
   5_Lure_Inventory.py    Tackle inventory (brand/description/category/photo/price/qty)
@@ -2020,7 +2030,7 @@ core/
   daily_leaderboard.py      "Fishing Activity" (Today/This Week tabs) roster/awards/
                            leaderboard-table logic for the Home page (punch-list #91) -
                            Streamlit-free and unit tested on its own, kept separate from
-                           pages/8_Leaderboard.py's all-time ranking logic
+                           core/stringer.py's all-time ranking logic below
   anglers.py                "Who's fishing" roster read/add + git commit-back
                            (data/anglers.csv) - punch-list #26's lightweight
                            multi-user support, used by the Spot Session picker
@@ -2030,9 +2040,15 @@ core/
                            column) and one generic compute_report() that groups any
                            success metric by any factor, over any filter set;
                            Streamlit-free and unit tested on its own, kept
-                           independent from pages/8_Leaderboard.py's own frame
-                           builder for the same regression-risk reason as
-                           daily_leaderboard.py above
+                           independent from core/stringer.py's own frame builder
+                           for the same regression-risk reason as daily_leaderboard.py
+                           above
+  stringer.py               "The Stringer" (pages/8_Leaderboard.py, punch-list #97
+                           Phase 2) data/ranking layer - hero-stat shares, and the
+                           6 ranked-list tabs (biggest/longest fish, top anglers/
+                           lures/spots/sessions); Streamlit-free and unit tested on
+                           its own, replaces the old pages/8_Leaderboard.py-local
+                           frame builder outright
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)

@@ -1,77 +1,225 @@
 """
-Leaderboard - punch-list #54.
+The Stringer - punch-list #97 Phase 2 of the site-wide visual redesign
+(Phase 1, the bottom nav bar shell, is punch-list #96 - core/nav.py).
 
-Ranks the logged trip history (data/trip_log.csv, same source as Trip
-History) a bunch of different ways: biggest/longest fish, most fish by
-lure/spot/angler/day, best fish-per-use rate by lure/spot, and a few more -
-see CATEGORIES below for the full list. Every category shares one flat
-"top N, sorted either direction, optionally filtered to one angler/species"
-control panel rather than being fifteen bespoke pages, so adding a new
-ranking later is one new entry in CATEGORIES, not a new page.
+Replaces the old flat "pick a category from a dropdown, see a filterable
+dataframe" Leaderboard with the validated "The Stringer" mockup: a
+cyclable ring-chart hero showing 2-3 real season stats, an underline tab
+bar over six curated rankings (Biggest Fish / Top Anglers / Hot Lures /
+Top Spots / Longest Fish / Top Sessions), and a "season activity + species
+mix" glance panel underneath. Full design-critique history (two "looks
+like PowerPoint"/"too cartoony" rounds before this landed) and the mockup
+artifact itself: SESSION_NOTES.md entries 171/172 and punch-list #97's own
+text.
 
-Two granularities get built once up front and every category reads from
-one or the other:
-- `fish_df`: one row per INDIVIDUAL fish catch record, flattened out of
-  every trip's conditions_json["fish"] list (see core/activity_log.py's
-  _new_fish_from_form() for that shape). This is the only place species/
-  weight/length actually live, so anything ranking individual catches or
-  aggregating "total fish caught" reads from here.
-- `trips_df`: one row per trip_log.csv row (one lure USE, in this app's own
-  vocabulary - a single Spot Session can produce several "trips," one per
-  lure fished). Used for lure/spot/angler/day aggregates and for "most fish
-  in a single trip."
+This is a full replacement, not an addition - the old page's 14-category
+dropdown + angler/species filters are gone. That's a deliberate scope
+split validated with the angler, not an oversight: deep ad hoc filtering
+and correlation now belongs on the Reports page (punch-list #92), so this
+page can be a tight "highlight reel" instead of trying to be both. All the
+actual data work (grouping/sorting/formatting) lives in core/stringer.py -
+Streamlit-free and unit tested on its own (tests/test_stringer.py), same
+split as core/daily_leaderboard.py and core/reports.py - this file is
+just the rendering layer over it.
 
-A trip's fish COUNT is read from its own fish list when it has one (summing
-each fish record's "count," matching Trip History's own convention - a
-record can represent a small group logged together, not always exactly
-one fish); trips logged before the Spot Session redesign have no fish
-list at all, so those fall back to the trip_log.csv "fish_caught" column
-instead. That fallback is also why the Species filter only applies to
-fish-level categories (Biggest fish, Longest fish, Biggest by species) -
-a fallback-only trip has no species to filter by, so filtering aggregate
-categories by species would silently make older trips vanish from a "most
-fish by lure" ranking without any indication why. Worth revisiting if that
-ever turns out to matter in practice.
+One real design-language gap, flagged rather than silently worked around:
+the mockup's page-wide background/typography swap (Plus Jakarta Sans, the
+teal accent, the near-flat card look) is scoped to THIS page's own cards
+only here, not applied to the rest of the app - Phase 3+ (punch-list #98)
+is where that happens everywhere else, one page at a time, per the
+angler's own explicit scoping note on #97 ("Reports, Trip History, Lake
+Map, Development not yet scoped"). Applying it globally from inside this
+one page's code would be exactly the kind of premature, un-asked-for
+scope creep this app's own operating notes warn against.
 """
-from datetime import datetime
+import math
+import re
+from datetime import date as date_cls
 
-import pandas as pd
 import streamlit as st
 
 from core.appstate import (
-    get_lake_spots, get_trip_history, get_calibrated_weights, get_location_adjustments, get_anglers, github_token, repo_slug,
+    get_lake_spots, get_trip_history, get_calibrated_weights, get_location_adjustments,
+    github_token, repo_slug,
 )
-from core.lures import LURE_PROFILES
-from core.activity_log import format_weight_lb_oz
 from core.ui import inject_mobile_css
-from core.storage import parse_conditions, sync_data_from_data_branch
+from core.storage import sync_data_from_data_branch
 from core.nav import render_bottom_nav
+from core.stringer import (
+    build_frames, season_label, hero_states, CATEGORIES, daily_activity_series, species_mix,
+)
 
-st.set_page_config(page_title="Leaderboard - Nolin Lake", page_icon="🏆", layout="wide")
+st.set_page_config(page_title="The Stringer - Nolin Lake", page_icon="🏆", layout="wide")
 inject_mobile_css()
 render_bottom_nav("pages/8_Leaderboard.py")
-st.title("🏆 Leaderboard")
 
-# Punch-list #61: get_trip_history() is a 5-minute st.cache_data cache (see
-# core/appstate.py) that, unlike every OTHER cached getter in this app
-# (get_lake_spots, get_inventory, get_dev_tasks - each cleared right after
-# its own page's own writes), was never cleared after a trip is logged/
-# edited/deleted anywhere. That means this page could show data up to 5
-# minutes stale after ANY save, on top of the separate "this running
-# server only syncs from the data branch once, at boot" gap Trip History's
-# own refresh button (below) exists for - see that button's comment in
-# pages/4_Trip_History.py and core.storage.sync_data_from_data_branch's
-# docstring for the full "why" behind that second gap. This mirrors that
-# same button here, and - unlike Trip History's own copy - explicitly
-# clears both trip caches too, since this page (and 7-Day Forecast) reads
-# through them rather than a live, uncached read_all_trips() call.
+# --- Design-language CSS + fonts (punch-list #97 Phase 2) --------------------
+# Named --stringer-* rather than reusing/overriding any of Streamlit's own
+# theme variables - these are purely additive on :root (harmless on every
+# other page, which simply never references them) rather than an attempt
+# to re-theme the whole app from inside one page's code (see this file's
+# own docstring above for why that's explicitly out of scope right now).
+# Exact hex values are copied straight from the validated mockup artifact
+# linked on punch-list #97, not re-picked here.
+st.markdown(
+    """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+    :root {
+      --stringer-surface:#FFFFFF; --stringer-surface-sunk:#EEF0EA;
+      --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E; --stringer-muted:#6E766F;
+      --stringer-border:#E7E9E2; --stringer-accent:#2C7C6E; --stringer-accent-strong:#1F5F54;
+      --stringer-accent-track:#D8EAE5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --stringer-surface:#131A16; --stringer-surface-sunk:#0F1512;
+        --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5; --stringer-muted:#8A948C;
+        --stringer-border:#212A24; --stringer-accent:#4FAE9C; --stringer-accent-strong:#6FC2B2;
+        --stringer-accent-track:#173630;
+      }
+    }
+    .stringer-topbar, .stringer-hero-desc, .stringer-panel, .stringer-glance,
+    .st-key-stringer_hero, .st-key-stringer_tabs, .st-key-stringer_dots {
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    }
+    .stringer-mono { font-family: "IBM Plex Mono", monospace; }
+    .stringer-unit { color: var(--stringer-muted); font-size: 0.78em; }
+
+    /* Top brand row: wordmark + rolling season-date chip. */
+    .stringer-topbar {
+        display:flex; align-items:center; justify-content:space-between;
+        gap:12px; flex-wrap:wrap; margin-bottom:4px;
+    }
+    .stringer-brand { font-weight:800; font-size:1.05rem; letter-spacing:.04em; color:var(--stringer-ink); }
+    .stringer-season-chip {
+        font-family:"IBM Plex Mono", monospace; font-size:.72rem; color:var(--stringer-muted);
+        background:var(--stringer-surface-sunk); padding:5px 10px; border-radius:100px; white-space:nowrap;
+    }
+
+    /* Hero ring card - the whole st.container(key="stringer_hero") becomes
+       one visual card; the buttons/columns inside it are real Streamlit
+       widgets (needed for the prev/next/dot rerun interactivity), the ring
+       SVG itself is one injected HTML block. */
+    .st-key-stringer_hero {
+        background:var(--stringer-surface); border-radius:16px; padding:14px 18px 18px;
+        text-align:center; margin-bottom:14px;
+    }
+    .st-key-stringer_hero [data-testid="stMarkdownContainer"] h2 {
+        font-size:1.05rem; font-weight:700; margin:2px 0 10px;
+    }
+    .st-key-stringer_hero button[kind="secondary"] {
+        background:none !important; border:none !important; color:var(--stringer-ink) !important;
+        font-size:1.3rem !important; line-height:1 !important; box-shadow:none !important;
+    }
+    .st-key-stringer_hero button[kind="secondary"]:hover { color:var(--stringer-accent) !important; }
+    .st-key-stringer_dots button[kind="secondary"] {
+        background:none !important; border:none !important; box-shadow:none !important;
+        color:var(--stringer-border) !important; font-size:.6rem !important; padding:2px !important;
+        min-height:0 !important;
+    }
+    .st-key-stringer_dots button[kind="primary"] {
+        background:none !important; border:none !important; box-shadow:none !important;
+        color:var(--stringer-ink) !important; font-size:.6rem !important; padding:2px !important;
+        min-height:0 !important;
+    }
+
+    .stringer-ring-wrap { position:relative; width:190px; height:190px; margin:0 auto; }
+    .stringer-ring-wrap svg { width:100%; height:100%; transform:rotate(-90deg); }
+    .stringer-ring-center {
+        position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+        justify-content:center; text-align:center; gap:4px; padding:0 40px;
+    }
+    .stringer-ring-legend { display:flex; align-items:center; gap:6px; font-size:.72rem; color:var(--stringer-ink-soft); font-weight:600; }
+    .stringer-swatch { width:8px; height:8px; border-radius:2px; background:var(--stringer-accent); display:inline-block; }
+    .stringer-ring-value { font-size:2.1rem; font-weight:800; letter-spacing:-.02em; line-height:1; color:var(--stringer-ink); }
+    .stringer-ring-desc { font-size:.76rem; color:var(--stringer-muted); max-width:320px; margin:8px auto 0; }
+    .stringer-hero-secondary { margin-top:10px; }
+    .stringer-hero-label { font-size:.72rem; color:var(--stringer-muted); font-weight:600; margin-bottom:2px; }
+    .stringer-hero-big { font-size:1.15rem; font-weight:800; color:var(--stringer-ink); }
+
+    /* Ranked-list panel. */
+    .stringer-panel { background:var(--stringer-surface); border-radius:16px; overflow:hidden; margin-bottom:14px; }
+    .stringer-panel-head {
+        display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+        padding:14px 16px 8px; flex-wrap:wrap;
+    }
+    .stringer-panel-head h3 { font-size:.95rem; font-weight:700; margin:0; color:var(--stringer-ink); }
+    .stringer-sort-note { font-size:.72rem; color:var(--stringer-muted); font-family:"IBM Plex Mono",monospace; }
+    .stringer-row {
+        display:grid; grid-template-columns:24px 1fr auto; align-items:center;
+        gap:12px; padding:9px 16px; border-top:1px solid var(--stringer-border);
+    }
+    .stringer-rank { font-weight:800; font-size:.84rem; color:var(--stringer-muted); }
+    .stringer-rank.r1 { color:var(--stringer-ink); }
+    .stringer-row-primary { font-weight:700; font-size:.9rem; color:var(--stringer-ink); overflow-wrap:break-word; }
+    .stringer-row-secondary { font-size:.74rem; color:var(--stringer-muted); margin-top:2px; overflow-wrap:break-word; }
+    .stringer-row-num {
+        font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:.9rem;
+        color:var(--stringer-ink); text-align:right; white-space:nowrap;
+    }
+    .stringer-row-tag { display:block; margin-top:2px; font-size:.62rem; color:var(--stringer-muted); text-align:right; }
+    .stringer-empty { padding:16px; font-size:.85rem; color:var(--stringer-muted); }
+
+    /* Underline tab bar (st.tabs, restyled via BaseWeb's own stable
+       data-baseweb hooks) - not live-DOM-verified against a real browser
+       in this sandbox (no browser attached here), same caveat SESSION_NOTES
+       entry 171 flagged for the bottom nav bar's own first pass; worth a
+       real-device look before calling this pixel-final. */
+    .st-key-stringer_tabs [data-baseweb="tab-list"] {
+        gap:20px; border-bottom:1px solid var(--stringer-border); background:transparent;
+    }
+    .st-key-stringer_tabs [data-baseweb="tab"] {
+        font-weight:600; font-size:.84rem; color:var(--stringer-muted); background:transparent;
+        padding:8px 2px 10px;
+    }
+    .st-key-stringer_tabs [data-baseweb="tab"][aria-selected="true"] { color:var(--stringer-ink) !important; }
+    .st-key-stringer_tabs [data-baseweb="tab-highlight"] { background-color:var(--stringer-accent) !important; }
+    .st-key-stringer_tabs [data-baseweb="tab-border"] { background-color:transparent !important; }
+
+    /* Glance panel: season activity chart + species mix. */
+    .stringer-glance {
+        background:var(--stringer-surface); border-radius:16px; padding:14px 16px 16px;
+        display:grid; grid-template-columns:1.3fr 1fr; gap:0;
+    }
+    @media (max-width:520px) { .stringer-glance { grid-template-columns:1fr; } }
+    .stringer-glance-col h4 { font-size:.86rem; font-weight:700; margin:0 0 2px; color:var(--stringer-ink); }
+    .stringer-glance-sub { font-size:.72rem; color:var(--stringer-muted); margin-bottom:10px; }
+    .stringer-glance-col + .stringer-glance-col { padding-left:16px; border-left:1px solid var(--stringer-border); }
+    @media (max-width:520px) {
+        .stringer-glance-col + .stringer-glance-col { padding-left:0; border-left:none; border-top:1px solid var(--stringer-border); padding-top:12px; margin-top:12px; }
+    }
+    .stringer-species-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .stringer-species-name { width:90px; flex:none; font-size:.76rem; font-weight:600; color:var(--stringer-ink-soft); }
+    .stringer-species-track { flex:1; height:6px; border-radius:100px; background:var(--stringer-surface-sunk); overflow:hidden; }
+    .stringer-species-fill { height:100%; border-radius:100px; background:var(--stringer-muted); }
+    .stringer-species-fill.top { background:var(--stringer-accent); }
+    .stringer-species-count { width:30px; flex:none; text-align:right; font-family:"IBM Plex Mono",monospace; font-size:.76rem; color:var(--stringer-ink); }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+_UNIT_RE = re.compile(r"\b(lb|oz|fish|in|days|trips)\b")
+
+
+def _style_units(text: str) -> str:
+    return _UNIT_RE.sub(r'<span class="stringer-unit">\1</span>', text)
+
+
+# --- Refresh from GitHub (punch-list #61) ------------------------------------
+# Carried over unchanged from the old page: get_trip_history() is a
+# 5-minute cache that's never cleared by a save made elsewhere, on top of
+# this server only syncing from the `data` branch once at boot - see
+# core.storage.sync_data_from_data_branch's own docstring.
 _refresh_col, _ = st.columns([1, 3])
 if _refresh_col.button(
     "🔄 Refresh from GitHub", help=(
         "Pulls the latest trip_log.csv (and the rest of data/) from GitHub right now, and "
-        "clears this page's own cache of it - use this if you know a trip was saved (by you "
-        "or someone else, or by a change pushed straight to GitHub) but this page still "
-        "looks out of date."
+        "clears this page's own cache of it - use this if you know a trip was saved but this "
+        "page still looks out of date."
     ),
 ):
     _token = github_token()
@@ -88,347 +236,203 @@ rows = get_trip_history()
 
 if not rows:
     st.info(
-        "No trips logged yet - the leaderboard fills in as you log sessions on the "
+        "No trips logged yet - The Stringer fills in as you log sessions on the "
         "**Spot Session** page."
     )
     st.stop()
 
-
-# --- Shared parsing (mirrors pages/4_Trip_History.py's own conventions) -----
-def _parse_conditions(row: dict) -> dict:
-    return parse_conditions(row)
-
-
-def _parse_date(s: str):
-    try:
-        return datetime.fromisoformat(s).date()
-    except (ValueError, TypeError):
-        return None
-
-
-def _lure_type_label(cond: dict) -> str:
-    category = cond.get("lure_category")
-    if not category:
-        return None
-    return LURE_PROFILES.get(category, {}).get("name", category)
-
-
 _spot_name_by_id = {s["spot_id"]: s["name"] for s in get_lake_spots()}
+fish_df, trips_df = build_frames(rows, _spot_name_by_id)
 
-
-def _location_label(row: dict) -> str:
-    return _spot_name_by_id.get(row.get("spot_id")) or row.get("spot_name") or "Unknown location"
-
-
-def _build_frames(rows: list):
-    """One pass over trip_log builds both fish_df (per catch) and trips_df
-    (per lure-use), so every category below can just filter/group instead
-    of re-parsing conditions_json itself."""
-    fish_records = []
-    trip_records = []
-    for row in rows:
-        cond = _parse_conditions(row)
-        trip_id = row.get("trip_id")
-        date = _parse_date(row.get("trip_date"))
-        angler = (cond.get("angler") or "").strip() or "Unspecified"
-        lure = row.get("lure_used") or _lure_type_label(cond) or "Unspecified"
-        spot = _location_label(row)
-
-        fish_list = cond.get("fish")
-        trip_fish_count = 0
-        if isinstance(fish_list, list) and fish_list:
-            for fish in fish_list:
-                if not isinstance(fish, dict):
-                    continue
-                count = fish.get("count") or 1
-                trip_fish_count += count
-                fish_records.append({
-                    "trip_id": trip_id, "date": date, "angler": angler, "lure": lure, "spot": spot,
-                    "species": (fish.get("species") or "Unspecified").strip() or "Unspecified",
-                    "count": count, "weight_lb": fish.get("weight_lb"), "length_in": fish.get("length_in"),
-                    "caught_at": fish.get("caught_at"),
-                })
-        else:
-            # Legacy row (pre-redesign, or "Log a Trip") - no per-fish detail,
-            # just the trip's own summary column.
-            try:
-                trip_fish_count = int(float(row.get("fish_caught") or 0))
-            except (TypeError, ValueError):
-                trip_fish_count = 0
-
-        try:
-            biggest = float(row.get("biggest_fish_lb")) if row.get("biggest_fish_lb") not in (None, "") else None
-        except (TypeError, ValueError):
-            biggest = None
-
-        trip_records.append({
-            "trip_id": trip_id, "date": date, "angler": angler, "lure": lure, "spot": spot,
-            "fish_count": trip_fish_count, "biggest_fish_lb": biggest,
-        })
-
-    fish_df = pd.DataFrame(fish_records)
-    trips_df = pd.DataFrame(trip_records)
-    return fish_df, trips_df
-
-
-fish_df, trips_df = _build_frames(rows)
-
-
-# --- Filters ------------------------------------------------------------------
-angler_roster = get_anglers()
-anglers_present = sorted(set(trips_df["angler"]) - set(angler_roster)) if not trips_df.empty else []
-ANGLER_OPTIONS = ["All anglers"] + angler_roster + [a for a in anglers_present if a != "Unspecified"] + (
-    ["Unspecified"] if (not trips_df.empty and "Unspecified" in set(trips_df["angler"])) else []
-)
-SPECIES_OPTIONS = ["All species"] + (sorted(fish_df["species"].dropna().unique().tolist()) if not fish_df.empty else [])
-
-
-def _filtered_frames(angler_choice: str, species_choice: str):
-    f_df, t_df = fish_df, trips_df
-    if angler_choice != "All anglers":
-        f_df = f_df[f_df["angler"] == angler_choice] if not f_df.empty else f_df
-        t_df = t_df[t_df["angler"] == angler_choice] if not t_df.empty else t_df
-    if species_choice != "All species" and not f_df.empty:
-        f_df = f_df[f_df["species"] == species_choice]
-    return f_df, t_df
-
-
-# --- Category builders ---------------------------------------------------------
-# Each builder returns (result_df, value_col, value_label, value_kind,
-# display_cols) where value_kind is "int" | "weight" | "rate" (drives
-# formatting), or None if there's nothing to rank (no data after filters).
-# display_cols is [(col, header), ...] shown alongside the rank/value.
-
-def _fish_ranked(f_df, numeric_col):
-    d = f_df[f_df[numeric_col].notna()].copy()
-    return d
-
-
-def _biggest_fish(f_df, t_df):
-    d = _fish_ranked(f_df, "weight_lb")
-    if d.empty:
-        return None
-    d = d.rename(columns={"weight_lb": "value"})
-    return d, "value", "Weight", "weight", [
-        ("species", "Species"), ("angler", "Angler"), ("lure", "Lure"), ("spot", "Spot"), ("date", "Date"),
-    ]
-
-
-def _longest_fish(f_df, t_df):
-    d = _fish_ranked(f_df, "length_in")
-    if d.empty:
-        return None
-    d = d.rename(columns={"length_in": "value"})
-    return d, "value", "Length (in)", "length", [
-        ("species", "Species"), ("angler", "Angler"), ("lure", "Lure"), ("spot", "Spot"), ("date", "Date"),
-    ]
-
-
-def _biggest_by_species(f_df, t_df):
-    d = _fish_ranked(f_df, "weight_lb")
-    if d.empty:
-        return None
-    idx = d.groupby("species")["weight_lb"].idxmax()
-    d = d.loc[idx].rename(columns={"weight_lb": "value"})
-    return d, "value", "Weight", "weight", [
-        ("species", "Species"), ("angler", "Angler"), ("lure", "Lure"), ("spot", "Spot"), ("date", "Date"),
-    ]
-
-
-def _agg_fish_count(f_df, group_col, label):
-    if f_df.empty:
-        return None
-    g = f_df.groupby(group_col)["count"].sum().reset_index().rename(columns={"count": "value"})
-    if g.empty:
-        return None
-    return g, "value", "Total fish", "int", [(group_col, label)]
-
-
-def _by_lure_count(f_df, t_df):
-    return _agg_fish_count(f_df, "lure", "Lure")
-
-
-def _by_spot_count(f_df, t_df):
-    return _agg_fish_count(f_df, "spot", "Spot")
-
-
-def _by_angler_count(f_df, t_df):
-    return _agg_fish_count(f_df, "angler", "Angler")
-
-
-def _by_day_count(f_df, t_df):
-    d = _agg_fish_count(f_df, "date", "Date")
-    if d is None:
-        return None
-    g, value_col, value_label, kind, display_cols = d
-    # Extra context: who actually caught them that day, so an "All anglers"
-    # view doesn't just show a bare number.
-    who = f_df.groupby("date")["angler"].agg(lambda s: ", ".join(sorted(set(s)))).reset_index()
-    who.columns = ["date", "anglers"]
-    g = g.merge(who, on="date", how="left")
-    return g, value_col, value_label, kind, [("date", "Date"), ("anglers", "Angler(s)")]
-
-
-def _rate_by(t_df, group_col, label, min_uses=1):
-    if t_df.empty:
-        return None
-    g = t_df.groupby(group_col).agg(total_fish=("fish_count", "sum"), uses=("trip_id", "count")).reset_index()
-    g = g[g["uses"] >= min_uses]
-    if g.empty:
-        return None
-    g["value"] = (g["total_fish"] / g["uses"]).round(2)
-    return g, "value", "Fish per use", "rate", [(group_col, label), ("total_fish", "Total fish"), ("uses", "Uses")]
-
-
-def _rate_by_lure(f_df, t_df):
-    return _rate_by(t_df, "lure", "Lure")
-
-
-def _rate_by_spot(f_df, t_df):
-    return _rate_by(t_df, "spot", "Spot")
-
-
-def _rate_by_angler(f_df, t_df):
-    return _rate_by(t_df, "angler", "Angler")
-
-
-def _biggest_by_group(f_df, group_col, label):
-    d = _fish_ranked(f_df, "weight_lb")
-    if d.empty:
-        return None
-    idx = d.groupby(group_col)["weight_lb"].idxmax()
-    d = d.loc[idx].rename(columns={"weight_lb": "value"})
-    extra = [(group_col, label)] if group_col != "species" else []
-    return d, "value", "Biggest fish", "weight", extra + [("species", "Species"), ("angler", "Angler"), ("date", "Date")]
-
-
-def _biggest_by_lure(f_df, t_df):
-    return _biggest_by_group(f_df, "lure", "Lure")
-
-
-def _biggest_by_spot(f_df, t_df):
-    return _biggest_by_group(f_df, "spot", "Spot")
-
-
-def _biggest_by_angler(f_df, t_df):
-    return _biggest_by_group(f_df, "angler", "Angler")
-
-
-def _single_trip(f_df, t_df):
-    if t_df.empty:
-        return None
-    d = t_df[t_df["fish_count"] > 0].copy()
-    if d.empty:
-        return None
-    d = d.rename(columns={"fish_count": "value"})
-    return d, "value", "Fish caught", "int", [
-        ("date", "Date"), ("angler", "Angler"), ("lure", "Lure"), ("spot", "Spot"),
-    ]
-
-
-CATEGORIES = [
-    ("biggest_fish", "🐟 Biggest fish (by weight)", _biggest_fish, True, True),
-    ("longest_fish", "📏 Longest fish (by length)", _longest_fish, True, True),
-    ("biggest_by_species", "🐟 Biggest fish by species (best of each)", _biggest_by_species, True, False),
-    ("by_lure_count", "🎣 Most fish caught — by lure", _by_lure_count, True, True),
-    ("rate_by_lure", "🎣 Best fish-per-use rate — by lure", _rate_by_lure, True, False),
-    ("biggest_by_lure", "🎣 Biggest fish caught — by lure", _biggest_by_lure, True, True),
-    ("by_spot_count", "📍 Most fish caught — by spot", _by_spot_count, True, True),
-    ("rate_by_spot", "📍 Best fish-per-trip rate — by spot", _rate_by_spot, True, False),
-    ("biggest_by_spot", "📍 Biggest fish caught — by spot", _biggest_by_spot, True, True),
-    ("by_angler_count", "🧑 Most fish caught — by angler", _by_angler_count, False, True),
-    ("rate_by_angler", "🧑 Best fish-per-trip rate — by angler", _rate_by_angler, False, False),
-    ("biggest_by_angler", "🧑 Biggest fish caught — by angler", _biggest_by_angler, False, True),
-    ("by_day_count", "📅 Most fish caught — in a single day", _by_day_count, True, True),
-    ("single_trip", "🎯 Most fish caught — in a single trip", _single_trip, True, True),
-]
-CATEGORY_LABELS = [c[1] for c in CATEGORIES]
-CATEGORY_BY_LABEL = {c[1]: c for c in CATEGORIES}
-
-st.caption(
-    "Ranks your logged trip history (same data as Trip History) different ways - biggest/"
-    "longest fish, most productive lures/spots/anglers, best fish-per-use rates, and more. "
-    "Pick a category, filter it down if you want, and see the top of the list either direction."
+_season = season_label(trips_df) or "All time"
+st.markdown(
+    f"""
+    <div class="stringer-topbar">
+        <span class="stringer-brand">🎣 THE STRINGER</span>
+        <span class="stringer-season-chip">{_season}</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
-category_label = f1.selectbox("Category", CATEGORY_LABELS, key="lb_category")
-_key, _label, _builder, _supports_angler, _supports_species = CATEGORY_BY_LABEL[category_label]
+# --- Hero: cyclable ring-chart season stats -----------------------------------
+_states = hero_states(fish_df, trips_df)
+if _states:
+    st.session_state.setdefault("stringer_ring_idx", 0)
+    st.session_state["stringer_ring_idx"] %= len(_states)
 
-angler_choice = "All anglers"
-if _supports_angler:
-    angler_choice = f2.selectbox("Angler", ANGLER_OPTIONS, key="lb_angler")
-else:
-    f2.selectbox("Angler", ["All anglers"], disabled=True, key="lb_angler_disabled",
-                 help="This category already ranks by angler.")
+    with st.container(key="stringer_hero"):
+        head_l, head_c, head_r = st.columns([1, 8, 1])
+        # Punch-list #97: every one of these buttons calls st.rerun() itself
+        # right after moving the index, rather than just falling through to
+        # render the rest of this same script run - the dots below are
+        # necessarily rendered AFTER the title/ring above them (that's the
+        # mockup's own layout), so a click on a dot can't retroactively fix
+        # up content this same pass already emitted further up the page.
+        # Forcing an immediate fresh rerun (same pattern pages/7_Development.py
+        # and pages/6_Spot_Session.py already use after every mutation) means
+        # the very next run starts clean and renders title/ring/dots all
+        # from one single, already-final index - never a stale title next to
+        # an updated ring, or a dot highlight one click behind.
+        if head_l.button("‹", key="stringer_ring_prev", help="Previous stat"):
+            st.session_state["stringer_ring_idx"] = (st.session_state["stringer_ring_idx"] - 1) % len(_states)
+            st.rerun()
+        if head_r.button("›", key="stringer_ring_next", help="Next stat"):
+            st.session_state["stringer_ring_idx"] = (st.session_state["stringer_ring_idx"] + 1) % len(_states)
+            st.rerun()
 
-species_choice = "All species"
-if _supports_species:
-    species_choice = f3.selectbox("Species", SPECIES_OPTIONS, key="lb_species")
-else:
-    f3.selectbox("Species", ["All species"], disabled=True, key="lb_species_disabled",
-                 help="This category isn't broken out by individual catch, so a species filter "
-                      "wouldn't change anything - and would silently drop trips logged before "
-                      "per-fish detail existed.")
-
-is_species_view = _key == "biggest_by_species"
-if is_species_view:
-    f4.selectbox("Show", ["All species"], disabled=True, key="lb_topn_disabled")
-    top_n = None
-    sort_dir = "High to low"
-else:
-    top_n_choice = f4.selectbox("Show", ["Top 5", "Top 10", "Top 25", "All"], index=1, key="lb_topn")
-    top_n = None if top_n_choice == "All" else int(top_n_choice.split()[1])
-    sort_dir = st.radio("Sort", ["High to low", "Low to high"], horizontal=True, key="lb_sort")
-
-f_filtered, t_filtered = _filtered_frames(angler_choice, species_choice)
-result = _builder(f_filtered, t_filtered)
-
-st.divider()
-
-if result is None:
-    st.caption("No data matches these filters yet - try a different angler/species, or log a few more trips.")
-else:
-    df, value_col, value_label, value_kind, display_cols = result
-    ascending = sort_dir == "Low to high"
-    df = df.sort_values(value_col, ascending=ascending)
-    if top_n is not None:
-        df = df.head(top_n)
-    df = df.reset_index(drop=True)
-
-    def _fmt_value(v):
-        if value_kind == "weight":
-            return format_weight_lb_oz(v) or "-"
-        if value_kind == "length":
-            return f"{v:g} in"
-        if value_kind == "rate":
-            return f"{v:g}"
-        try:
-            return f"{int(v):,}"
-        except (TypeError, ValueError):
-            return str(v)
-
-    def _medal(i):
-        return {0: "🥇", 1: "🥈", 2: "🥉"}.get(i, f"{i + 1}")
-
-    show = pd.DataFrame({"Rank": [_medal(i) for i in range(len(df))]})
-    for col, header in display_cols:
-        vals = df[col]
-        if col == "date":
-            vals = vals.apply(lambda d: d.strftime("%m/%d/%Y") if d else "-")
-        show[header] = vals.values
-    show[value_label] = df[value_col].apply(_fmt_value).values
-
-    st.dataframe(show, width='stretch', hide_index=True)
-
-    if not is_species_view and value_kind in ("int", "rate") and len(df) > 1:
-        chart_labels = display_cols[0][0]
-        chart_series = pd.Series(df[value_col].values, index=df[chart_labels].astype(str).values, name=value_label)
-        st.bar_chart(chart_series, horizontal=True)
-
-    st.caption(f"{len(df)} row(s) shown.")
-    if _key in ("rate_by_lure", "rate_by_spot", "rate_by_angler"):
-        st.caption(
-            "A high rate from very few uses isn't necessarily reliable - check the \"Uses\" "
-            "column before reading too much into it."
+        s = _states[st.session_state["stringer_ring_idx"]]
+        head_c.markdown(f"<h2>{s.title}</h2>", unsafe_allow_html=True)
+        pct = (s.value / s.total) if s.total else 0.0
+        pct = max(0.0, min(1.0, pct))
+        circumference = 2 * math.pi * 86
+        offset = circumference * (1 - pct)
+        st.markdown(
+            f"""
+            <div class="stringer-ring-wrap">
+                <svg viewBox="0 0 200 200">
+                    <circle cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent-track)" stroke-width="16"/>
+                    <circle cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent)" stroke-width="16"
+                            stroke-linecap="round" stroke-dasharray="{circumference:.1f}"
+                            stroke-dashoffset="{offset:.1f}"/>
+                </svg>
+                <div class="stringer-ring-center">
+                    <div class="stringer-ring-legend"><span class="stringer-swatch"></span>{s.legend}</div>
+                    <div class="stringer-ring-value">{round(pct * 100)}%</div>
+                </div>
+            </div>
+            <div class="stringer-ring-desc">{s.desc}</div>
+            <div class="stringer-hero-secondary">
+                <div class="stringer-hero-label">{s.sec_label}</div>
+                <div class="stringer-hero-big">{_style_units(s.sec_value)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+        if len(_states) > 1:
+            with st.container(key="stringer_dots"):
+                dot_cols = st.columns(len(_states))
+                for i, col in enumerate(dot_cols):
+                    is_active = i == st.session_state["stringer_ring_idx"]
+                    if col.button(
+                        "●", key=f"stringer_dot_{i}", type="primary" if is_active else "secondary",
+                        help=f"Show stat {i + 1}",
+                    ):
+                        st.session_state["stringer_ring_idx"] = i
+                        st.rerun()
+
+# --- Underline tabs + ranked list ----------------------------------------------
+with st.container(key="stringer_tabs"):
+    tab_objs = st.tabs([label for _, label, _, _ in CATEGORIES])
+    for tab, (_, label, sort_note, builder) in zip(tab_objs, CATEGORIES):
+        with tab:
+            category_rows = builder(fish_df, trips_df)
+            if not category_rows:
+                st.markdown(
+                    f"""
+                    <div class="stringer-panel">
+                        <div class="stringer-panel-head"><h3>{label}</h3></div>
+                        <div class="stringer-empty">No data for this category yet.</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                continue
+            row_html = []
+            for i, r in enumerate(category_rows):
+                rank = i + 1
+                tag_html = f'<span class="stringer-row-tag">{r["tag"]}</span>' if r["tag"] else ""
+                row_html.append(f"""
+                <div class="stringer-row">
+                    <div class="stringer-rank{' r1' if rank == 1 else ''}">{rank}</div>
+                    <div>
+                        <div class="stringer-row-primary">{r['primary']}</div>
+                        <div class="stringer-row-secondary">{r['secondary']}</div>
+                    </div>
+                    <div>
+                        <div class="stringer-row-num">{_style_units(r['num'])}</div>
+                        {tag_html}
+                    </div>
+                </div>
+                """)
+            st.markdown(
+                f"""
+                <div class="stringer-panel">
+                    <div class="stringer-panel-head"><h3>{label}</h3><span class="stringer-sort-note">{sort_note}</span></div>
+                    {''.join(row_html)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+# --- Glance panel: season activity + species mix -------------------------------
+_dates = trips_df["date"].dropna()
+if not _dates.empty:
+    _lo, _hi = _dates.min(), _dates.max()
+    _daily = daily_activity_series(fish_df, _lo, _hi)
+    _mix = species_mix(fish_df)
+
+    _max_fish = max((c for _, c in _daily), default=0)
+    _bars = ""
+    if _max_fish > 0 and _daily:
+        chart_w, chart_h, pad_b = 400, 130, 20
+        bar_gap = 1.2
+        bar_w = max(chart_w / len(_daily) - bar_gap, 0.6)
+        peak_i = max(range(len(_daily)), key=lambda i: _daily[i][1])
+        parts = []
+        for i, (_, count) in enumerate(_daily):
+            x = i * (chart_w / len(_daily))
+            h = max((count / _max_fish) * (chart_h - pad_b), 0.6) if count else 0.6
+            y = (chart_h - pad_b) - h
+            color = "var(--stringer-accent)" if i == peak_i else "var(--stringer-muted)"
+            opacity = "1" if i == peak_i else "0.5"
+            parts.append(
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="0.6" '
+                f'fill="{color}" opacity="{opacity}"/>'
+            )
+        parts.append(
+            f'<line x1="0" x2="{chart_w}" y1="{chart_h - pad_b}" y2="{chart_h - pad_b}" '
+            f'stroke="var(--stringer-border)" stroke-width="1"/>'
+        )
+        _bars = (
+            f'<svg viewBox="0 0 {chart_w} {chart_h}" preserveAspectRatio="none" '
+            f'style="width:100%;height:auto;display:block;">{"".join(parts)}</svg>'
+        )
+    else:
+        _bars = '<div class="stringer-empty">No catches logged yet this season.</div>'
+
+    _species_rows = ""
+    if _mix:
+        top_count = _mix[0][1]
+        for name, count in _mix:
+            width_pct = (count / top_count) * 100 if top_count else 0
+            fill_cls = "stringer-species-fill top" if count == top_count else "stringer-species-fill"
+            _species_rows += f"""
+            <div class="stringer-species-row">
+                <div class="stringer-species-name">{name}</div>
+                <div class="stringer-species-track"><div class="{fill_cls}" style="width:{width_pct:.1f}%"></div></div>
+                <div class="stringer-species-count">{count}</div>
+            </div>
+            """
+    else:
+        _species_rows = '<div class="stringer-empty">No per-fish detail logged yet.</div>'
+
+    total_fish_logged = int(fish_df["count"].sum()) if not fish_df.empty else 0
+    st.markdown(
+        f"""
+        <div class="stringer-glance">
+            <div class="stringer-glance-col">
+                <h4>Season activity</h4>
+                <div class="stringer-glance-sub">Fish caught per day, {_season}</div>
+                {_bars}
+            </div>
+            <div class="stringer-glance-col">
+                <h4>Species mix</h4>
+                <div class="stringer-glance-sub">{total_fish_logged} fish, all spots</div>
+                {_species_rows}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
