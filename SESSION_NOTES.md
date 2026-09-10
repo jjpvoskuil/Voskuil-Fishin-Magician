@@ -11759,6 +11759,40 @@ every real save.
     calling Phase 1 fully done. Flagged to the angler as the next thing to
     check.
 
+172. **`data` branch's `dev_tasks.csv`/`dev_tasks_counter.txt` had fallen
+    5 items behind `main`'s - resynced.** Found at the start of this
+    session, before picking a punch-list item to work on: `main`'s
+    `data/dev_tasks.csv` was at task #97 (counter 98), but `origin/data` -
+    the branch `sync_data_from_data_branch()` actually overlays onto the
+    live deployed app on every boot, and therefore the branch the
+    Development page's angler-facing punch list actually reflects - was
+    still stuck at #92 (counter 93). #93-96 (all already-shipped fixes:
+    Spot Session mid-session relocate, the score-derivation popover,
+    the water-temp gradient, and the bottom-nav Phase 1) and #97 (the
+    open Phase 2+ visual-redesign item) had only ever been committed to
+    `main`, exactly the gap this file's own "Two branches" callout warns
+    about - a prior coding session's direct `data/dev_tasks.csv` edit
+    reached `main` but never got the required second push to `data`. Net
+    effect: the live app's own Development page was silently showing a
+    stale, 5-items-behind punch list (missing #97 entirely, and still
+    listing #93-96 as if unresolved-per-that-branch even though they'd
+    long since shipped).
+
+    Fixed the same way the original punch-list #52 cutover populated
+    `data` in the first place: a throwaway worktree checked out to
+    `origin/data`, `git checkout origin/main -- data/dev_tasks.csv
+    data/dev_tasks_counter.txt` (touches only those two files - every
+    other `data`-branch file, i.e. real angler-logged `trip_log.csv` and
+    friends, untouched), commit, push straight to `data`. Verified via
+    `git fetch origin data` + `git show origin/data:data/dev_tasks.csv`
+    afterward: `data` now carries #93-97 and its counter reads 98,
+    matching `main`. No app code changed by this fix, so no test run was
+    needed - **flagging as a standing risk, not just a one-time cleanup**:
+    per the existing "Two branches" note, any future coding session that
+    edits `data/dev_tasks.csv`/`dev_tasks_counter.txt` directly must push
+    that change to BOTH `main` and `data` in the same session, or this
+    same silent drift will recur.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
