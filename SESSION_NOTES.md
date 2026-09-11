@@ -12007,6 +12007,49 @@ every real save.
     computed from a fake/local weather mock) - not a real angler trip, not
     part of this fix, `git checkout --` on that one file before staging.
 
+175. **Live report, same session: Spot Session's "Name" field unreachable
+    by scroll on a phone.** The angler's own report: "in spot session, I
+    can't scroll down far enough on my phone to enter the angler." Traced
+    to the "brand-new visit" landing screen (`pages/6_Spot_Session.py`,
+    the `not _identity_established and not _watching_established` block) -
+    the shortest state this page ever renders (one `st.info` banner plus
+    the "🎣 Who's this?" selectbox, nothing else above it), so whatever
+    renders last in that block - the "Name" text input after picking
+    "Other," the watch-target picker, the reclaim-session button - sits
+    close to the very bottom of a short page, directly above
+    `core/nav.py`'s fixed bottom bar.
+
+    Reproduced with the same local-Streamlit-plus-Playwright harness entry
+    174 built (mobile viewport, real render, not just AppTest): scrolling
+    the actual `[data-testid="stMain"]` container to its programmatic max
+    DID show the Name field clear of the bottom bar in this sandbox - so
+    the exact failure mode couldn't be nailed down here (no real phone or
+    on-screen keyboard to test against; a phone's virtual keyboard eating
+    into the visible viewport, or iOS Safari's well-documented "nested
+    `position:absolute; overflow:auto` scroll container doesn't quite
+    reach its true scrollHeight via momentum scroll" quirk, are both
+    plausible and both invisible to a headless desktop-Chromium repro).
+    Given the report is real and the exact mechanism isn't reproducible
+    here, fixed with safe, low-risk insurance rather than a fix aimed at
+    one guessed mechanism: a `_stop_with_scroll_room()` helper wraps every
+    `st.stop()` in that landing block, rendering a 240px invisible spacer
+    first - so there's always genuine extra scrollable room past whatever
+    the real last widget is, regardless of which branch fires, cheap
+    enough that it can't make anything worse even if the guessed mechanism
+    is wrong. Scoped to just this one short-page state (not a site-wide
+    padding change) to avoid adding unwanted blank space to every other,
+    already-long page.
+
+    **Verified:** full suite (645 passed, unchanged), a targeted `AppTest`
+    walk through the "Other" name-entry path specifically (select "Other,"
+    type a name, no exception), and the Playwright harness confirming the
+    spacer is real (measured `scrollHeight` growing by the full 240px and
+    the Name field landing well clear of the bottom bar with room to
+    spare). **Could not verify against an actual phone/keyboard** - flagged
+    to the angler as still worth a real on-device check; if the field is
+    still unreachable after this ships, the mechanism is something this
+    sandbox genuinely can't see, not that the fix didn't apply.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
