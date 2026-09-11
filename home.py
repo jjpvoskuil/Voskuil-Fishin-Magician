@@ -54,7 +54,7 @@ st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
@@ -125,13 +125,23 @@ st.markdown(
     }
     .home-card-head { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
     .home-card-head h3 { font-size:.95rem; font-weight:700; margin:0; color:var(--stringer-ink); }
-    /* "Today at a Glance" metric tiles - IBM Plex Mono values, muted
-       Jakarta Sans labels, same pairing as every other number on The
-       Stringer. inject_compact_metric_css() (called right below, unchanged)
-       still owns the actual font SIZE / mobile-stacking behavior - this
-       only adds family/color on top of it. */
+    /* "Today at a Glance" metric tiles - IBM Plex Mono read too much like a
+       typewriter/telegraph to the angler ("this font is too telegraph type
+       looking"), so these values (and the daily/weekly award-tile values
+       below) moved to Space Grotesk - still a distinct, numbers-forward
+       display face, just not monospace. tabular-nums keeps digit widths
+       even, even though Space Grotesk isn't a monospace font, so a value
+       like "7.4 / 10" doesn't visually jitter against its neighbors.
+       Everything else that was already IBM Plex Mono (the date chip above,
+       The Stringer's own numbers on pages/8_Leaderboard.py) is unchanged -
+       the angler's ask was scoped to "the numbers and the txt for the
+       daily/weekly leaders," not every mono use on the site. Muted Jakarta
+       Sans labels are unchanged. inject_compact_metric_css() (called right
+       below, unchanged) still owns the actual font SIZE / mobile-stacking
+       behavior - this only adds family/color on top of it. */
     .st-key-today_at_a_glance_metrics [data-testid="stMetricValue"] {
-        font-family:"IBM Plex Mono", monospace; color:var(--stringer-ink);
+        font-family:"Space Grotesk", system-ui, sans-serif; font-variant-numeric:tabular-nums;
+        color:var(--stringer-ink);
     }
     .st-key-today_at_a_glance_metrics [data-testid="stMetricLabel"] {
         font-family:"Plus Jakarta Sans", system-ui, sans-serif; color:var(--stringer-muted); font-weight:600;
@@ -177,7 +187,8 @@ st.markdown(
        selector covers today's and this week's tiles from one rule instead
        of duplicating it per period. */
     [class*="st-key-activity_awards_"] [data-testid="stMetricValue"] {
-        font-family:"IBM Plex Mono", monospace; color:var(--stringer-ink);
+        font-family:"Space Grotesk", system-ui, sans-serif; font-variant-numeric:tabular-nums;
+        color:var(--stringer-ink);
     }
     [class*="st-key-activity_awards_"] [data-testid="stMetricLabel"] {
         font-family:"Plus Jakarta Sans", system-ui, sans-serif; color:var(--stringer-muted); font-weight:600;
