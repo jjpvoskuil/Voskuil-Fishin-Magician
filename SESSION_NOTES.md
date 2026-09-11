@@ -12343,6 +12343,107 @@ every real save.
     un-truncated, and the computed-style checks above on both tabs in
     light and dark mode.
 
+181. **Punch-list #98 Phase 4: 7-Day Forecast restyled to match Home/The
+    Stringer.** Angler's own ask: "OK...looks pretty good. Lets move on to
+    the 7 day forecast," confirmed via a follow-up question to mean the
+    same visual rollout, not a functional change. This is the most
+    structurally different of the three pages redesigned so far - Home and
+    The Stringer are mostly custom HTML panels over a handful of widgets,
+    but this page is a deep, genuinely interactive tree (a week-long
+    `st.metric` row, then a real `st.expander` per day, each containing
+    `st.columns`, `st.write`/`st.caption` text, `st.warning`/`st.success`
+    alerts, a second row of `st.metric` segment tiles, and a THIRD level of
+    nested `st.expander`s for each segment's lure setup - which can
+    themselves contain a FOURTH-level nested expander from
+    `core.ui.render_lure_recommendation()`'s own "tackle box gaps"
+    section) - so this pass reskins real, deeply nested native widgets
+    rather than mostly replacing markup with custom HTML panels.
+
+    Added the same `--stringer-*` design tokens (light + dark, including
+    the glossy-gradient card tokens) and a brand topbar, kept in sync by
+    hand with `home.py`/`pages/8_Leaderboard.py`'s own copies exactly like
+    those two already do with each other. One deliberate departure from
+    both: no IBM Plex Mono import at all on this page. The angler's own
+    most recent ask before this one (entry 180) was to move OFF that exact
+    typeface for being "too telegraph type looking" - reintroducing it here
+    only to probably swap it again later would be working against that
+    feedback, not with it, so every number on this page (the week-summary
+    tiles and every day's own segment-score tiles) uses Space Grotesk from
+    the start, matching where Home's own numbers already moved to. Wrapped
+    the week-summary row in `st.container(key="forecast_week_card")` and
+    the entire day loop in `st.container(key="forecast_days_list")` (the
+    minimum structural change needed - no widget was added, removed, or
+    reordered, only two new wrapping `with` blocks and a re-indent) so
+    every rule below could be scoped to this page's own content via CSS,
+    without touching `core/ui.py`'s shared helpers (`render_score_
+    breakdown`, `render_lure_recommendation`, `render_lake_setup_sidebar`)
+    that other pages (Spot Session, and the sidebar that's genuinely
+    shared) also call - the sidebar itself (native Streamlit `st.sidebar`,
+    "Lake Setup Options") was deliberately left untouched for the same
+    reason: it's shared, native-styled real estate, not part of either
+    page's own card language.
+
+    Confirmed live (via `getComputedStyle()`, same discipline as every
+    other widget reskin on this site) that `[data-testid="stExpander"]`
+    itself carries no border/background of its own - its single `<details>`
+    child does - before writing the card-shell rule, and that nested
+    expanders (any `[data-testid="stExpander"]` inside another one,
+    regardless of depth) get a flatter, sunk look instead of the same
+    gradient/shadow card stacked inside itself: piling identical heavy
+    cards three or four levels deep reads as visual noise, not depth, so
+    only the outermost (per-day) expander gets the full glossy-gradient
+    treatment; anything nested inside it - the per-segment lure-setup
+    expander, and its own possible "tackle box gaps" expander one level
+    deeper - gets a plain `var(--stringer-surface-sunk)` fill with a
+    hairline border instead. One descendant selector
+    (`[data-testid="stExpander"] [data-testid="stExpander"]`) covers every
+    nesting level at once, so it doesn't need to know how deep any given
+    day's content happens to go.
+
+    **A real bug caught by live dark-mode verification, not present in
+    Home/The Stringer's own dark-mode checks:** this page's plain
+    `st.write()`/`st.caption()` body text (water temp, sunrise/sunset,
+    weather summary, the solunar-overlap caption, and the alert text
+    inside `st.warning`/`st.success`) rendered essentially invisible - dark
+    text on a dark card - once the card's own background flipped dark
+    under `prefers-color-scheme: dark`. Root cause: `.streamlit/
+    config.toml` pins a FIXED light theme (`textColor = "#262730"`) for
+    this whole app, so Streamlit's own native widget text never itself
+    follows the OS/browser dark-mode preference the way these
+    `--stringer-*` CSS custom properties do - only an explicit color
+    override closes that gap once a card's own background starts
+    following it instead. Home's own bestwindow-card alert restyle (entry
+    178) already needed the exact same fix for the exact same reason, but
+    that page only had ONE spot where default-colored text sat on a custom
+    background, so the underlying mechanism was easy to miss generalizing
+    from; this page has half a dozen, all fixed with two rules scoped to
+    `[data-testid="stExpanderDetails"]` (a sibling of `summary`, not an
+    ancestor of it, so the fix doesn't also mute the bold, already-
+    correctly-colored day/segment title text sitting in the header above
+    it) rather than one at a time.
+
+    **Verified:** full suite (645 passed, including the existing AppTest
+    coverage in `tests/test_forecast_page_score_breakdown.py`, unaffected
+    by the new wrapping containers), scanned the edited `<style>` block
+    programmatically for blank lines before testing, and - since this
+    page's own weather fetch (unlike `home.py`'s) isn't wrapped in a
+    try/except, so it simply can't render past `st.stop()` at all against
+    this sandbox's blocked network - a live Playwright render against a
+    throwaway wrapper script that monkeypatches `core.appstate.get_weather_
+    bundle()` (and friends) with the same synthetic-but-realistic
+    `WeatherBundle` fixture `tests/test_forecast_page_score_breakdown.py`
+    already builds for AppTest, run through the REAL page file via
+    `runpy.run_path()` rather than a rewritten copy. That render confirmed:
+    no CSS-as-text leak and the full style block un-truncated; the week
+    card's and every segment tile's numbers computing to Space Grotesk;
+    the outer day card and inner lure-setup/gaps expanders each showing
+    their own distinct (card vs. sunk) treatment, correctly, three and
+    four levels deep; the dark-mode text-contrast bug above, caught and
+    then re-confirmed fixed; and, after the fix, that real interactivity
+    still worked end to end - a day's own expander still opens and closes
+    on click, a score-breakdown popover still opens - with no non-network
+    console/page errors either before or after.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
