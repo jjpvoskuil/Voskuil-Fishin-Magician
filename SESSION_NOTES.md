@@ -12177,6 +12177,74 @@ every real save.
     the ‹/› buttons and the swipe gesture (entry 176) both still work
     unchanged alongside the new dot layout. Full suite: 645 passed.
 
+178. **Punch-list #98 Phase 3: Today/Home redesigned in The Stringer's
+    visual language.** The angler's own ask, after Leaderboard shipped:
+    "lets pretty up some other pages," starting with Today. Restyled
+    `home.py` - the plain `st.title()`/`st.caption()` pair became a
+    `.home-topbar` brand row (wordmark + a rolling "today at the lake"
+    date chip, same shape as The Stringer's own season chip); "Today at a
+    Glance," "Best Window Today," and "Fishing Activity" each became one
+    `st.container(key=...)` card (Plus Jakarta Sans headers, IBM Plex Mono
+    metric values, one muted teal accent); the Fishing Activity tabs got
+    the identical underline treatment as The Stringer's six ranked-list
+    tabs; and `st.info`/`st.warning` inside the Best Window card were
+    re-skinned with a flat surface and a colored left rule (teal for info,
+    amber for warning) instead of Streamlit's default saturated blue/
+    yellow. Deliberately kept every widget REAL (st.metric, st.popover,
+    st.tabs, st.dataframe, st.info/st.warning) rather than replacing any
+    of it with static HTML - unlike The Stringer's ranked lists (pure
+    display), this page's popovers/help-tooltips/delta-coloring are all
+    genuinely interactive, so only the CSS skin changed, not the
+    underlying widgets, keeping risk to the actual data/calibration logic
+    at zero. `<style>` and its `<link>` font tags were deliberately split
+    into two separate `st.markdown()` calls this time (entries 174/177's
+    same bug class - a mid-string blank line silently truncating
+    everything after it - only bites when the raw-text tag ISN'T the very
+    first content in its string), closing off that whole failure mode here
+    instead of just remembering not to add a blank line.
+
+    Two real, pre-existing bugs surfaced by actually live-verifying this
+    page at real phone width (not just reasoning about the CSS, or trusting
+    an old docstring's claim of "confirmed live"):
+    - `core.ui.inject_compact_metric_css(..., stack_on_mobile=True)` - used
+      by the Fishing Activity award tiles (and documented, since punch-list
+      #91, as forcing one tile per row on a phone so long labels like
+      "String King - Top Angler" don't truncate) - had in fact NEVER worked
+      below 700px. Same specificity fight as entry 177's dots, just never
+      caught before now: `core.ui.inject_mobile_css()`'s own 3+-column
+      reflow rule (`:has()`'s argument counts toward specificity, working
+      out to (0,4,1) - see entry 177 for the full derivation) beat this
+      function's single-class-scoped override outright. Fixed the same
+      way, in the shared helper itself (not just home.py) so every current
+      and future caller benefits: repeat the scoping class 4x to push this
+      rule to (0,5,0). `tests/test_ui.py`'s own
+      `test_compact_metric_css_stack_on_mobile_forces_full_width_columns`
+      asserted the OLD (broken) single-repeat selector shape - updated to
+      expect the fixed 4x-repeat one, whitespace-normalized since the real
+      CSS now wraps that selector across two lines for readability.
+    - The `st.info`/`st.warning` restyle's first pass targeted the wrong
+      DOM layer - `[data-testid="stAlert"]`, the outermost wrapper, which
+      carries no background of its own to override - and silently had zero
+      visible effect. Found by rendering a standalone scratch
+      `st.info()`/`st.warning()` and inspecting the real DOM directly: the
+      actual tinted background lives on the middle
+      `[data-testid="stAlertContainer"]` layer. Re-verified the corrected
+      selector the same way (a live screenshot) before trusting it.
+
+    **Verified:** full suite (645 passed, including the updated
+    `test_ui.py` assertion), a live Playwright render at real phone width
+    with no literal CSS-as-text leaking into the page (the entry-174 bug
+    class), no console/page errors, both the "Today" and "This Week" tabs
+    confirmed reachable, the award tiles confirmed one-per-row at 390px
+    after the `inject_compact_metric_css` fix, and the alert re-skin and
+    dataframe-card rounding each confirmed against an isolated scratch
+    render before trusting them on the real page (this sandbox's own lack
+    of outbound network access means Open-Meteo/USGS/USACE all fail here,
+    so the real "Best Window Today" card and a populated leaderboard table
+    couldn't be exercised end-to-end live in this environment the way the
+    "Today at a Glance"/"Fishing Activity" cards were - covered instead by
+    the full AppTest suite plus the isolated live-CSS checks above).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

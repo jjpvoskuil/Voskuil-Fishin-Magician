@@ -49,12 +49,18 @@ The Home page's "🎣 Fishing Activity" award tiles (punch-list #91 follow-up) h
 truncation problem in a different shape: their labels ("String King - Top Angler," "Z-Man - Bag
 Limit Buster") are long enough that even `inject_mobile_css()`'s generic reflow - which still
 fits 2 tiles per row at its 120px column minimum - left `st.metric`'s own built-in
-`white-space: nowrap` + ellipsis CSS clipping every label with "...". Confirmed live and fixed by
-forcing that row to one tile per row below the phone breakpoint
-(`core.ui.inject_compact_metric_css(..., stack_on_mobile=True)`), on top of shortening the labels
-themselves (dropped the redundant "of the Day"/"of the Week," since the Today/This Week tab
-already says that) and moving the roster's 🟢/⚪ legend out of a repeated inline-text prefix into
-a one-time hover tooltip.
+`white-space: nowrap` + ellipsis CSS clipping every label with "...". Fixed by forcing that row to
+one tile per row below the phone breakpoint (`core.ui.inject_compact_metric_css(...,
+stack_on_mobile=True)`), on top of shortening the labels themselves (dropped the redundant "of the
+Day"/"of the Week," since the Today/This Week tab already says that) and moving the roster's 🟢/⚪
+legend out of a repeated inline-text prefix into a one-time hover tooltip. That `stack_on_mobile`
+override was believed "confirmed live" when first written, but punch-list #98's redesign (below)
+found - by actually rendering the page through a headless browser at real phone width, not just
+reasoning about the CSS - that it had never really worked: `core.ui.inject_mobile_css()`'s own
+site-wide 3+-column reflow rule out-specified it, the same class of `:has()`-selector specificity
+fight SESSION_NOTES.md entries 177/178 (and `core/nav.py`'s own bottom-nav bar fix before them)
+kept running into elsewhere this same session. Now genuinely fixed (and live-verified) in
+`inject_compact_metric_css()` itself - see entry 178.
 
 Add the app to your home screen from Safari (Share -> Add to Home Screen) for a one-tap icon -
 this works today at zero cost. One caveat: Streamlit Community Cloud serves the app inside an
@@ -64,6 +70,19 @@ Safari actually reads when you bookmark it, including its `apple-touch-icon`/`ma
 `favicon_*.png`/`manifest.json`, not anything this repo could serve). So the home-screen icon
 will carry Streamlit's default branding rather than a custom one - there's no code change in
 this repo that can override it on this hosting.
+
+The Home ("Today") page was restyled to match The Stringer's own visual language - Plus Jakarta
+Sans + IBM Plex Mono, one muted teal accent, flat cards (punch-list #98 Phase 3, following the
+Leaderboard's own Phase 2 redesign; site-wide rollout continues one page at a time). The plain
+title/caption became a brand row with a rolling "today at the lake" date chip; "Today at a
+Glance," "Best Window Today," and "Fishing Activity" each became their own card; the Fishing
+Activity tabs got the same underline treatment as The Stringer's ranked-list tabs; and the
+info/warning boxes in "Best Window Today" were re-skinned with a colored left rule instead of
+Streamlit's default blue/yellow. Every widget underneath (metrics, popovers, tabs, the
+leaderboard table, info/warning boxes) is still the real, fully interactive Streamlit widget -
+only the CSS skin changed - see SESSION_NOTES.md entry 178 for the full story, including two
+real pre-existing mobile bugs (one in a shared helper used by other pages too) that a live
+Playwright render at real phone width caught along the way.
 
 ## What it does
 
