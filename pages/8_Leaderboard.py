@@ -123,6 +123,37 @@ st.markdown(
     .st-key-stringer_hero iframe {
         border:none !important; width:100% !important; display:block;
     }
+    /* The dots are real st.columns(len(_states)) under the hood (each dot
+       needs its own click target), which by default stretches them into
+       equal-width columns spanning the card's full width - leaving wide
+       gaps between just 2-3 dots. Force that row to shrink-wrap and
+       center instead, so the dots sit snug together right under the ring
+       image rather than spread edge-to-edge.
+       Live-verified (Playwright, at a real phone-width viewport - this
+       silently doesn't matter above ~700px, which is easy to miss testing
+       by eye on a desktop window) that a plain single-class-scoped
+       override here has ZERO effect below 700px: this app's OWN
+       `core.ui.inject_mobile_css()` (called by every page, including this
+       one) ships a global `!important` rule reflowing any 3+ column row
+       below that width - `[data-testid="stHorizontalBlock"]:has(>
+       [data-testid="stColumn"]:nth-child(3))` for the wrap, plus a
+       `min-width/flex: 120px !important` per column - correct for the
+       wide data/metric rows it was written for, wrong for this narrow dot
+       row. `core/nav.py` hit this exact same specificity fight for the
+       bottom nav bar (see its own "polish round 3/4" comments) and worked
+       out the fix: a `:has()` pseudo-class argument counts toward
+       specificity too, working out to (0,3,0)/(0,4,1) for the two rules
+       above, and repeating OUR scoping class here (a valid, deliberate
+       specificity bump, not a typo) out-ranks both outright - no source-
+       order tie-breaking needed either way, matching that page's own
+       fix. */
+    .st-key-stringer_dots.st-key-stringer_dots.st-key-stringer_dots [data-testid="stHorizontalBlock"] {
+        display:flex !important; justify-content:center !important; flex-wrap:nowrap !important;
+        gap:4px !important;
+    }
+    .st-key-stringer_dots.st-key-stringer_dots.st-key-stringer_dots.st-key-stringer_dots [data-testid="stColumn"] {
+        width:auto !important; min-width:0 !important; flex:0 0 auto !important;
+    }
     .st-key-stringer_dots button[kind="secondary"] {
         background:none !important; border:none !important; box-shadow:none !important;
         color:var(--stringer-border) !important; font-size:.6rem !important; padding:2px !important;
