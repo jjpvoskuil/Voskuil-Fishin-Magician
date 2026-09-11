@@ -332,8 +332,17 @@ def test_compact_metric_css_stack_on_mobile_forces_full_width_columns(monkeypatc
     assert "flex: 1 1 100%" in mobile_block
     assert "min-width: 100%" in mobile_block
     # Must be scoped to THIS container's key, not a bare column selector
-    # that would affect every column on the page.
-    assert ".st-key-activity_awards_today [data-testid=\"stColumn\"]" in mobile_block
+    # that would affect every column on the page. Punch-list #98: the
+    # scoping class is deliberately repeated 4x here (not a typo) - see
+    # this function's own docstring and SESSION_NOTES.md entry 178 for why
+    # a single repeat lost a real, live-verified specificity fight against
+    # inject_mobile_css()'s own `:has()`-based reflow rule for any 3+
+    # column row below the same breakpoint. Whitespace-normalized before
+    # comparing since the real CSS wraps the selector across lines for
+    # readability.
+    normalized = " ".join(mobile_block.split())
+    expected_selector = " ".join((".st-key-activity_awards_today" * 4 + ' [data-testid="stColumn"]').split())
+    assert expected_selector in normalized
     # And it must not leak into the unconditional (pre-media-query) CSS.
     unconditional_block = css[:media_start]
     assert "flex: 1 1 100%" not in unconditional_block

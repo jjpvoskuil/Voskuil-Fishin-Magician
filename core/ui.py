@@ -197,20 +197,38 @@ def inject_compact_metric_css(container_key: str, value_rem: float = 1.15, label
 
     `stack_on_mobile=True` (punch-list #91 follow-up) additionally forces
     every column in this container to full row width - one tile per row -
-    once the phone-width breakpoint hits. Confirmed live this is needed
-    for home.py's "Fishing Activity" award tiles: their labels ("String
-    King - Top Angler," "Z-Man - Top Bag Limit Buster") are long enough
-    that `inject_mobile_css()`'s own generic reflow (min-width 120px,
-    still 2-per-row on a normal phone width) wasn't enough room - Streamlit's
+    once the phone-width breakpoint hits. Originally written for home.py's
+    "Fishing Activity" award tiles: their labels ("String King - Top
+    Angler," "Z-Man - Top Bag Limit Buster") are long enough that
+    `inject_mobile_css()`'s own generic reflow (min-width 120px, still
+    2-per-row on a normal phone width) wasn't enough room - Streamlit's
     own `st.metric` label CSS is `white-space: nowrap` + ellipsis with no
     built-in way to wrap it onto a second line, so a column narrower than
     the full label just truncates with "...". One tile per row, at the
-    phone's full width, gives even the longest label real room instead."""
+    phone's full width, gives even the longest label real room instead.
+
+    Punch-list #98: this override had NEVER actually worked at real phone
+    width, for exactly the same reason entry 177 (SESSION_NOTES.md)
+    documents for The Stringer's dot indicators - `inject_mobile_css()`'s
+    own 3+-column reflow rule for any row below `MOBILE_BREAKPOINT_PX` is
+    `[data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]
+    :nth-child(3)) > div[data-testid="stColumn"]`, whose `:has()` argument
+    counts toward specificity and works out to (0,4,1) - comfortably
+    beating a single-class-scoped `!important` override like the one this
+    function used to emit. Caught live, on a real 3-tile award row, only
+    once this session started actually rendering pages through a headless
+    browser at real phone width instead of reasoning about the CSS from
+    the outside (see entries 174/176/177 for the same lesson learned three
+    separate times now). Fixed the same way `core/nav.py`'s bottom nav bar
+    and The Stringer's dots both already fixed it: repeat the scoping
+    class enough times to push this rule's own specificity to (0,5,0),
+    which beats (0,4,1) outright - a deliberate repeat, not a typo."""
     stack_css = ""
     if stack_on_mobile:
         stack_css = f"""
         @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
-            .st-key-{container_key} [data-testid="stColumn"] {{
+            .st-key-{container_key}.st-key-{container_key}.st-key-{container_key}.st-key-{container_key}
+                [data-testid="stColumn"] {{
                 flex: 1 1 100% !important;
                 min-width: 100% !important;
             }}
