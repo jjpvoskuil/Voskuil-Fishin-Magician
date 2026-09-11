@@ -72,6 +72,17 @@ st.markdown(
       --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E; --stringer-muted:#6E766F;
       --stringer-border:#E7E9E2; --stringer-accent:#2C7C6E; --stringer-accent-strong:#1F5F54;
       --stringer-accent-track:#D8EAE5;
+      /* Card "depth" treatment (punch-list #98 follow-up, angler's own ask
+         after seeing Home's first flat-card pass: "kind of a boring
+         look... 3D depth shaded boxes"). Same three tokens as home.py's
+         own copy (kept in sync by hand, same as every other --stringer-*
+         token) - a glossy-gradient card (soft top-light sheen, layered
+         shadow, hairline border), chosen by the angler from a set of
+         previewed options over a plain flat fill, a heavier drop-shadow-
+         only card, and a neumorphic soft-embossed one. */
+      --stringer-card-from:#FFFFFF; --stringer-card-to:#F5F7F1;
+      --stringer-card-shadow:0 1px 2px rgba(15,20,16,0.05), 0 6px 16px rgba(15,20,16,0.08);
+      --stringer-card-border:1px solid rgba(15,20,16,0.05);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -79,6 +90,12 @@ st.markdown(
         --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5; --stringer-muted:#8A948C;
         --stringer-border:#212A24; --stringer-accent:#4FAE9C; --stringer-accent-strong:#6FC2B2;
         --stringer-accent-track:#173630;
+        /* Dark mode leans on the gradient + a faint light hairline border
+           rather than the shadow (a black box-shadow barely shows against
+           an already-dark page) - see home.py's own copy of this comment. */
+        --stringer-card-from:#1A231D; --stringer-card-to:#10150F;
+        --stringer-card-shadow:0 1px 2px rgba(0,0,0,0.35), 0 6px 18px rgba(0,0,0,0.45);
+        --stringer-card-border:1px solid rgba(255,255,255,0.05);
       }
     }
     .stringer-topbar, .stringer-hero-desc, .stringer-panel, .stringer-glance,
@@ -109,7 +126,9 @@ st.markdown(
        around every such iframe - stripped of its default border/margin so
        it reads as part of this card, not a separate embedded box. */
     .st-key-stringer_hero {
-        background:var(--stringer-surface); border-radius:16px; padding:14px 18px 18px;
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
+        box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
+        border-radius:16px; padding:14px 18px 18px;
         text-align:center; margin-bottom:14px;
     }
     .st-key-stringer_hero [data-testid="stMarkdownContainer"] h2 {
@@ -165,7 +184,11 @@ st.markdown(
         min-height:0 !important;
     }
     /* Ranked-list panel. */
-    .stringer-panel { background:var(--stringer-surface); border-radius:16px; overflow:hidden; margin-bottom:14px; }
+    .stringer-panel {
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
+        box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
+        border-radius:16px; overflow:hidden; margin-bottom:14px;
+    }
     .stringer-panel-head {
         display:flex; align-items:baseline; justify-content:space-between; gap:12px;
         padding:14px 16px 8px; flex-wrap:wrap;
@@ -203,7 +226,9 @@ st.markdown(
     .st-key-stringer_tabs [data-baseweb="tab-border"] { background-color:transparent !important; }
     /* Glance panel: season activity chart + species mix. */
     .stringer-glance {
-        background:var(--stringer-surface); border-radius:16px; padding:14px 16px 16px;
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
+        box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
+        border-radius:16px; padding:14px 16px 16px;
         display:grid; grid-template-columns:1.3fr 1fr; gap:0;
     }
     @media (max-width:520px) { .stringer-glance { grid-template-columns:1fr; } }
