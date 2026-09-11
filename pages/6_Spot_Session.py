@@ -614,10 +614,27 @@ if not _identity_established and not _watching_established:
     )
     _landing_choice = st.selectbox("🎣 Who's this?", _landing_options, key="spot_session_landing_choice")
 
+    def _stop_with_scroll_room() -> None:
+        """A real angler report from a phone: this landing screen is often
+        the SHORTEST state this page ever renders (a brand-new visit has
+        nothing above it but one st.info banner and this selectbox), so
+        whatever renders last here - the "Name" field, the watch-target
+        picker, the reclaim-session button - can end up sitting right at
+        the edge of how far a phone's on-screen keyboard/momentum-scroll
+        will actually let a real user scroll, underneath core.nav's fixed
+        bottom bar. This dev sandbox has no real phone/keyboard to nail the
+        exact mechanism against (see SESSION_NOTES), so rather than guess
+        at the precise pixel math, add a big invisible spacer right before
+        every st.stop() in this block - cheap, safe insurance that there's
+        always genuine extra scroll room past the real content, regardless
+        of which branch above fired."""
+        st.markdown('<div style="height:240px"></div>', unsafe_allow_html=True)
+        st.stop()
+
     if _landing_choice == WATCH_LABEL:
         if not anglers_with_open_session_here:
             st.caption("No one has a session in progress at this spot right now - nothing to watch yet.")
-            st.stop()
+            _stop_with_scroll_room()
         if len(anglers_with_open_session_here) > 1:
             _watch_target = st.selectbox(
                 "Whose session?", anglers_with_open_session_here, key="spot_session_landing_watch_pick",
@@ -647,10 +664,10 @@ if not _identity_established and not _watching_established:
             st.session_state[angler_other_key] = _typed
             st.query_params[angler_query_key] = _typed
             st.rerun()
-        st.stop()
+        _stop_with_scroll_room()
 
     elif _landing_choice == LANDING_PROMPT:
-        st.stop()
+        _stop_with_scroll_room()
 
     else:
         st.session_state[angler_key] = _landing_choice
