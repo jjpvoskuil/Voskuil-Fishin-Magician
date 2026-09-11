@@ -95,6 +95,19 @@ angler called the old monospace numbers "too telegraph type looking" (SESSION_NO
 number on The Stringer/Leaderboard page) is unchanged - that was a deliberate scope call, not an
 oversight.
 
+The 7-Day Forecast page got the same treatment next (punch-list #98 Phase 4) - the same brand
+topbar and card language, with every number using Space Grotesk from the start rather than
+introducing IBM Plex Mono on a new page. This page is structurally deeper than Home or The
+Stringer (a real `st.expander` per day, itself nesting a nested lure-setup expander, itself
+sometimes nesting a "tackle box gaps" expander), so only the outermost per-day card gets the full
+glossy-gradient treatment - anything nested inside it gets a flatter, sunk-background look instead,
+so identical heavy cards don't stack visual noise three or four levels deep. Every widget
+underneath (the week/day/segment metrics, the score-breakdown popovers, the day/segment expanders
+themselves, the info/warning/success alerts) is still the real, interactive Streamlit widget - see
+SESSION_NOTES.md entry 181 for the full story, including a real dark-mode text-contrast bug (this
+app's fixed light theme means native widget text never itself follows the OS dark-mode preference
+the way this site's own `--stringer-*` card tokens do) caught and fixed along the way.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
