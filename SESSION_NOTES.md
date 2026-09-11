@@ -12133,6 +12133,50 @@ every real save.
     both missed entirely; see entry 174's first instance of the same
     lesson).
 
+177. **Live polish, same session: the ring hero's dot indicators sat far
+    apart instead of together.** The angler's own report, after entry
+    176 shipped: "the 3 dots below the volume image are far apart. Can
+    you put them next to each other in middle right below the volume
+    image?" - `st.columns(len(_states))` (one column per dot, needed so
+    each dot is its own click target) stretches into equal-width columns
+    spanning the whole card, which reads fine at 1-2 dots but leaves
+    wide gaps at 3.
+
+    First fix attempt (a plain `.st-key-stringer_dots [data-testid=...]`
+    override forcing the row to shrink-wrap and center) silently had
+    **zero effect** below 700px - the exact width real phones render at,
+    invisible testing this by eye on a wide sandbox window. Root cause
+    #1: this app's own `core.ui.inject_mobile_css()` (called by every
+    page) ships a global `!important` reflow rule for any 3+ column row
+    below 700px, and its selector - a `:has()` argument counts toward
+    specificity - out-specifies a plain single-class override.
+    `core/nav.py` had already fought and won this exact battle for the
+    bottom nav bar (its own "polish round 3/4" comments); reused that
+    fix's approach here (repeating the `.st-key-stringer_dots` scoping
+    class, a deliberate specificity bump, not a typo).
+
+    That still didn't work - live-Playwright checks kept showing the
+    OLD unstyled layout no matter how many times the server was
+    restarted from scratch on a fresh port, which ruled out Python-level
+    caching. Dumping the actual `<style>` tag content served to the
+    browser found the real root cause #2: the new CSS comment explaining
+    the fix above contained a blank line - and this page's own `<style>`
+    block is NOT the first thing in its `st.markdown(unsafe_allow_html=
+    True)` call (it's preceded by three `<link>` font tags, exactly the
+    at-risk shape entry 174 first diagnosed) - so that blank line
+    silently truncated the entire rest of the CSS block server-side,
+    before it ever reached the browser. Same bug class as entry 174,
+    self-inflicted this time while writing the fix for a different bug -
+    a reminder that the "no blank lines inside `unsafe_allow_html`
+    content" rule has to be honored in every future edit to this block,
+    not just the one entry 174 originally fixed.
+
+    **Verified, live:** dots now measure a tight 4px apart (16px wide
+    each, `flex:0 0 auto`, shrink-wrapped and centered) directly under
+    the ring at every viewport width tested, including real phone width;
+    the ‹/› buttons and the swipe gesture (entry 176) both still work
+    unchanged alongside the new dot layout. Full suite: 645 passed.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
