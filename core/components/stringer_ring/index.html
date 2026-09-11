@@ -1,0 +1,209 @@
+<!--
+The Stringer's ring hero - swipe-left/right support (punch-list, angler's
+own ask; SESSION_NOTES entry 176 has the full "why a custom component"
+story). This app's FIRST piece of real client-side JavaScript: everywhere
+else, "every interaction is a live round trip to the Python server" is
+possible because Streamlit's own widgets (buttons, selectboxes, ...)
+already know how to detect a click/change themselves. A swipe has no
+such built-in widget - recognizing "that's a horizontal swipe, not a
+vertical page-scroll" has to happen in the browser before there's
+anything to send the server at all, and Streamlit's normal
+`st.markdown(unsafe_allow_html=True)` route does NOT execute injected
+<script> tags (confirmed live before building this - see entry 176), so
+a real Streamlit custom component (this file, served into its own
+sandboxed <iframe> via `st.components.v1.declare_component`) is the only
+way to run this bit of JS at all.
+
+Deliberately hand-written vanilla JS/CSS, no React/npm/build step: this
+app has no JS build tooling anywhere else, and the actual job here (render
+one ring, watch for a horizontal drag, report "prev"/"next") doesn't need
+a framework. Talks to Streamlit using the same plain `postMessage`
+protocol the official React component template wraps
+(streamlit-component-lib) - implemented directly here instead of pulling
+in that whole library for three message types.
+
+Renders ONLY the ring/description/secondary-stat card - the ‹/› buttons,
+the dot indicators, and the "<h2>" title above this card all stay real
+Streamlit widgets in pages/8_Leaderboard.py, completely unchanged. This
+component reports a swipe as a bare "prev"/"next" direction (plus a
+one-time nonce - see below), the same as a button click; Python does the
+exact same `(idx +/- 1) % len(states)` + st.rerun() either way, so a
+swipe and a button tap produce an identical whole-card update in the same
+single rerun - no separate "instant client-side" ring animation that the
+title above it wouldn't also get, which would make the two feel out of
+sync with each other.
+-->
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Same palette as pages/8_Leaderboard.py's own :root --stringer-* vars -
+   duplicated, not shared, because this document is a separate iframe and
+   can't see the host page's CSS custom properties at all. Keep these two
+   copies in sync by hand if the palette ever changes (both are copied
+   from the same validated mockup artifact, so drift should be rare). */
+:root {
+  --stringer-surface:#FFFFFF; --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E;
+  --stringer-muted:#6E766F; --stringer-accent:#2C7C6E; --stringer-accent-track:#D8EAE5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --stringer-surface:#131A16; --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5;
+    --stringer-muted:#8A948C; --stringer-accent:#4FAE9C; --stringer-accent-track:#173630;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; background: var(--stringer-surface);
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif; overflow: hidden;
+}
+#card {
+  touch-action: pan-y; /* let a vertical drag fall through to the page's own
+                           scroll untouched - only a confirmed horizontal
+                           drag (see dragMove below) ever calls
+                           preventDefault() to claim the gesture instead. */
+  padding: 4px 18px 6px; text-align: center; -webkit-user-select: none; user-select: none;
+}
+.ring-wrap { position:relative; width:190px; height:190px; margin:0 auto; }
+.ring-wrap svg { width:100%; height:100%; transform:rotate(-90deg); display:block; }
+.ring-center {
+  position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; text-align:center; gap:4px; padding:0 40px;
+}
+.ring-legend { display:flex; align-items:center; gap:6px; font-size:.72rem; color:var(--stringer-ink-soft); font-weight:600; }
+.swatch { width:8px; height:8px; border-radius:2px; background:var(--stringer-accent); display:inline-block; }
+.ring-value { font-size:2.1rem; font-weight:800; letter-spacing:-.02em; line-height:1; color:var(--stringer-ink); }
+.ring-desc { font-size:.76rem; color:var(--stringer-muted); max-width:320px; margin:8px auto 0; }
+.hero-secondary { margin-top:10px; }
+.hero-label { font-size:.72rem; color:var(--stringer-muted); font-weight:600; margin-bottom:2px; }
+.hero-big { font-size:1.15rem; font-weight:800; color:var(--stringer-ink); }
+.unit { color: var(--stringer-muted); font-size: 0.78em; }
+.mono { font-family: "IBM Plex Mono", monospace; }
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="ring-wrap">
+    <svg viewBox="0 0 200 200">
+      <circle cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent-track)" stroke-width="16"/>
+      <circle id="ringFill" cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent)" stroke-width="16" stroke-linecap="round"/>
+    </svg>
+    <div class="ring-center">
+      <div class="ring-legend"><span class="swatch"></span><span id="legend"></span></div>
+      <div class="ring-value" id="value"></div>
+    </div>
+  </div>
+  <div class="ring-desc" id="desc"></div>
+  <div class="hero-secondary">
+    <div class="hero-label" id="secLabel"></div>
+    <div class="hero-big" id="secValue"></div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  // --- Minimal Streamlit component protocol (postMessage-based) ------------
+  // Same three message types the official streamlit-component-lib wraps;
+  // implemented by hand here rather than pulling in that whole library for
+  // three message types (see this file's own header comment for why).
+  function sendToStreamlit(type, extra) {
+    // isStreamlitMessage: true is NOT optional - Streamlit's parent-frame
+    // ComponentRegistry.onMessageEvent() silently drops (with only a debug
+    // log the component's own iframe never sees) any postMessage whose data
+    // doesn't carry this exact property, before it even looks at `type`.
+    // Confirmed by reading the installed streamlit package's own
+    // ComponentRegistry bundle (static/static/js/index.*.js) after every
+    // message from this component was mysteriously received by nothing.
+    var payload = Object.assign({ isStreamlitMessage: true, type: type, apiVersion: 1 }, extra || {});
+    window.parent.postMessage(payload, "*");
+  }
+  function setFrameHeight() {
+    sendToStreamlit("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight });
+  }
+  function reportSwipe(direction) {
+    // A bare "prev"/"next" would be STICKY - Streamlit remembers a
+    // component's last-set value across reruns like any other widget, so a
+    // later rerun that calls this same component again (e.g. from someone
+    // tapping a real button instead) would otherwise keep re-reporting the
+    // same old swipe forever. A nonce that changes every time lets the
+    // Python side tell "a new swipe just happened" apart from "this is just
+    // the value from last time" - see pages/8_Leaderboard.py's own handling.
+    sendToStreamlit("streamlit:setComponentValue", {
+      value: { action: direction, nonce: Date.now() + Math.random() },
+      dataType: "json",
+    });
+  }
+
+  var unitRe = /\b(lb|oz|fish|in|days|trips)\b/g;
+  function styleUnits(text) {
+    return String(text).replace(unitRe, '<span class="unit">$1</span>');
+  }
+
+  var circumference = 2 * Math.PI * 86;
+
+  function render(args) {
+    if (!args) return;
+    var pct = args.total ? Math.max(0, Math.min(1, args.value / args.total)) : 0;
+    var offset = circumference * (1 - pct);
+    document.getElementById("ringFill").setAttribute("stroke-dasharray", circumference.toFixed(1));
+    document.getElementById("ringFill").setAttribute("stroke-dashoffset", offset.toFixed(1));
+    document.getElementById("legend").textContent = args.legend || "";
+    document.getElementById("value").textContent = Math.round(pct * 100) + "%";
+    document.getElementById("desc").textContent = args.desc || "";
+    document.getElementById("secLabel").textContent = args.secLabel || "";
+    document.getElementById("secValue").innerHTML = styleUnits(args.secValue || "");
+    setFrameHeight();
+  }
+
+  // --- Swipe (pointer events cover touch + mouse + pen in one handler) -----
+  var card = document.getElementById("card");
+  var dragging = false, committed = false, startX = 0, startY = 0;
+  var SWIPE_PX = 40; // matches this app's other touch-target/threshold choices - big enough
+                      // to not fire on an accidental wobble, small enough to feel responsive.
+
+  card.addEventListener("pointerdown", function (e) {
+    dragging = true; committed = false;
+    startX = e.clientX; startY = e.clientY;
+  });
+  card.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!committed && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+      // Confirmed horizontal intent - claim the gesture from here on so the
+      // page behind this iframe doesn't ALSO try to scroll sideways/select
+      // text while the swipe is in progress.
+      committed = true;
+    }
+    if (committed) e.preventDefault();
+  }, { passive: false });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (!committed) return;
+    var dx = (e.clientX != null ? e.clientX : startX) - startX;
+    if (Math.abs(dx) >= SWIPE_PX) {
+      reportSwipe(dx < 0 ? "next" : "prev");
+    }
+  }
+  card.addEventListener("pointerup", endDrag);
+  card.addEventListener("pointercancel", endDrag);
+
+  // --- Wire up to Streamlit -------------------------------------------------
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (data.type === "streamlit:render") {
+      render(data.args);
+    }
+  });
+  sendToStreamlit("streamlit:componentReady");
+  setFrameHeight();
+})();
+</script>
+</body>
+</html>

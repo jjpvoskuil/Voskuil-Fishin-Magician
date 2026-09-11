@@ -12050,6 +12050,89 @@ every real save.
     still unreachable after this ships, the mechanism is something this
     sandbox genuinely can't see, not that the fix didn't apply.
 
+176. **Live report, same session: The Stringer's ring-hero "stats carousel"
+    doesn't respond to a swipe left/right.** The angler's own report (same
+    message as entry 175's Spot Session bug): "on the new leader board, I
+    think we are supposed to be able to toggle through different 'volume'
+    image stats, but it does move if I swipe right or left" - read as "does
+    **not** move," since the `‹`/`›` buttons and dot indicators already
+    worked (see entry 173) and the only real gap was the gesture itself.
+
+    First confirmed, live, that this app's existing pattern of injecting
+    raw HTML via `st.markdown(..., unsafe_allow_html=True)` genuinely
+    cannot support this: a throwaway test page (`st.markdown('<script>
+    document.title="SCRIPT_RAN_OK";</script>', unsafe_allow_html=True)`,
+    checked with `page.title()` over the same Playwright harness entry 174
+    built) proved Streamlit's markdown-to-HTML pipeline never executes an
+    injected `<script>` tag at all - so recognizing "that's a horizontal
+    swipe, not a page scroll" has nowhere to run client-side. Put this
+    tradeoff to the angler directly (build a real Streamlit custom
+    component - this app's first-ever client-side JavaScript, a genuine
+    architecture change - vs. skip the gesture and just enlarge the tap
+    targets vs. leave it as-is) and recommended the tap-target option as
+    lower-risk. **The angler chose to build the real component anyway.**
+
+    Built `core/components/stringer_ring/index.html` (hand-written vanilla
+    HTML/CSS/JS, no build step/framework/npm - the only JS anywhere in
+    this app) served via `core/ring_component.py`'s
+    `declare_component(..., path=...)`, replacing the ring hero's old
+    inline-SVG `unsafe_allow_html` block in `pages/8_Leaderboard.py`. The
+    component renders one ring/description/secondary-stat card and, on a
+    confirmed horizontal drag past a 40px threshold (Pointer Events -
+    touch/mouse/pen in one handler; `touch-action: pan-y` plus a
+    `preventDefault()` only once horizontal intent is confirmed, so
+    ordinary vertical page scroll still passes through untouched), reports
+    `{"action": "prev"|"next", "nonce": <float>}` back to Python. The
+    nonce exists because a component's last return value is sticky across
+    reruns like any widget's - without it, the rerun right after a swipe
+    was already handled would see that same stale value again and advance
+    a second time; `pages/8_Leaderboard.py` tracks the last nonce it
+    actually acted on in `st.session_state` and only reacts on change.
+    Deliberately scoped to ONLY the ring/description/stat card - the
+    `<h2>` title above it and the `‹`/`›` buttons/dots stay plain,
+    unchanged Streamlit widgets, and a swipe drives the exact same
+    `(idx +/- 1) % len(states)` + `st.rerun()` a button click does, so
+    both update the whole card together in one identical rerun.
+
+    **First live-Playwright pass came up empty**: the iframe loaded with
+    the right URL and correct static HTML/CSS (confirmed via its own
+    `document.body`), but every text field inside it (`legend`/`value`/
+    `desc`) stayed empty and the outer `<iframe>` element never grew past
+    height 0 - meaning the component's own `render()` was never running
+    and its `setFrameHeight()` calls were having no visible effect, even
+    though instrumenting the component's JS with `console.log` (read via
+    Playwright's `page.on("console")`) proved `componentReady` and
+    `setFrameHeight` messages genuinely were being *sent*, with no thrown
+    JS error anywhere. Root-caused by reading the installed `streamlit`
+    package's own compiled frontend JS directly
+    (`site-packages/streamlit/static/static/js/index.*.js`, searched for
+    the literal `streamlit:componentReady`/`streamlit:render` strings):
+    Streamlit's parent-frame `ComponentRegistry.onMessageEvent()` silently
+    drops **any** postMessage whose payload doesn't carry
+    `isStreamlitMessage: true` - `!Object.hasOwn(e.data, "isStreamlitMessage")`
+    returns before even looking at `type` - and the official
+    `streamlit-component-lib` always sets that flag on every message it
+    sends, but nothing in Streamlit's own component docs spells this out
+    for a hand-rolled protocol. This one missing field explained both
+    symptoms at once (every message this component sent was being
+    silently ignored, not just misrouted). Fixed by adding
+    `isStreamlitMessage: true` to every payload in `sendToStreamlit()`.
+
+    **Verified, live, after the fix**: the ring/legend/value/description/
+    secondary-stat all populate correctly and the iframe resizes to its
+    real content height; a simulated swipe-left advances to the next
+    state (title + ring + stats all change together, e.g. "Days on the
+    Water" -> "Stripe Island Point Share"), a simulated swipe-right goes
+    back (prev), a plain tap and a small <40px wobble both correctly do
+    **nothing** (no false-positive swipes), and the existing `‹`/`›`
+    buttons and dot indicators still work completely unchanged alongside
+    the new gesture. Full suite: 645 passed, unchanged (AppTest gracefully
+    no-ops the custom component call, so it can't catch this class of bug
+    on its own - this is the second time this session a real
+    Playwright-driven browser check caught something AppTest + full pytest
+    both missed entirely; see entry 174's first instance of the same
+    lesson).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

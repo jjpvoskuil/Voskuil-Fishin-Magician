@@ -1102,10 +1102,19 @@ already-shipped pages and vice versa):
 
 - **A cyclable ring-chart hero** - up to 3 season stats (days on the water as a fraction of
   the season, the top spot's share of every catch, the top species' share), tapped through
-  with ‹/› chevrons or the dot indicators below the ring. Each stat only appears when there's
-  real data to show it (e.g. a brand-new install with trips logged but no per-fish detail yet
-  shows just "Days on the Water," not two broken 0% rings). The season chip at the top always
-  spans your actual earliest-to-latest logged trip date - never a hardcoded window.
+  with ‹/› chevrons or the dot indicators below the ring, or swiped left/right directly on
+  the card itself on a touchscreen (punch-list, angler's own ask - see SESSION_NOTES.md entry
+  176). That card is this app's first real Streamlit custom component (a small hand-written
+  HTML/CSS/JS bundle in `core/components/stringer_ring/`, wired up via `core/ring_component.py`)
+  rather than another `unsafe_allow_html` block, since recognizing a horizontal swipe (vs. an
+  ordinary vertical page scroll) genuinely needs client-side JavaScript actually running -
+  Streamlit's normal markdown-injection route never executes an injected `<script>` tag at
+  all. A swipe reports back to Python exactly like a button click and drives the same rerun,
+  so the title above the card and the ring/stats inside it always update together. Each stat
+  only appears when there's real data to show it (e.g. a brand-new install with trips logged
+  but no per-fish detail yet shows just "Days on the Water," not two broken 0% rings). The
+  season chip at the top always spans your actual earliest-to-latest logged trip date - never
+  a hardcoded window.
 - **An underline tab bar over six ranked lists** - Biggest Fish, Top Anglers, Hot Lures (by
   lure *and color* - a Blue Chrome Spook ranks separately from the same lure in another
   color), Top Spots (ranked by biggest fish landed there), Longest Fish, and Top Sessions
@@ -1129,7 +1138,11 @@ boot, and the trip cache itself is separately held for 5 minutes.
 (Live-verified against a real rendered page, not just AppTest, after a same-session bug where
 this page's own injected CSS briefly showed up as literal on-screen text instead of being
 applied - see SESSION_NOTES.md entry 174 for the root cause and the "no blank lines inside
-`unsafe_allow_html` content" rule that came out of it.)
+`unsafe_allow_html` content" rule that came out of it. The ring hero's swipe gesture was
+live-verified the same way - AppTest can't exercise a custom component's actual browser-side
+JS at all - after its own subtler bug where every message the component sent to Streamlit was
+being silently dropped for missing one required `isStreamlitMessage: true` field; see entry
+176.)
 
 ## Reports (punch-list #92, first pass)
 
@@ -2054,6 +2067,18 @@ core/
                            lures/spots/sessions); Streamlit-free and unit tested on
                            its own, replaces the old pages/8_Leaderboard.py-local
                            frame builder outright
+  ring_component.py         Thin wrapper declaring the Stringer ring hero's swipe-
+                           gesture custom component (see components/stringer_ring/
+                           below) - this app's only st.components.v1 usage
+  components/
+    stringer_ring/
+      index.html             The component's entire frontend - hand-written vanilla
+                           HTML/CSS/JS, no build step/framework; renders one ring/
+                           description/stat card and reports a swipe left/right back
+                           to Python (SESSION_NOTES.md entry 176 has the full story,
+                           including a subtle bug where every message it sent was
+                           silently dropped for missing Streamlit's required
+                           `isStreamlitMessage: true` flag)
 data/
   nolin_spots.json        Curated general reference spots (currently orphaned)
   lake_spots.csv          Your own saved Lake Map pins (grows over time)

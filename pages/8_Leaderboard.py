@@ -32,7 +32,6 @@ Map, Development not yet scoped"). Applying it globally from inside this
 one page's code would be exactly the kind of premature, un-asked-for
 scope creep this app's own operating notes warn against.
 """
-import math
 import re
 from datetime import date as date_cls
 
@@ -45,6 +44,7 @@ from core.appstate import (
 from core.ui import inject_mobile_css
 from core.storage import sync_data_from_data_branch
 from core.nav import render_bottom_nav
+from core.ring_component import stringer_ring_card
 from core.stringer import (
     build_frames, season_label, hero_states, CATEGORIES, daily_activity_series, species_mix,
 )
@@ -98,9 +98,16 @@ st.markdown(
         background:var(--stringer-surface-sunk); padding:5px 10px; border-radius:100px; white-space:nowrap;
     }
     /* Hero ring card - the whole st.container(key="stringer_hero") becomes
-       one visual card; the buttons/columns inside it are real Streamlit
-       widgets (needed for the prev/next/dot rerun interactivity), the ring
-       SVG itself is one injected HTML block. */
+       one visual card; the ‹/›/dot buttons are real Streamlit widgets
+       (needed for their own rerun interactivity), the ring/description/
+       secondary-stat block below the title is core/ring_component.py's
+       custom component (an <iframe>, not a markdown block - it owns the
+       swipe-left/right gesture, punch-list angler ask, SESSION_NOTES entry
+       176) - that component's own index.html carries its own copy of this
+       same ring/text CSS, since an iframe can't see this page's stylesheet
+       at all. `stCustomComponentV1` is Streamlit's own wrapper element
+       around every such iframe - stripped of its default border/margin so
+       it reads as part of this card, not a separate embedded box. */
     .st-key-stringer_hero {
         background:var(--stringer-surface); border-radius:16px; padding:14px 18px 18px;
         text-align:center; margin-bottom:14px;
@@ -113,6 +120,9 @@ st.markdown(
         font-size:1.3rem !important; line-height:1 !important; box-shadow:none !important;
     }
     .st-key-stringer_hero button[kind="secondary"]:hover { color:var(--stringer-accent) !important; }
+    .st-key-stringer_hero iframe {
+        border:none !important; width:100% !important; display:block;
+    }
     .st-key-stringer_dots button[kind="secondary"] {
         background:none !important; border:none !important; box-shadow:none !important;
         color:var(--stringer-border) !important; font-size:.6rem !important; padding:2px !important;
@@ -123,19 +133,6 @@ st.markdown(
         color:var(--stringer-ink) !important; font-size:.6rem !important; padding:2px !important;
         min-height:0 !important;
     }
-    .stringer-ring-wrap { position:relative; width:190px; height:190px; margin:0 auto; }
-    .stringer-ring-wrap svg { width:100%; height:100%; transform:rotate(-90deg); }
-    .stringer-ring-center {
-        position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
-        justify-content:center; text-align:center; gap:4px; padding:0 40px;
-    }
-    .stringer-ring-legend { display:flex; align-items:center; gap:6px; font-size:.72rem; color:var(--stringer-ink-soft); font-weight:600; }
-    .stringer-swatch { width:8px; height:8px; border-radius:2px; background:var(--stringer-accent); display:inline-block; }
-    .stringer-ring-value { font-size:2.1rem; font-weight:800; letter-spacing:-.02em; line-height:1; color:var(--stringer-ink); }
-    .stringer-ring-desc { font-size:.76rem; color:var(--stringer-muted); max-width:320px; margin:8px auto 0; }
-    .stringer-hero-secondary { margin-top:10px; }
-    .stringer-hero-label { font-size:.72rem; color:var(--stringer-muted); font-weight:600; margin-bottom:2px; }
-    .stringer-hero-big { font-size:1.15rem; font-weight:800; color:var(--stringer-ink); }
     /* Ranked-list panel. */
     .stringer-panel { background:var(--stringer-surface); border-radius:16px; overflow:hidden; margin-bottom:14px; }
     .stringer-panel-head {
@@ -277,32 +274,32 @@ if _states:
 
         s = _states[st.session_state["stringer_ring_idx"]]
         head_c.markdown(f"<h2>{s.title}</h2>", unsafe_allow_html=True)
-        pct = (s.value / s.total) if s.total else 0.0
-        pct = max(0.0, min(1.0, pct))
-        circumference = 2 * math.pi * 86
-        offset = circumference * (1 - pct)
-        st.markdown(
-            f"""
-            <div class="stringer-ring-wrap">
-                <svg viewBox="0 0 200 200">
-                    <circle cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent-track)" stroke-width="16"/>
-                    <circle cx="100" cy="100" r="86" fill="none" stroke="var(--stringer-accent)" stroke-width="16"
-                            stroke-linecap="round" stroke-dasharray="{circumference:.1f}"
-                            stroke-dashoffset="{offset:.1f}"/>
-                </svg>
-                <div class="stringer-ring-center">
-                    <div class="stringer-ring-legend"><span class="stringer-swatch"></span>{s.legend}</div>
-                    <div class="stringer-ring-value">{round(pct * 100)}%</div>
-                </div>
-            </div>
-            <div class="stringer-ring-desc">{s.desc}</div>
-            <div class="stringer-hero-secondary">
-                <div class="stringer-hero-label">{s.sec_label}</div>
-                <div class="stringer-hero-big">{_style_units(s.sec_value)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+
+        # Punch-list (angler's own ask): swipe left/right on the ring card
+        # itself, not just the ‹/› buttons above it - see SESSION_NOTES
+        # entry 176 and core/ring_component.py's own docstring for why this
+        # needed to be a real custom component rather than another
+        # unsafe_allow_html block. The component only reports a bare
+        # {"action", "nonce"} the instant a NEW swipe happens - a component's
+        # last return value is otherwise sticky across reruns (Streamlit
+        # remembers it like any other widget's state), so without the nonce
+        # check below, the run right after we already handled a swipe would
+        # see that same still-"next" value again and advance a second time.
+        _swipe = stringer_ring_card(
+            # Raw sec_value, not run through _style_units() here - the
+            # component's own JS applies that same lb/oz/fish/... highlight
+            # itself (index.html's styleUnits(), same regex/rule), since it
+            # renders inside its own separate iframe document and needs its
+            # own ".unit" CSS class, not this page's ".stringer-unit" one.
+            legend=s.legend, value=s.value, total=s.total, desc=s.desc,
+            sec_label=s.sec_label, sec_value=s.sec_value,
+            key="stringer_ring_swipe",
         )
+        if _swipe and _swipe.get("nonce") != st.session_state.get("stringer_ring_swipe_seen"):
+            st.session_state["stringer_ring_swipe_seen"] = _swipe.get("nonce")
+            _direction = 1 if _swipe.get("action") == "next" else -1
+            st.session_state["stringer_ring_idx"] = (st.session_state["stringer_ring_idx"] + _direction) % len(_states)
+            st.rerun()
 
         if len(_states) > 1:
             with st.container(key="stringer_dots"):
