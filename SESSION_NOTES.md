@@ -12286,6 +12286,63 @@ every real save.
     ring hero (entries 176/177) all still fully functional with the new
     card treatment layered underneath them.
 
+180. **Punch-list #98 follow-up: IBM Plex Mono swapped for Space Grotesk on
+    Home's numbers and daily/weekly award-leader values.** Angler feedback
+    on the Home redesign (entries 178/179): "lets change the font on the
+    main txt items. This font is too telegraph type looking" - IBM Plex
+    Mono's monospace letterforms read as typewriter/telegraph. Asked two
+    follow-up questions (how much to change; which font to switch to); the
+    angler's answer ("The numbers and the txt for the daily/weekly
+    leaders") only settled scope, so asked a second, narrower question
+    with the same four font options - **Space Grotesk chosen**.
+
+    Scope landed on exactly two `home.py` rules, both real IBM-Plex-Mono
+    uses that read as "the numbers" or "the daily/weekly leaders": the
+    "Today at a Glance" metric values
+    (`.st-key-today_at_a_glance_metrics [data-testid="stMetricValue"]`)
+    and the Fishing Activity award-tile values on the "Today"/"This Week"
+    tabs (`[class*="st-key-activity_awards_"] [data-testid="stMetricValue"]`
+    - Berkley/String King/Z-Man, i.e. the actual daily/weekly leaders).
+    Everything else already using IBM Plex Mono was deliberately left
+    alone as out of the stated scope: the `.home-date-chip` badge on this
+    same page, and every mono use on `pages/8_Leaderboard.py` (The
+    Stringer's own ranked-list numbers, sort note, species counts) - that
+    page's all-time filterable rankings aren't framed as "daily/weekly"
+    the way Home's own two tabs literally are, so it was left as a
+    deliberate scope boundary rather than assumed-in. Added
+    `family=Space+Grotesk:wght@500;600;700` to the existing Google Fonts
+    `<link>` import (which still also loads Plus Jakarta Sans and IBM Plex
+    Mono for everything that didn't change) and switched both rules'
+    `font-family` to `"Space Grotesk", system-ui, sans-serif`, adding
+    `font-variant-numeric: tabular-nums` since Space Grotesk isn't
+    monospace and these are still numeric-forward values that benefit
+    from even digit widths.
+
+    Same sandbox network gap noted when this session first considered a
+    font change: `fonts.googleapis.com`/`fonts.gstatic.com` are blocked at
+    the org-wide egress-proxy level here (confirmed earlier via a direct
+    `curl`, not just the browser), so no live render in this dev sandbox
+    can show the actual Space Grotesk glyphs - every screenshot here falls
+    back to the browser's default sans-serif. Verification therefore
+    focused on CSS mechanics rather than glyph appearance: confirmed via
+    `getComputedStyle()` that both target elements (and no others) resolve
+    to `"Space Grotesk", system-ui, sans-serif` on both the "Today" and
+    "This Week" tabs, in both light and dark mode, and that the date chip
+    and every other IBM-Plex-Mono use is untouched. The real deployed app
+    (Streamlit Community Cloud, genuine internet access) will render the
+    actual typeface; if it still doesn't look right there, that's a live
+    check, not a sandbox limitation, and worth flagging back.
+
+    **Verified:** full suite (645 passed), scanned the edited `<style>`
+    block programmatically for blank lines before testing (the entry
+    174/177 truncation bug class - `home.py` already uses the safer
+    split-`<link>`-and-`<style>`-calls pattern from entry 178, so this was
+    a formality, not new risk), a live Playwright render at real phone
+    width with no CSS-as-text leak and the full style block (through its
+    last, unrelated dataframe-rounding rule) confirmed present and
+    un-truncated, and the computed-style checks above on both tabs in
+    light and dark mode.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

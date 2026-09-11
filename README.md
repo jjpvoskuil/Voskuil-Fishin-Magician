@@ -87,6 +87,14 @@ shipped near-flat; a follow-up (entry 179) gave them a soft glossy-gradient/shad
 border look instead, one of six styles previewed directly for the angler to pick from, after the
 first flat pass was called "kind of a boring look."
 
+The two number-forward spots that mattered most to the angler - the "Today at a Glance" metric
+values and the Fishing Activity award tiles (Berkley/String King/Z-Man, the actual daily/weekly
+leaders on the "Today"/"This Week" tabs) - moved off IBM Plex Mono to Space Grotesk, after the
+angler called the old monospace numbers "too telegraph type looking" (SESSION_NOTES.md entry
+180). Everything else that was already IBM Plex Mono (the date chip on this page, and every
+number on The Stringer/Leaderboard page) is unchanged - that was a deliberate scope call, not an
+oversight.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
