@@ -12245,6 +12245,47 @@ every real save.
     "Today at a Glance"/"Fishing Activity" cards were - covered instead by
     the full AppTest suite plus the isolated live-CSS checks above).
 
+179. **Punch-list #98 follow-up: cards given real depth after angler
+    feedback that the new flat-card look was "kind of a boring look."**
+    Rather than guess at a direction, built six small CSS mockups side by
+    side (flat/current, soft-elevation drop-shadow, glossy-gradient,
+    neumorphic soft-embossed, an accent-top-edge card, and a stronger
+    "deep tile") and sent a screenshot to the angler to pick from directly
+    - **Glossy Gradient chosen**, and the angler asked for it to be
+    applied to The Stringer too, not just Home, so both pages stay
+    visually consistent.
+
+    Implemented as three new shared tokens (`--stringer-card-from`,
+    `--stringer-card-to`, `--stringer-card-shadow`, `--stringer-card-
+    border`) added to both pages' own `:root` blocks (kept in sync by
+    hand, same convention as every other `--stringer-*` token since
+    punch-list #97/#98 - no shared stylesheet exists yet) and defined
+    separately for light/dark, not just a lighter/darker pair of the same
+    two colors - a black `box-shadow` is nearly invisible against an
+    already-dark page, so dark mode leans more on the gradient itself and
+    a faint light hairline border for its sense of "lift." Every card
+    shell on both pages now pulls from these same four tokens instead of
+    a flat `background: var(--stringer-surface)`: `home.py`'s three cards
+    (glance/best-window/activity) and `pages/8_Leaderboard.py`'s three
+    (`.st-key-stringer_hero`, `.stringer-panel`, `.stringer-glance`).
+
+    Editing `pages/8_Leaderboard.py`'s `<style>` block again was a
+    deliberate moment of extra caution, given entries 174 and 177 both
+    trace back to exactly this block: its `<style>` tag still isn't the
+    first content in its `st.markdown()` call (preceded by `<link>` font
+    tags, unlike home.py's now-safer split-into-two-calls pattern from
+    entry 178) so a stray blank line here would silently truncate
+    everything after it again. Scanned both files programmatically for
+    any blank line inside their raw-HTML blocks before testing, on top of
+    the usual live-render check.
+
+    **Verified:** full suite (645 passed), a live Playwright render of
+    both pages at real phone width with no CSS-as-text leak, screenshots
+    confirming the gradient/shadow/border actually render (light and
+    dark), and the existing dots/buttons/swipe gesture on The Stringer's
+    ring hero (entries 176/177) all still fully functional with the new
+    card treatment layered underneath them.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

@@ -72,17 +72,20 @@ will carry Streamlit's default branding rather than a custom one - there's no co
 this repo that can override it on this hosting.
 
 The Home ("Today") page was restyled to match The Stringer's own visual language - Plus Jakarta
-Sans + IBM Plex Mono, one muted teal accent, flat cards (punch-list #98 Phase 3, following the
-Leaderboard's own Phase 2 redesign; site-wide rollout continues one page at a time). The plain
-title/caption became a brand row with a rolling "today at the lake" date chip; "Today at a
-Glance," "Best Window Today," and "Fishing Activity" each became their own card; the Fishing
-Activity tabs got the same underline treatment as The Stringer's ranked-list tabs; and the
-info/warning boxes in "Best Window Today" were re-skinned with a colored left rule instead of
-Streamlit's default blue/yellow. Every widget underneath (metrics, popovers, tabs, the
-leaderboard table, info/warning boxes) is still the real, fully interactive Streamlit widget -
-only the CSS skin changed - see SESSION_NOTES.md entry 178 for the full story, including two
-real pre-existing mobile bugs (one in a shared helper used by other pages too) that a live
-Playwright render at real phone width caught along the way.
+Sans + IBM Plex Mono, one muted teal accent (punch-list #98 Phase 3, following the Leaderboard's
+own Phase 2 redesign; site-wide rollout continues one page at a time). The plain title/caption
+became a brand row with a rolling "today at the lake" date chip; "Today at a Glance," "Best
+Window Today," and "Fishing Activity" each became their own card; the Fishing Activity tabs got
+the same underline treatment as The Stringer's ranked-list tabs; and the info/warning boxes in
+"Best Window Today" were re-skinned with a colored left rule instead of Streamlit's default
+blue/yellow. Every widget underneath (metrics, popovers, tabs, the leaderboard table,
+info/warning boxes) is still the real, fully interactive Streamlit widget - only the CSS skin
+changed - see SESSION_NOTES.md entry 178 for the full story, including two real pre-existing
+mobile bugs (one in a shared helper used by other pages too) that a live Playwright render at
+real phone width caught along the way. Cards on both this page and The Stringer originally
+shipped near-flat; a follow-up (entry 179) gave them a soft glossy-gradient/shadow/hairline-
+border look instead, one of six styles previewed directly for the angler to pick from, after the
+first flat pass was called "kind of a boring look."
 
 ## What it does
 
@@ -1147,11 +1150,15 @@ already-shipped pages and vice versa):
   chart across the whole logged season (peak day highlighted) and a species breakdown, both
   built fresh from the same real data every time.
 
-Design language (Plus Jakarta Sans + IBM Plex Mono, one muted teal accent reserved for data,
-near-flat cards, no gradients/illustrated icons) is scoped to this page's own cards for now -
-applying it site-wide is Phase 3+ (punch-list #98), one page at a time, not part of this
-round. Keeps the same **"🔄 Refresh from GitHub"** button (punch-list #61) for the same
-reason every other trip-history page has one: this server only syncs from GitHub once at
+Design language (Plus Jakarta Sans + IBM Plex Mono, one muted teal accent reserved for data) is
+scoped to this page's and Home's own cards for now - applying it to every remaining page is
+ongoing (punch-list #98), one page at a time. Cards originally shipped near-flat, no gradients;
+after the angler saw the first flat pass and called it "kind of a boring look," a soft
+glossy-gradient/shadow/hairline-border card - one of six options previewed directly - replaced
+the flat fill on both this page and Home (SESSION_NOTES.md entry 179), with matching light/dark
+tokens (`--stringer-card-from/-to/-shadow/-border`) kept in sync between the two pages until they
+share one real stylesheet. Keeps the same **"🔄 Refresh from GitHub"** button (punch-list #61) for
+the same reason every other trip-history page has one: this server only syncs from GitHub once at
 boot, and the trip cache itself is separately held for 5 minutes.
 
 (Live-verified against a real rendered page, not just AppTest, after a same-session bug where

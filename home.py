@@ -66,6 +66,20 @@ st.markdown(
       --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E; --stringer-muted:#6E766F;
       --stringer-border:#E7E9E2; --stringer-accent:#2C7C6E; --stringer-accent-strong:#1F5F54;
       --stringer-accent-track:#D8EAE5; --stringer-warn:#8A5A1E; --stringer-warn-track:#F3E6D2;
+      /* Card "depth" treatment (punch-list #98 follow-up, angler's own ask
+         after seeing the first flat-card pass: "kind of a boring look...
+         3D depth shaded boxes"). A glossy-gradient card - a soft top-light
+         sheen top-to-bottom, plus a layered shadow and a hairline border -
+         picked over a plain flat fill (the original Stringer look), a
+         heavier drop-shadow-only "elevated" card, and a neumorphic
+         soft-embossed treatment, from a set of options previewed for and
+         chosen by the angler directly. One shared set of tokens so every
+         card shell below (and pages/8_Leaderboard.py's own, kept in sync
+         by hand) pulls from the same three values instead of repeating
+         the gradient/shadow/border literals at each card. */
+      --stringer-card-from:#FFFFFF; --stringer-card-to:#F5F7F1;
+      --stringer-card-shadow:0 1px 2px rgba(15,20,16,0.05), 0 6px 16px rgba(15,20,16,0.08);
+      --stringer-card-border:1px solid rgba(15,20,16,0.05);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -73,6 +87,14 @@ st.markdown(
         --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5; --stringer-muted:#8A948C;
         --stringer-border:#212A24; --stringer-accent:#4FAE9C; --stringer-accent-strong:#6FC2B2;
         --stringer-accent-track:#173630; --stringer-warn:#E8B370; --stringer-warn-track:#2E2413;
+        /* Dark mode needs its own values, not just a lighter/darker pair of
+           the same two colors - a black box-shadow is nearly invisible
+           against an already-dark page, so the "lift" here leans more on
+           the gradient itself (a lighter top fading to a darker bottom)
+           and a faint light-colored hairline border than on the shadow. */
+        --stringer-card-from:#1A231D; --stringer-card-to:#10150F;
+        --stringer-card-shadow:0 1px 2px rgba(0,0,0,0.35), 0 6px 18px rgba(0,0,0,0.45);
+        --stringer-card-border:1px solid rgba(255,255,255,0.05);
       }
     }
     .home-topbar, .home-card-head, .st-key-home_glance_card, .st-key-home_bestwindow_card,
@@ -97,7 +119,9 @@ st.markdown(
        the same "whole container becomes one visual card" pattern The
        Stringer uses for its own ring hero. */
     .st-key-home_glance_card, .st-key-home_bestwindow_card, .st-key-home_activity_card {
-        background:var(--stringer-surface); border-radius:16px; padding:14px 18px 18px; margin-bottom:14px;
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
+        box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
+        border-radius:16px; padding:14px 18px 18px; margin-bottom:14px;
     }
     .home-card-head { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
     .home-card-head h3 { font-size:.95rem; font-weight:700; margin:0; color:var(--stringer-ink); }
