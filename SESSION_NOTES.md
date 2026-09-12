@@ -12783,12 +12783,16 @@ every real save.
     AppTest suite (unlike Spot Session/7-Day Forecast/Leaderboard), so
     this was the only mechanical check available that the new per-item
     `key=` values don't collide with each other or anything else on a
-    real render. **NOT yet done:** an actual live check against the
-    deployed app - flagged the same way as every other CSS-only page
-    pass in this log, and this page in particular has more never-before-
-    styled widget types in it (multiselect, form, several number inputs)
-    than any single prior pass, so it's more likely than usual something
-    here needs a follow-up fix once seen for real.
+    real render. Followed up with an actual live check against the
+    deployed app (post-redeploy) despite this page having more never-
+    before-styled widget types in it than any single prior pass
+    (multiselect, form, several number inputs) - unlike Spot Session's
+    icon fix, everything came back correct on the first try: the keyed
+    item cards' border/radius/background, the text-input/multiselect
+    boxes, the expander gradient card, and - checked specifically since
+    dialogs render into their own portal - the Edit-lure dialog's actual
+    computed `font-family` (`"Plus Jakarta Sans"`) and its numeric
+    steppers, all confirmed via computed style, not just a screenshot.
 
 ## Key design decisions & rationale
 
