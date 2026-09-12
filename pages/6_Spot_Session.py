@@ -1228,7 +1228,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         )
 
     with st.container(key="spotsession_cond_water_card"):
-        st.subheader(":material/water_drop: Water conditions")
+        st.subheader("Water conditions", icon=":material/water_drop:")
         c1, c2 = st.columns(2)
         wt_key = f"{key_ns}_water_temp"
         st.session_state.setdefault(wt_key, _default("water_temp_f", 85.0))
@@ -1248,7 +1248,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         _badge("Visibility band", f"<b>{vis_band['label']}</b> — {vis_band['detail']}")
 
     with st.container(key="spotsession_cond_stain_card"):
-        st.subheader(":material/invert_colors: Environmental stain")
+        st.subheader("Environmental stain", icon=":material/invert_colors:")
         stain_color = None
         if vis_band["label"] == "Stained":
             stain_key = f"{key_ns}_stain_color"
@@ -1266,7 +1266,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         )
 
     with st.container(key="spotsession_cond_wind_card"):
-        st.subheader(":material/air: Wind & atmosphere")
+        st.subheader("Wind & atmosphere", icon=":material/air:")
         c3, c4 = st.columns(2)
         wind_key = f"{key_ns}_wind_band"
         st.session_state.setdefault(wind_key, _default("wind_band", WIND_BAND_LABELS[1]))
@@ -1288,7 +1288,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         precipitation = c6.selectbox("Precipitation", PRECIPITATION_OPTIONS, key=precip_key)
 
     with st.container(key="spotsession_cond_activity_card"):
-        st.subheader(":material/set_meal: Fish & forage activity")
+        st.subheader("Fish & forage activity", icon=":material/set_meal:")
         forage_key = f"{key_ns}_forage_seen"
         st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
         forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)

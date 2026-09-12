@@ -12632,6 +12632,37 @@ every real save.
     before calling this done, same as every other CSS change in this
     log that leans on a live check.
 
+184. **Live bug, same session: entry 183's four card-header icons rendered
+    as literal text ("water_drop Water conditions") instead of an actual
+    icon glyph.** Caught immediately by the live-verification pass entry
+    183 itself flagged as still pending - navigated the deployed app post-
+    push, pulled the heading's real child nodes via the browser tools, and
+    found the leading `:material/water_drop:` token sitting in the DOM as
+    plain text, not a `stIconMaterial` icon span. Root cause: `st.header`/
+    `st.subheader`/`st.title` do NOT parse a leading `:material/...:` token
+    out of the body string the way `core/nav.py`'s icon lookup assumed by
+    analogy (confirmed via `inspect.signature(st.subheader)`) - they take
+    icon via a dedicated `icon=` keyword argument instead, with the body
+    string left untouched. Fixed by switching all four calls from
+    `st.subheader(":material/water_drop: Water conditions")` to
+    `st.subheader("Water conditions", icon=":material/water_drop:")`;
+    confirmed the fix is right by tracing the frontend bundle's own
+    heading-render function (`icon` prop rendered as the first child
+    ahead of the text span, going through the same `DynamicIcon`
+    component - `stIconMaterial` testid confirmed present in that same
+    file - every other icon on this site already goes through).
+
+    **Verified:** full suite (645 passed) after the fix, and this time an
+    actual live re-check after redeploying - all four card icons and
+    headers, the badge pills, the selectbox/checkbox restyle, and the
+    numeric steppers all confirmed against the real DOM/computed styles
+    on the deployed app, not just reasoned through. **Still not done:** a
+    dark-mode screenshot check (this session's browser tooling didn't
+    have an obvious way to force `prefers-color-scheme: dark` the way a
+    prior session's Playwright-based checks did) - worth a follow-up pass
+    given this exact page has twice already had a real, live-only-visible
+    dark-mode contrast bug (entries 178, 182).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
