@@ -12701,6 +12701,32 @@ every real save.
     silently assumed fixed, given the last two "should be fine" icon
     attempts both weren't.
 
+186. **Punch-list #98 follow-up: "Forage seen" on Spot Session's Conditions
+    form became `st.pills` (always-visible tappable chips) instead of
+    `st.multiselect` (a floating dropdown), with Threadfin Shad selected
+    by default on a fresh session - angler's own ask.** Exact same
+    widget swap, same rationale, and same reused `selection_mode="multi"`
+    call shape as "Type of hit" on the "Log a fish" dialog (punch-list
+    #33) - still returns a plain list, so nothing downstream
+    (`_compute_scoring`, `FORAGE_NOTES` lookups, the returned dict) needed
+    to change. The default is scoped narrowly: it only fills in when
+    there's neither a prefill (editing/relocating an existing session)
+    nor a weather-derived guess for this field - deliberately NOT
+    `core.lures.DEFAULT_FORAGE` (Gizzard Shad + Bluegill/Sunfish), which
+    is a different, pre-existing default used elsewhere in the
+    recommendation engine and not what was actually asked for here.
+    `st.pills` is left with zero custom CSS, matching the existing "Type
+    of hit" instance elsewhere on this same page - the app's
+    `primaryColor` (`#2ca02c`, `.streamlit/config.toml`) is close enough
+    to this page's teal accent that it already reads as part of the same
+    family without needing an override, the same reason the Fish/Forage
+    activity sliders next to it were never restyled either.
+
+    **Verified:** full suite (645 passed), plus a scratch AppTest against
+    the real widget call confirming the fresh-session default actually is
+    `['Threadfin Shad']` rather than trusting the code by inspection alone
+    (`app.pills[0].value == ['Threadfin Shad']`).
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
