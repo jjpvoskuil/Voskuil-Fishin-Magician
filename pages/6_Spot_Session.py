@@ -43,7 +43,243 @@ from core.nav import render_bottom_nav
 st.set_page_config(page_title="Spot Session - Nolin Lake", page_icon="🎯", layout="wide")
 inject_mobile_css()
 render_bottom_nav("pages/6_Spot_Session.py")
-st.title("🎯 Spot Session")
+
+# --- Design-language CSS + fonts (punch-list #98 Phase 5: Spot Session) -----
+# Same visual language as Home/The Stringer/7-Day Forecast (punch-list
+# #97/#98) - Plus Jakarta Sans, Space Grotesk numbers, one muted teal
+# accent, glossy-gradient cards - the fourth and by far the biggest/most
+# interactive page in the rollout (the angler's own framing: "this one
+# needs to be the best and crispest" - it's the page actually used
+# standing at the water, not just reviewed afterward). Reuses the exact
+# same --stringer-* variable names as the other three pages (kept in sync
+# by hand - no shared stylesheet exists yet, see their own comments on
+# why). No IBM Plex Mono import, same reasoning as 7-Day Forecast (entry
+# 181): the angler's own prior ask (entry 180) was to move OFF that exact
+# monospace look, so every number here (session/segment scores, fish
+# counts) uses Space Grotesk from the start instead.
+#
+# This page's own content - unlike Home, which mixes styled cards with a
+# native Streamlit sidebar it deliberately leaves alone - has nothing on
+# it that should stay unstyled, so most rules below are page-wide
+# (`[data-testid="stExpander"]`, not `.st-key-<container> [data-testid=
+# "stExpander"]`): every expander, alert, and metric on THIS page should
+# look the same way, and a page-local <style> block only ever applies
+# while this page itself is being viewed (Streamlit's multi-page nav
+# fully remounts the DOM per page - see app.py's own docstring), so this
+# can't leak onto any other page. Three specific always-visible sections
+# (Conditions, the active-session lure list, "Lures for this session")
+# get their own named `st.container(key=...)` card treatment, matching
+# Home's own always-visible cards; every `st.expander` on this page (there
+# are many - Suggestions, Conditions changed/Relocate, Add a lure, Fish
+# caught, Retired lures, Tackle box gaps, Add from tackle box) gets the
+# same two-tier treatment 7-Day Forecast already established (entry 181):
+# the outermost expander in any nesting chain gets the full glossy-
+# gradient card; anything nested inside it gets a flatter, sunk look
+# instead, so identical heavy cards don't stack visual noise. This page's
+# three `st.dialog` popups (`_trailer_dialog`, `_fish_entry_dialog`,
+# `_lure_added_dialog`) render into a browser-level portal, confirmed live
+# via `.closest()` NOT to be a descendant of `[data-testid="stMain"]` -
+# page-container CSS can't reach them, so they get their own explicit
+# `[data-testid="stDialog"]` font rule instead of inheriting one.
+#
+# Font <link> tags are their own st.markdown call, never combined with
+# <style> into one string - see home.py's own comment on entries 174/177
+# for why a stray blank line in a combined call can silently truncate
+# everything after it.
+st.markdown(
+    """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    """
+    <style>
+    :root {
+      --stringer-surface:#FFFFFF; --stringer-surface-sunk:#EEF0EA;
+      --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E; --stringer-muted:#6E766F;
+      --stringer-border:#E7E9E2; --stringer-accent:#2C7C6E; --stringer-accent-strong:#1F5F54;
+      --stringer-accent-track:#D8EAE5; --stringer-warn:#8A5A1E; --stringer-warn-track:#F3E6D2;
+      --stringer-good:#2C7C6E; --stringer-error:#B3261E;
+      --stringer-card-from:#FFFFFF; --stringer-card-to:#F5F7F1;
+      --stringer-card-shadow:0 1px 2px rgba(15,20,16,0.05), 0 6px 16px rgba(15,20,16,0.08);
+      --stringer-card-border:1px solid rgba(15,20,16,0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --stringer-surface:#131A16; --stringer-surface-sunk:#0F1512;
+        --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5; --stringer-muted:#8A948C;
+        --stringer-border:#212A24; --stringer-accent:#4FAE9C; --stringer-accent-strong:#6FC2B2;
+        --stringer-accent-track:#173630; --stringer-warn:#E8B370; --stringer-warn-track:#2E2413;
+        --stringer-good:#4FAE9C; --stringer-error:#E5847E;
+        --stringer-card-from:#1A231D; --stringer-card-to:#10150F;
+        --stringer-card-shadow:0 1px 2px rgba(0,0,0,0.35), 0 6px 18px rgba(0,0,0,0.45);
+        --stringer-card-border:1px solid rgba(255,255,255,0.05);
+      }
+    }
+    [data-testid="stMainBlockContainer"], [data-testid="stDialog"] {
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    }
+    /* Brand row - same shape as Home's/The Stringer's/7-Day Forecast's own
+       topbar. Deliberately FIXED (non-flipping) text colors here, not
+       var(--stringer-ink)/var(--stringer-muted) - caught live via a dark-
+       mode Playwright check while verifying this page: the brand/tagline
+       sit directly on Streamlit's own native page background, which
+       .streamlit/config.toml pins to a fixed LIGHT theme that never
+       itself responds to prefers-color-scheme (same root cause as the
+       widget-text contrast fix below), unlike the date-chip next to them,
+       which is safe because BOTH its own background and its text use the
+       flipping tokens together. Using the flipping ink token here made
+       the brand line render near-white-on-white (unreadable) in dark
+       mode - this bug is latent on Home's and 7-Day Forecast's own
+       identical topbar markup too (not yet fixed there as of this entry). */
+    .spotsession-topbar {
+        display:flex; align-items:center; justify-content:space-between;
+        gap:12px; flex-wrap:wrap; margin-bottom:2px;
+    }
+    .spotsession-brand { font-weight:800; font-size:1.05rem; letter-spacing:.04em; color:#0F1410; }
+    .spotsession-tagline { font-size:.78rem; color:#6E766F; margin-top:2px; }
+    .spotsession-date-chip {
+        font-family:"Space Grotesk", system-ui, sans-serif; font-size:.72rem; color:var(--stringer-muted);
+        background:var(--stringer-surface-sunk); padding:5px 10px; border-radius:100px; white-space:nowrap;
+    }
+    /* The three always-visible "big" sections (Conditions, the active
+       session's own lure list, and the pending build's "Lures for this
+       session" list) - the same glossy-gradient card shell as Home's
+       always-visible cards, not an expander (nothing about these should
+       be collapsible). */
+    .st-key-spotsession_conditions_card,
+    .st-key-spotsession_active_card,
+    .st-key-spotsession_pending_lures_card {
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
+        box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
+        border-radius:16px; padding:14px 18px 18px; margin-bottom:14px;
+    }
+    /* Every expander on this page becomes a card - `details` (not the
+       outer [data-testid="stExpander"] wrapper) is what actually carries
+       Streamlit's own border/radius/background, confirmed live via
+       getComputedStyle() before writing this rule, same discipline as
+       every other widget reskin on this site (entry 178's alert-box
+       lesson). Page-wide, not container-scoped - see the block comment
+       above this whole style block for why that's safe here. */
+    [data-testid="stExpander"] > details {
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%) !important;
+        box-shadow:var(--stringer-card-shadow) !important; border:var(--stringer-card-border) !important;
+        border-radius:16px !important;
+    }
+    [data-testid="stExpander"] > details > summary {
+        background:transparent !important; border-radius:16px 16px 0 0 !important;
+        padding:14px 18px !important; font-weight:700 !important; color:var(--stringer-ink) !important;
+    }
+    [data-testid="stExpander"] > details > [data-testid="stExpanderDetails"] {
+        padding:4px 18px 18px !important;
+    }
+    /* An expander nested inside another one (Tackle box gaps inside
+       Suggestions; See updated lure suggestions inside Conditions
+       changed?) gets a flatter, sunk look instead of the same gradient/
+       shadow card stacked inside itself - identical heavy cards nested
+       reads as visual noise, not depth. One descendant selector covers
+       any nesting depth, same as 7-Day Forecast's own version of this
+       rule (entry 181). */
+    [data-testid="stExpander"] [data-testid="stExpander"] > details {
+        background:var(--stringer-surface-sunk) !important; box-shadow:none !important;
+        border:1px solid var(--stringer-border) !important; border-radius:10px !important;
+    }
+    [data-testid="stExpander"] [data-testid="stExpander"] > details > summary {
+        background:transparent !important; border-radius:10px 10px 0 0 !important; font-weight:600 !important;
+    }
+    /* st.info/st.warning/st.success/st.error anywhere on this page - same
+       re-skin as every other page (entry 178): the real tinted background
+       lives on the middle `stAlertContainer` layer, not the outer
+       `stAlert` wrapper, which has none of its own to override. */
+    [data-testid="stAlertContainer"] {
+        background:var(--stringer-surface-sunk) !important; border-radius:10px !important;
+        border:none !important;
+    }
+    [data-testid="stAlertContentInfo"] { border-left:3px solid var(--stringer-accent) !important; }
+    [data-testid="stAlertContentWarning"] { border-left:3px solid var(--stringer-warn) !important; }
+    [data-testid="stAlertContentSuccess"] { border-left:3px solid var(--stringer-good) !important; }
+    [data-testid="stAlertContentError"] { border-left:3px solid var(--stringer-error) !important; }
+    /* Every number on this page (session/segment activity scores, fish
+       counts) - Space Grotesk, not IBM Plex Mono, matching where Home's
+       own numbers already moved to (entry 180) and 7-Day Forecast started
+       from day one (entry 181). */
+    [data-testid="stMetricValue"] {
+        font-family:"Space Grotesk", system-ui, sans-serif; font-variant-numeric:tabular-nums;
+        color:var(--stringer-ink);
+    }
+    [data-testid="stMetricLabel"] {
+        font-family:"Plus Jakarta Sans", system-ui, sans-serif; color:var(--stringer-muted); font-weight:600;
+    }
+    /* Body text color, inside any expander (any nesting depth) or one of
+       the three named cards above - this app's .streamlit/config.toml
+       pins a fixed LIGHT theme (textColor #262730), so Streamlit's own
+       native widget text never itself follows the OS/browser's prefers-
+       color-scheme the way these --stringer-* tokens do - only an
+       explicit override here keeps plain text, captions, widget labels,
+       and headings readable once a card's own background flips dark
+       under that same media query. Same fix, same reason, as Home's own
+       bestwindow-card override (entry 178) and 7-Day Forecast's page-wide
+       version of it (entry 181) - this page just has far more of these
+       (a dozen-plus expanders, three big cards, and this is the one page
+       in the app where every field is a live on-the-water input, not
+       read-only display, so widget LABELS need the same fix too, not
+       just markdown/caption text). */
+    [data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"] p,
+    .st-key-spotsession_conditions_card [data-testid="stMarkdownContainer"] p,
+    .st-key-spotsession_active_card [data-testid="stMarkdownContainer"] p,
+    .st-key-spotsession_pending_lures_card [data-testid="stMarkdownContainer"] p {
+        color:var(--stringer-ink-soft) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stCaptionContainer"] p,
+    .st-key-spotsession_conditions_card [data-testid="stCaptionContainer"] p,
+    .st-key-spotsession_active_card [data-testid="stCaptionContainer"] p,
+    .st-key-spotsession_pending_lures_card [data-testid="stCaptionContainer"] p {
+        color:var(--stringer-muted) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_conditions_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_active_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_pending_lures_card [data-testid="stWidgetLabel"] p {
+        color:var(--stringer-ink-soft) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h1,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h2,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h3,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h4,
+    .st-key-spotsession_conditions_card [data-testid="stHeading"] h1,
+    .st-key-spotsession_conditions_card [data-testid="stHeading"] h2,
+    .st-key-spotsession_conditions_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_conditions_card [data-testid="stHeading"] h4,
+    .st-key-spotsession_active_card [data-testid="stHeading"] h1,
+    .st-key-spotsession_active_card [data-testid="stHeading"] h2,
+    .st-key-spotsession_active_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_active_card [data-testid="stHeading"] h4,
+    .st-key-spotsession_pending_lures_card [data-testid="stHeading"] h1,
+    .st-key-spotsession_pending_lures_card [data-testid="stHeading"] h2,
+    .st-key-spotsession_pending_lures_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_pending_lures_card [data-testid="stHeading"] h4 {
+        color:var(--stringer-ink) !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+_top_today = lake_today()
+st.markdown(
+    f"""
+    <div class="spotsession-topbar">
+        <div>
+            <div class="spotsession-brand">🎯 SPOT SESSION</div>
+            <div class="spotsession-tagline">Live on-the-water conditions, lure calls, and catch logging</div>
+        </div>
+        <div class="spotsession-date-chip">{_top_today.strftime('%a, %b %-d')}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Punch-list #62: a persistent (not a toast, so it can't be missed/scrolled
 # past on a phone) line saying whether this running process can actually
@@ -2418,104 +2654,105 @@ if active is not None:
     # reference the exact same key without recomputing the f-string twice.
     cancel_pending_key = f"cancel_session_confirm_{spot['spot_id']}"
     _session_angler = (active.get("base_conditions") or {}).get("angler") or resolved_angler
-    st.header(f"🎣 Session in progress{f' - {_session_angler}' if _session_angler else ''}")
-    if active.pop("reconstructed", False):
-        st.info(
-            "Reconnected - picked this session back up from what was already saved "
-            "(nothing was lost, but double-check the fish list below matches what you've logged)."
+    with st.container(key="spotsession_active_card"):
+        st.header(f"🎣 Session in progress{f' - {_session_angler}' if _session_angler else ''}")
+        if active.pop("reconstructed", False):
+            st.info(
+                "Reconnected - picked this session back up from what was already saved "
+                "(nothing was lost, but double-check the fish list below matches what you've logged)."
+            )
+            st.session_state[active_session_key] = active
+        score_bit = f" · predicted score {active['predicted_score']}/10" if active.get("predicted_score") is not None else ""
+        # Punch-list #93: a session can now be relocated mid-session (see the
+        # "🔄 Conditions changed?" panel below), so its CURRENT location can
+        # differ from spot["name"] (the page this session happens to be viewed
+        # from) - surfaced here explicitly rather than leaving the angler to
+        # infer it only from the page header above.
+        _current_spot_name = active.get("spot_name") or spot["name"]
+        st.caption(
+            f"Started {active['start_time']} · currently at 📍 {_current_spot_name} · {active['segment_name']} · "
+            f"{active['water_clarity']} water{score_bit}"
         )
-        st.session_state[active_session_key] = active
-    score_bit = f" · predicted score {active['predicted_score']}/10" if active.get("predicted_score") is not None else ""
-    # Punch-list #93: a session can now be relocated mid-session (see the
-    # "🔄 Conditions changed?" panel below), so its CURRENT location can
-    # differ from spot["name"] (the page this session happens to be viewed
-    # from) - surfaced here explicitly rather than leaving the angler to
-    # infer it only from the page header above.
-    _current_spot_name = active.get("spot_name") or spot["name"]
-    st.caption(
-        f"Started {active['start_time']} · currently at 📍 {_current_spot_name} · {active['segment_name']} · "
-        f"{active['water_clarity']} water{score_bit}"
-    )
-    # Punch-list #94: only present for a session that hasn't needed
-    # _reconstruct_active_session() to rebuild it from disk since its
-    # score was last set (Start Session, or a #93 relocate/conditions
-    # update) - see "predicted_score_breakdown"'s own comment above.
-    render_score_breakdown(
-        active.get("predicted_score_breakdown") or [], active.get("predicted_score"),
-        key=f"active_session_score_breakdown_{spot['spot_id']}",
-    )
-    st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
+        # Punch-list #94: only present for a session that hasn't needed
+        # _reconstruct_active_session() to rebuild it from disk since its
+        # score was last set (Start Session, or a #93 relocate/conditions
+        # update) - see "predicted_score_breakdown"'s own comment above.
+        render_score_breakdown(
+            active.get("predicted_score_breakdown") or [], active.get("predicted_score"),
+            key=f"active_session_score_breakdown_{spot['spot_id']}",
+        )
+        st.caption("Tap a lure below every time you land a fish on it. \"🔄 Change\" retires a lure without ending the session.")
 
-    # Punch-list #58: persistent save-health warning + silent 30s background
-    # retry heartbeat - see the block comment above _push_or_toast() for the
-    # full "why". Rendered/started once here, right under the session
-    # header, so it's visible no matter how far down the angler has
-    # scrolled to tap a lure or open "Add a lure to this session."
-    #
-    # Punch-list #66: skipped entirely while this spot's Cancel Session
-    # confirm ("Yes, cancel it" / "Keep session") is on screen. Live
-    # reproduction of punch-list #64's still-open "first click on 'Yes,
-    # cancel it' silently does nothing" bug found that the failure was
-    # NOT _cancel_session() returning False (that path sets a visible
-    # "cancel_failed" banner - punch-list #64/#65 - and the banner never
-    # appeared in any failing repro). The button's own `if ccol1.button(...)`
-    # block wasn't running at all on the failing click - nothing it does
-    # (delete_trip, the push, either banner) ever started. This page is
-    # the ONLY one in the app using st.fragment(run_every=...) (this one,
-    # plus _render_watch_view()'s 20s tick for spectators) - every other
-    # page's identical two-step confirm (e.g. Trip History's "🗑️ Delete
-    # this trip") has never had this reported. A background fragment's own
-    # periodic rerun landing at the same moment as a click on an unrelated
-    # button is a known source of that click being silently dropped rather
-    # than processed on the next full script run - plausible here given
-    # the timing (tap "❌ Cancel Session", read the warning, tap "Yes,
-    # cancel it" a few seconds later lines up with this heartbeat's 30s
-    # cadence) and given no other page pairs a fragment with a confirm-
-    # click flow. Not calling the fragment at all while the confirm buttons
-    # are the only thing the angler can act on removes that window - it
-    # already skips its own work most ticks anyway (see its docstring), so
-    # pausing it for the few seconds a "are you sure" prompt is up costs
-    # nothing. Unproven as THE root cause (see SESSION_NOTES.md punch-list
-    # #66), but a real candidate worth eliminating rather than another
-    # diagnostic-only pass.
-    _render_push_health_banner()
-    if not st.session_state.get(cancel_pending_key):
-        _autosave_heartbeat()
+        # Punch-list #58: persistent save-health warning + silent 30s background
+        # retry heartbeat - see the block comment above _push_or_toast() for the
+        # full "why". Rendered/started once here, right under the session
+        # header, so it's visible no matter how far down the angler has
+        # scrolled to tap a lure or open "Add a lure to this session."
+        #
+        # Punch-list #66: skipped entirely while this spot's Cancel Session
+        # confirm ("Yes, cancel it" / "Keep session") is on screen. Live
+        # reproduction of punch-list #64's still-open "first click on 'Yes,
+        # cancel it' silently does nothing" bug found that the failure was
+        # NOT _cancel_session() returning False (that path sets a visible
+        # "cancel_failed" banner - punch-list #64/#65 - and the banner never
+        # appeared in any failing repro). The button's own `if ccol1.button(...)`
+        # block wasn't running at all on the failing click - nothing it does
+        # (delete_trip, the push, either banner) ever started. This page is
+        # the ONLY one in the app using st.fragment(run_every=...) (this one,
+        # plus _render_watch_view()'s 20s tick for spectators) - every other
+        # page's identical two-step confirm (e.g. Trip History's "🗑️ Delete
+        # this trip") has never had this reported. A background fragment's own
+        # periodic rerun landing at the same moment as a click on an unrelated
+        # button is a known source of that click being silently dropped rather
+        # than processed on the next full script run - plausible here given
+        # the timing (tap "❌ Cancel Session", read the warning, tap "Yes,
+        # cancel it" a few seconds later lines up with this heartbeat's 30s
+        # cadence) and given no other page pairs a fragment with a confirm-
+        # click flow. Not calling the fragment at all while the confirm buttons
+        # are the only thing the angler can act on removes that window - it
+        # already skips its own work most ticks anyway (see its docstring), so
+        # pausing it for the few seconds a "are you sure" prompt is up costs
+        # nothing. Unproven as THE root cause (see SESSION_NOTES.md punch-list
+        # #66), but a real candidate worth eliminating rather than another
+        # diagnostic-only pass.
+        _render_push_health_banner()
+        if not st.session_state.get(cancel_pending_key):
+            _autosave_heartbeat()
 
-    retired_lures = []
-    for i, lure in enumerate(active["lures"]):
-        if lure.get("retired"):
-            retired_lures.append((i, lure))
-            continue
-        fish_count = sum((f.get("count") or 1) for f in lure["fish"])
-        label = f"🎣 {lure['label']}" + (f" ({fish_count} caught)" if fish_count else "")
-        lcol1, lcol2 = st.columns([4, 1])
-        if lcol1.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
-            _fish_entry_dialog(spot["spot_id"], i, resolved_angler)
-        if lcol2.button("🔄 Change", key=f"retire_lure_{spot['spot_id']}_{i}", width='stretch'):
-            _retire_lure(spot["spot_id"], i, resolved_angler)
-            st.rerun()
-        if lure["fish"]:
-            with st.expander(f"Fish caught on {lure['label']} ({fish_count})", expanded=False):
-                for fi, fish in enumerate(lure["fish"]):
-                    frow1, frow2 = st.columns([5, 1])
-                    frow1.write(f"- {', '.join(str(b) for b in _fish_summary_bits(fish))}")
-                    if frow2.button("Remove", key=f"remove_active_fish_{spot['spot_id']}_{i}_{fi}"):
-                        _remove_fish(spot["spot_id"], i, fi, resolved_angler)
-                        st.rerun()
+        retired_lures = []
+        for i, lure in enumerate(active["lures"]):
+            if lure.get("retired"):
+                retired_lures.append((i, lure))
+                continue
+            fish_count = sum((f.get("count") or 1) for f in lure["fish"])
+            label = f"🎣 {lure['label']}" + (f" ({fish_count} caught)" if fish_count else "")
+            lcol1, lcol2 = st.columns([4, 1])
+            if lcol1.button(label, key=f"open_fish_dialog_{spot['spot_id']}_{i}", width='stretch'):
+                _fish_entry_dialog(spot["spot_id"], i, resolved_angler)
+            if lcol2.button("🔄 Change", key=f"retire_lure_{spot['spot_id']}_{i}", width='stretch'):
+                _retire_lure(spot["spot_id"], i, resolved_angler)
+                st.rerun()
+            if lure["fish"]:
+                with st.expander(f"Fish caught on {lure['label']} ({fish_count})", expanded=False):
+                    for fi, fish in enumerate(lure["fish"]):
+                        frow1, frow2 = st.columns([5, 1])
+                        frow1.write(f"- {', '.join(str(b) for b in _fish_summary_bits(fish))}")
+                        if frow2.button("Remove", key=f"remove_active_fish_{spot['spot_id']}_{i}_{fi}"):
+                            _remove_fish(spot["spot_id"], i, fi, resolved_angler)
+                            st.rerun()
 
-    if retired_lures:
-        with st.expander(f"Retired lures ({len(retired_lures)})", expanded=False):
-            for i, lure in retired_lures:
-                fish_count = sum((f.get("count") or 1) for f in lure["fish"])
-                start = lure["entry_kwargs"]["conditions"].get("lure_start_time") or "?"
-                end = lure["entry_kwargs"]["conditions"].get("lure_end_time") or "?"
-                # Punch-list #93: a retired lure's own row now records
-                # whichever spot was current when it was fished, which can
-                # legitimately differ from other lures' rows in the same
-                # session once a mid-session relocation happens.
-                _lure_spot = lure["entry_kwargs"].get("spot_name") or spot["name"]
-                st.caption(f"{lure['label']} @ 📍 {_lure_spot} - {fish_count} fish - {start} to {end}")
+        if retired_lures:
+            with st.expander(f"Retired lures ({len(retired_lures)})", expanded=False):
+                for i, lure in retired_lures:
+                    fish_count = sum((f.get("count") or 1) for f in lure["fish"])
+                    start = lure["entry_kwargs"]["conditions"].get("lure_start_time") or "?"
+                    end = lure["entry_kwargs"]["conditions"].get("lure_end_time") or "?"
+                    # Punch-list #93: a retired lure's own row now records
+                    # whichever spot was current when it was fished, which can
+                    # legitimately differ from other lures' rows in the same
+                    # session once a mid-session relocation happens.
+                    _lure_spot = lure["entry_kwargs"].get("spot_name") or spot["name"]
+                    st.caption(f"{lure['label']} @ 📍 {_lure_spot} - {fish_count} fish - {start} to {end}")
 
     st.divider()
     # Punch-list #49 (extended by #93 - the angler's own explicit ask:
@@ -2746,15 +2983,16 @@ else:
     st.session_state.setdefault(_pending_lures_key(spot["spot_id"], session_build_seq), _pending_draft.get("lures", []))
 
     st.divider()
-    st.header("Conditions")
-    st.caption(
-        "Enter what you're actually seeing at the water - weather-related fields below default from the "
-        "live forecast, override any of them if what you see is different. Once you've picked your "
-        "lure(s) below, Start Session locks in the exact time and this whole snapshot."
-    )
-    weather_defaults = _weather_defaults(bundle, session_date, lake_now_naive())
-    cond_key_ns = f"cond_{spot['spot_id']}_{session_build_seq}"
-    cond_values = render_conditions_block(cond_key_ns, weather_defaults, prefill=_pending_draft.get("cond"))
+    with st.container(key="spotsession_conditions_card"):
+        st.header("Conditions")
+        st.caption(
+            "Enter what you're actually seeing at the water - weather-related fields below default from the "
+            "live forecast, override any of them if what you see is different. Once you've picked your "
+            "lure(s) below, Start Session locks in the exact time and this whole snapshot."
+        )
+        weather_defaults = _weather_defaults(bundle, session_date, lake_now_naive())
+        cond_key_ns = f"cond_{spot['spot_id']}_{session_build_seq}"
+        cond_values = render_conditions_block(cond_key_ns, weather_defaults, prefill=_pending_draft.get("cond"))
 
     _preview_now = lake_now_naive()
     _preview_segment = _guess_segment(_preview_now.hour, _preview_now)
@@ -2818,47 +3056,48 @@ else:
         )
 
     st.divider()
-    st.markdown("#### Lures for this session")
-    pending_lures = st.session_state.get(_pending_lures_key(spot["spot_id"], session_build_seq), [])
-    # Punch-list #87: a lure was just added (from the suggestions quick-add,
-    # the tackle-box picker, manual entry, or the trailer dialog - see
-    # _lure_added_popup_key()) - show the confirmation popup, right now,
-    # before anything else on this rerun renders. Deliberately a plain
-    # `.get()`, NOT a `.pop()`: an `@st.dialog` function has to be reachable
-    # on every rerun ITS OWN widgets trigger (e.g. just re-rendering while
-    # open) or Streamlit has nothing left to show once the user interacts
-    # with anything inside it - a one-shot pop-on-render would close this
-    # popup the instant it first renders, before either of its own buttons
-    # ever got a chance to be clicked. The flag is cleared explicitly
-    # instead, by whichever of _lure_added_dialog()'s two buttons actually
-    # dismisses it ("Add more lures" pops it directly; "Start Session"
-    # advances session_build_seq, so this exact key - scoped to the OLD
-    # seq - simply stops matching on the very next render).
-    if st.session_state.get(_lure_added_popup_key(spot["spot_id"], session_build_seq), False):
-        _lure_added_dialog(
-            spot, cond_values, session_date, bundle, structure_type, resolved_angler,
-            pending_lures, session_build_seq, session_build_seq_key, active_session_key,
-        )
-    # Punch-list #53: keep the URL's draft in sync with wherever this build
-    # actually is right now - conditions form values plus whatever lures
-    # are queued so far - every render, so a reconnect at any point (even
-    # before a single lure's been picked) restores it instead of starting
-    # over blank.
-    _save_pending_draft(spot["spot_id"], session_build_seq, cond_values, pending_lures)
-    if pending_lures:
-        for i, lure in enumerate(pending_lures):
-            lcol1, lcol2 = st.columns([5, 1])
-            trailer = lure.get("trailer")
-            trailer_bit = f" + {trailer['label']} trailer" if trailer else ""
-            lcol1.write(f"🎣 {lure['label']}{trailer_bit}")
-            if lcol2.button("Remove", key=f"remove_pending_lure_{spot['spot_id']}_{session_build_seq}_{i}"):
-                # Removing a lure removes its trailer too, since the trailer
-                # is stored nested inside this same pending-list entry, not
-                # tracked separately.
-                _remove_lure_from_pending(spot["spot_id"], session_build_seq, i)
-                st.rerun()
-    else:
-        st.caption("No lures selected yet - use the suggestions above or the tackle box below.")
+    with st.container(key="spotsession_pending_lures_card"):
+        st.markdown("#### Lures for this session")
+        pending_lures = st.session_state.get(_pending_lures_key(spot["spot_id"], session_build_seq), [])
+        # Punch-list #87: a lure was just added (from the suggestions quick-add,
+        # the tackle-box picker, manual entry, or the trailer dialog - see
+        # _lure_added_popup_key()) - show the confirmation popup, right now,
+        # before anything else on this rerun renders. Deliberately a plain
+        # `.get()`, NOT a `.pop()`: an `@st.dialog` function has to be reachable
+        # on every rerun ITS OWN widgets trigger (e.g. just re-rendering while
+        # open) or Streamlit has nothing left to show once the user interacts
+        # with anything inside it - a one-shot pop-on-render would close this
+        # popup the instant it first renders, before either of its own buttons
+        # ever got a chance to be clicked. The flag is cleared explicitly
+        # instead, by whichever of _lure_added_dialog()'s two buttons actually
+        # dismisses it ("Add more lures" pops it directly; "Start Session"
+        # advances session_build_seq, so this exact key - scoped to the OLD
+        # seq - simply stops matching on the very next render).
+        if st.session_state.get(_lure_added_popup_key(spot["spot_id"], session_build_seq), False):
+            _lure_added_dialog(
+                spot, cond_values, session_date, bundle, structure_type, resolved_angler,
+                pending_lures, session_build_seq, session_build_seq_key, active_session_key,
+            )
+        # Punch-list #53: keep the URL's draft in sync with wherever this build
+        # actually is right now - conditions form values plus whatever lures
+        # are queued so far - every render, so a reconnect at any point (even
+        # before a single lure's been picked) restores it instead of starting
+        # over blank.
+        _save_pending_draft(spot["spot_id"], session_build_seq, cond_values, pending_lures)
+        if pending_lures:
+            for i, lure in enumerate(pending_lures):
+                lcol1, lcol2 = st.columns([5, 1])
+                trailer = lure.get("trailer")
+                trailer_bit = f" + {trailer['label']} trailer" if trailer else ""
+                lcol1.write(f"🎣 {lure['label']}{trailer_bit}")
+                if lcol2.button("Remove", key=f"remove_pending_lure_{spot['spot_id']}_{session_build_seq}_{i}"):
+                    # Removing a lure removes its trailer too, since the trailer
+                    # is stored nested inside this same pending-list entry, not
+                    # tracked separately.
+                    _remove_lure_from_pending(spot["spot_id"], session_build_seq, i)
+                    st.rerun()
+        else:
+            st.caption("No lures selected yet - use the suggestions above or the tackle box below.")
 
     with st.expander(
         "➕ Add from tackle box",

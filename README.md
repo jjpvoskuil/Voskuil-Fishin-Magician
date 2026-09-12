@@ -108,6 +108,21 @@ SESSION_NOTES.md entry 181 for the full story, including a real dark-mode text-c
 app's fixed light theme means native widget text never itself follows the OS dark-mode preference
 the way this site's own `--stringer-*` card tokens do) caught and fixed along the way.
 
+The Spot Session page - the last and biggest page in the rollout (punch-list #98 Phase 5), and
+the one actually used standing at the water rather than reviewed afterward - got the same brand
+topbar and card language, applied page-wide rather than scoped to a couple of containers, since
+there's nothing on this page that should stay unstyled. Three always-visible sections (Conditions,
+the active session's own lure list, "Lures for this session") became named cards; every expander
+on the page (there are a dozen-plus - Suggestions, Conditions changed/Relocate, Add a lure, Fish
+caught, Retired lures, Tackle box gaps, Add from tackle box) gets the same two-tier glossy-card/
+flatter-sunk-nested treatment as the 7-Day Forecast page; and its three `st.dialog` popups (add a
+trailer, log a fish, lure added) - confirmed to render into a browser-level portal outside the
+main page container - get their own explicit font rule rather than inheriting the page-wide one.
+See SESSION_NOTES.md entry 182 for the full story, including a second real dark-mode contrast bug
+(the topbar's own brand text, sitting directly on this app's fixed-light native page background)
+caught by an actual dark-mode screenshot - a bug that turns out to be latent, unfixed, on Home's
+and 7-Day Forecast's identical topbar markup too.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
