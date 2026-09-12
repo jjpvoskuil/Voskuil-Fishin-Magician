@@ -12444,6 +12444,106 @@ every real save.
     on click, a score-breakdown popover still opens - with no non-network
     console/page errors either before or after.
 
+182. **Punch-list #98 Phase 5: Spot Session restyled to match Home/The
+    Stringer/7-Day Forecast - the last and by far the biggest page in the
+    rollout.** Angler's own ask: "Alright...lets tackle the spot session
+    next. this one needs to be the best and crispest," reinforced mid-
+    session with "Visually it needs to be good and functionality must be
+    intuitive and flawless" - the explicit bar for this pass, given this
+    is the page actually used standing at the water, not just reviewed
+    afterward. Confirmed scope (everything: pre-session setup, the live
+    active-session view, the watch view, the relocate flow, and the fish/
+    lure dialogs) via a follow-up question before starting.
+
+    Same `--stringer-*` tokens as the other three pages (kept in sync by
+    hand, no shared stylesheet yet), same brand topbar shape, no IBM Plex
+    Mono (entries 180/181 - every number here uses Space Grotesk from the
+    start). Two NEW tokens this page needed and the other three didn't:
+    `--stringer-good` (aliases the existing teal accent, used for
+    `st.success`'s left rule) and `--stringer-error` (a new red, for
+    `st.error`'s left rule - this is the first of the four redesigned
+    pages that actually calls `st.error()`, in `_fish_entry_dialog()`).
+
+    Unlike 7-Day Forecast (mostly read-only, so its reskin could stay
+    scoped to a couple of wrapping containers), this page's CSS is
+    deliberately PAGE-WIDE rather than container-scoped
+    (`[data-testid="stExpander"]`, not `.st-key-<container>
+    [data-testid="stExpander"]`) - there's nothing on this page that
+    should stay unstyled the way Home's native sidebar does, and a page-
+    local `<style>` block only ever applies while that page itself is
+    being viewed (Streamlit's multi-page nav fully remounts the DOM per
+    page), so a page-wide rule here can't leak onto any other page.
+    Three always-visible sections got the same named-card treatment as
+    Home's own always-visible cards - `st.container(key="spotsession_
+    conditions_card")` around the Conditions header/caption/form,
+    `st.container(key="spotsession_active_card")` around the active
+    session's own header through its "Retired lures" expander (NOT the
+    "Conditions changed?"/"Add a lure"/End-Session controls below it,
+    which stay as their own separate expanders/buttons), and
+    `st.container(key="spotsession_pending_lures_card")` around "Lures for
+    this session" through its list rendering (NOT the "Add from tackle
+    box" expander below it) - the minimum structural change needed, three
+    new wrapping `with` blocks plus re-indents, no widget added/removed/
+    reordered. Every one of this page's dozen-plus `st.expander`s (
+    Suggestions, Conditions changed/Relocate, Add a lure, Fish caught,
+    Retired lures, Tackle box gaps, Add from tackle box) gets the same
+    two-tier treatment 7-Day Forecast established (entry 181): outermost
+    gets the full glossy-gradient card, anything nested inside gets a
+    flatter sunk look instead.
+
+    **A DOM finding specific to this page:** its three `st.dialog` popups
+    (`_trailer_dialog`, `_fish_entry_dialog`, `_lure_added_dialog`) render
+    into a browser-level portal - confirmed live via `.closest('[data-
+    testid="stMain"]')` returning `false` - so they are NOT descendants of
+    the main page content container the way everything else on this page
+    is. Page-container-scoped CSS (including the page-wide font rule)
+    can't reach them, so they get their own explicit `[data-testid=
+    "stDialog"]` selector alongside `[data-testid="stMainBlockContainer"]`
+    rather than inheriting one.
+
+    **A real dark-mode bug caught by live verification, distinct from
+    entry 181's (and latent, unfixed, on Home's and 7-Day Forecast's own
+    identical topbar markup):** the brand/tagline text in the topbar sits
+    directly on Streamlit's own native page background, which `.streamlit/
+    config.toml` pins to a fixed LIGHT theme that never itself flips under
+    `prefers-color-scheme` - unlike the date-chip next to it, which is
+    safe because both its own background AND its text use the flipping
+    `--stringer-*` tokens together. Using `var(--stringer-ink)` for the
+    brand text (the same pattern Home/7-Day Forecast already use) made it
+    render near-white-on-white in dark mode - essentially invisible, caught
+    only by an actual dark-mode screenshot, not by reasoning about the CSS.
+    Fixed here by giving `.spotsession-brand`/`.spotsession-tagline` fixed,
+    non-flipping colors instead. Home's and 7-Day Forecast's topbars carry
+    the same latent bug and have NOT been fixed as part of this entry -
+    worth a small follow-up pass across both.
+
+    **Verified:** full suite (645 passed - this sandbox needed `pip
+    install -r requirements.txt` first, a fresh environment for this
+    session; unrelated to the code change), scanned the new `<style>`
+    block programmatically for blank lines before testing (the entry
+    174/177/181 truncation bug class - this block is the longest of the
+    four pages' own copies), and a live Playwright walkthrough (via the
+    same `runpy.run_path()` + monkeypatched-`appstate` wrapper technique
+    entry 181 used, extended here to also fake `get_lake_spots`/
+    `get_inventory`/`get_anglers` so the real session-build/active-session
+    flow could be driven end to end, not just rendered once) covering, in
+    both light AND dark mode: no CSS-as-text leaking anywhere; the spot
+    picker -> angler picker -> Conditions card chain; the "Suggestions for
+    right now" card with its nested "Tackle box gaps" expander correctly
+    sunk; adding a lure from the tackle-box grid; the "Lure added" dialog
+    (correct font, legible on its own native white dialog surface in both
+    modes) and its "Start Session" button actually starting the session;
+    the resulting "Session in progress" card (header, reconnect-safe
+    caption, score-breakdown popover, per-lure buttons); the nested
+    "Conditions changed? Relocate" card with its own sunk "See updated
+    lure suggestions" sub-expander; and the "Log a fish" dialog (native
+    `st.pills` for Type of hit, all dropdowns, the Record button) opening
+    correctly on top of the active card. Every text-contrast fix (body
+    text, captions, widget labels, headings, inside expanders and inside
+    all three named cards) reconfirmed actually legible in dark mode via
+    real screenshots, not just asserted from the CSS. No functional
+    regressions found in any exercised flow.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
