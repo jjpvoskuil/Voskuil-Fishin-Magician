@@ -1303,8 +1303,21 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
     with st.container(key="spotsession_cond_activity_card"):
         st.markdown('<div class="ss-card-head"><span class="ss-msym">set_meal</span>Fish &amp; forage activity</div>', unsafe_allow_html=True)
         forage_key = f"{key_ns}_forage_seen"
-        st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
-        forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)
+        # Angler's ask: buttons instead of a dropdown, Threadfin Shad
+        # selected by default. st.pills (not st.multiselect) for the same
+        # reason as "Type of hit" above (punch-list #33) - always-visible,
+        # directly tappable chips instead of a floating dropdown list -
+        # and still returns a plain list, so nothing downstream needed to
+        # change. The "Threadfin Shad" default only applies to a genuinely
+        # fresh session (no prefill, no weather-derived forage guess);
+        # deliberately NOT core.lures.DEFAULT_FORAGE (Gizzard Shad +
+        # Bluegill/Sunfish) - that constant is a different, pre-existing
+        # default used elsewhere in the recommendation engine, not what
+        # was asked for here.
+        st.session_state.setdefault(forage_key, _default("forage_seen", ["Threadfin Shad"]) or ["Threadfin Shad"])
+        forage_seen = st.pills(
+            "Forage seen (optional)", FORAGE_OPTIONS, selection_mode="multi", key=forage_key,
+        )
 
         c7, c8 = st.columns(2)
         fish_act_key = f"{key_ns}_fish_activity"
