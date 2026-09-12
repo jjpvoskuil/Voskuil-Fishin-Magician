@@ -91,9 +91,23 @@ st.markdown(
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,500,0,0&display=swap" rel="stylesheet">
     """,
     unsafe_allow_html=True,
 )
+# Punch-list #98 follow-up entry 185: the Conditions sub-card headers below
+# use this webfont directly (a raw <span class="ss-msym">) rather than
+# st.subheader(..., icon=":material/...:") - confirmed live (post-deploy,
+# via the browser tools) that Streamlit's own heading-icon path creates a
+# real stHeadingIconWrapper element but never actually applies the Material
+# Symbols font to it in this version/context (computed font-family stayed
+# Streamlit's own default "Source Sans", not a bug in this app's CSS - the
+# icon text itself never got the right font at all). AppTest confirmed the
+# icon WAS reaching the proto correctly, so this is a frontend-only quirk,
+# not a mistake in how the icon was passed. Sidestepping it entirely with a
+# real, independently-loaded webfont (same technique already proven in the
+# approved mockup) was faster and more reliable than chasing a Streamlit
+# internal rendering bug further.
 st.markdown(
     """
     <style>
@@ -183,29 +197,28 @@ st.markdown(
         border-radius:14px !important; padding:0 18px 16px !important; margin-bottom:14px !important;
         overflow:hidden;
     }
-    /* Header band - bled edge-to-edge via a negative margin matching the
-       container's own side padding above (confirmed live: stHeading is
-       the block-level wrapper Streamlit itself already uses for
-       st.header/st.subheader, already trusted elsewhere in this same
-       file's own dark-mode override rules). */
-    .st-key-spotsession_cond_water_card [data-testid="stHeading"],
-    .st-key-spotsession_cond_stain_card [data-testid="stHeading"],
-    .st-key-spotsession_cond_wind_card [data-testid="stHeading"],
-    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] {
-        background:var(--stringer-surface-sunk) !important; margin:0 -18px 14px -18px !important;
-        padding:10px 18px !important; border-bottom:1px solid var(--stringer-border) !important;
+    /* Header band - a raw markdown div (`.ss-card-head`), not
+       st.subheader (entry 185: st.subheader's own icon= path creates a
+       real stHeadingIconWrapper element live, confirmed via the browser
+       tools, but never actually applies the Material Symbols font to it
+       in this version/context - a frontend-only quirk, confirmed NOT a
+       mistake in how the icon was passed via a matching AppTest proto
+       check). Bled edge-to-edge via a negative margin matching the
+       container's own side padding above. `.ss-msym` uses the
+       Material+Symbols+Outlined webfont loaded alongside this page's
+       other two fonts above - same real, independently-loaded-webfont
+       technique already proven in the approved mockup, sidestepping
+       Streamlit's own icon path entirely. */
+    .ss-card-head {
+        display:flex; align-items:center; gap:8px;
+        background:var(--stringer-surface-sunk); margin:0 -18px 14px -18px;
+        padding:10px 18px; border-bottom:1px solid var(--stringer-border);
+        font-family:"Plus Jakarta Sans", system-ui, sans-serif; font-size:.92rem; font-weight:700;
+        color:var(--stringer-ink);
     }
-    .st-key-spotsession_cond_water_card [data-testid="stHeading"] h3,
-    .st-key-spotsession_cond_stain_card [data-testid="stHeading"] h3,
-    .st-key-spotsession_cond_wind_card [data-testid="stHeading"] h3,
-    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] h3 {
-        font-size:.92rem !important; font-weight:700 !important; color:var(--stringer-ink) !important;
-    }
-    .st-key-spotsession_cond_water_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
-    .st-key-spotsession_cond_stain_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
-    .st-key-spotsession_cond_wind_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
-    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] [data-testid="stIconMaterial"] {
-        color:var(--stringer-accent) !important;
+    .ss-msym {
+        font-family:'Material Symbols Outlined'; font-variation-settings:'opsz' 20,'wght' 500,'FILL' 0,'GRAD' 0;
+        font-size:19px; line-height:1; color:var(--stringer-accent);
     }
     /* Numeric steppers (water temp / secchi / fish depth) - real
        st.number_input, just reskinned. Confirmed live that
@@ -1228,7 +1241,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         )
 
     with st.container(key="spotsession_cond_water_card"):
-        st.subheader("Water conditions", icon=":material/water_drop:")
+        st.markdown('<div class="ss-card-head"><span class="ss-msym">water_drop</span>Water conditions</div>', unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         wt_key = f"{key_ns}_water_temp"
         st.session_state.setdefault(wt_key, _default("water_temp_f", 85.0))
@@ -1248,7 +1261,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         _badge("Visibility band", f"<b>{vis_band['label']}</b> — {vis_band['detail']}")
 
     with st.container(key="spotsession_cond_stain_card"):
-        st.subheader("Environmental stain", icon=":material/invert_colors:")
+        st.markdown('<div class="ss-card-head"><span class="ss-msym">invert_colors</span>Environmental stain</div>', unsafe_allow_html=True)
         stain_color = None
         if vis_band["label"] == "Stained":
             stain_key = f"{key_ns}_stain_color"
@@ -1266,7 +1279,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         )
 
     with st.container(key="spotsession_cond_wind_card"):
-        st.subheader("Wind & atmosphere", icon=":material/air:")
+        st.markdown('<div class="ss-card-head"><span class="ss-msym">air</span>Wind &amp; atmosphere</div>', unsafe_allow_html=True)
         c3, c4 = st.columns(2)
         wind_key = f"{key_ns}_wind_band"
         st.session_state.setdefault(wind_key, _default("wind_band", WIND_BAND_LABELS[1]))
@@ -1288,7 +1301,7 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
         precipitation = c6.selectbox("Precipitation", PRECIPITATION_OPTIONS, key=precip_key)
 
     with st.container(key="spotsession_cond_activity_card"):
-        st.subheader("Fish & forage activity", icon=":material/set_meal:")
+        st.markdown('<div class="ss-card-head"><span class="ss-msym">set_meal</span>Fish &amp; forage activity</div>', unsafe_allow_html=True)
         forage_key = f"{key_ns}_forage_seen"
         st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
         forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)
