@@ -132,6 +132,16 @@ Water temperature/Secchi depth/fish depth use restyled numeric steppers, and the
 SESSION_NOTES.md entry 183 for the full story, including why an earlier attempt at this exact
 redesign had to be redone from scratch (a prior session's commit never made it to GitHub).
 
+Tackle Box (punch-list #98 follow-up) got the same design language next, matched specifically to
+Spot Session's look rather than the punch list's own placeholder "fantasy-football stat-row" idea -
+the angler's own choice. This page started from zero existing styling (a plain title, bare
+expanders), so it's the widest single pass yet: the four expanders, the item/gap/product-family
+card grids, and every text input/selectbox/multiselect/number input on the page (the main grid's
+filters, the Edit-lure dialog, the Add-a-lure and Confirm-details forms) all now match. See
+SESSION_NOTES.md entry 187 for the full story, including a new problem this page raised - a
+repeating card grid built with `st.container(border=True)` and no stable way to target it in CSS
+without adding an explicit `key=` to each card.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
