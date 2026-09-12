@@ -12727,6 +12727,69 @@ every real save.
     `['Threadfin Shad']` rather than trusting the code by inspection alone
     (`app.pills[0].value == ['Threadfin Shad']`).
 
+187. **Punch-list #98 Phase 3+: Tackle Box gets the design language too -
+    matched to Spot Session's look specifically, angler's own choice over
+    the punch list's own placeholder "fantasy-football stat-row" idea.**
+    Asked directly (this page was explicitly flagged in punch-list #98 as
+    needing a confirmed direction, not an assumed one) - answer was "match
+    styling to Spot Session," not a new reference image and not the denser
+    stat-row layout floated back in punch-list #98 itself. Every token,
+    font, and CSS technique below is copied verbatim from
+    `pages/6_Spot_Session.py` rather than reinvented, for exactly that
+    reason.
+
+    This was the first page in the whole rollout starting from ZERO
+    existing styling (Spot Session at least had Phase-5-era CSS to extend;
+    this page still had a plain `st.title()` and bare `st.expander()`s),
+    so the "there's nothing on this page that should stay unstyled"
+    standard from Spot Session's own README section meant covering more
+    ground in one pass than any follow-up so far: the four expanders
+    (Scan a lure / Search Cabela's / Add a lure / Fill your tackle gaps)
+    got the same glossy-card treatment as every other page's expanders;
+    the plain title/captions became a `.tacklebox-brand`/`-tagline` topbar
+    row; `st.info`/`st.warning`/`st.success` got the same alert re-skin;
+    and every text input / selectbox / multiselect / number input on the
+    page (the main grid's search+filter row, the Edit-lure dialog, the
+    Add-a-lure and Confirm-details forms) got the same box/stepper
+    treatment already proven live on Spot Session's Conditions cards -
+    confirmed via a **live DOM check on the currently-deployed (pre-this-
+    change) Tackle Box page** before writing any of these selectors,
+    exactly the discipline that saved a wasted redeploy cycle last time:
+    `st.multiselect`'s real bordered box is `div[role="group"]`, same
+    pattern as `st.selectbox`; `st.text_input`'s is the real
+    `stTextInputRootElement` testid; `st.form` already has a real
+    `stForm` testid worth targeting directly.
+
+    The one genuinely new problem this page posed: the item/gap/family
+    card grids all use `st.container(border=True)` with no `key=`, and
+    live inspection confirmed the actual bordered element
+    (`[data-testid="stVerticalBlock"]`) carries no distinguishing class
+    beyond an unstable per-build emotion-cache hash - not safe to target
+    directly. Fixed by giving each card an explicit, per-item `key=`
+    (`tacklebox_item_card_<item_id>`, `tacklebox_gap_card_<category_key>`,
+    `tacklebox_family_card_<key_prefix>_<idx>`) and matching all of them
+    with the same `[class*="st-key-<prefix>_"]` wildcard-substring
+    selector home.py's award tiles already proved out (entry 180) - since
+    a container's `key=` is purely a stable-identity/CSS hook here (no
+    session-state value lives under it), adding one to each loop iteration
+    carries no functional risk. These three grids get a flatter, non-
+    gradient card (same "nested/repeating content is flatter, not another
+    stacked heavy card" principle used everywhere else) rather than the
+    expanders' own glossy treatment.
+
+    **Verified:** full suite (645 passed) and a scratch `AppTest.from_file`
+    render of the whole page with no exception raised - meaningful here
+    specifically because this page has never had its own page-level
+    AppTest suite (unlike Spot Session/7-Day Forecast/Leaderboard), so
+    this was the only mechanical check available that the new per-item
+    `key=` values don't collide with each other or anything else on a
+    real render. **NOT yet done:** an actual live check against the
+    deployed app - flagged the same way as every other CSS-only page
+    pass in this log, and this page in particular has more never-before-
+    styled widget types in it (multiselect, form, several number inputs)
+    than any single prior pass, so it's more likely than usual something
+    here needs a follow-up fix once seen for real.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

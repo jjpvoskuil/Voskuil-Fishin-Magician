@@ -40,11 +40,181 @@ _TEXT_SEARCH_STATE_KEYS = (
 st.set_page_config(page_title="Tackle Box - Nolin Lake", page_icon="🧰", layout="wide")
 inject_mobile_css()
 render_bottom_nav("pages/5_Lure_Inventory.py")
-st.title("🧰 Tackle Box")
-st.caption(
-    "Your tackle box, tracked: brand, full description, a photo, the last price you paid, and "
-    "how many you currently have on hand. Seeded from a Cabela's order, and grows as you add "
-    "more by hand or with a photo."
+
+# --- Design-language CSS + fonts (punch-list #98 follow-up: Tackle Box) -----
+# Same visual language as Home/The Stringer/7-Day Forecast/Spot Session -
+# Plus Jakarta Sans, one muted teal accent, glossy-gradient cards for the
+# page's four expanders, flatter cards for the repeating item/gap/family
+# grids below (same "dense repeating grid gets the flatter nested
+# treatment" principle as everywhere else, not another stacked heavy
+# card). Angler's own ask for this page specifically: match Spot
+# Session's look rather than a new from-scratch direction, so every token
+# below is copied verbatim from pages/6_Spot_Session.py, not reinvented.
+# Font <link> tags are their own st.markdown call, never combined with
+# <style> into one string - see home.py's own comment on entries 174/177
+# for why a stray blank line in a combined call can silently truncate
+# everything after it.
+st.markdown(
+    """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    """
+    <style>
+    :root {
+      --stringer-surface:#FFFFFF; --stringer-surface-sunk:#EEF0EA;
+      --stringer-ink:#0F1410; --stringer-ink-soft:#3C443E; --stringer-muted:#6E766F;
+      --stringer-border:#E7E9E2; --stringer-accent:#2C7C6E; --stringer-accent-strong:#1F5F54;
+      --stringer-accent-track:#D8EAE5; --stringer-warn:#8A5A1E; --stringer-warn-track:#F3E6D2;
+      --stringer-good:#2C7C6E; --stringer-error:#B3261E;
+      --stringer-card-from:#FFFFFF; --stringer-card-to:#F5F7F1;
+      --stringer-card-shadow:0 1px 2px rgba(15,20,16,0.05), 0 6px 16px rgba(15,20,16,0.08);
+      --stringer-card-border:1px solid rgba(15,20,16,0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --stringer-surface:#131A16; --stringer-surface-sunk:#0F1512;
+        --stringer-ink:#F1F3EF; --stringer-ink-soft:#C4CCC5; --stringer-muted:#8A948C;
+        --stringer-border:#212A24; --stringer-accent:#4FAE9C; --stringer-accent-strong:#6FC2B2;
+        --stringer-accent-track:#173630; --stringer-warn:#E8B370; --stringer-warn-track:#2E2413;
+        --stringer-good:#4FAE9C; --stringer-error:#E5847E;
+        --stringer-card-from:#1A231D; --stringer-card-to:#10150F;
+        --stringer-card-shadow:0 1px 2px rgba(0,0,0,0.35), 0 6px 18px rgba(0,0,0,0.45);
+        --stringer-card-border:1px solid rgba(255,255,255,0.05);
+      }
+    }
+    [data-testid="stMainBlockContainer"], [data-testid="stDialog"] {
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    }
+    .tacklebox-brand { font-weight:800; font-size:1.05rem; letter-spacing:.04em; color:#0F1410; margin-bottom:2px; }
+    .tacklebox-tagline { font-size:.78rem; color:#6E766F; }
+
+    /* Every expander on this page becomes a card - identical technique to
+       Home/7-Day Forecast/Spot Session's own topmost cards: `details`
+       (not the outer stExpander wrapper) is what actually carries
+       Streamlit's own border/radius/background. */
+    [data-testid="stExpander"] > details {
+        background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%) !important;
+        box-shadow:var(--stringer-card-shadow) !important; border:var(--stringer-card-border) !important;
+        border-radius:16px !important;
+    }
+    [data-testid="stExpander"] > details > summary {
+        background:transparent !important; border-radius:16px 16px 0 0 !important;
+        padding:14px 18px !important; font-weight:700 !important; color:var(--stringer-ink) !important;
+    }
+    [data-testid="stExpander"] > details > [data-testid="stExpanderDetails"] {
+        padding:4px 18px 18px !important;
+    }
+    /* The repeating item/gap/family grids below use a flatter, non-
+       gradient card (same "nested content is flatter, not another
+       stacked heavy card" principle as a nested expander elsewhere in
+       this app) - `st.container(border=True, key=...)` has no stable
+       testid of its own to target directly (confirmed live: the actual
+       bordered element is a plain [data-testid="stVerticalBlock"], no
+       distinguishing class beyond an unstable per-build emotion hash),
+       so each card gets an explicit `key=` and this uses the same
+       `[class*="st-key-<prefix>_"]` wildcard-match technique already
+       proven on home.py's award tiles (entry 180) instead. */
+    [class*="st-key-tacklebox_item_card_"],
+    [class*="st-key-tacklebox_gap_card_"],
+    [class*="st-key-tacklebox_family_card_"],
+    [data-testid="stForm"] {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:12px !important;
+    }
+    /* st.info/st.warning/st.success/st.error anywhere on this page - same
+       re-skin as every other page: the real tinted background lives on
+       the middle stAlertContainer layer, not the outer stAlert wrapper,
+       which carries none of its own to override. */
+    [data-testid="stAlertContainer"] {
+        background:var(--stringer-surface-sunk) !important; border-radius:10px !important;
+        border:none !important;
+    }
+    [data-testid="stAlertContentInfo"] { border-left:3px solid var(--stringer-accent) !important; }
+    [data-testid="stAlertContentWarning"] { border-left:3px solid var(--stringer-warn) !important; }
+    [data-testid="stAlertContentSuccess"] { border-left:3px solid var(--stringer-good) !important; }
+    [data-testid="stAlertContentError"] { border-left:3px solid var(--stringer-error) !important; }
+    /* Text inputs / selectboxes / multiselects - confirmed live (same
+       technique proven on Spot Session's Conditions cards): a selectbox's
+       or multiselect's real bordered box is div[role="group"], not the
+       outer stSelectbox/stMultiSelect testid; a text input's is
+       stTextInputRootElement, a real testid of its own. Page-wide (not
+       scoped to one card) since, unlike Spot Session, nothing on this
+       page needs a different look per section. */
+    [data-testid="stTextInputRootElement"],
+    [data-testid="stSelectbox"] div[role="group"],
+    [data-testid="stMultiSelect"] div[role="group"] {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:10px !important;
+    }
+    /* Numeric steppers (quantity / price / package qty, in the Edit
+       dialog and the Add-a-lure/Confirm-details forms) - real
+       st.number_input, reskinned the same way as Spot Session's
+       Conditions cards (confirmed live there: stNumberInputContainer is
+       the actual flex-row box, the two step buttons grouped together on
+       the right, not split to either side of the value). */
+    [data-testid="stNumberInputContainer"] {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:10px !important; height:46px !important;
+    }
+    [data-testid="stNumberInputField"] {
+        font-family:"Space Grotesk", system-ui, sans-serif !important; font-weight:600 !important;
+        font-size:1rem !important; color:var(--stringer-ink) !important;
+    }
+    [data-testid="stNumberInputContainer"] > div:last-child { border-left:1px solid var(--stringer-border) !important; }
+    [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {
+        background:var(--stringer-surface-sunk) !important; width:34px !important; height:44px !important;
+    }
+    /* Body text color, inside any expander, form, or one of the three
+       keyed card grids above - this app's .streamlit/config.toml pins a
+       fixed LIGHT theme, so Streamlit's own native widget text never
+       itself follows prefers-color-scheme the way these --stringer-*
+       tokens do - only an explicit override here keeps plain text,
+       captions, widget labels, and headings readable once a card's own
+       background flips dark under that same media query. */
+    [data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stForm"] [data-testid="stMarkdownContainer"] p,
+    [class*="st-key-tacklebox_item_card_"] [data-testid="stMarkdownContainer"] p,
+    [class*="st-key-tacklebox_gap_card_"] [data-testid="stMarkdownContainer"] p,
+    [class*="st-key-tacklebox_family_card_"] [data-testid="stMarkdownContainer"] p {
+        color:var(--stringer-ink-soft) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stCaptionContainer"] p,
+    [data-testid="stForm"] [data-testid="stCaptionContainer"] p,
+    [class*="st-key-tacklebox_item_card_"] [data-testid="stCaptionContainer"] p,
+    [class*="st-key-tacklebox_gap_card_"] [data-testid="stCaptionContainer"] p,
+    [class*="st-key-tacklebox_family_card_"] [data-testid="stCaptionContainer"] p {
+        color:var(--stringer-muted) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stForm"] [data-testid="stWidgetLabel"] p,
+    [class*="st-key-tacklebox_item_card_"] [data-testid="stWidgetLabel"] p,
+    [class*="st-key-tacklebox_gap_card_"] [data-testid="stWidgetLabel"] p,
+    [class*="st-key-tacklebox_family_card_"] [data-testid="stWidgetLabel"] p {
+        color:var(--stringer-ink-soft) !important;
+    }
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h1,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h2,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h3,
+    [data-testid="stExpanderDetails"] [data-testid="stHeading"] h4,
+    [data-testid="stForm"] [data-testid="stHeading"] h1,
+    [data-testid="stForm"] [data-testid="stHeading"] h2,
+    [data-testid="stForm"] [data-testid="stHeading"] h3,
+    [data-testid="stForm"] [data-testid="stHeading"] h4 {
+        color:var(--stringer-ink) !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<div class="tacklebox-brand">🧰 TACKLE BOX</div>'
+    '<div class="tacklebox-tagline">Your tackle box, tracked: brand, description, photo, last price, and qty on hand</div>',
+    unsafe_allow_html=True,
 )
 st.caption(
     "🎣 Tag each lure with a **Category** matching how it's fished - the 7-Day Forecast and Lake "
@@ -183,7 +353,7 @@ def _render_family_grid(families: list, session_key: str, family_key: str, key_p
         cand_cols = st.columns(cols_per_row)
         for col, (idx, fam) in zip(cand_cols, row_families):
             with col:
-                with st.container(border=True):
+                with st.container(border=True, key=f"tacklebox_family_card_{key_prefix}_{idx}"):
                     if not render_square_thumbnail(fam, size_px=SCAN_THUMBNAIL_PX):
                         st.caption("No photo")
                     st.caption(f"**{fam['brand']}**  \n{fam['description']}"[:110])
@@ -735,7 +905,7 @@ with st.expander("🎯 Fill your tackle gaps", expanded=False):
         st.write(f"**{len(gap_categories)} of {len(LURE_PROFILES)}** lure types have nothing in your inventory yet:")
         for category_key in gap_categories:
             profile = LURE_PROFILES[category_key]
-            with st.container(border=True):
+            with st.container(border=True, key=f"tacklebox_gap_card_{category_key}"):
                 st.markdown(f"**{profile['name']}**")
                 render_cabelas_suggestions(
                     profile["name"],
@@ -778,7 +948,7 @@ else:
         cols = st.columns(cols_per_row)
         for col, row in zip(cols, row_items):
             with col:
-                with st.container(border=True):
+                with st.container(border=True, key=f"tacklebox_item_card_{row['item_id']}"):
                     if not render_square_thumbnail(row, size_px=CARD_THUMBNAIL_PX):
                         st.caption("No photo yet")
 
