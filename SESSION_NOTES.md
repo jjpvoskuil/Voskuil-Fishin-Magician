@@ -12544,6 +12544,94 @@ every real save.
     real screenshots, not just asserted from the CSS. No functional
     regressions found in any exercised flow.
 
+183. **Punch-list #98 follow-up: Spot Session's "Conditions" section split
+    into four sub-cards (Water conditions / Environmental stain / Wind &
+    atmosphere / Fish & forage activity), redone after a prior session's
+    same redesign never made it to GitHub.** Context: a session before
+    this one built and locally committed this exact redesign (commit
+    `5b8f476`, described by the angler as "pretty decent and worth
+    pursuing") but never pushed it - confirmed lost via `git fetch`
+    against both `origin/main` and `origin/data` plus a direct GitHub API
+    lookup (`No commit found for SHA: 5b8f476`), not just a stale local
+    ref. Nothing recoverable was handed off from that session (no bundle,
+    no diff), so this redo started from the angler's own reference image
+    again (a phone-mockup screenshot: gray header-band cards with an
+    icon + title, numeric steppers, solid data-badge pills, a dense
+    "professional app" feel) rather than guessing at what the lost commit
+    contained.
+
+    Followed this app's own established process for a redesign the
+    angler has previously been unhappy with the quality of: built a
+    standalone HTML mockup first (phone-frame, real field labels/values
+    from `render_conditions_block`, NOT the reference image's literal
+    blue accent or emoji icons - recolored to this app's existing teal
+    `--stringer-accent` and swapped emoji for the same Material Symbols
+    already used by `core/nav.py`, both flagged to the angler as
+    deliberate departures) and got explicit sign-off ("this looks very
+    nice, let's go with this") before touching real code - same
+    validate-then-implement order as The Stringer (entry 173).
+
+    Implementation, once approved:
+    - `spotsession_conditions_card`'s own glossy hero-card treatment
+      (background/shadow/border) was dropped - the "Conditions"
+      heading/caption now sit on the plain page background, matching the
+      mockup (no outer card wrapping everything). Four new container
+      keys (`spotsession_cond_water_card`/`_stain_card`/`_wind_card`/
+      `_activity_card`) get a flatter, non-gradient card treatment
+      instead - same "nested content is flatter, not another stacked
+      heavy card" principle as a nested expander (see the comment above
+      this entry's own CSS block), since these now sit inside the same
+      conceptual section a hero card would otherwise wrap.
+    - Every new selector was read off the REAL live DOM first, via the
+      Chrome browser tools against the deployed app - the
+      `mcp__claude-in-chrome__*` tools this file has referenced as
+      useful in past sessions, now actually exercised for DOM discovery
+      rather than only post-deploy verification. Confirmed live (not
+      assumed): `st.number_input`'s real structure is
+      `[data-testid="stNumberInputContainer"]` (flex row) containing the
+      input plus a wrapper div grouping BOTH step buttons together on
+      the right (`stNumberInputStepDown`/`stNumberInputStepUp`) - not
+      split to either side of the value the way the reference image drew
+      them, so the restyle works with that real grouped-right layout
+      instead of fighting it; `st.selectbox`'s actual bordered box is
+      `div[role="group"]` wrapping `input[role="combobox"]` (matching
+      punch-list #75's earlier finding that selectbox is a real
+      combobox input, not a BaseWeb-styled div); and `st.checkbox`
+      wraps its input, label text, and tooltip icon in one `<label>`,
+      which is what carries the new sunk-pill background. Also confirmed
+      Streamlit hides a number input's step buttons below a ~120px-wide
+      container (`hideNumberInputControls: 7.5rem` in the frontend
+      bundle) - the two-column water-temp/Secchi layout stays well above
+      that on a 390px phone width, so the buttons stay visible.
+    - The two "Metabolic state"/"Visibility band" `st.caption()` lines
+      became real HTML badge pills (`.ss-badge`/`.ss-badge-label`, a new
+      small `_badge()` helper) instead of a restyled native widget - a
+      solid-color pill needs exact control a caption can't reliably give.
+    - Card headers use `st.subheader(":material/water_drop: Water
+      conditions")`-style leading-icon syntax (same mechanism
+      `core/nav.py`'s page icons already use, confirmed server-side via
+      `streamlit.string_util.extract_leading_icon`) rather than loading a
+      separate icon webfont - one fewer font dependency, same icon
+      vocabulary as the rest of the app.
+    - `render_conditions_block()`'s two call sites (a brand-new session,
+      and the mid-session "Conditions changed? Relocate" expander) were
+      NOT touched - they only call the function, and the four new
+      container keys are safe to reuse across both since they render
+      from mutually exclusive if/else branches, never both in one page
+      load.
+
+    **Verified:** full suite (645 passed, no regressions - the
+    AppTest-based Spot Session suites in particular confirm the
+    container restructuring didn't disturb any widget key/value
+    wiring), a fresh local clone of the commit. **NOT yet verified:**
+    the actual header-band bleed margins and stepper spacing live in a
+    browser - reasoned through against real DOM/computed-style data
+    pulled from the currently-deployed app (pre-dating this change) but
+    not against a build that actually has this change in it, since that
+    requires pushing first. Flagged to the angler as the next step
+    before calling this done, same as every other CSS change in this
+    log that leans on a live check.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline

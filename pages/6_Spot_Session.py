@@ -150,12 +150,123 @@ st.markdown(
        session" list) - the same glossy-gradient card shell as Home's
        always-visible cards, not an expander (nothing about these should
        be collapsible). */
-    .st-key-spotsession_conditions_card,
     .st-key-spotsession_active_card,
     .st-key-spotsession_pending_lures_card {
         background:linear-gradient(180deg, var(--stringer-card-from) 0%, var(--stringer-card-to) 100%);
         box-shadow:var(--stringer-card-shadow); border:var(--stringer-card-border);
         border-radius:16px; padding:14px 18px 18px; margin-bottom:14px;
+    }
+    /* Punch-list #98 follow-up: the "Conditions" section's own sub-groups
+       (Water conditions / Environmental stain / Wind & atmosphere / Fish
+       & forage activity) - the angler's own reference image (a phone
+       mockup screenshot) asked for denser, clearly-separated field
+       groups with their own header band, rather than one long list
+       inside a single big card. Approved first as a standalone HTML
+       mockup before any of this landed here (see SESSION_NOTES.md), then
+       every selector below was read off the REAL live DOM (the deployed
+       app's own iframe) before writing it - not guessed. Deliberately
+       flatter than the two "hero" cards above (no gradient/shadow) - the
+       same "nested content gets a flatter treatment, not another stacked
+       heavy card" principle already used for a nested expander (see
+       below). Because these sub-cards carry their own --stringer-
+       surface/-sunk backgrounds, spotsession_conditions_card is
+       deliberately DROPPED from the hero-card selector above - it's now
+       a plain, unstyled layout wrapper (the "Conditions" heading/caption
+       sit directly on the native page background, same as any other
+       page-level heading), and these four keys take over its old spot in
+       the dark-mode stWidgetLabel override further below instead. */
+    .st-key-spotsession_cond_water_card,
+    .st-key-spotsession_cond_stain_card,
+    .st-key-spotsession_cond_wind_card,
+    .st-key-spotsession_cond_activity_card {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:14px !important; padding:0 18px 16px !important; margin-bottom:14px !important;
+        overflow:hidden;
+    }
+    /* Header band - bled edge-to-edge via a negative margin matching the
+       container's own side padding above (confirmed live: stHeading is
+       the block-level wrapper Streamlit itself already uses for
+       st.header/st.subheader, already trusted elsewhere in this same
+       file's own dark-mode override rules). */
+    .st-key-spotsession_cond_water_card [data-testid="stHeading"],
+    .st-key-spotsession_cond_stain_card [data-testid="stHeading"],
+    .st-key-spotsession_cond_wind_card [data-testid="stHeading"],
+    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] {
+        background:var(--stringer-surface-sunk) !important; margin:0 -18px 14px -18px !important;
+        padding:10px 18px !important; border-bottom:1px solid var(--stringer-border) !important;
+    }
+    .st-key-spotsession_cond_water_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_cond_stain_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_cond_wind_card [data-testid="stHeading"] h3,
+    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] h3 {
+        font-size:.92rem !important; font-weight:700 !important; color:var(--stringer-ink) !important;
+    }
+    .st-key-spotsession_cond_water_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
+    .st-key-spotsession_cond_stain_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
+    .st-key-spotsession_cond_wind_card [data-testid="stHeading"] [data-testid="stIconMaterial"],
+    .st-key-spotsession_cond_activity_card [data-testid="stHeading"] [data-testid="stIconMaterial"] {
+        color:var(--stringer-accent) !important;
+    }
+    /* Numeric steppers (water temp / secchi / fish depth) - real
+       st.number_input, just reskinned. Confirmed live that
+       stNumberInputContainer is the actual flex-row box (input + a
+       grouped stepDown/stepUp pair on the right) - the two buttons are
+       NOT split to either side of the value, so this works with that
+       real layout rather than fighting it into the angler's reference
+       image's split layout. */
+    .st-key-spotsession_cond_water_card [data-testid="stNumberInputContainer"],
+    .st-key-spotsession_cond_activity_card [data-testid="stNumberInputContainer"] {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:10px !important; height:46px !important;
+    }
+    .st-key-spotsession_cond_water_card [data-testid="stNumberInputField"],
+    .st-key-spotsession_cond_activity_card [data-testid="stNumberInputField"] {
+        font-family:"Space Grotesk", system-ui, sans-serif !important; font-weight:600 !important;
+        font-size:1rem !important; color:var(--stringer-ink) !important;
+    }
+    .st-key-spotsession_cond_water_card [data-testid="stNumberInputContainer"] > div:last-child,
+    .st-key-spotsession_cond_activity_card [data-testid="stNumberInputContainer"] > div:last-child {
+        border-left:1px solid var(--stringer-border) !important;
+    }
+    .st-key-spotsession_cond_water_card [data-testid="stNumberInputStepUp"],
+    .st-key-spotsession_cond_water_card [data-testid="stNumberInputStepDown"],
+    .st-key-spotsession_cond_activity_card [data-testid="stNumberInputStepUp"],
+    .st-key-spotsession_cond_activity_card [data-testid="stNumberInputStepDown"] {
+        background:var(--stringer-surface-sunk) !important; width:34px !important; height:44px !important;
+    }
+    /* Data badges (Metabolic state / Visibility band) - custom markup,
+       not a restyled native widget: a real colored pill needs exact
+       control a restyled st.caption can't reliably give. */
+    .ss-badge-label {
+        font-family:"Plus Jakarta Sans", system-ui, sans-serif; font-size:.68rem; font-weight:700;
+        letter-spacing:.03em; color:var(--stringer-muted); text-transform:uppercase; margin:10px 0 5px;
+    }
+    .ss-badge {
+        background:var(--stringer-accent); color:#EAF6F2; font-size:.85rem; font-weight:600;
+        border-radius:9px; padding:8px 11px; line-height:1.35;
+    }
+    .ss-badge b { color:#FFFFFF; }
+    /* Selectbox (Stain color / Wind / Wind direction / Sky / Precipitation)
+       - confirmed live: the real bordered box is the div[role="group"]
+       wrapping input[role="combobox"] + the chevron button, not the
+       outer stSelectbox testid (that just wraps the label + this group). */
+    .st-key-spotsession_cond_stain_card [data-testid="stSelectbox"] div[role="group"],
+    .st-key-spotsession_cond_wind_card [data-testid="stSelectbox"] div[role="group"] {
+        background:var(--stringer-surface) !important; border:1px solid var(--stringer-border) !important;
+        border-radius:10px !important;
+    }
+    .st-key-spotsession_cond_stain_card [data-testid="stSelectbox"] input[role="combobox"],
+    .st-key-spotsession_cond_wind_card [data-testid="stSelectbox"] input[role="combobox"] {
+        color:var(--stringer-ink) !important;
+    }
+    /* "Stirred up / muddy" checkbox - sunk pill, matching the reference
+       image's treatment, via stCheckbox's own <label> (confirmed live:
+       the checkbox input, label text, and tooltip icon are all children
+       of one <label>, so this is the one element that can carry the pill
+       background without breaking the native click target). */
+    .st-key-spotsession_cond_stain_card [data-testid="stCheckbox"] label {
+        background:var(--stringer-surface-sunk) !important; border-radius:10px !important;
+        padding:10px 12px !important;
     }
     /* Every expander on this page becomes a card - `details` (not the
        outer [data-testid="stExpander"] wrapper) is what actually carries
@@ -240,7 +351,10 @@ st.markdown(
         color:var(--stringer-muted) !important;
     }
     [data-testid="stExpanderDetails"] [data-testid="stWidgetLabel"] p,
-    .st-key-spotsession_conditions_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_cond_water_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_cond_stain_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_cond_wind_card [data-testid="stWidgetLabel"] p,
+    .st-key-spotsession_cond_activity_card [data-testid="stWidgetLabel"] p,
     .st-key-spotsession_active_card [data-testid="stWidgetLabel"] p,
     .st-key-spotsession_pending_lures_card [data-testid="stWidgetLabel"] p {
         color:var(--stringer-ink-soft) !important;
@@ -1089,7 +1203,17 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
     ever applies the FIRST time this exact key exists - so `prefill`/
     `weather_defaults` only ever set the initial value, never fight a
     manual override on a later rerun, the same pattern every other keyed
-    widget on this page follows."""
+    widget on this page follows.
+
+    Punch-list #98 follow-up: rebuilt as four flatter sub-cards (Water
+    conditions / Environmental stain / Wind & atmosphere / Fish & forage
+    activity) instead of one long list, per the angler's own reference-
+    image ask - approved first as a standalone HTML mockup (see
+    SESSION_NOTES.md) before any of this landed here. The four container
+    keys are safe to reuse across this function's two call sites (a
+    brand-new session vs. the mid-session "Conditions changed? Relocate"
+    expander) because they only ever render from mutually exclusive
+    if/else branches - never both in the same page load."""
     prefill = prefill or {}
 
     def _default(field, fallback):
@@ -1097,78 +1221,92 @@ def render_conditions_block(key_ns: str, weather_defaults: dict, prefill: dict =
             return prefill[field]
         return weather_defaults.get(field, fallback)
 
-    c1, c2 = st.columns(2)
-    wt_key = f"{key_ns}_water_temp"
-    st.session_state.setdefault(wt_key, _default("water_temp_f", 85.0))
-    water_temp_f = c1.number_input(
-        "Water temperature (°F)", min_value=32.0, max_value=100.0, step=0.5, key=wt_key,
-    )
-    sec_key = f"{key_ns}_secchi"
-    st.session_state.setdefault(sec_key, _default("secchi_ft", 2.5))
-    secchi_ft = c2.number_input(
-        "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
-        help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
-        key=sec_key,
-    )
-    temp_band = water_temp_band(water_temp_f)
-    st.caption(f"Metabolic state: **{temp_band['label']}** - {temp_band['detail']}")
-    vis_band = visibility_band(secchi_ft)
-    st.caption(f"Visibility band: **{vis_band['label']}** ({vis_band['detail']})")
-
-    stain_color = None
-    if vis_band["label"] == "Stained":
-        stain_key = f"{key_ns}_stain_color"
-        st.session_state.setdefault(stain_key, _default("stain_color", STAIN_COLOR_OPTIONS[0]))
-        stain_color = st.selectbox(
-            "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
-            key=stain_key,
+    def _badge(label, value_html):
+        st.markdown(
+            f'<div class="ss-badge-label">{label}</div><div class="ss-badge">{value_html}</div>',
+            unsafe_allow_html=True,
         )
-    stirred_key = f"{key_ns}_stirred_up"
-    st.session_state.setdefault(stirred_key, _default("stirred_up", False))
-    stirred_up = st.checkbox(
-        "Stirred up / muddy right now (recent wind or rain)",
-        help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color.",
-        key=stirred_key,
-    )
 
-    c3, c4 = st.columns(2)
-    wind_key = f"{key_ns}_wind_band"
-    st.session_state.setdefault(wind_key, _default("wind_band", WIND_BAND_LABELS[1]))
-    wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, help=_wind_help, key=wind_key)
-    wind_dir_key = f"{key_ns}_wind_dir"
-    st.session_state.setdefault(wind_dir_key, _default("wind_direction", "SW"))
-    wind_direction = c4.selectbox("Wind direction", WIND_DIRECTIONS, key=wind_dir_key)
+    with st.container(key="spotsession_cond_water_card"):
+        st.subheader(":material/water_drop: Water conditions")
+        c1, c2 = st.columns(2)
+        wt_key = f"{key_ns}_water_temp"
+        st.session_state.setdefault(wt_key, _default("water_temp_f", 85.0))
+        water_temp_f = c1.number_input(
+            "Water temperature (°F)", min_value=32.0, max_value=100.0, step=0.5, key=wt_key,
+        )
+        sec_key = f"{key_ns}_secchi"
+        st.session_state.setdefault(sec_key, _default("secchi_ft", 2.5))
+        secchi_ft = c2.number_input(
+            "Water visibility / Secchi depth (ft)", min_value=0.0, max_value=20.0, step=0.5,
+            help="How far down you can see a light-colored object/lure. Estimate visually if you don't carry a Secchi disk.",
+            key=sec_key,
+        )
+        temp_band = water_temp_band(water_temp_f)
+        _badge("Metabolic state", f"<b>{temp_band['label']}</b> — {temp_band['detail']}")
+        vis_band = visibility_band(secchi_ft)
+        _badge("Visibility band", f"<b>{vis_band['label']}</b> — {vis_band['detail']}")
 
-    c5, c6 = st.columns(2)
-    light_key = f"{key_ns}_light_condition"
-    st.session_state.setdefault(light_key, _default("light_condition", LIGHT_CONDITIONS[2]))
-    light_condition = c5.selectbox(
-        "Sky conditions", LIGHT_CONDITIONS,
-        help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
-        key=light_key,
-    )
-    precip_key = f"{key_ns}_precipitation"
-    st.session_state.setdefault(precip_key, _default("precipitation", PRECIPITATION_OPTIONS[0]))
-    precipitation = c6.selectbox("Precipitation", PRECIPITATION_OPTIONS, key=precip_key)
+    with st.container(key="spotsession_cond_stain_card"):
+        st.subheader(":material/invert_colors: Environmental stain")
+        stain_color = None
+        if vis_band["label"] == "Stained":
+            stain_key = f"{key_ns}_stain_color"
+            st.session_state.setdefault(stain_key, _default("stain_color", STAIN_COLOR_OPTIONS[0]))
+            stain_color = st.selectbox(
+                "Stain color (Nolin normally runs greenish-brown, leaning brown)", STAIN_COLOR_OPTIONS,
+                key=stain_key,
+            )
+        stirred_key = f"{key_ns}_stirred_up"
+        st.session_state.setdefault(stirred_key, _default("stirred_up", False))
+        stirred_up = st.checkbox(
+            "Stirred up / muddy right now (recent wind or rain)",
+            help="Overrides the reading above straight to Muddy, regardless of Secchi depth or stain color.",
+            key=stirred_key,
+        )
 
-    forage_key = f"{key_ns}_forage_seen"
-    st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
-    forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)
+    with st.container(key="spotsession_cond_wind_card"):
+        st.subheader(":material/air: Wind & atmosphere")
+        c3, c4 = st.columns(2)
+        wind_key = f"{key_ns}_wind_band"
+        st.session_state.setdefault(wind_key, _default("wind_band", WIND_BAND_LABELS[1]))
+        wind_band_choice = c3.selectbox("Wind", WIND_BAND_LABELS, help=_wind_help, key=wind_key)
+        wind_dir_key = f"{key_ns}_wind_dir"
+        st.session_state.setdefault(wind_dir_key, _default("wind_direction", "SW"))
+        wind_direction = c4.selectbox("Wind direction", WIND_DIRECTIONS, key=wind_dir_key)
 
-    c7, c8 = st.columns(2)
-    fish_act_key = f"{key_ns}_fish_activity"
-    st.session_state.setdefault(fish_act_key, _default("fish_activity", "Moderate"))
-    fish_activity = c7.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, key=fish_act_key)
-    forage_act_key = f"{key_ns}_forage_activity"
-    st.session_state.setdefault(forage_act_key, _default("forage_activity", "Moderate"))
-    forage_activity = c8.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, key=forage_act_key)
+        c5, c6 = st.columns(2)
+        light_key = f"{key_ns}_light_condition"
+        st.session_state.setdefault(light_key, _default("light_condition", LIGHT_CONDITIONS[2]))
+        light_condition = c5.selectbox(
+            "Sky conditions", LIGHT_CONDITIONS,
+            help="\n".join(f"{k} ({v['range']}): {v['detail']}" for k, v in LIGHT_CONDITION_INFO.items()),
+            key=light_key,
+        )
+        precip_key = f"{key_ns}_precipitation"
+        st.session_state.setdefault(precip_key, _default("precipitation", PRECIPITATION_OPTIONS[0]))
+        precipitation = c6.selectbox("Precipitation", PRECIPITATION_OPTIONS, key=precip_key)
 
-    depth_key = f"{key_ns}_fish_depth"
-    st.session_state.setdefault(depth_key, _default("fish_depth_ft", 8.0))
-    fish_depth_ft = st.number_input(
-        "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, step=1.0,
-        key=depth_key,
-    )
+    with st.container(key="spotsession_cond_activity_card"):
+        st.subheader(":material/set_meal: Fish & forage activity")
+        forage_key = f"{key_ns}_forage_seen"
+        st.session_state.setdefault(forage_key, _default("forage_seen", []) or [])
+        forage_seen = st.multiselect("Forage seen (optional)", FORAGE_OPTIONS, key=forage_key)
+
+        c7, c8 = st.columns(2)
+        fish_act_key = f"{key_ns}_fish_activity"
+        st.session_state.setdefault(fish_act_key, _default("fish_activity", "Moderate"))
+        fish_activity = c7.select_slider("Fish activity", options=FISH_ACTIVITY_OPTIONS, key=fish_act_key)
+        forage_act_key = f"{key_ns}_forage_activity"
+        st.session_state.setdefault(forage_act_key, _default("forage_activity", "Moderate"))
+        forage_activity = c8.select_slider("Forage activity", options=FORAGE_ACTIVITY_OPTIONS, key=forage_act_key)
+
+        depth_key = f"{key_ns}_fish_depth"
+        st.session_state.setdefault(depth_key, _default("fish_depth_ft", 8.0))
+        fish_depth_ft = st.number_input(
+            "Depth fish are showing up on electronics (ft, optional)", min_value=0.0, max_value=100.0, step=1.0,
+            key=depth_key,
+        )
 
     return {
         "water_temp_f": water_temp_f, "secchi_ft": secchi_ft, "stain_color": stain_color,

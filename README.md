@@ -123,6 +123,15 @@ See SESSION_NOTES.md entry 182 for the full story, including a second real dark-
 caught by an actual dark-mode screenshot - a bug that turns out to be latent, unfixed, on Home's
 and 7-Day Forecast's identical topbar markup too.
 
+The "Conditions" section of Spot Session (punch-list #98 follow-up) went one step further than the
+rest of the page: instead of one long list of fields inside a single card, it's now four flatter
+sub-cards - Water conditions, Environmental stain, Wind & atmosphere, Fish & forage activity - each
+with its own icon + header band, following a phone-mockup reference image the angler provided.
+Water temperature/Secchi depth/fish depth use restyled numeric steppers, and the "Metabolic state"/
+"Visibility band" readouts are solid data-badge pills instead of plain caption text. See
+SESSION_NOTES.md entry 183 for the full story, including why an earlier attempt at this exact
+redesign had to be redone from scratch (a prior session's commit never made it to GitHub).
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,
