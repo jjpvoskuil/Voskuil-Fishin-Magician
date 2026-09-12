@@ -12663,6 +12663,44 @@ every real save.
     given this exact page has twice already had a real, live-only-visible
     dark-mode contrast bug (entries 178, 182).
 
+185. **Live bug, same session: entry 184's `icon=` fix didn't actually fix
+    anything - re-checking after that redeploy showed the SAME broken
+    render.** Traced further before assuming the fix itself was wrong:
+    `AppTest` confirmed the Python/proto layer was correct all along
+    (`heading.proto.icon == ':material/water_drop:'`), and the live DOM
+    now showed a genuine `data-testid="stHeadingIconWrapper"` element (so
+    Streamlit DID recognize the icon and build the right wrapper) - but
+    the actual icon glyph span inside it still computed to `font-family:
+    "Source Sans"` (Streamlit's own plain body font), not a Material
+    Symbols font, confirmed distinct from a real WORKING material icon
+    found elsewhere on the same live page (an expander chevron, `font-
+    family: "Material Symbols Rounded"`) and confirmed not a stale-cache
+    artifact (same result after an explicit hard reload of the app's
+    iframe). Also ruled out a Streamlit-version mismatch between this
+    sandbox and the deployed app specifically (`Made with Streamlit
+    v1.63.0` in both, via the app's own "..." menu). Net: a genuine
+    frontend-only quirk in this Streamlit version where a heading's own
+    `icon=` sometimes builds the wrapper element but never wires up the
+    icon font inside it - not something to keep chasing deeper into
+    Streamlit's own minified bundle when a reliable workaround exists.
+
+    Fix: dropped `st.subheader(..., icon=...)` for these four headers
+    entirely in favor of a plain `st.markdown()` div (`.ss-card-head`,
+    containing a `.ss-msym` icon span) using an explicitly-loaded
+    `Material Symbols Outlined` webfont `<link>` - the exact same "load a
+    real webfont, don't depend on Streamlit's own icon plumbing"
+    technique already proven live in the approved standalone mockup
+    (entry 183) before any of this touched real code. This also
+    incidentally drops the hover-only anchor-link icon `st.subheader`
+    would have added to every card header (`stHeaderActionElements`) -
+    not something a purely decorative card header needs anyway.
+
+    **Verified:** full suite (645 passed). A live re-check of this
+    specific fix is the same still-pending item entry 184 already
+    flagged, now for a third redeploy - flagged again rather than
+    silently assumed fixed, given the last two "should be fine" icon
+    attempts both weren't.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
