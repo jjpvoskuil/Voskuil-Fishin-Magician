@@ -12832,16 +12832,13 @@ every real save.
     has) - a page-wide problem, but the fix belongs with its cause, not
     filed as a second, disconnected "mobile CSS" entry.
 
-    **Verified:** full suite (645 passed), plus the fix itself was proven
-    live BEFORE writing it into the codebase - injected the exact CSS
-    rule directly into the currently-deployed (still-unfixed) page via
-    the browser tools and re-measured the same element's on-screen
-    position at the new max scroll, confirming it actually clears the
-    bar rather than trusting the arithmetic alone. **Still pending:** the
-    standard post-push redeploy check (confirming the rule as it now
-    actually lives in `core/nav.py`, not just injected ad hoc, survives
-    on the real deployed page) - flagged the same way as every other CSS
-    change in this log that leans on one.
+    **Verified:** full suite (645 passed); the fix was proven live BEFORE
+    writing it into the codebase (injected the exact CSS rule into the
+    still-unfixed deployed page and re-measured); and, post-push, the
+    standard redeploy check confirmed `padding-bottom: 120px` as an
+    actual computed style on the real deployed Reports page - the same
+    page the angler's screenshot came from - with the previously-hidden
+    text and its full explanation now genuinely clear of the bar.
 
 ## Key design decisions & rationale
 
