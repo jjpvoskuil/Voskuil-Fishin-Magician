@@ -1244,9 +1244,9 @@ success, flexibly over any date range, with a chart and an Excel export. Pick a 
 time segment, season, sky condition, wind band/direction, precipitation, water temp band,
 water temp custom range, pressure trend, moon illumination % the night before, reported
 fish/forage activity, angler, day of week, or date daily/weekly) and a **success metric**
-(total fish caught, fish per hour, biggest fish, or # trips - defaults to **Fish per Hour**,
-see why below), then narrow it down with an optional species filter
-(only applies to the two metrics computed per-catch - disabled, with a tooltip, for the two
+(total fish caught, fish per hour, biggest fish, average fish weight, or # trips - defaults
+to **Fish per Hour**, see why below), then narrow it down with an optional species filter
+(only applies to the three metrics computed per-catch - disabled, with a tooltip, for the two
 that are inherently per-trip), a date range, an angler multiselect, and a time-segment multiselect (defaults to
 **Dawn + Morning** - real logged trip history is heavily lopsided toward those two right now,
 so starting there gives a cleaner, more representative read than pooling in the handful of
@@ -1307,6 +1307,14 @@ doesn't inflate with n, just gets better-supported by it, so it's the one that s
 sane-looking regardless of how much history is behind it - Total Fish Caught/# Trips are
 still there in the picker for exploring the historical chart above, where "here's the
 cumulative total logged so far" is a meaningful reading in its own right.
+
+**Average Fish Weight (lb)** is a plain mean of `weight_lb` across individual catch rows in
+the filtered data (species-filterable, like Biggest Fish) - deliberately NOT weighted by a
+row's own `count` field (Trip History's manual-entry form supports logging one row as "3 x
+2 lb," unlike Spot Session's live flow, which always logs one row per fish); each row
+contributes its own weight once, the same way its sample size counts rows rather than
+individual fish, so one bulk-count entry can't quietly dominate the average the way it
+would if weighted by count.
 
 **🔮 Predict a future day** (punch-list #92's predictive half) is a section at the bottom of
 the page: pick a date (shared by both predictors below) and get back a prediction for

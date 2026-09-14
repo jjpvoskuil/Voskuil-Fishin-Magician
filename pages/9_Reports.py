@@ -284,7 +284,7 @@ prediction = predict_by_moon_illumination(
 def _format_metric_value(key: str, value) -> str:
     if value is None:
         return "—"
-    if key == "biggest_fish":
+    if key in ("biggest_fish", "average_fish_weight"):
         return format_weight_lb_oz(value) or "—"
     if key == "fish_per_hour":
         return f"{value:.2f} fish/hr"

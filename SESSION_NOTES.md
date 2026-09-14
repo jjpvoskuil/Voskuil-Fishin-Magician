@@ -12840,6 +12840,35 @@ every real save.
     page the angler's screenshot came from - with the previously-hidden
     text and its full explanation now genuinely clear of the bar.
 
+189. **Reports: "Average Fish Weight (lb)" added as a success metric,
+    angler's own direct ask.** Straightforward addition once traced
+    through - `METRIC_OPTIONS`/`SPECIES_FILTERABLE_METRICS`/one new
+    `compute_report()` branch in `core/reports.py`, plus one line in
+    `pages/9_Reports.py`'s `_format_metric_value()` - and both "Predict a
+    future day" predictors picked it up for free, since they both call
+    `compute_report()` with whatever `metric_key` the page's own picker
+    has selected rather than duplicating metric logic of their own.
+
+    One real judgment call: whether to weight the mean by each fish_df
+    row's own `count` field (Trip History's manual-entry form supports
+    logging one row as "3 x 2 lb," unlike Spot Session's live flow, which
+    always writes count=1 - one row per individual fish). Weighting by
+    count would let one bulk-count entry dominate an average the same way
+    one truly enormous single fish dominates a MAX - fine for Biggest
+    Fish, wrong for an average. Went with a plain per-ROW mean instead
+    (same convention `n` already uses here - a count of rows, not
+    individual fish), and added a test that actually exercises this
+    (`test_compute_report_average_fish_weight_is_per_row_not_weighted_by_
+    count`) rather than only asserting it in a comment.
+
+    **Verified:** full suite, 647 passed (645 + 2 new tests: the
+    per-spot-mean case mirroring the existing Biggest Fish test, and the
+    count-weighting judgment call above). Not yet live-checked on the
+    deployed app - low enough risk (new branch in an already-tested,
+    well-factored aggregator, not new CSS/DOM territory) that this one's
+    being pushed on the test suite plus the two new targeted tests alone,
+    unlike this session's UI/CSS changes.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
