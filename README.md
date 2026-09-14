@@ -142,6 +142,15 @@ SESSION_NOTES.md entry 187 for the full story, including a new problem this page
 repeating card grid built with `st.container(border=True)` and no stable way to target it in CSS
 without adding an explicit `key=` to each card.
 
+A site-wide bug (angler-reported with a screenshot, entry 188) meant every page's content could
+end up cut off behind the bottom nav bar with no way to scroll far enough to reveal it - not a
+per-page issue, since it came from the nav bar itself: the bar is deliberately lifted 44px off the
+true viewport bottom (punch-list #96 round 4, so Streamlit Community Cloud's own free-tier badge
+has its own clear strip below it), and Streamlit's own auto-padding for content above a sticky
+bottom container sizes itself to the bar's default position, not wherever that lift moves it to.
+Fixed with explicit bottom padding on the page content container, sized (and confirmed) against
+the bar's real rendered height plus that same 44px live, not guessed.
+
 ## What it does
 
 - **1-10 daily activity score** for largemouth bass, built from barometric pressure trend,

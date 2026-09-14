@@ -175,6 +175,33 @@ def render_bottom_nav(active_path: str) -> None:
         [data-testid="stBottom"] {{
             bottom: 44px !important;
         }}
+        /* Angler-reported bug (screenshot: text half-hidden behind the bar
+           with no way to scroll further) - confirmed live, not just from
+           the screenshot: at genuine max scroll, the page's own last
+           content element sat exactly flush with this bar's top edge, i.e.
+           the bar was overlapping real content rather than sitting below
+           reserved empty space for it. Root cause is the 44px lift
+           directly above - `st.bottom`'s content-area auto-padding (the
+           mechanism that normally keeps content from rendering under a
+           sticky bottom container) sizes itself to the bar's own natural
+           position, not to wherever a `bottom: Npx` override later moves
+           it, so the lift silently opened a same-sized gap in the
+           clearance that padding never actually covered. Confirmed via a
+           live before/after check (390x844 viewport, matching a real
+           phone): the bar's own rendered height plus that 44px lift comes
+           to ~105px of true dead space past the last reserved pixel;
+           120px on the content container's own bottom padding (not the
+           bar's own 6px above, which only pads the bar's interior) clears
+           it with a small margin, confirmed by re-measuring the same
+           element's on-screen position at new max scroll, not just
+           re-eyeballing a screenshot. `stMainBlockContainer` (not
+           `stMain`, the outer scrolling region itself) is the real
+           element with its own bottom padding to extend - confirmed live,
+           already had a 16px default this overrides outright rather than
+           adding to. */
+        [data-testid="stMainBlockContainer"] {{
+            padding-bottom: 120px !important;
+        }}
         /* Punch-list #96 polish round 3: force the nav's own row of 6
            columns to stay a single line at every viewport width, instead
            of following core.ui.inject_mobile_css()'s site-wide rule (every
