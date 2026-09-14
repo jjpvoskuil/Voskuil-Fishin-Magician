@@ -271,6 +271,36 @@ def test_compute_report_biggest_fish_by_spot():
     assert by_spot["Spot B"] == 1.0
 
 
+def test_compute_report_average_fish_weight_by_spot():
+    rows = [
+        _row("t1", "2026-09-06", spot_name="Spot A", fish=[_fish("Bass", 2.0), _fish("Bass", 6.0)]),
+        _row("t2", "2026-09-06", spot_name="Spot B", fish=[_fish("Bass", 1.0)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(trips_df, fish_df, "spot", "average_fish_weight")
+    by_spot = dict(zip(report["spot"], report["value"]))
+    assert by_spot["Spot A"] == 4.0  # mean(2.0, 6.0), not the 5.0 a biggest_fish reading would give
+    assert by_spot["Spot B"] == 1.0
+    n_by_spot = dict(zip(report["spot"], report["n"]))
+    assert n_by_spot["Spot A"] == 2
+
+
+def test_compute_report_average_fish_weight_is_per_row_not_weighted_by_count():
+    # A bulk "3 x 2 lb" entry (fish_df's own "count" field, set via Trip
+    # History's manual-entry form - pages/6_Spot_Session.py's live logging
+    # flow always writes count=1, one row per individual fish) must not let
+    # that one row's weight dominate the average 3x over - each fish_df ROW
+    # is one weight sample here, regardless of its own count, the same way
+    # "n" below counts rows, not individual fish.
+    rows = [
+        _row("t1", "2026-09-06", fish=[_fish("Bass", 2.0, count=3), _fish("Bass", 6.0, count=1)]),
+    ]
+    trips_df, fish_df = build_reports_dataframe(rows)
+    report = compute_report(trips_df, fish_df, "spot", "average_fish_weight")
+    assert report.iloc[0]["value"] == 4.0  # mean(2.0, 6.0) == 4.0, not a count-weighted 3.0
+    assert report.iloc[0]["n"] == 2  # 2 rows, not 4 individual fish
+
+
 def test_compute_report_trip_count_by_angler():
     rows = [
         _row("t1", "2026-09-06", angler="Amy"),
@@ -405,7 +435,7 @@ def test_compute_report_water_temp_bucket_factor_pools_fish_per_hour_per_bucket(
 
 def test_compute_report_water_temp_bucket_factor_with_empty_data_returns_empty_for_every_metric():
     trips_df, fish_df = build_reports_dataframe([])
-    for metric_key in ("total_fish", "fish_per_hour", "biggest_fish", "trip_count"):
+    for metric_key in ("total_fish", "fish_per_hour", "biggest_fish", "average_fish_weight", "trip_count"):
         report = compute_report(trips_df, fish_df, WATER_TEMP_BUCKET_FACTOR, metric_key)
         assert report.empty, f"expected an empty report for {metric_key} with no data at all"
 

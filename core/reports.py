@@ -287,6 +287,7 @@ METRIC_OPTIONS = {
     "Total Fish Caught": "total_fish",
     "Fish per Hour (rate)": "fish_per_hour",
     "Biggest Fish (lb)": "biggest_fish",
+    "Average Fish Weight (lb)": "average_fish_weight",
     "# Trips": "trip_count",
 }
 
@@ -295,7 +296,7 @@ METRIC_OPTIONS = {
 # fish_per_hour/trip_count are inherently per-TRIP, not per-species, so the
 # page disables the species picker for those (mirrors
 # pages/8_Leaderboard.py's own disabled-when-not-applicable pattern).
-SPECIES_FILTERABLE_METRICS = {"total_fish", "biggest_fish"}
+SPECIES_FILTERABLE_METRICS = {"total_fish", "biggest_fish", "average_fish_weight"}
 
 
 # --- Fish-per-hour: pooled (sum/sum), not a median-of-per-trip-rates ------------
@@ -511,7 +512,8 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
     reads from: groups `metric_key` by `factor_col`, after applying the
     filters, and returns a DataFrame with columns [factor_col, "value",
     "n"] - "n" is the sample size actually backing "value" (trips for
-    fish_per_hour/trip_count, individual fish for total_fish/biggest_fish),
+    fish_per_hour/trip_count, individual fish for total_fish/biggest_fish/
+    average_fish_weight),
     so a thin bar/point can be told apart from a well-supported one.
 
     Row set: for a factor in ORDER_HINTS or a date-based factor, EVERY
@@ -590,6 +592,18 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
     elif metric_key == "biggest_fish":
         base = f_df.dropna(subset=["weight_lb"]) if not f_df.empty else f_df
         agg = base.groupby(factor_col)["weight_lb"].agg(value="max", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
+    elif metric_key == "average_fish_weight":
+        # Mean, not weighted by each fish's own "count" field - a logged
+        # "3 x Gizzard Shad-pattern swimbait, 2 lb each" entry (the
+        # multi-fish-same-stats shorthand _row_factors() above already
+        # supports) would otherwise let one bulk entry's weight dominate an
+        # average the same way one truly enormous single fish would a max -
+        # fine for "biggest," wrong for "average," so this is a plain mean
+        # over individual catch ROWS (one weight_lb reading per row,
+        # regardless of that row's own count), same convention n already
+        # uses here (a count of rows, not of individual fish).
+        base = f_df.dropna(subset=["weight_lb"]) if not f_df.empty else f_df
+        agg = base.groupby(factor_col)["weight_lb"].agg(value="mean", n="count").reset_index() if not base.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
     else:  # total_fish (default)
         if species and species != "All species":
             agg = f_df.groupby(factor_col)["count"].agg(value="sum", n="count").reset_index() if not f_df.empty else pd.DataFrame(columns=[factor_col, "value", "n"])
@@ -692,7 +706,8 @@ def predict_by_moon_illumination(trips_df: pd.DataFrame, fish_df: pd.DataFrame, 
     - predicted_value: float|None - None when n == 0 (a bucket nobody has
       ever logged a trustworthy trip under yet has nothing to predict from)
     - n: sample size backing predicted_value (trips for fish_per_hour/
-      trip_count, individual fish for total_fish/biggest_fish - same
+      trip_count, individual fish for total_fish/biggest_fish/
+      average_fish_weight - same
       meaning compute_report()'s own "n" column already carries)
     - low_sample: True when 0 < n < MIN_PREDICTION_SAMPLES - enough to
       show a number, not enough to lean on it."""
