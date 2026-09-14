@@ -12794,6 +12794,55 @@ every real save.
     computed `font-family` (`"Plus Jakarta Sans"`) and its numeric
     steppers, all confirmed via computed style, not just a screenshot.
 
+188. **Site-wide bug: page content cut off behind the bottom nav bar, no
+    way to scroll far enough to see it - angler-reported with a
+    screenshot (Reports page, "1.96 fish/hr" half-hidden).** Confirmed
+    live before touching any CSS (390x844 viewport, matching a real
+    phone) rather than assuming the screenshot's cause: at genuine max
+    scroll, the page's own last content element sat exactly flush with
+    the nav bar's top edge - the bar was overlapping real content, not
+    sitting below reserved empty space meant to clear it.
+
+    Root cause: entry (punch-list #96 polish round 4)'s own `[data-
+    testid="stBottom"] { bottom: 44px !important; }` - deliberately
+    lifting the bar off the true viewport bottom so Streamlit Community
+    Cloud's own free-tier badge has its own clear strip below it.
+    `st.bottom`'s automatic content-padding (the mechanism that normally
+    keeps page content from rendering under a sticky bottom container)
+    sizes itself to the bar's own natural/default position, not to
+    wherever a later `bottom: Npx` override moves it - so that same 44px
+    lift silently opened a same-size gap in the clearance padding never
+    actually covered, on every page, the whole time since round 4 shipped.
+
+    Fix: `[data-testid="stMainBlockContainer"]` (confirmed live as the
+    real element with its own bottom padding to extend - NOT `stMain`,
+    the outer scrolling region itself, which has none of its own) gets an
+    explicit `padding-bottom: 120px !important`, replacing its 16px
+    default outright. That number isn't arbitrary - measured the bar's
+    own rendered height plus the 44px lift live (~105px of true dead
+    space past the last reserved pixel) and added a small margin, then
+    confirmed the fix by re-measuring the SAME element's on-screen
+    position at the new max scroll (not just re-eyeballing a screenshot):
+    fully clear of the bar afterward. Lives in `core/nav.py`'s
+    `render_bottom_nav()` (not `core.ui.inject_mobile_css()`, despite
+    being a mobile-usability fix in spirit) since it only makes sense
+    paired with the exact bar height/lift numbers already defined right
+    there, and only when the bar itself actually renders (same
+    `StreamlitPageNotFoundError` early-exit this whole function already
+    has) - a page-wide problem, but the fix belongs with its cause, not
+    filed as a second, disconnected "mobile CSS" entry.
+
+    **Verified:** full suite (645 passed), plus the fix itself was proven
+    live BEFORE writing it into the codebase - injected the exact CSS
+    rule directly into the currently-deployed (still-unfixed) page via
+    the browser tools and re-measured the same element's on-screen
+    position at the new max scroll, confirming it actually clears the
+    bar rather than trusting the arithmetic alone. **Still pending:** the
+    standard post-push redeploy check (confirming the rule as it now
+    actually lives in `core/nav.py`, not just injected ad hoc, survives
+    on the real deployed page) - flagged the same way as every other CSS
+    change in this log that leans on one.
+
 ## Key design decisions & rationale
 
 - **No proprietary chart scraping, ever** - bathymetry and thermocline
