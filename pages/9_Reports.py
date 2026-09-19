@@ -202,11 +202,52 @@ else:
     if is_date_factor:
         st.line_chart(chart_series)
     else:
-        st.bar_chart(chart_series, horizontal=(len(report_display) > 8))
+        # Long category labels (full lure names, spot names...) used to be cut
+        # off with "..." by st.bar_chart's default axis label limit. Draw the
+        # bars with Altair instead, wrapping each label onto several lines and
+        # lifting the label limit so the whole text shows.
+        import textwrap
+        import altair as alt
+
+        labels = [str(x) for x in chart_series.index]
+        longest = max((len(x) for x in labels), default=0)
+        horizontal = len(labels) > 8 or longest > 14
+        wrap_at = 30 if horizontal else 16
+        wrapped = ["\n".join(textwrap.wrap(x, wrap_at)) or x for x in labels]
+        chart_df = pd.DataFrame({"label": wrapped, "full": labels, "value": chart_series.values})
+        cat_axis = alt.Axis(title=None, labelLimit=0, labelAngle=0, labelLineHeight=12,
+                            labelExpr="split(datum.value, '\\n')")
+        if horizontal:
+            enc = dict(
+                y=alt.Y("label:N", sort=None, axis=cat_axis),
+                x=alt.X("value:Q", title=None),
+            )
+            height = max(160, sum((1 + w.count("\n")) * 14 + 14 for w in wrapped) + 30)
+        else:
+            enc = dict(
+                x=alt.X("label:N", sort=None, axis=cat_axis),
+                y=alt.Y("value:Q", title=None),
+            )
+            height = 300
+        bar_chart = (
+            alt.Chart(chart_df)
+            .mark_bar(color="#2ca02c")
+            .encode(tooltip=[alt.Tooltip("full:N", title=factor_label), alt.Tooltip("value:Q", title=metric_label)], **enc)
+            .properties(height=height)
+        )
+        st.altair_chart(bar_chart, width="stretch")
 
     # --- Table --------------------------------------------------------------------
     table = report_display.rename(columns={display_col: factor_label, "value": metric_label, "n": "Sample size (n)"})
-    st.dataframe(table, width='stretch', hide_index=True)
+    # st.dataframe cells never wrap, so a long label (full lure name, etc.)
+    # got cut off with "..." - size the label column to the longest entry
+    # instead (about 8px per character, clamped so it can't swallow the page).
+    _longest_label = max((len(str(v)) for v in table[factor_label]), default=10)
+    _label_px = int(min(700, max(120, _longest_label * 8 + 24)))
+    st.dataframe(
+        table, width='stretch', hide_index=True,
+        column_config={factor_label: st.column_config.TextColumn(factor_label, width=_label_px)},
+    )
     st.caption(
         f"{len(report_display)} row(s) shown. \"Sample size (n)\" is how many trips/catches back "
         "each row - a striking value from a very small n isn't necessarily reliable."
