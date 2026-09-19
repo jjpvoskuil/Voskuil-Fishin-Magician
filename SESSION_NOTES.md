@@ -13285,6 +13285,18 @@ every real save.
     (type in species)". Also fixed the stale "Striped Bass" example in
     `core/stringer.py`'s `_join_names` docstring.
 
+191. **Reports: long labels no longer truncate with "..." (angler-reported).**
+    Two causes: `st.bar_chart`'s default axis label limit, and
+    `st.dataframe` cells never wrapping. `pages/9_Reports.py` now draws
+    categorical bars with `st.altair_chart` (labelLimit 0, labels wrapped
+    with textwrap and split into lines via `labelExpr`; horizontal when >8
+    bars or any label >14 chars; green primary color to match the theme;
+    tooltip shows the full label; `sort=None` keeps the report's own order),
+    and sizes the table's label column to the longest entry (8px/char,
+    120-700px). Date factors keep `st.line_chart`. Rendered the Vega spec to
+    PNG to confirm the wrapping; live look on the deployed app not yet
+    checked. Test added in tests/test_reports_page.py.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

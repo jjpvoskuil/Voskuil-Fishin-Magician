@@ -276,3 +276,20 @@ def test_pressure_predict_section_still_renders_when_the_historical_report_above
     predicted_metrics = [m for m in at.metric if m.label.startswith("Predicted ")]
     assert len(predicted_metrics) == 2
     assert predicted_metrics[1].value == "—", "starved of matching historical trips, pressure's own prediction should be a dash"
+
+
+def test_long_category_labels_are_not_truncated_in_chart_or_table():
+    # Long labels (full lure names etc.) used to be cut off with "..." by
+    # st.bar_chart's default axis label limit and st.dataframe's non-wrapping
+    # cells. The chart now lifts the label limit and wraps labels; the table
+    # sizes its label column to the longest entry.
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    next(s for s in at.selectbox if s.label == "Factor (x-axis)").set_value("Lure").run()
+    assert not at.exception, f"page raised: {at.exception}"
+    assert len(at.dataframe) == 1
+    charts = at.get("vega_lite_chart")
+    assert charts, "expected the report's bar chart to render"
+    spec = charts[0].proto.spec
+    assert '"labelLimit":0' in spec.replace(" ", "")
+    assert "split(datum.value" in spec

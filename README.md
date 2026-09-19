@@ -1242,6 +1242,10 @@ being silently dropped for missing one required `isStreamlitMessage: true` field
 
 ## Reports (punch-list #92, first pass)
 
+**Long labels show in full.** Category labels on the Reports chart and table (full lure
+names, spot names and so on) are no longer cut off with "...": the chart wraps each
+label over several lines, and the table's label column is sized to the longest entry.
+
 A dynamic, "pick any two things and see how they line up" analysis page (`pages/9_Reports.py`,
 `core/reports.py`) - the first-pass framework for the angler's own ask: run correlations
 between session parameters/weather/moon illumination/location/lure/color/etc. and fishing
