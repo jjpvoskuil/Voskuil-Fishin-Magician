@@ -13296,6 +13296,11 @@ every real save.
     120-700px). Date factors keep `st.line_chart`. Rendered the Vega spec to
     PNG to confirm the wrapping; live look on the deployed app not yet
     checked. Test added in tests/test_reports_page.py.
+    Follow-up (angler's live screenshot): every other label was hidden -
+    Vega's default `labelOverlap` dropped labels that touched their
+    neighbors. Fixed with `labelOverlap=False` plus a uniform band height
+    sized to the most-wrapped label (bands are equal-height, so per-row
+    sizing didn't work).
 
 ## Operating notes
 
