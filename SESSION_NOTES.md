@@ -13274,6 +13274,17 @@ every real save.
     lack `session_end_time` (End Session only stamps active rows) - harmless
     to this view, noted for a possible follow-up.
 
+190. **"Striped Bass" catches relabeled White Bass (angler-reported).** Nolin
+    has only white bass; 14 fish across 5 sessions (8/11-8/17, John) had been
+    logged as "Striped Bass" back when an earlier Spot Session species picker
+    offered it. Rewrote those to "White Bass" in the real `data` branch's
+    `data/trip_log.csv` (species field only, commit 0f5f8c3; totals now 48
+    White Bass, 0 Striped) - main's frozen copy never had them. The current
+    picker (`core.activity_log.FISH_SPECIES_OPTIONS`, already pinned by a
+    test) does not offer Striped Bass; it can only appear now via "Other
+    (type in species)". Also fixed the stale "Striped Bass" example in
+    `core/stringer.py`'s `_join_names` docstring.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

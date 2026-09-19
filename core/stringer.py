@@ -186,7 +186,7 @@ def season_label(trips_df) -> Optional[str]:
 
 
 def _join_names(names: list) -> str:
-    """"White Bass, Striped Bass & Catfish" - Oxford-less list with a final
+    """"White Bass, Largemouth Bass & Catfish" - Oxford-less list with a final
     "&", matching the mockup's own hand-written species-mix description."""
     names = list(names)
     if not names:
