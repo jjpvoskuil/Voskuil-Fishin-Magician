@@ -13302,6 +13302,20 @@ every real save.
     sized to the most-wrapped label (bands are equal-height, so per-row
     sizing didn't work).
 
+192. **Reports: water color and water clarity (ft) split into separate
+    factors (angler-requested).** The existing "Water Clarity" factor was
+    the resolved `water_clarity` column, one word mixing color and clarity
+    (Clear / Green stained / Brown stained / Muddy). Added "Water Color
+    (green / brown stain)" (`conditions_json.stain_color`, "Unspecified"
+    when unrecorded - 22 of 257 real rows) and "Water Clarity (Secchi ft,
+    custom range)" (`secchi_ft`, bucketed at query time with an adjustable
+    "Bucket width (ft)", default 0.5, anchored to 0 ft). Kept the old one
+    relabeled "Water Clarity + Color (combined, as logged)". In
+    `core/reports.py` the water-temp on-the-fly bucketing was generalized
+    into a small `dynamic_buckets` table so both share one code path
+    (`_bucket_axis`); `compute_report()` gained `secchi_bucket_width_ft`.
+    Tests in tests/test_reports.py and tests/test_reports_page.py.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

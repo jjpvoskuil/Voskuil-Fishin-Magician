@@ -1250,7 +1250,7 @@ A dynamic, "pick any two things and see how they line up" analysis page (`pages/
 `core/reports.py`) - the first-pass framework for the angler's own ask: run correlations
 between session parameters/weather/moon illumination/location/lure/color/etc. and fishing
 success, flexibly over any date range, with a chart and an Excel export. Pick a **factor**
-(22 choices - spot, structure type, water clarity, lure, lure category, color, technique,
+(24 choices - spot, structure type, water color, water clarity in feet, water clarity + color combined, lure, lure category, color, technique,
 time segment, season, sky condition, wind band/direction, precipitation, water temp band,
 water temp custom range, pressure trend, moon illumination % the night before, reported
 fish/forage activity, angler, day of week, or date daily/weekly) and a **success metric**
@@ -1280,6 +1280,14 @@ binning logic for factors that are already plain categorical strings in the cond
 dict. Read entirely from `data/trip_log.csv` (same cached `get_trip_history()` every other
 page uses, with its own **"🔄 Refresh from GitHub"** button for the same staleness reasons
 The Stringer's copy exists) - this page never writes anything.
+
+**Water color and water clarity are separate factors.** **Water Color (green / brown
+stain)** groups by the stain color you recorded, and **Water Clarity (Secchi ft, custom
+range)** groups by the actual Secchi-disk reading in feet, in buckets whose width you set
+("Bucket width (ft)", default 0.5 ft) - so you can look at each on its own. Trips with no
+stain color recorded show as "Unspecified" under color, and trips with no Secchi reading
+are left out of the clarity view. The old single **Water Clarity + Color (combined, as
+logged)** factor (one word like "Clear" or "Green stained") is still there.
 
 **Water Temp (custom range)** (punch-list #92 follow-up) exists alongside the fixed
 **Water Temp Band** factor for the same reason moon illumination needed its own binning:
