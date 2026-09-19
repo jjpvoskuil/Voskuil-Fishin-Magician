@@ -293,3 +293,15 @@ def test_long_category_labels_are_not_truncated_in_chart_or_table():
     spec = charts[0].proto.spec
     assert '"labelLimit":0' in spec.replace(" ", "")
     assert "split(datum.value" in spec
+
+
+def test_secchi_factor_shows_its_own_bucket_width_control():
+    at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+    at.run()
+    box = next(s for s in at.selectbox if s.label == "Factor (x-axis)")
+    box.set_value("Water Clarity (Secchi ft, custom range)").run()
+    assert not at.exception, at.exception
+    assert any(n.label == "Bucket width (ft)" for n in at.number_input)
+    box.set_value("Water Color (green / brown stain)").run()
+    assert not at.exception, at.exception
+    assert not any(n.label == "Bucket width (ft)" for n in at.number_input)

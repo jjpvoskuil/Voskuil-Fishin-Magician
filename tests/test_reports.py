@@ -5,7 +5,7 @@ from core.astro import moon_phase
 from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     moon_illumination_pct_night_before, _moon_illumination_bin, _pressure_trend_band,
-    _water_temp_bucket_label, _water_temp_bucket_axis, WATER_TEMP_BUCKET_FACTOR,
+    _water_temp_bucket_label, _water_temp_bucket_axis, WATER_TEMP_BUCKET_FACTOR, SECCHI_BUCKET_FACTOR,
     predict_by_moon_illumination, predict_by_pressure_trend, MIN_PREDICTION_SAMPLES,
 )
 from core.weather import WeatherBundle
@@ -706,3 +706,46 @@ def test_predict_by_pressure_trend_reports_unavailable_right_at_the_forward_edge
     trips_df, fish_df = build_reports_dataframe([])
     result = predict_by_pressure_trend(trips_df, fish_df, target, bundle, metric_key="total_fish")
     assert result["forecast_available"] is False
+
+
+# --- water color vs water clarity (Secchi ft) as separate factors -----------
+
+def _clarity_row(trip_id, stain, secchi, fish_caught=1):
+    r = _row(trip_id, "2026-08-10", fish_caught=fish_caught)
+    cond = json.loads(r["conditions_json"])
+    if stain is not None:
+        cond["stain_color"] = stain
+    if secchi is not None:
+        cond["secchi_ft"] = secchi
+    r["conditions_json"] = json.dumps(cond)
+    return r
+
+
+def test_water_color_and_secchi_are_separate_factors():
+    rows = [
+        _clarity_row("a", "Green stained", 2.5, fish_caught=3),
+        _clarity_row("b", "Green stained", 3.5, fish_caught=1),
+        _clarity_row("c", "Brown stained", 2.5, fish_caught=2),
+        _clarity_row("d", None, None, fish_caught=4),
+    ]
+    trips, fish = build_reports_dataframe(rows)
+    color = compute_report(trips, fish, "water_color", "total_fish").set_index("water_color")
+    assert color.loc["Green stained", "value"] == 4 and color.loc["Brown stained", "value"] == 2
+    assert color.loc["Unspecified", "value"] == 4
+    ft = compute_report(trips, fish, SECCHI_BUCKET_FACTOR, "total_fish", secchi_bucket_width_ft=1.0).set_index("secchi_bucket")
+    # 2.5 -> "2-3 ft" (a + c), 3.5 -> "3-4 ft" (b); the row with no reading is left out
+    assert list(ft.index) == ["2-3 ft", "3-4 ft"]
+    assert ft.loc["2-3 ft", "value"] == 5 and ft.loc["3-4 ft", "value"] == 1
+
+
+def test_secchi_axis_shows_empty_buckets_between_real_readings():
+    rows = [_clarity_row("a", "Green stained", 1.2), _clarity_row("b", "Green stained", 4.1)]
+    trips, fish = build_reports_dataframe(rows)
+    out = compute_report(trips, fish, SECCHI_BUCKET_FACTOR, "trip_count", secchi_bucket_width_ft=1.0)
+    assert list(out["secchi_bucket"]) == ["1-2 ft", "2-3 ft", "3-4 ft", "4-5 ft"]
+    assert list(out["n"]) == [1, 0, 0, 1]
+
+
+def test_secchi_factor_with_no_readings_is_an_empty_report_not_a_crash():
+    trips, fish = build_reports_dataframe([_clarity_row("a", "Green stained", None)])
+    assert compute_report(trips, fish, SECCHI_BUCKET_FACTOR, "total_fish").empty

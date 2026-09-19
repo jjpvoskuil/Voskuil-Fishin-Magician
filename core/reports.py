@@ -206,6 +206,44 @@ def _water_temp_bucket_label(temp_f: Optional[float], width: float) -> Optional[
     return f"{lo:g}-{hi:g}°F"
 
 
+# --- Water clarity (Secchi ft): user-adjustable-width buckets -------------------
+# Same query-time bucketing as water temp above, for the same reason: the
+# angler wanted water COLOR (green/brown stain - see "water_color" in
+# _row_factors) and water CLARITY (how many feet of visibility) as two
+# separate things to look at, and a Secchi reading is a continuous number
+# whose useful bucket size depends on how much spread has been logged so far
+# (real data right now is only ~1.5-4.5 ft). Anchored to absolute 0 ft for
+# the same reason as water temp (stable, round-number bucket edges).
+SECCHI_BUCKET_FACTOR = "secchi_bucket"
+DEFAULT_SECCHI_BUCKET_WIDTH_FT = 0.5
+
+
+def _secchi_bucket_label(secchi_ft: Optional[float], width: float) -> Optional[str]:
+    if secchi_ft is None or width <= 0 or pd.isna(secchi_ft):
+        return None
+    lo = math.floor(secchi_ft / width) * width
+    hi = lo + width
+    return f"{lo:g}-{hi:g} ft"
+
+
+def _bucket_axis(observed: pd.Series, width: float, label_fn) -> list:
+    """Every width-wide bucket between the smallest and largest observed
+    value, labelled by `label_fn` - see _water_temp_bucket_axis()'s
+    docstring for the "show a real zero between two real endpoints"
+    convention this shares."""
+    valid = observed.dropna() if observed is not None else pd.Series(dtype=float)
+    if valid.empty or width <= 0:
+        return []
+    lo = math.floor(valid.min() / width) * width
+    hi = math.floor(valid.max() / width) * width
+    labels = []
+    b = lo
+    while b <= hi + 1e-9:  # tolerate float drift at the top edge
+        labels.append(label_fn(b, width))
+        b += width
+    return labels
+
+
 def _water_temp_bucket_axis(observed_temps: pd.Series, width: float) -> list:
     """Every width-wide bucket between the coldest and warmest water-temp
     reading actually present in the currently-filtered trips (not the
@@ -237,7 +275,9 @@ def _water_temp_bucket_axis(observed_temps: pd.Series, width: float) -> list:
 FACTOR_OPTIONS = {
     "Spot": "spot",
     "Structure Type": "structure_type",
-    "Water Clarity": "water_clarity",
+    "Water Color (green / brown stain)": "water_color",
+    "Water Clarity (Secchi ft, custom range)": SECCHI_BUCKET_FACTOR,
+    "Water Clarity + Color (combined, as logged)": "water_clarity",
     "Lure": "lure",
     "Lure Category": "lure_category",
     "Color": "color",
@@ -373,6 +413,13 @@ def _row_factors(row: dict) -> dict:
         "spot": row.get("spot_name") or "Unknown location",
         "structure_type": row.get("structure_type") or "Unspecified",
         "water_clarity": row.get("water_clarity") or "Unspecified",
+        # Water color and clarity (ft) as two separate factors - the combined
+        # "water_clarity" above is one resolved word (Clear / Green stained /
+        # Brown stained / Muddy) that mixes both. Color is the recorded stain
+        # color only; clarity is the raw Secchi depth (bucketed at query time,
+        # see SECCHI_BUCKET_FACTOR).
+        "water_color": (cond.get("stain_color") or "").strip() or "Unspecified",
+        "secchi_ft": _to_float(cond.get("secchi_ft")),
         "lure": row.get("lure_used") or _lure_category_label(cond) or "Unspecified",
         "lure_category": _lure_category_label(cond) or "Unspecified",
         "color": row.get("color_used") or "Unspecified",
@@ -507,7 +554,8 @@ def _date_axis(date_start, date_end, weekly: bool) -> list:
 def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: str, metric_key: str,
                     species: Optional[str] = None, date_start=None, date_end=None,
                     anglers: Optional[list] = None, segments: Optional[list] = None,
-                    water_temp_bucket_width_f: Optional[float] = None) -> pd.DataFrame:
+                    water_temp_bucket_width_f: Optional[float] = None,
+                    secchi_bucket_width_ft: Optional[float] = None) -> pd.DataFrame:
     """The one generic aggregator every Reports page chart/table/export
     reads from: groups `metric_key` by `factor_col`, after applying the
     filters, and returns a DataFrame with columns [factor_col, "value",
@@ -544,27 +592,34 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
     WATER_TEMP_BUCKET_FACTOR - see that constant's own module-level comment
     for why this factor can't be precomputed like every other one. Ignored
     for every other factor_col. Defaults to
-    DEFAULT_WATER_TEMP_BUCKET_WIDTH_F when not given."""
+    DEFAULT_WATER_TEMP_BUCKET_WIDTH_F when not given.
+
+    secchi_bucket_width_ft: the same idea for SECCHI_BUCKET_FACTOR (water
+    clarity in feet); defaults to DEFAULT_SECCHI_BUCKET_WIDTH_FT."""
     t_df = _apply_filters(trips_df, date_start, date_end, anglers, segments)
     f_df = _apply_filters(fish_df, date_start, date_end, anglers, segments)
     if species and species != "All species" and metric_key in SPECIES_FILTERABLE_METRICS and not f_df.empty:
         f_df = f_df[f_df["species"] == species]
 
     water_temp_bucket_width = water_temp_bucket_width_f or DEFAULT_WATER_TEMP_BUCKET_WIDTH_F
-    if factor_col == WATER_TEMP_BUCKET_FACTOR:
-        # Can't be a precomputed column (unlike every other factor) - the
-        # bucket width isn't known until query time - so it's added here,
-        # on a copy (.assign(), never mutating the caller's own trips_df/
-        # fish_df), right before the same groupby-by-factor_col logic every
-        # other factor already goes through below.
+    secchi_bucket_width = secchi_bucket_width_ft or DEFAULT_SECCHI_BUCKET_WIDTH_FT
+    # factor -> (source numeric column, bucket width, label fn). These can't
+    # be precomputed columns (unlike every other factor) - the bucket width
+    # isn't known until query time - so they're added here, on a copy
+    # (.assign(), never mutating the caller's own trips_df/fish_df), right
+    # before the same groupby-by-factor_col logic every other factor goes
+    # through below.
+    dynamic_buckets = {
+        WATER_TEMP_BUCKET_FACTOR: ("water_temp_f", water_temp_bucket_width, _water_temp_bucket_label),
+        SECCHI_BUCKET_FACTOR: ("secchi_ft", secchi_bucket_width, _secchi_bucket_label),
+    }
+    dyn = dynamic_buckets.get(factor_col)
+    if dyn:
+        src_col, dyn_width, dyn_label = dyn
         if not t_df.empty:
-            t_df = t_df.assign(**{factor_col: t_df["water_temp_f"].apply(
-                lambda v: _water_temp_bucket_label(v, water_temp_bucket_width)
-            )})
+            t_df = t_df.assign(**{factor_col: t_df[src_col].apply(lambda v: dyn_label(v, dyn_width))})
         if not f_df.empty:
-            f_df = f_df.assign(**{factor_col: f_df["water_temp_f"].apply(
-                lambda v: _water_temp_bucket_label(v, water_temp_bucket_width)
-            )})
+            f_df = f_df.assign(**{factor_col: f_df[src_col].apply(lambda v: dyn_label(v, dyn_width))})
 
     if metric_key == "fish_per_hour":
         base = t_df.dropna(subset=["trustworthy_hours"]) if not t_df.empty else t_df
@@ -626,13 +681,13 @@ def compute_report(trips_df: pd.DataFrame, fish_df: pd.DataFrame, factor_col: st
         order = {v: i for i, v in enumerate(ORDER_HINTS[factor_col])}
         return agg.sort_values(by=factor_col, key=lambda s: s.map(order)).reset_index(drop=True)
 
-    if factor_col == WATER_TEMP_BUCKET_FACTOR:
+    if dyn:
         # Same "every bucket between the two real endpoints, even at n=0"
         # idea as ORDER_HINTS/DATE_FACTOR_COLUMNS above, but the axis itself
         # has to be generated fresh each call (from whatever's actually in
         # the filtered trips_df right now) instead of coming from a fixed
         # table, since the bucket width is chosen at query time.
-        axis_labels = _water_temp_bucket_axis(t_df["water_temp_f"] if not t_df.empty else None, water_temp_bucket_width)
+        axis_labels = _bucket_axis(t_df[src_col] if not t_df.empty else None, dyn_width, dyn_label)
         # An empty axis_labels list (no trustworthy water-temp readings at
         # all in the filtered trips) would otherwise default to a float64
         # column here, which can't merge against agg's object-dtype

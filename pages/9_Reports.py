@@ -35,7 +35,7 @@ from core.reports import (
     build_reports_dataframe, compute_report, species_options,
     predict_by_moon_illumination, predict_by_pressure_trend,
     FACTOR_OPTIONS, METRIC_OPTIONS, SPECIES_FILTERABLE_METRICS, DATE_FACTOR_COLUMNS,
-    WATER_TEMP_BUCKET_FACTOR, DEFAULT_WATER_TEMP_BUCKET_WIDTH_F, MIN_PREDICTION_SAMPLES,
+    WATER_TEMP_BUCKET_FACTOR, DEFAULT_WATER_TEMP_BUCKET_WIDTH_F, SECCHI_BUCKET_FACTOR, DEFAULT_SECCHI_BUCKET_WIDTH_FT, MIN_PREDICTION_SAMPLES,
 )
 from core.scoring import SEGMENTS
 from core.storage import sync_data_from_data_branch
@@ -126,6 +126,16 @@ if factor_col == WATER_TEMP_BUCKET_FACTOR:
              "temperature spread makes fewer, bigger buckets more useful.",
     )
 
+# Water clarity in feet (Secchi depth) - same adjustable-bucket idea, in feet.
+secchi_bucket_width = DEFAULT_SECCHI_BUCKET_WIDTH_FT
+if factor_col == SECCHI_BUCKET_FACTOR:
+    secchi_bucket_width = st.number_input(
+        "Bucket width (ft)", min_value=0.25, max_value=5.0, value=DEFAULT_SECCHI_BUCKET_WIDTH_FT, step=0.25,
+        key="rpt_secchi_bucket_width",
+        help="How wide each water-clarity bucket should be, in feet of Secchi-disk visibility. "
+             "Narrower gives more buckets over your logged range; widen it if data is thin.",
+    )
+
 species_supported = metric_key in SPECIES_FILTERABLE_METRICS
 c3, c4 = st.columns([1, 1])
 if species_supported:
@@ -175,6 +185,7 @@ report = compute_report(
     species=species_choice, date_start=date_start, date_end=date_end,
     anglers=anglers_choice or None, segments=segments_choice or None,
     water_temp_bucket_width_f=water_temp_bucket_width,
+    secchi_bucket_width_ft=secchi_bucket_width,
 )
 
 st.divider()
