@@ -215,14 +215,18 @@ else:
         wrap_at = 30 if horizontal else 16
         wrapped = ["\n".join(textwrap.wrap(x, wrap_at)) or x for x in labels]
         chart_df = pd.DataFrame({"label": wrapped, "full": labels, "value": chart_series.values})
-        cat_axis = alt.Axis(title=None, labelLimit=0, labelAngle=0, labelLineHeight=12,
+        cat_axis = alt.Axis(title=None, labelLimit=0, labelAngle=0, labelLineHeight=12, labelOverlap=False,
                             labelExpr="split(datum.value, '\\n')")
         if horizontal:
             enc = dict(
                 y=alt.Y("label:N", sort=None, axis=cat_axis),
                 x=alt.X("value:Q", title=None),
             )
-            height = max(160, sum((1 + w.count("\n")) * 14 + 14 for w in wrapped) + 30)
+            # Every bar gets an equal band, so size the bands to the tallest
+            # (most-wrapped) label; labelOverlap=False above stops Vega from
+            # silently hiding every other label when they sit close together.
+            most_lines = max((1 + w.count("\n") for w in wrapped), default=1)
+            height = max(160, len(wrapped) * (most_lines * 14 + 14) + 30)
         else:
             enc = dict(
                 x=alt.X("label:N", sort=None, axis=cat_axis),
