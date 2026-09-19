@@ -13248,6 +13248,32 @@ every real save.
   some cells for a while; that's the minimum-sample guard working as
   intended, not a bug.
 
+189. **Trip History hid mid-session relocations, and editing a relocated
+    session flattened it (punch-list #99, angler-reported).** John fished
+    Stripe Island Point then Flag Point in one Spot Session (9/18) using
+    "🔄 Relocate"; every fish was there but Trip History showed one
+    location. Checked the real `data` branch first: storage was correct -
+    `_relocate_active_session()` had written separate rows per location
+    (same `session_id`, old rows end-stamped, new rows at Flag Point).
+    (Matthew's sessions that day were separate sessions, never relocated.)
+    Root cause was display only: `build_sessions()` took location/time of
+    day/structure/conditions from the session's FIRST row, and the edit
+    form applied one location/condition set to every row on Save - so
+    pressing Save on a relocated session would have permanently merged it
+    back into one location (the old module-docstring "narrow edge case").
+
+    Fix (pages/4_Trip_History.py): rows are grouped into "legs" by spot_id
+    + shared condition snapshot (`_leg_key`), in fished order. Card title
+    reads "Stripe Island Point -> Flag Point"; the Location/Time-of-day
+    filters match any leg; the detail view shows one section per leg (its
+    time span, structure, conditions, lures, fish), with a note when a leg
+    is a same-spot conditions update. Edit is per-leg (only date/angler
+    are session-wide), so Save keeps each location. Single-location
+    sessions render as before. Tests: 3 new in tests/test_trip_history_page.py
+    (fail on old code). Not changed: 9/18-19 John sessions' earlier-leg rows
+    lack `session_end_time` (End Session only stamps active rows) - harmless
+    to this view, noted for a possible follow-up.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

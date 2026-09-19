@@ -90,3 +90,79 @@ def test_today_only_button_jumps_the_filter_to_a_single_day_on_today():
     assert after == (lake_today(), lake_today()), (
         "Today only did not jump the date range to a single day on today"
     )
+
+
+# ------------------------------------------------------------------------------
+# Punch-list #99: a session relocated mid-way (Spot Session's "🔄 Relocate") is
+# stored as separate rows per location under one session_id. Trip History used
+# to show only the FIRST row's location/conditions for the whole session and,
+# worse, saved edits flattened every row to that one location.
+# ------------------------------------------------------------------------------
+import json
+from unittest import mock
+
+
+def _row(trip_id, spot_id, spot_name, segment, start, end, fish=0):
+    cond = {
+        "angler": "John", "start_time": "06:12:20", "lure_start_time": start, "lure_end_time": end,
+        "water_temp_f": 80.0, "secchi_ft": 2.5, "source": "spot_session", "fish": [],
+    }
+    return {
+        "trip_id": trip_id, "logged_at": start, "trip_date": "2026-09-18", "segment": segment,
+        "spot_id": spot_id, "spot_name": spot_name, "structure_type": "Main-lake point",
+        "water_clarity": "Green stained", "lure_used": "Zoom - Super Fluke", "color_used": "",
+        "technique_used": "", "fish_caught": fish, "biggest_fish_lb": None, "predicted_score": 5.0,
+        "conditions_json": json.dumps(cond), "notes": "", "session_id": "sess-split",
+    }
+
+
+def _split_rows():
+    return [
+        _row("t1", "spotA", "Stripe Island Point", "Dawn", "06:12:20", "08:09:57", fish=3),
+        _row("t2", "spotB", "Flag Point", "Morning", "08:09:57", "08:59:55", fish=11),
+    ]
+
+
+def _open_split_session(at):
+    import datetime
+    at.run()
+    assert not at.exception, at.exception
+    at.date_input[0].set_value((datetime.date(2026, 9, 18), datetime.date(2026, 9, 18)))
+    at.run()
+    next(b for b in at.button if b.label.startswith("🔍")).click().run()
+    assert not at.exception, at.exception
+
+
+def test_relocated_session_shows_every_location_in_order():
+    with mock.patch("core.storage.read_all_trips", return_value=_split_rows()):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        _open_split_session(at)
+        labels = [e.label for e in at.expander]
+        assert any("Stripe Island Point -> Flag Point" in l and "14 fish" in l for l in labels), labels
+        headings = [m.value for m in at.markdown if "Location" in m.value and " of 2" in m.value]
+        assert len(headings) == 2 and "Stripe Island Point" in headings[0] and "Flag Point" in headings[1]
+
+
+def test_location_filter_matches_any_leg_of_a_relocated_session():
+    with mock.patch("core.storage.read_all_trips", return_value=_split_rows()):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        _open_split_session(at)
+        loc = next(m for m in at.multiselect if m.label == "Location")
+        assert "Flag Point" in loc.options and "Stripe Island Point" in loc.options
+
+
+def test_saving_an_edit_does_not_flatten_a_relocated_session():
+    saved = {}
+    def fake_update(entry):
+        saved[entry.trip_id] = entry
+        return True
+    with mock.patch("core.storage.read_all_trips", return_value=_split_rows()), \
+         mock.patch("core.storage.update_trip", side_effect=fake_update):
+        at = AppTest.from_file(PAGE_PATH, default_timeout=60)
+        _open_split_session(at)
+        next(b for b in at.button if b.label == "✏️ Edit").click().run()
+        assert not at.exception, at.exception
+        next(b for b in at.button if b.label == "💾 Save changes").click().run()
+        assert not at.exception, at.exception
+    assert saved["t1"].spot_id == "spotA" and saved["t1"].segment == "Dawn"
+    assert saved["t2"].spot_id == "spotB" and saved["t2"].segment == "Morning"

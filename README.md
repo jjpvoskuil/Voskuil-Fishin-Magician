@@ -548,6 +548,12 @@ the bar's real rendered height plus that same 44px live, not guessed.
   grid, the "Edit this trip" handoff back to Spot Session, and this page's own
   summary metrics/calibration-status section are gone - rankings/totals live on the
   **Leaderboard** page instead.
+- **Trip History shows every location of a relocated session (punch-list #99).** A
+  session you moved mid-way with Spot Session's "🔄 Relocate" now shows as
+  "Stripe Island Point -> Flag Point" on its card, matches the Location/Time-of-day
+  filters for either spot, and opens to one section per location (time span,
+  conditions, lures, fish). Editing is per location, so saving never merges a
+  moved session back into one spot.
 - **Tackle Box (lure inventory)** - your tackle box, tracked: brand, full description,
   a category (matching it to one of the forecast engine's lure types), a photo, the
   last price paid, and how many you have on hand. Seeded from a Cabela's order history

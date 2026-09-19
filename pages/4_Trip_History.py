@@ -91,14 +91,12 @@ same spirit as the old grid's own documented limitations:
     retroactively re-score the trip.
   - lure_start_time/lure_end_time/session_end_time stay read-only - shown
     for reference, not editable here.
-  - This page edits SESSION-level conditions once and applies them to
-    EVERY lure in that session uniformly. A session where the angler used
-    Spot Session's "🔄 Conditions changed? Get updated suggestions"
-    mid-session (punch-list #49) can have per-lure divergence in
-    fish_activity/forage_activity/wind/sky between lures added before vs.
-    after that update - saving an edit here flattens that back to one
-    shared value across the whole session. Narrow edge case, not handled
-    specially.
+  - Punch-list #99: a session relocated (or conditions-updated) mid-way via
+    Spot Session's "🔄 Relocate" is stored as separate rows per location,
+    all sharing one session_id. Sessions are split into "legs" (location +
+    condition snapshot, see build_sessions/_leg_key); view and edit are
+    per-leg, so editing never flattens a moved session into one location.
+    Only date and angler are session-wide.
 
 The "Location" filter/display resolves each trip's `spot_id` against the
 angler's *current* saved-spot catalog (core.lake_spots / data/lake_spots.csv)
@@ -148,6 +146,7 @@ calendar's two-click range mechanic at all. The calendar itself still
 supports picking any other single day the same two-click way it always
 has - this is an addition, not a replacement.
 """
+import json
 from datetime import datetime, time as dtime
 
 import pandas as pd
@@ -301,19 +300,68 @@ def _sort_key_for_member(row: dict) -> str:
     return cond.get("lure_start_time") or row.get("logged_at") or ""
 
 
+# Punch-list #99: the shared, session-level condition fields Spot Session's
+# "🔄 Conditions changed? Relocate" panel (_relocate_active_session) rewrites
+# when it splits a session into a new row set - together with spot_id they
+# identify one "leg" of a session (one location under one set of conditions).
+_LEG_CONDITION_KEYS = (
+    "water_temp_f", "secchi_ft", "stain_color", "stirred_up", "wind_band", "wind_direction",
+    "light_condition", "precipitation", "fish_depth_ft", "forage_seen", "fish_activity", "forage_activity",
+)
+
+
+def _leg_key(row: dict) -> tuple:
+    """Identity of the leg (location + conditions snapshot) this row belongs
+    to. Two rows share a leg exactly when they share spot AND every shared
+    condition field - which is precisely what a mid-session relocate/
+    conditions update breaks apart, and what a plain "add a lure" leaves
+    alone (a newly added lure copies the session's current base conditions)."""
+    cond = row.get("_conditions") or {}
+    return (
+        row.get("spot_id") or row.get("spot_name") or "",
+        tuple(json.dumps(cond.get(k), sort_keys=True, default=str) for k in _LEG_CONDITION_KEYS),
+    )
+
+
+def _leg_time_span_label(rows: list) -> str:
+    """"6:12 AM - 8:09 AM" from the leg's earliest lure start to its latest
+    lure end; open-ended ("6:12 AM - still open") if any lure is unended."""
+    starts = [(r.get("_conditions") or {}).get("lure_start_time") for r in rows]
+    ends = [(r.get("_conditions") or {}).get("lure_end_time") for r in rows]
+    starts = sorted(x for x in starts if x)
+    if not starts:
+        return ""
+    start_label = _format_fish_caught_at(starts[0]) or starts[0]
+    if any(not e for e in ends):
+        return f"{start_label} - still open"
+    end_label = _format_fish_caught_at(max(ends)) or max(ends)
+    return f"{start_label} - {end_label}"
+
+
 def build_sessions(enriched_rows: list) -> list:
     """Groups already-enriched trip rows (each must already carry _date/
     _conditions/_location/_angler/_lure_type - see the enrichment loop
     below) into one dict per session:
 
       {session_key, rows (member rows, sorted by lure start time), date,
-       segment, location, angler, structure_type, fish_total,
-       lure_labels (list), lure_types (set), specific_lures (set)}
+       segment, segments, location, locations, angler, structure_type,
+       fish_total, legs, lure_labels (list), lure_types (set),
+       specific_lures (set)}
 
-    date/segment/location/angler/structure_type are taken from whichever
-    member row has the EARLIEST _sort_key_for_member (the session's first
-    lure) - representative of the session as a whole. fish_total sums
-    fish_caught across every member row."""
+    `legs` (punch-list #99) splits the session's rows by location +
+    conditions snapshot (see _leg_key), in the order they were fished - a
+    session relocated mid-way through via Spot Session's "🔄 Relocate"
+    panel is stored as separate rows per location (all sharing one
+    session_id), and each leg here is one of those location stretches:
+      {rows, spot_id, location, segment, structure_type, time_span}
+    `locations`/`segments` are each leg's value, de-duplicated in order;
+    `location`/`segment` are those joined with " -> " for display (a plain
+    single-location session's is just its one name, unchanged).
+
+    date/angler/structure_type are taken from whichever member row has the
+    EARLIEST _sort_key_for_member (the session's first lure) -
+    representative of the session as a whole. fish_total sums fish_caught
+    across every member row."""
     groups = {}
     for row in enriched_rows:
         key = _session_group_key(row)
@@ -329,15 +377,31 @@ def build_sessions(enriched_rows: list) -> list:
                 fish_total += int(m.get("fish_caught") or 0)
             except (TypeError, ValueError):
                 pass
+        leg_groups = {}
+        for m in members_sorted:
+            leg_groups.setdefault(_leg_key(m), []).append(m)
+        legs = []
+        for leg_rows in leg_groups.values():  # dicts keep first-seen order = fished order
+            lead = leg_rows[0]
+            legs.append({
+                "rows": leg_rows, "spot_id": lead.get("spot_id") or "", "location": lead["_location"],
+                "segment": lead.get("segment"), "structure_type": lead.get("structure_type"),
+                "time_span": _leg_time_span_label(leg_rows),
+            })
+        locations = list(dict.fromkeys(leg["location"] for leg in legs if leg["location"]))
+        segments = list(dict.fromkeys(leg["segment"] for leg in legs if leg["segment"]))
         sessions.append({
             "session_key": key,
             "rows": members_sorted,
             "date": first["_date"],
-            "segment": first.get("segment"),
-            "location": first["_location"],
+            "segment": " -> ".join(segments) if segments else first.get("segment"),
+            "segments": segments,
+            "location": " -> ".join(locations) if locations else first["_location"],
+            "locations": locations,
             "angler": first["_angler"],
             "structure_type": first.get("structure_type"),
             "fish_total": fish_total,
+            "legs": legs,
             "lure_labels": [m.get("lure_used") or "Unspecified" for m in members_sorted],
             "lure_types": {m["_lure_type"] for m in members},
             "specific_lures": {m.get("lure_used") for m in members if m.get("lure_used")},
@@ -427,13 +491,13 @@ if st.button("📅 Today only", help="Set the date range to just today, in one t
     st.rerun()
 
 f2, f3 = st.columns(2)
-segment_options = sorted({s["segment"] for s in sessions if s["segment"]})
+segment_options = sorted({seg for s in sessions for seg in s["segments"]})
 segments = f2.multiselect(
     "Time of day", segment_options, default=[],
     format_func=lambda name: segment_display_label(name, _th_seg_ranges),
     help="Clock ranges shown are today's actual sunrise/sunset-derived windows, as a reference point.",
 )
-location_options = sorted({s["location"] for s in sessions if s["location"]})
+location_options = sorted({loc for s in sessions for loc in s["locations"]})
 locations = f3.multiselect("Location", location_options, default=[])
 
 f4, f5, f6 = st.columns(3)
@@ -461,9 +525,9 @@ def _session_matches(s: dict) -> bool:
     elif date_range and not isinstance(date_range, tuple):
         if s["date"] != date_range:
             return False
-    if segments and s["segment"] not in segments:
+    if segments and not (set(s["segments"]) & set(segments)):
         return False
-    if locations and s["location"] not in locations:
+    if locations and not (set(s["locations"]) & set(locations)):
         return False
     if anglers and s["angler"] not in anglers:
         return False
@@ -640,24 +704,10 @@ def _clear_edit_state(ens: str):
         del st.session_state[k]
 
 
-def _render_session_view(session: dict):
-    """Read-only display of everything _render_session_edit() below can
-    edit - the default view. Nothing here is a widget, so there's no way to
-    accidentally change a value just by having the card open; editing only
-    becomes possible after pressing "✏️ Edit" (see _render_session_card)."""
-    first_row = session["rows"][0]
-    cond = first_row["_conditions"]
-
-    st.markdown("#### Session")
-    vc1, vc2 = st.columns(2)
-    vc1.write(f"**Date:** {session['date'].isoformat() if session['date'] else 'Unknown'}")
-    seg_label = segment_display_label(session["segment"], _th_seg_ranges) if session["segment"] else "Unspecified"
-    vc2.write(f"**Time of day:** {seg_label}")
-    va1, va2 = st.columns(2)
-    va1.write(f"**Angler:** {session['angler'] or 'Unspecified'}")
-    va2.write(f"**Structure type:** {session['structure_type'] or 'Unspecified'}")
-    st.write(f"**📍 Location:** {session['location']}")
-
+def _render_leg_view(leg: dict):
+    """One location/conditions stretch of a session (punch-list #99)."""
+    cond = leg["rows"][0]["_conditions"]
+    rows = leg["rows"]
     st.markdown("##### Conditions")
     cc1, cc2, cc3 = st.columns(3)
     cc1.write(f"**Water temp:** {cond['water_temp_f']:g}°F" if cond.get("water_temp_f") is not None else "**Water temp:** —")
@@ -694,7 +744,7 @@ def _render_session_view(session: dict):
 
     st.divider()
     st.markdown("##### Lures fished this session")
-    for row in session["rows"]:
+    for row in rows:
         lure_cond = row["_conditions"]
         with st.container(border=True):
             lv1, lv2, lv3 = st.columns(3)
@@ -732,32 +782,72 @@ def _render_session_view(session: dict):
                     st.write(f"{fish_caught} fish from this lure")
 
 
-def _render_session_edit(session: dict, ns: str, ens: str):
-    """The actual editable form - only ever rendered while this session's
-    edit mode is on (see _render_session_card). Every widget below is keyed
-    under `ens`, the edit-only namespace, so Save/Cancel can cleanly wipe
-    just this state via _clear_edit_state() without touching the session's
-    edit-mode flag or its (separate) delete-confirmation state."""
-    first_row = session["rows"][0]
-    cond = first_row["_conditions"]
+
+
+def _render_session_view(session: dict):
+    """Read-only display of everything _render_session_edit() below can
+    edit - the default view. Nothing here is a widget, so there's no way to
+    accidentally change a value just by having the card open; editing only
+    becomes possible after pressing "✏️ Edit" (see _render_session_card).
+
+    A session moved mid-way via Spot Session's "🔄 Relocate" (punch-list
+    #99) shows one section per location, in the order fished, each with its
+    own time of day/structure/conditions/lures/fish; a single-location
+    session renders as one section exactly like before."""
+    legs = session["legs"]
+    multi = len(legs) > 1
 
     st.markdown("#### Session")
+    vc1, vc2 = st.columns(2)
+    vc1.write(f"**Date:** {session['date'].isoformat() if session['date'] else 'Unknown'}")
+    vc2.write(f"**Angler:** {session['angler'] or 'Unspecified'}")
+    if multi:
+        if len(session["locations"]) > 1:
+            st.info("📍 Moved during this session: " + " → ".join(l["location"] for l in legs))
+        else:
+            st.info(f"🔄 Conditions were updated {len(legs) - 1} time(s) at {legs[0]['location']} during this session.")
+
+    for i, leg in enumerate(legs):
+        if multi:
+            st.divider()
+            span = f" · {leg['time_span']}" if leg["time_span"] else ""
+            same_spot = i > 0 and leg["spot_id"] == legs[i - 1]["spot_id"]
+            note = " (conditions updated)" if same_spot else ""
+            st.markdown(f"#### 📍 Location {i + 1} of {len(legs)}: {leg['location']}{note}{span}")
+        seg_label = segment_display_label(leg["segment"], _th_seg_ranges) if leg["segment"] else "Unspecified"
+        lc1, lc2 = st.columns(2)
+        lc1.write(f"**Time of day:** {seg_label}")
+        lc2.write(f"**Structure type:** {leg['structure_type'] or 'Unspecified'}")
+        st.write(f"**📍 Location:** {leg['location']}")
+        _render_leg_view(leg)
+
+
+def _render_leg_edit(leg: dict, session: dict, ens: str, li: int, multi: bool) -> dict:
+    """The editable form for ONE location/conditions leg of a session
+    (punch-list #99) - time of day, structure, location, conditions, and
+    that leg's lures/fish. Widget keys are namespaced per leg so a
+    relocated session's legs never share state. Returns the leg's edited
+    values for the caller's Save handler."""
+    ens = f"{ens}_leg{li}"
+    first_row = leg["rows"][0]
+    cond = first_row["_conditions"]
+
+    if multi:
+        span = f" · {leg['time_span']}" if leg["time_span"] else ""
+        note = " (conditions updated)" if li > 0 and leg["spot_id"] == session["legs"][li - 1]["spot_id"] else ""
+        st.markdown(f"#### 📍 Location {li + 1}: {leg['location']}{note}{span}")
+
     ec1, ec2 = st.columns(2)
-    edit_date = ec1.date_input("Date", value=session["date"] or lake_today(), max_value=lake_today(), key=f"{ens}_date")
-    segment_canon = SEGMENTS if not session["segment"] or session["segment"] in SEGMENTS else SEGMENTS + [session["segment"]]
+    segment_canon = SEGMENTS if not leg["segment"] or leg["segment"] in SEGMENTS else SEGMENTS + [leg["segment"]]
     label_by_name, name_by_label = segment_label_maps(segment_canon, _th_seg_ranges)
-    seg_default = session["segment"] if session["segment"] in segment_canon else SEGMENTS[0]
-    seg_label = ec2.selectbox(
+    seg_default = leg["segment"] if leg["segment"] in segment_canon else SEGMENTS[0]
+    seg_label = ec1.selectbox(
         "Time of day", [label_by_name[n] for n in segment_canon],
         index=segment_canon.index(seg_default), key=f"{ens}_segment",
     )
     edit_segment = name_by_label[seg_label]
-
-    ac1, ac2 = st.columns(2)
-    angler_opts = _angler_options_for(session["angler"])
-    edit_angler = ac1.selectbox("Angler", angler_opts, index=angler_opts.index(session["angler"]) if session["angler"] in angler_opts else 0, key=f"{ens}_angler")
-    structure_default = session["structure_type"] if session["structure_type"] in STRUCTURE_TYPES else STRUCTURE_TYPES[0]
-    edit_structure = ac2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ens}_structure")
+    structure_default = leg["structure_type"] if leg["structure_type"] in STRUCTURE_TYPES else STRUCTURE_TYPES[0]
+    edit_structure = ec2.selectbox("Structure type", STRUCTURE_TYPES, index=STRUCTURE_TYPES.index(structure_default), key=f"{ens}_structure")
 
     # Punch-list #72: "there is no ability to edit the location... in case
     # that was entered incorrectly" - this used to be a fixed, deliberate
@@ -781,14 +871,14 @@ def _render_session_edit(session: dict, ns: str, ens: str):
         # option (labeled with whatever name is already on record) rather
         # than silently jumping the picker to some unrelated first spot.
         edit_spot_ids = [edit_current_spot_id] + edit_spot_ids
-        edit_spot_name_by_id[edit_current_spot_id] = f"{session['location']} (no longer in your saved spots)"
+        edit_spot_name_by_id[edit_current_spot_id] = f"{leg['location']} (no longer in your saved spots)"
     edit_location_index = edit_spot_ids.index(edit_current_spot_id) if edit_current_spot_id in edit_spot_ids else 0
     edit_spot_id = st.selectbox(
         "📍 Location", edit_spot_ids, index=edit_location_index,
         format_func=lambda sid: edit_spot_name_by_id.get(sid, "Unknown spot"),
         key=f"{ens}_location",
     )
-    edit_spot_name = edit_spot_name_by_id.get(edit_spot_id, session["location"])
+    edit_spot_name = edit_spot_name_by_id.get(edit_spot_id, leg["location"])
     if edit_spot_id != edit_current_spot_id:
         st.caption(
             "📍 Location changed - if the new spot's structure or typical water clarity is genuinely "
@@ -835,9 +925,9 @@ def _render_session_edit(session: dict, ns: str, ens: str):
     )
 
     st.divider()
-    st.markdown("##### Lures fished this session")
+    st.markdown("##### Lures fished" + (" at this location" if multi else " this session"))
     lure_edits = []
-    for row in session["rows"]:
+    for row in leg["rows"]:
         lure_cond = row["_conditions"]
         lns = f"{ens}_lure_{row['trip_id']}"
         with st.container(border=True):
@@ -883,45 +973,74 @@ def _render_session_edit(session: dict, ns: str, ens: str):
                 "fish": edited_fish, "fish_caught": fish_caught, "biggest_fish_lb": biggest_fish_lb,
             })
 
+
+    shared_updates = {
+        "water_temp_f": edit_water_temp, "secchi_ft": edit_secchi, "stain_color": edit_stain,
+        "stirred_up": edit_stirred, "wind_band": edit_wind_band, "wind_direction": edit_wind_direction,
+        "light_condition": edit_light, "precipitation": edit_precip, "forage_seen": edit_forage,
+        "fish_activity": edit_fish_activity, "forage_activity": edit_forage_activity,
+        "fish_depth_ft": edit_fish_depth,
+    }
+    return {
+        "segment": edit_segment, "spot_id": edit_spot_id, "spot_name": edit_spot_name,
+        "structure": edit_structure, "clarity": resolved_clarity, "shared_updates": shared_updates,
+        "lure_edits": lure_edits,
+    }
+
+
+def _render_session_edit(session: dict, ns: str, ens: str):
+    """The actual editable form - only ever rendered while this session's
+    edit mode is on (see _render_session_card). Every widget below is keyed
+    under `ens`, the edit-only namespace, so Save/Cancel can cleanly wipe
+    just this state via _clear_edit_state() without touching the session's
+    edit-mode flag or its (separate) delete-confirmation state.
+
+    Date and angler are session-wide; everything else is edited per
+    location "leg" (punch-list #99) so saving never flattens a relocated
+    session's separate locations/conditions back into one."""
+    legs = session["legs"]
+    multi = len(legs) > 1
+
+    st.markdown("#### Session")
+    sc1, sc2 = st.columns(2)
+    edit_date = sc1.date_input("Date", value=session["date"] or lake_today(), max_value=lake_today(), key=f"{ens}_date")
+    angler_opts = _angler_options_for(session["angler"])
+    edit_angler = sc2.selectbox("Angler", angler_opts, index=angler_opts.index(session["angler"]) if session["angler"] in angler_opts else 0, key=f"{ens}_angler")
+
+    leg_results = []
+    for li, leg in enumerate(legs):
+        if multi:
+            st.divider()
+        leg_results.append(_render_leg_edit(leg, session, ens, li, multi))
+
     st.divider()
     save_col, cancel_col = st.columns(2)
     if save_col.button("💾 Save changes", key=f"{ns}_save", type="primary", width="stretch"):
-        shared_updates = {
-            "water_temp_f": edit_water_temp, "secchi_ft": edit_secchi, "stain_color": edit_stain,
-            "stirred_up": edit_stirred, "wind_band": edit_wind_band, "wind_direction": edit_wind_direction,
-            "light_condition": edit_light, "precipitation": edit_precip, "forage_seen": edit_forage,
-            "fish_activity": edit_fish_activity, "forage_activity": edit_forage_activity,
-            "fish_depth_ft": edit_fish_depth, "angler": edit_angler,
-        }
         saved_ids, missing_ids = [], []
-        for le in lure_edits:
-            new_cond = dict(le["raw_conditions"])
-            new_cond.update(shared_updates)
-            new_cond["trailer_used"] = le["trailer_used"]
-            new_cond["trailer_name"] = le["trailer_name"]
-            new_cond["trailer_color"] = le["trailer_color"]
-            if le["fish"] is not None:
-                new_cond["fish"] = le["fish"]
-            raw_score = le["predicted_score"]
-            entry = TripEntry(
-                # Punch-list #72: location is now a session-level edit, same
-                # as date/segment/structure/angler above - every lure row in
-                # the session gets the newly picked spot_id/spot_name, not
-                # each row's own original one (le["spot_id"]/le["spot_name"]
-                # below the session-level TripEntry fields are still each
-                # lure's OWN edited fields, unrelated to location).
-                trip_date=edit_date.isoformat(), segment=edit_segment, spot_id=edit_spot_id,
-                spot_name=edit_spot_name, structure_type=edit_structure, water_clarity=resolved_clarity,
-                lure_used=le["lure_used"], color_used=le["color_used"], technique_used=le["technique_used"],
-                fish_caught=le["fish_caught"], biggest_fish_lb=le["biggest_fish_lb"],
-                predicted_score=float(raw_score) if raw_score not in (None, "") and not pd.isna(raw_score) else None,
-                conditions=new_cond, notes=le["notes"], trip_id=le["trip_id"], logged_at=le["logged_at"] or "",
-                session_id=session["session_key"] if not session["session_key"].startswith("solo:") else "",
-            )
-            if update_trip(entry):
-                saved_ids.append(le["trip_id"])
-            else:
-                missing_ids.append(le["trip_id"])
+        for res in leg_results:
+            shared_updates = dict(res["shared_updates"], angler=edit_angler)
+            for le in res["lure_edits"]:
+                new_cond = dict(le["raw_conditions"])
+                new_cond.update(shared_updates)
+                new_cond["trailer_used"] = le["trailer_used"]
+                new_cond["trailer_name"] = le["trailer_name"]
+                new_cond["trailer_color"] = le["trailer_color"]
+                if le["fish"] is not None:
+                    new_cond["fish"] = le["fish"]
+                raw_score = le["predicted_score"]
+                entry = TripEntry(
+                    trip_date=edit_date.isoformat(), segment=res["segment"], spot_id=res["spot_id"],
+                    spot_name=res["spot_name"], structure_type=res["structure"], water_clarity=res["clarity"],
+                    lure_used=le["lure_used"], color_used=le["color_used"], technique_used=le["technique_used"],
+                    fish_caught=le["fish_caught"], biggest_fish_lb=le["biggest_fish_lb"],
+                    predicted_score=float(raw_score) if raw_score not in (None, "") and not pd.isna(raw_score) else None,
+                    conditions=new_cond, notes=le["notes"], trip_id=le["trip_id"], logged_at=le["logged_at"] or "",
+                    session_id=session["session_key"] if not session["session_key"].startswith("solo:") else "",
+                )
+                if update_trip(entry):
+                    saved_ids.append(le["trip_id"])
+                else:
+                    missing_ids.append(le["trip_id"])
         if saved_ids:
             _push([TRIP_LOG_PATH], f"Update session {session['session_key']} via Trip History ({len(saved_ids)} lure row(s))")
             # Punch-list #61: get_trip_history()/get_calibrated_weights() (Leaderboard,
@@ -943,6 +1062,8 @@ def _render_session_edit(session: dict, ns: str, ens: str):
         _clear_edit_state(ens)
         st.session_state[f"{ns}_edit_mode"] = False
         st.rerun()
+
+
 
 
 def _render_session_card(session: dict):
