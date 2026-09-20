@@ -13316,6 +13316,30 @@ every real save.
     (`_bucket_axis`); `compute_report()` gained `secchi_bucket_width_ft`.
     Tests in tests/test_reports.py and tests/test_reports_page.py.
 
+193. **Spot Session: a relocated session got lost on reconnect, so lures had to
+    be re-added (angler-reported, punch-list #100).** The 🔄 Relocate panel
+    itself was fine (carries every active lure to the new spot, fish reset to
+    0 - verified in the real `data` branch: John's 9/19 Stripe -> Flag
+    session has the carried rows). The bug: after a relocation the still-open
+    rows sit at the NEW spot, but the page (and its `active_session_<spot>_
+    <angler>` key) stays anchored to the START spot. Any reconnect
+    (session_state lost - dropped signal, phone lock, redeploy, reload) runs
+    `_reconstruct_active_session()`, whose `_open_session_rows()` /
+    `_anglers_with_open_session()` only looked at rows whose spot_id equalled
+    the page's spot, found only closed rows, and showed no session - so the
+    angler started over and re-added lures. Real evidence: John's 9/19
+    f6ab1ac4 relocated to Flag Point at 07:54 and its Flag rows were never
+    ended, then a fresh session (bda8ddc5) started at 08:47.
+    Fix (pages/6_Spot_Session.py): a session now belongs to a spot if ANY of
+    its rows was ever logged there; the callers pass all trips
+    (`all_trips_for_sessions`) instead of only that spot's. Reconstruct
+    already rebuilt current spot/conditions from the latest open row, so the
+    session comes back at its current location with lures intact and fish 0.
+    Test: tests/test_spot_session_relocate.py (fails on the old code).
+    Data note: John's orphaned 9/19 Flag Point rows (session f6ab1ac4, no
+    lure_end_time) are still open on the `data` branch; with this fix that
+    session is findable again and can be ended from the app.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

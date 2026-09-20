@@ -1026,7 +1026,9 @@ in-place overwrite: every lure currently in play gets closed out (the same end-s
 retire "🔄 Change" already does to its existing trip-log row) and immediately reopened as
 a fresh continuation row under the new spot/conditions - so you never have to re-pick a
 lure you're already using, the session never ends, and the same session_id runs through
-the whole thing start to finish. Fish already logged stay exactly where they were caught
+the whole thing start to finish. If your connection drops or the page reloads after moving, reopening the spot you
+started at brings the session back at its new location with your lures still in play
+(punch-list #100 - it used to come back empty and you had to re-add them). Fish already logged stay exactly where they were caught
 - attributed to whichever location/conditions were true at the time - while anything you
 land from that point on lands on the new row instead. This happens even if you only
 changed conditions and left the location alone, since a plain conditions update needs the

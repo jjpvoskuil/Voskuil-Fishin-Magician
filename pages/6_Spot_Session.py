@@ -666,7 +666,9 @@ def _session_group_key(t: dict, cond: dict):
 
 
 def _open_session_rows(spot_id: str, trips_at_spot: list, angler: str) -> list:
-    """Groups this spot's spot_session-sourced rows (any trip_date - see
+    """(Callers pass ALL logged rows, not just this spot's - a relocated
+    session's open rows live at its new spot; see the comment below.)
+    Groups spot_session-sourced rows (any trip_date - see
     punch-list #69 note above) by _session_group_key() (real session_id
     when present, else trip_date+start_time+angler - see that function's
     own docstring for why a bare start_time alone isn't safe to group on),
@@ -686,8 +688,6 @@ def _open_session_rows(spot_id: str, trips_at_spot: list, angler: str) -> list:
     simply left alone rather than merged or discarded."""
     groups = {}
     for t in trips_at_spot:
-        if t.get("spot_id") != spot_id:
-            continue
         cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
@@ -696,9 +696,16 @@ def _open_session_rows(spot_id: str, trips_at_spot: list, angler: str) -> list:
             continue
         groups.setdefault(key, []).append((t, cond))
     my_slug = _angler_session_slug(angler)
+    # A session belongs to this spot if ANY of its rows was ever logged here
+    # - not only rows that are here right now. After a mid-session relocation
+    # (punch-list #93) every still-open row sits at the NEW spot, while this
+    # page (and its session_state key) stays anchored to wherever the session
+    # started; filtering rows by spot used to make a reconnect find nothing
+    # and lose the session's lures (angler-reported, punch-list #100).
     open_groups = {
         k: rows for k, rows in groups.items()
-        if any(not c.get("lure_end_time") for _, c in rows)
+        if any(t.get("spot_id") == spot_id for t, _ in rows)
+        and any(not c.get("lure_end_time") for _, c in rows)
         and _angler_session_slug(rows[0][1].get("angler")) == my_slug
     }
     if not open_groups:
@@ -720,9 +727,8 @@ def _anglers_with_open_session(spot_id: str, trips_at_spot: list) -> list:
     see that function's docstring for why a bare start_time alone isn't a
     safe grouping key (punch-list #69)."""
     groups = {}
+    spots_by_group = {}
     for t in trips_at_spot:
-        if t.get("spot_id") != spot_id:
-            continue
         cond = parse_conditions(t)
         if cond.get("source") != "spot_session":
             continue
@@ -730,9 +736,13 @@ def _anglers_with_open_session(spot_id: str, trips_at_spot: list) -> list:
         if not key:
             continue
         groups.setdefault(key, []).append(cond)
+        spots_by_group.setdefault(key, set()).add(t.get("spot_id"))
     seen_slugs = set()
     anglers = []
-    for conds in groups.values():
+    for key, conds in groups.items():
+        # Any row ever logged at this spot counts (see _open_session_rows()).
+        if spot_id not in spots_by_group[key]:
+            continue
         if not any(not c.get("lure_end_time") for c in conds):
             continue
         angler_name = (conds[0].get("angler") or "").strip()
@@ -870,7 +880,7 @@ def _render_watch_view(spot: dict, structure_type: str, watched_angler: str):
     anything. Wrapped in a 20-second auto-refreshing fragment (same
     mechanism as the autosave heartbeat below) so a new catch shows up
     without the watcher needing to manually reload."""
-    trips_at_spot = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+    trips_at_spot = read_all_trips()  # all rows: a relocated session's rows sit at other spots too
     active = _reconstruct_active_session(spot, structure_type, trips_at_spot, watched_angler)
     if active is None:
         st.info(f"👀 {watched_angler}'s session here has ended (or hasn't started). Nothing to watch right now.")
@@ -909,7 +919,7 @@ def _render_watch_view(spot: dict, structure_type: str, watched_angler: str):
 # picker, so it can both keep anyone from picking a name that's already
 # mid-session and offer a "just watching" option for it instead
 # (punch-list #59).
-_open_check_entries = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+_open_check_entries = read_all_trips()  # all rows - see _open_session_rows() (relocated sessions)
 anglers_with_open_session_here = _anglers_with_open_session(spot["spot_id"], _open_check_entries)
 
 
@@ -1160,7 +1170,8 @@ _wind_help = "\n".join(
 # every NEW row gets stamped with) stays scoped to whatever the "Session
 # date" widget shows, same as always - only the open-session lookup itself
 # needed to stop caring which date a row landed on.
-entries_at_spot = [t for t in read_all_trips() if t.get("spot_id") == spot["spot_id"]]
+all_trips_for_sessions = read_all_trips()
+entries_at_spot = [t for t in all_trips_for_sessions if t.get("spot_id") == spot["spot_id"]]
 todays_entries = [t for t in entries_at_spot if t.get("trip_date") == session_date.isoformat()]
 if todays_entries:
     summary_bits = [f"{t.get('lure_used') or 'unknown lure'} ({t.get('fish_caught') or 0} fish)" for t in todays_entries]
@@ -2793,7 +2804,7 @@ if active is None:
     # which defaults to today) - an open session from an earlier date needs
     # to be found here too, or it becomes permanently unreachable the
     # moment that widget isn't pointed at the exact day it started.
-    active = _reconstruct_active_session(spot, structure_type, entries_at_spot, resolved_angler)
+    active = _reconstruct_active_session(spot, structure_type, all_trips_for_sessions, resolved_angler)
     if active is not None:
         st.session_state[active_session_key] = active
 
@@ -2802,7 +2813,7 @@ if active is None:
 # this same spot right now - each angler's own session (start/add-lure/log
 # fish/end/cancel) is fully independent of everyone else's.
 _other_open_anglers = _other_anglers_with_open_session(
-    spot["spot_id"], entries_at_spot, resolved_angler,
+    spot["spot_id"], all_trips_for_sessions, resolved_angler,
 )
 if _other_open_anglers:
     st.caption(

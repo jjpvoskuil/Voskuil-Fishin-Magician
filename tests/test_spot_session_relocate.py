@@ -228,3 +228,50 @@ def test_retired_lures_expander_shows_spot_per_lure(monkeypatch):
     assert any("currently at 📍 Second Cove" in c for c in captions), (
         f"expected the session header caption to show the NEW current location, got: {captions}"
     )
+
+
+def _relocated_rows():
+    """Trip-log rows as a relocated session leaves them on disk: the lure's
+    original row at spot1 (closed out) and its continuation row at spot2
+    (still open), sharing one session_id, angler "Solo"."""
+    import json
+
+    def row(trip_id, spot_id, spot_name, start, end):
+        cond = {
+            "angler": "Solo", "source": "spot_session", "start_time": "06:00:00", "session_id": "sess-1",
+            "lure_start_time": start, "lure_end_time": end, "fish": [], "lure_category": "medium_diving_crankbait",
+            "water_temp_f": 75.0,
+        }
+        return {
+            "trip_id": trip_id, "logged_at": f"2026-09-19T{start}", "trip_date": "2026-09-19", "segment": "Dawn",
+            "spot_id": spot_id, "spot_name": spot_name, "structure_type": "Main-lake point",
+            "water_clarity": "Green stained", "lure_used": "Strike King - Test Chartreuse Shad", "color_used": "",
+            "technique_used": "", "fish_caught": 0, "biggest_fish_lb": "", "predicted_score": "5.0",
+            "conditions_json": json.dumps(cond), "notes": "", "session_id": "sess-1",
+        }
+    return [
+        row("t1", "spot1", "Test Cove", "06:00:00", "07:54:00"),
+        row("t2", "spot2", "Second Cove", "07:54:00", None),
+    ]
+
+
+def test_reconnect_after_relocation_finds_the_session_from_its_start_spot(monkeypatch):
+    """Angler-reported (punch-list #100): after relocating, a reconnect
+    (session_state lost) showed no session and the lures had to be re-added,
+    because the open rows now sit at the NEW spot while the page (and its
+    session key) stays anchored to the start spot, and the lookup only
+    considered rows at the page's own spot."""
+    _install_mocks(monkeypatch)
+    monkeypatch.setattr(storage, "read_all_trips", mock.MagicMock(return_value=_relocated_rows()))
+    at = AppTest.from_file(PAGE_PATH, default_timeout=30)
+    # A reconnect reopens the page with the start spot + angler still in the URL.
+    at.query_params["spot_id"] = "spot1"
+    at.query_params["angler"] = "Solo"
+    at.run()
+    assert not at.exception, at.exception
+    assert any("Session in progress" in h.value for h in at.header), [h.value for h in at.header]
+    active = at.session_state["active_session_spot1_solo"]
+    assert active["spot_id"] == "spot2", "the session should come back at its CURRENT location"
+    live = [l for l in active["lures"] if not l["retired"]]
+    assert len(live) == 1 and "Test Chartreuse Shad" in live[0]["label"]
+    assert live[0]["fish"] == []
