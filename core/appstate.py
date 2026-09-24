@@ -1,5 +1,7 @@
 """Shared, cached accessors used by every Streamlit page."""
 from __future__ import annotations
+from datetime import datetime, timedelta
+
 import requests
 import streamlit as st
 
@@ -18,9 +20,64 @@ from .dev_tasks import read_all_tasks as read_all_dev_tasks
 from .anglers import read_anglers
 
 
+# Punch-list #101: how long a previously-successful weather fetch is still
+# trustworthy enough to serve when a FRESH fetch fails - see
+# get_weather_bundle()'s own docstring for the full "why."
+WEATHER_STALE_FALLBACK_MAX_AGE = timedelta(hours=6)
+
+
+@st.cache_resource(show_spinner=False)
+def _weather_bundle_fallback_store() -> dict:
+    """A plain dict, kept alive for the life of this server process via
+    st.cache_resource (same cross-session-singleton pattern app.py's own
+    boot-sync guard uses) - {days: WeatherBundle}, one slot per distinct
+    `days` argument get_weather_bundle() is ever called with (today that's
+    just 7 and 16 - see pages/9_Reports.py's own predictor). Deliberately
+    NOT st.cache_data (which is exactly what's failing/expiring above) -
+    this needs to survive independently of that cache's own TTL/failures."""
+    return {}
+
+
 @st.cache_data(ttl=60 * 60, show_spinner="Fetching weather forecast...")
 def get_weather_bundle(days: int = 7):
-    return fetch_forecast(days=days)
+    """The live Open-Meteo forecast, cached for an hour (core.weather.
+    fetch_forecast() itself already retries a transient 429/5xx a couple
+    times with a short backoff - see that function's own comment).
+
+    Punch-list #101 (angler-reported, more than once, most recently via a
+    live screenshot of "Couldn't fetch live weather data right now: 429
+    Client Error: Too Many Requests"): Open-Meteo's free tier is IP-rate-
+    limited, and Streamlit Community Cloud apps commonly share an outbound
+    IP with other hosted apps, so a 429 here is very often NOT caused by
+    this app's own traffic (it fetches at most twice an hour, per `days`
+    value - nowhere close to Open-Meteo's published limits on its own).
+    Confirmed not a regression from any recent change (git history on this
+    module/home.py/core/weather.py has nothing dated near the report).
+
+    If a fresh fetch still fails after its own retries, and a previous
+    successful fetch for this same `days` is on hand and not older than
+    WEATHER_STALE_FALLBACK_MAX_AGE, serve THAT instead of raising - every
+    page that reads this bundle is already computing an estimate (a
+    forecast, not a live measurement), so a forecast that's an hour or two
+    stale is a strictly better fallback than a blank red error banner
+    blocking the whole scored page (home.py already keeps lake level/USACE
+    readings independent of this - see punch-list #16/#17 - this extends
+    the same "degrade gracefully, don't just error" instinct to the
+    weather bundle itself). A genuinely fresh boot with no prior successful
+    fetch yet, or an outage longer than the staleness cap, still raises
+    exactly as before - every caller's own try/except (home.py, Spot
+    Session, 7-Day Forecast, Trip History, Reports) already handles that
+    case with its own friendly message."""
+    store = _weather_bundle_fallback_store()
+    try:
+        bundle = fetch_forecast(days=days)
+    except Exception:
+        cached = store.get(days)
+        if cached is not None and (datetime.utcnow() - cached.fetched_at) <= WEATHER_STALE_FALLBACK_MAX_AGE:
+            return cached
+        raise
+    store[days] = bundle
+    return bundle
 
 
 @st.cache_data(ttl=60 * 15, show_spinner="Fetching lake level...")
