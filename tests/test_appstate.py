@@ -197,3 +197,73 @@ def test_test_github_push_access_false_on_network_error(monkeypatch):
     ok, msg = appstate.test_github_push_access("sometoken", "someone/somerepo")
     assert ok is False
     assert "couldn't reach github" in msg.lower()
+
+
+# --- Punch-list #101: stale-bundle fallback when a fresh weather fetch fails --
+
+def test_get_weather_bundle_falls_back_to_last_good_bundle_on_a_transient_failure(monkeypatch):
+    from datetime import datetime
+    from core.weather import WeatherBundle
+
+    good = WeatherBundle(hourly={"time": ["ok"]}, daily={}, fetched_at=datetime.utcnow())
+    calls = {"n": 0}
+
+    def _fake_fetch(days=7):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return good
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(appstate, "fetch_forecast", _fake_fetch)
+    appstate._weather_bundle_fallback_store.clear()
+    appstate.get_weather_bundle.clear()
+
+    first = appstate.get_weather_bundle(7)
+    assert first is good
+    appstate.get_weather_bundle.clear()  # force past the st.cache_data TTL for this test
+    second = appstate.get_weather_bundle(7)
+    assert second is good, "a transient failure should silently serve the last successful bundle"
+
+
+def test_get_weather_bundle_still_raises_with_nothing_good_on_hand(monkeypatch):
+    def _always_fails(days=7):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(appstate, "fetch_forecast", _always_fails)
+    appstate._weather_bundle_fallback_store.clear()
+    appstate.get_weather_bundle.clear()
+
+    try:
+        appstate.get_weather_bundle(7)
+        assert False, "expected the failure to propagate with no prior good bundle to fall back on"
+    except RuntimeError:
+        pass
+
+
+def test_get_weather_bundle_does_not_serve_a_too_stale_fallback(monkeypatch):
+    from datetime import datetime, timedelta
+    from core.weather import WeatherBundle
+
+    stale = WeatherBundle(
+        hourly={"time": ["old"]}, daily={},
+        fetched_at=datetime.utcnow() - appstate.WEATHER_STALE_FALLBACK_MAX_AGE - timedelta(minutes=1),
+    )
+    calls = {"n": 0}
+
+    def _fake_fetch(days=7):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return stale
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(appstate, "fetch_forecast", _fake_fetch)
+    appstate._weather_bundle_fallback_store.clear()
+    appstate.get_weather_bundle.clear()
+
+    appstate.get_weather_bundle(7)
+    appstate.get_weather_bundle.clear()
+    try:
+        appstate.get_weather_bundle(7)
+        assert False, "a fallback bundle older than the staleness cap should not be served"
+    except RuntimeError:
+        pass

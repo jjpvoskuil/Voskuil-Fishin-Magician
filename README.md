@@ -633,6 +633,20 @@ the bar's real rendered height plus that same 44px live, not guessed.
   full story, including one real Streamlit API compatibility fix needed
   to keep the existing test suite passing.
 
+## Weather data reliability
+
+Forecasts come from Open-Meteo's free API. Its free tier is IP-rate-limited, and hosted
+apps on Streamlit Community Cloud often share an outbound IP with other apps, so an
+occasional "429 Too Many Requests" isn't necessarily caused by this app's own traffic -
+this app itself only fetches weather at most twice an hour (cached for an hour per
+distinct request). A fresh fetch now retries automatically a couple of times with a
+short pause before giving up, and if a fetch still fails but a fetch from within the
+last 6 hours succeeded, that slightly-older forecast is used instead of showing an
+error - a small amount of staleness beats a blank page. If you still see a red weather
+error, either Open-Meteo has been unreachable for a while, or this is the very first
+fetch since the app started with nothing yet to fall back on; it should clear up within
+an hour on its own, or sooner with a manual refresh.
+
 ## How the model works (and its limits)
 
 This is a transparent, rule-based heuristic - not a black box and not a proprietary

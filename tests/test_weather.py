@@ -136,3 +136,90 @@ def test_estimate_water_temp_f_matches_real_logged_nolin_readings_in_mid_august(
         _bundle_with_daily_highs(d, {-i: 92.0 for i in trailing_offsets}), d, day_of_year,
     )
     assert 82.0 <= result <= 90.0
+
+
+# --- Punch-list #101: transient-failure retry ---------------------------------
+
+def test_fetch_forecast_retries_a_429_and_succeeds(monkeypatch):
+    import core.weather as mod
+    import requests
+
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                err = requests.exceptions.HTTPError(f"{self.status_code} error")
+                err.response = self
+                raise err
+
+        def json(self):
+            return {"hourly": {"time": []}, "daily": {"time": []}}
+
+    def _fake_get(url, params=None, timeout=None):
+        calls["n"] += 1
+        return _Resp(429) if calls["n"] < 3 else _Resp(200)
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    bundle = fetch_forecast(days=7)
+    assert isinstance(bundle, WeatherBundle)
+    assert calls["n"] == 3, "expected two failed attempts before the third succeeds"
+
+
+def test_fetch_forecast_gives_up_after_max_attempts_of_persistent_429s(monkeypatch):
+    import core.weather as mod
+    import requests
+
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 429
+
+        def raise_for_status(self):
+            err = requests.exceptions.HTTPError("429 error")
+            err.response = self
+            raise err
+
+    def _fake_get(url, params=None, timeout=None):
+        calls["n"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    try:
+        fetch_forecast(days=7)
+        assert False, "expected the persistent 429 to eventually raise"
+    except Exception as e:
+        assert "429" in str(e)
+    assert calls["n"] == mod._MAX_FETCH_ATTEMPTS
+
+
+def test_fetch_forecast_does_not_retry_a_genuine_client_error(monkeypatch):
+    # A 400 (malformed request) isn't going to succeed on retry - should
+    # raise immediately, not burn through the retry/backoff budget.
+    import core.weather as mod
+    import requests
+
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 400
+
+        def raise_for_status(self):
+            err = requests.exceptions.HTTPError("400 error")
+            err.response = self
+            raise err
+
+    def _fake_get(url, params=None, timeout=None):
+        calls["n"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    try:
+        fetch_forecast(days=7)
+        assert False, "expected the 400 to raise"
+    except Exception:
+        pass
+    assert calls["n"] == 1, "a genuine 4xx client error should not be retried"

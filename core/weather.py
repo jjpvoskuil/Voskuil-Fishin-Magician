@@ -7,6 +7,7 @@ precipitation probability) plus daily sunrise/sunset, for Nolin River
 Lake's approximate center point.
 """
 from __future__ import annotations
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -20,6 +21,20 @@ LAKE_TZ_UTC_OFFSET_HOURS = -5  # CDT (summer); adjust to -6 for CST if needed
 LAKE_ZONEINFO = ZoneInfo(LAKE_TZ)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+
+# Punch-list #101: Open-Meteo's free tier is IP-rate-limited (see
+# core.appstate.get_weather_bundle()'s own docstring for the full context -
+# Streamlit Community Cloud apps often share an outbound IP with other
+# hosted apps, so a 429 here isn't necessarily caused by THIS app's own
+# traffic), and a shared-IP burst or a brief upstream 5xx is often gone a
+# couple seconds later. Retry a handful of times with a short backoff
+# before giving up - cheap insurance against the exact "Couldn't fetch live
+# weather data right now: 429" error the angler has reported live more than
+# once, for the class of failure that's genuinely transient. A real client
+# error (4xx other than 429 - a malformed request) won't fix itself on
+# retry, so that's raised immediately instead of wasting the attempts.
+_MAX_FETCH_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = (1.5, 3.0)  # sleep before attempt 2, before attempt 3
 
 HOURLY_VARS = [
     "temperature_2m",
@@ -96,10 +111,22 @@ def fetch_forecast(days: int = 7, lat: float = LAKE_LAT, lon: float = LAKE_LON) 
         "windspeed_unit": "mph",
         "precipitation_unit": "inch",
     }
-    resp = requests.get(OPEN_METEO_URL, params=params, timeout=20)
-    resp.raise_for_status()
-    payload = resp.json()
-    return WeatherBundle(hourly=payload.get("hourly", {}), daily=payload.get("daily", {}))
+    last_exc = None
+    for attempt in range(_MAX_FETCH_ATTEMPTS):
+        if attempt > 0:
+            time.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+        try:
+            resp = requests.get(OPEN_METEO_URL, params=params, timeout=20)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and status != 429 and status < 500:
+                raise  # a genuine bad-request-style error - retrying won't help
+            last_exc = e
+            continue
+        payload = resp.json()
+        return WeatherBundle(hourly=payload.get("hourly", {}), daily=payload.get("daily", {}))
+    raise last_exc
 
 
 def hourly_rows_for_date(bundle: WeatherBundle, d: date):

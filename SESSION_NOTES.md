@@ -13340,6 +13340,56 @@ every real save.
     lure_end_time) are still open on the `data` branch; with this fix that
     session is findable again and can be ended from the app.
 
+194. **Weather fetches now retry transient failures and fall back to a
+    recent forecast instead of erroring (punch-list #101, angler-reported
+    via live screenshot of a red "429 Too Many Requests" banner on Home).**
+    Confirmed not a regression - no recent change touches core/weather.py,
+    home.py, or core/appstate.py, and this exact class of error was
+    already diagnosed once before (entry 78/punch-list #16): Open-Meteo's
+    free tier is IP-rate-limited, Streamlit Community Cloud apps commonly
+    share an outbound IP with unrelated apps, and this app's own weather
+    fetch (cached an hour, at most 2 distinct `days` values in use) comes
+    nowhere near the published limits on its own - so a 429 here is mostly
+    upstream/shared-IP noise, not something this app is causing. Since the
+    angler has now hit it more than once, added two lines of defense
+    rather than just re-explaining it again:
+    `core/weather.py`'s `fetch_forecast()` retries up to 3 attempts with a
+    1.5s/3s backoff on a 429, a 5xx, or a connection-level failure (no HTTP
+    response at all, e.g. a proxy/DNS hiccup) - a genuine 4xx client error
+    other than 429 raises immediately, since retrying a malformed request
+    can't help. `core/appstate.py`'s `get_weather_bundle()` additionally
+    keeps the last successful bundle per `days` value in a small
+    `st.cache_resource`-backed store (same cross-session-singleton pattern
+    app.py's own boot-sync guard uses - deliberately not `st.cache_data`,
+    since that's the cache that's failing/expiring); if a fresh fetch still
+    fails after its own retries, and that stored bundle is under
+    `WEATHER_STALE_FALLBACK_MAX_AGE` (6h) old, it's served instead of
+    raising - every page reading this bundle is already computing an
+    estimate, so a couple-hours-stale forecast beats a blank error banner
+    blocking the whole page. A fresh boot with nothing successful yet, or
+    an outage longer than 6h, still raises exactly as before - every
+    caller's own try/except (home.py, Spot Session, 7-Day Forecast, Trip
+    History, Reports) already has its own friendly message for that.
+    Added `tests/conftest.py` (new file) - a session-wide autouse fixture
+    stubbing out `core.weather.time.sleep` for every test, since without it
+    every test that renders a page touching `get_weather_bundle()` for real
+    (this sandbox's network to Open-Meteo is blocked, so it always fails)
+    would now burn the real ~4.5s retry backoff - turned a ~13s full suite
+    into one that didn't finish inside a 170s budget the first time this
+    was added, before the fixture. Even with sleeps stubbed, the extra real
+    (fast-failing) connection attempts triple the suite's own network-
+    touching page tests, so `pytest tests/ -q` now takes ~65-70s in this
+    sandbox (was ~13s) - a real, deliberate tradeoff for meaningfully
+    better resilience against a genuine recurring user-facing failure, not
+    a regression to chase back down. Tests: 3 new in tests/test_weather.py
+    (retry-then-succeed, gives-up-after-max-attempts, no-retry-on-a-real-
+    4xx) and 3 new in tests/test_appstate.py (falls back to last good
+    bundle, still raises with nothing to fall back on, doesn't serve a
+    too-stale fallback) - all 6 confirmed to fail against the pre-fix code.
+    Full suite 662 passed; AppTest smoke pass clean across every page
+    except 7-Day Forecast, which fails only on this sandbox's own blocked
+    network to Open-Meteo (same as every prior session).
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.
