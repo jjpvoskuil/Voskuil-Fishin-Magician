@@ -13390,6 +13390,33 @@ every real save.
     except 7-Day Forecast, which fails only on this sandbox's own blocked
     network to Open-Meteo (same as every prior session).
 
+195. **Backfilled John's 10/1-10/5 sessions from a catch spreadsheet, and
+    a `times_estimated` guard so those estimated times never feed fish/hour.**
+    John ran several sessions without logging them and supplied a 2-tab
+    spreadsheet (per-date conditions + one row per fish). Imported straight
+    into the `data` branch's trip_log.csv (one session per date, one leg per
+    location, one Roboworm Margarita Mutilator row per leg with per-fish
+    dicts, `source: "spot_session"`, all `angler: "John"`): 13 rows, 36 fish.
+    Assumptions made (all flagged to John): "Flag Island Point" = Flag Point;
+    the Conditions sheet's Water color cell reads "moderate chop" for
+    10/3-10/5 (looks like a wind label) so those use Green stained with wind
+    kept as Light Ripple; the 10/2 7:45 AM Stripe Island Banks fish was
+    1 lb 5 oz with length "<12" - John confirmed it was a typo and it is
+    stored as 15"; water_clarity is "Green
+    stained" at every Secchi depth (his earlier preference); predicted_score
+    and pressure_trend_24h are blank (Open-Meteo unreachable from the dev
+    sandbox); segment comes from NOAA-computed sunrise/sunset fed through
+    `core.scoring._segment_windows`. Real start/end times weren't recorded,
+    so each leg's window is estimated (first leg starts 15 min before its
+    first fish, later boundaries are midpoints between legs, last leg ends 15
+    min after its last fish) and every backfilled row carries
+    `conditions_json["times_estimated"] = true`. `core.calibration.
+    trip_fish_per_hour()` and `core.reports._trustworthy_session_hours()` now
+    return None for such rows, so invented durations can't skew any
+    fish-per-hour rate (fish counts, weights and every non-rate report still
+    include them). Tests: one new test each in tests/test_calibration.py and
+    tests/test_reports.py, both confirmed to fail without the guard.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.

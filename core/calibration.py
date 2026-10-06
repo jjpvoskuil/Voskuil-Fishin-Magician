@@ -112,6 +112,13 @@ def trip_fish_per_hour(row: dict) -> Optional[float]:
     fractional part) ever survived. `time.fromisoformat()` parses both
     forms, so this now trusts every row it always should have."""
     conditions = parse_conditions(row)
+    # A session logged after the fact from a catch list (no real start/end
+    # recorded) carries estimated lure_start_time/lure_end_time - see
+    # SESSION_NOTES.md entry 195. Those bound the catches, not the effort, so
+    # a rate computed from them would be inflated: exclude, like any other
+    # untrustworthy duration.
+    if conditions.get("times_estimated"):
+        return None
     start = conditions.get("lure_start_time")
     end = conditions.get("lure_end_time")
     if not start or not end:

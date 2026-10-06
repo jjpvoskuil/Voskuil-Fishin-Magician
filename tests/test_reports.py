@@ -235,6 +235,20 @@ def test_compute_report_fish_per_hour_excludes_untrustworthy_rows():
     assert report.empty
 
 
+def test_compute_report_fish_per_hour_excludes_sessions_with_estimated_times():
+    # Backfilled sessions (times_estimated) keep their fish in every
+    # fish-count report but must not contribute estimated hours to a rate.
+    estimated = _row("t1", "2026-10-02", lure_category="lipless_crankbait", fish_caught=3)
+    cond = json.loads(estimated["conditions_json"])
+    cond["times_estimated"] = True
+    estimated["conditions_json"] = json.dumps(cond)
+    trips_df, fish_df = build_reports_dataframe([estimated])
+    assert trips_df.iloc[0]["fish_caught"] == 3
+    assert trips_df.iloc[0]["fish_per_hour"] is None or trips_df["fish_per_hour"].isna().all()
+    assert trips_df["trustworthy_hours"].isna().all()
+    assert compute_report(trips_df, fish_df, "lure_category", "fish_per_hour").empty
+
+
 def test_compute_report_fish_per_hour_pooling_survives_a_majority_of_skunked_trips():
     # Regression guard for the angler's own live report: "if I pick sky
     # condition and total fish caught, there is something in every bucket,
