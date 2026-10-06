@@ -1146,7 +1146,8 @@ sessions were reconstructed after the fact in a batch during past data-recovery 
 (see punch-list #57/#67-69) with no field distinguishing a live-timed entry from a
 reconstructed one. Rather than trust every logged duration equally, it applies a 5
 minute - 6 hour plausibility filter and *excludes* (not zeroes) anything outside that
-range or missing a duration entirely - best-effort against what already exists, per the
+range or missing a duration entirely (and any session backfilled after the fact
+from a catch list, flagged `times_estimated`, since its start/end times are guesses) - best-effort against what already exists, per the
 angler's own explicit call, instead of waiting on a "logged live" flag that doesn't
 exist yet. Both `calibrate_weights()` and the new `location_adjustments()` compare the
 *median* fish/hour within each bucket, not the mean, specifically so one

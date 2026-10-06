@@ -82,6 +82,16 @@ def test_trip_fish_per_hour_excludes_missing_timing():
     assert trip_fish_per_hour(row) is None
 
 
+def test_trip_fish_per_hour_excludes_sessions_with_estimated_times():
+    # A session backfilled from a catch list carries estimated (not
+    # recorded) start/end times - see SESSION_NOTES.md entry 195 - so its
+    # perfectly plausible-looking window must not feed the fish/hour rate.
+    real = _timed_row(fish_caught=2, hours=1.0)
+    estimated = _timed_row(fish_caught=2, hours=1.0, extra_conditions={"times_estimated": True})
+    assert trip_fish_per_hour(real) == 2.0
+    assert trip_fish_per_hour(estimated) is None
+
+
 def test_trip_fish_per_hour_excludes_implausibly_short_or_long_durations():
     # A punch-list #81 guardrail against the "sketchy" batch-reconstructed
     # sessions the angler flagged - see core/calibration.py's module

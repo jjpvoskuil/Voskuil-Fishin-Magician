@@ -379,6 +379,8 @@ SPECIES_FILTERABLE_METRICS = {"total_fish", "biggest_fish", "average_fish_weight
 # with calibration's own.
 def _trustworthy_session_hours(row: dict) -> Optional[float]:
     conditions = parse_conditions(row)
+    if conditions.get("times_estimated"):  # backfilled session - see core.calibration.trip_fish_per_hour()
+        return None
     start = conditions.get("lure_start_time")
     end = conditions.get("lure_end_time")
     if not start or not end:
