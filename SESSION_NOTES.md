@@ -13417,6 +13417,20 @@ every real save.
     include them). Tests: one new test each in tests/test_calibration.py and
     tests/test_reports.py, both confirmed to fail without the guard.
 
+196. **Backfilled John's 10/10-10/11 sessions from a second spreadsheet
+    (data branch only).** Same approach as entry 195, but this workbook had a
+    third "Locations" tab with real per-leg start/end times, so these rows
+    carry those times as-is and are NOT flagged `times_estimated` (they do
+    count toward fish/hour). 8 legs across two sessions (one `session_id`
+    per date), each leg logged twice: the Roboworm (all 5 fish) and a Zoom
+    Salty Super Fluke with 0 fish. John didn't say which fluke, so White Pearl
+    5-1/4" (his most-used) was assumed. "Dog Creek" was matched to the existing
+    "Dog Creek?" spot and "Jeannes Point" to "Jeanne's Point". Both days'
+    Water color read Green stained; forecast score and pressure trend left
+    blank (Open-Meteo unreachable from the dev machine). Validated with
+    build_reports_dataframe, trip_fish_per_hour and AppTests of Trip History,
+    Spot Session, Leaderboard and Reports; no code change.
+
 ## Operating notes
 
 - GitHub repo: `jjpvoskuil/Voskuil-Fishin-Magician`, branch `main`.
