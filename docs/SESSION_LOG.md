@@ -10,3 +10,8 @@
   appearance + build stamp, demo backend, Pages workflow, app icon. `schema.sql` (fm_users) RLS-tested on local PG 16
   alongside Deercast's schema (12 checks pass). Checked light/dark on simulated iPhone.
 - Next: John enables Pages, runs schema, adds the redirect URL; then port the scoring engine.
+- Later the same day: John finished setup (Pages on, schema in the Deercast project after a first run landed in Vixen
+  Vault by mistake — cleaned up with drops of the fm_* objects; redirect URL; Google branding renamed Voskuil Outdoors,
+  app already In production). Sign-in works on his phone. Added outdoors.html + privacy.html for the Google branding.
+- Engine port started: astro, weather, onwater/thermocline, scoring, calibration — 8 parity test groups pass
+  (moon, solunar, 500 segment-score combos, 8 synthetic forecast weeks, calibration); real trip log also matches.

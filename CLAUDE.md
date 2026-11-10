@@ -40,8 +40,21 @@ browser), Punch list. 8. make_import.py (+ one-time GitHub Action copying the 80
 backups (private repo, twice weekly), make_restore.py, cutover.
 - Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
   John's OK for the force-push), revoke the Streamlit GITHUB_TOKEN, delete the Streamlit Cloud app.
+- Later (John, 11-10): show him other home-screen icon options once everything else is done.
 - Known oddity to raise, not silently fix: the Python scores "Season: Pre Spawn" in November (season looks keyed off
   water temp). Port as-is for parity.
+
+## Engine port notes
+- Ported so far (11-10): `lib/py.js` (Python-exact rounding/sum/time helpers), `astro.js`, `weather.js`, `onwater.js`
+  (+ thermocline), `scoring.js`, `calibration.js`. Parity: `npm test` runs `engine.test.js` against
+  `lib/fixtures/engine.fixtures.json` from `TZ=UTC python3 web/tools/make_engine_fixtures.py` (synthetic data only;
+  regenerate after any Python change). Also verified on the real trip log locally (not committed).
+- Exactness traps: naive datetimes = µs numbers; Python round()/f"{:.0f}" round exact ties to even (`pyRound`,
+  `pyFixed`); Python 3.12+ `sum()` of floats is compensated (`pySum`); Python `%` is floor-mod (`pmod`); timedelta
+  division/multiplication rounds µs half-even. Fixtures MUST be made with TZ=UTC (astro treats naive times as server
+  local = UTC on Streamlit Cloud). Band gaps (62.5 °F, 3.5 mph) fall to the last band in the Python — kept.
+- Still to port: lures.py (+ lure_history, videos), daily_leaderboard, stringer, reports, activity_log, lake_level /
+  lake_water_quality parsing (USACE needs an Edge Function — no CORS), forecast_freeze.
 
 ## Phone lessons (from Deercast)
 Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own
