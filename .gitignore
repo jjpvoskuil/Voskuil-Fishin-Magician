@@ -4,3 +4,9 @@ __pycache__/
 venv/
 .streamlit/secrets.toml
 .DS_Store
+node_modules/
+web/dist/
+# make_import.py output contains private data — never commit it
+*.import.sql
+import.sql
+restore.sql

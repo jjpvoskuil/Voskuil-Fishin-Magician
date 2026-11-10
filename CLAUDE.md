@@ -1,0 +1,48 @@
+# Fishin Magician — notes for Claude
+
+John has no coding background: Claude writes all code and pushes straight to `main`; John does setup clicks, one screen
+at a time, and confirms each. He wants direct, accurate answers. Keep this file current and append a dated entry to
+`docs/SESSION_LOG.md` at the end of every session.
+
+## What's happening (Nov 2026): moving off Streamlit
+The Streamlit app (`app.py`, `home.py`, `pages/`, `core/`, `SESSION_NOTES.md`) is being rebuilt as a phone-first web
+app in `web/`, the same way Deercast was (repo jjpvoskuil/Deercast is the finished reference). The Python stays as the
+**reference**: every computation is ported to `web/src/lib/` as JavaScript with parity tests (`node --test`) against
+fixtures generated from the Python. Until cutover, the live data is still on the Streamlit app's `data` branch.
+
+- **https://jjpvoskuil.github.io/Voskuil-Fishin-Magician/** — React (Vite) in `web/`, published to **GitHub Pages** by
+  `.github/workflows/pages.yml` on every push touching `web/` (build uses `BASE=/Voskuil-Fishin-Magician/`; use
+  `import.meta.env.BASE_URL` / `%BASE_URL%` for any local asset path; manifest paths are relative). Never Netlify.
+  Check a deploy: `gh run list --workflow pages.yml`. Build time shows in the menu and under More.
+- **Supabase: the Deercast project** (`https://gzxobsvhzscouehlrxeg.supabase.co`), shared on purpose (free plan = 2
+  projects; John may merge the apps later). This app uses ONLY `fm_*` tables and `fm_*` functions, its own allow-list
+  `fm_users`, its own RLS; never touch Deercast's tables. Own auth storageKey `fm-auth`. Google sign-in screen branding
+  is the shared Google client, renamed "Voskuil Outdoors".
+- Anglers: John (jjpvoskuil@gmail.com, admin), Matthew (mattvoskuil@gmail.com, admin), Alex (akvoskuil94@gmail.com).
+- Theme: "Lakeside Pro" (direction A, picked 11-10) — all colors/fonts/spacing in `web/src/styles.css` tokens; light by
+  day, dark 30 min before sunset → 30 min after sunrise (`lib/theme.js`), manual override in the menu.
+- Data layer: `web/src/lib/db.js` — `supabaseDb` and a browser-only `demoDb` (made-up data, `?demo`). The sandbox can't
+  reach Supabase: build/test against demo. Check screens with Playwright (iPhone 13, light + dark;
+  `/usr/bin/google-chrome`; run `vite preview` WITH `BASE=/Voskuil-Fishin-Magician/`).
+- Schema: `web/supabase/schema.sql`, re-runnable. Test RLS first on local Postgres 16:
+  `source web/supabase/test/local_pg.sh` then run Deercast's schema + ours + `test/test_*.sql` (outsider, signed out,
+  member, admin; Deercast-only user must see nothing). Upserts must also pass the SELECT policy.
+- Tabs: Today · Forecast · Session · Map · More (History, Leaderboard, Reports, Tackle Box, Punch list under More).
+
+## Plan (order agreed 11-10)
+1. Foundation (done 11-10: scaffold, theme, sign-in + fm_users, Pages workflow). 2. Port the engine (scoring, lures,
+calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
+4. Spot Session + Trip History. 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
+ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
+6. Lake Map (Leaflet satellite; bathymetry precomputed in Python, shipped static). 7. Leaderboard, Reports (Excel in
+browser), Punch list. 8. make_import.py (+ one-time GitHub Action copying the 80 Cabela's lure images into the bucket),
+backups (private repo, twice weekly), make_restore.py, cutover.
+- Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
+  John's OK for the force-push), revoke the Streamlit GITHUB_TOKEN, delete the Streamlit Cloud app.
+- Known oddity to raise, not silently fix: the Python scores "Season: Pre Spawn" in November (season looks keyed off
+  water temp). Port as-is for parity.
+
+## Phone lessons (from Deercast)
+Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own
+container — scroll that to top. iPhone pauses GPS on lock/background (wake lock, restart watchPosition, 20 s watchdog,
+save on hide). Users must fully close and reopen the home-screen app to get a new version.
