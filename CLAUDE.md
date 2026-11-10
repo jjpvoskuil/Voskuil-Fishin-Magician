@@ -17,7 +17,8 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 - **Supabase: the Deercast project** (`https://gzxobsvhzscouehlrxeg.supabase.co`), shared on purpose (free plan = 2
   projects; John may merge the apps later). This app uses ONLY `fm_*` tables and `fm_*` functions, its own allow-list
   `fm_users`, its own RLS; never touch Deercast's tables. Own auth storageKey `fm-auth`. Google sign-in screen branding
-  is the shared Google client, renamed "Voskuil Outdoors".
+  is the shared Google client (Deercast's Google Cloud project), renamed "Voskuil Outdoors"; its home page and privacy
+  links point at web/public/outdoors.html and privacy.html here (they cover both apps — keep them current).
 - Anglers: John (jjpvoskuil@gmail.com, admin), Matthew (mattvoskuil@gmail.com, admin), Alex (akvoskuil94@gmail.com).
 - Theme: "Lakeside Pro" (direction A, picked 11-10) — all colors/fonts/spacing in `web/src/styles.css` tokens; light by
   day, dark 30 min before sunset → 30 min after sunrise (`lib/theme.js`), manual override in the menu.
