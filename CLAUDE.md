@@ -57,8 +57,16 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `tools/export_lure_data.py` → `lib/data/lures.data.json` — re-run after editing core/lures.py or core/videos.py),
   `leaderboard.js` (daily_leaderboard + format_weight_lb_oz). Parity: `lures.test.js` vs
   `fixtures/lures.fixtures.json.gz` (`TZ=UTC python3 web/tools/make_lure_fixtures.py`); fixtures are gzipped.
-- Still to port: stringer (Leaderboard page), reports, rest of activity_log, lake_level / lake_water_quality parsing
-  (USACE needs an Edge Function — no CORS), forecast_freeze.
+- Also ported: `lake.js` (USGS level, USACE report parsing + DO saturation). Still to port: stringer (Leaderboard page),
+  reports, rest of activity_log, forecast_freeze (table `fm_score_freeze` exists; Forecast screen applies it).
+
+## Screens built
+- Today (`TodayScreen.jsx`, 11-10). Shared live data is loaded once in App (`lib/live.js`: weather + USGS cached in
+  localStorage 30 min; USACE via Edge Function `fm-usace-wq` = `web/supabase/functions/fm-usace-wq/index.ts`, a plain
+  HTML proxy deployed from the Supabase dashboard; readings logged add-only to `fm_water_quality`; trips from
+  `fm_trips`). Sheets render through a portal on <body> (each `.screen` is its own fixed layer).
+- Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
+  from the engine fixtures; needs the vite preview running).
 
 ## Phone lessons (from Deercast)
 Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own

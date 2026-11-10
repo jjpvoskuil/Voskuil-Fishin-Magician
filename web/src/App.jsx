@@ -3,6 +3,8 @@ import { supabase, configured } from "./supabase.js";
 import { LAKE } from "./config.js";
 import { Head, Menu, NotYet, TabBar, TABS } from "./Shell.jsx";
 import MoreScreen from "./MoreScreen.jsx";
+import TodayScreen from "./TodayScreen.jsx";
+import { useLakeLevel, useTrips, useWaterQuality, useWeather } from "./lib/live.js";
 import { demoSeed, DEMO_EMAIL } from "./demo.js";
 import { demoDb, supabaseDb } from "./lib/db.js";
 import { resolveTheme } from "./lib/theme.js";
@@ -58,6 +60,8 @@ export default function App() {
 
   const db = useMemo(() => (session ? (demo ? demoDb(demoSeed, session.user.email) : supabaseDb(supabase, session.user.email)) : null), [session?.user?.email, demo]);
   useEffect(() => { if (!db) return; db.whoami().then(setMe, (e) => setError(e.message)); }, [db]);
+  const approvedDb = me ? db : null; // shared data loads only once we know this person is on the list
+  const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips } = useTrips(approvedDb);
 
   /** Run a save, report failure as a toast. Returns true on success. */
   const save = useCallback(async (fn, { ok } = {}) => {
@@ -95,7 +99,7 @@ export default function App() {
   );
   return (
     <>
-      {stub("today", "Today", "The Today screen")}
+      <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} />
       {stub("forecast", "7-Day Forecast", "The 7-day forecast")}
       {stub("session", "Spot Session", "Spot Session")}
       {stub("map", "Lake Map", "The lake map")}

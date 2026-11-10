@@ -8,12 +8,35 @@
 -- Rules:
 --   * Only emails in fm_users are approved. Anyone else can finish Google sign-in but sees and saves nothing.
 --   * Admins (role 'admin') add, rename and remove anglers.
---   * (More tables — trips, lures, spots, punch list, photos — are added here as each screen is rebuilt.)
+--   * Trips (fm_trips): one row per lure fished, like the old trip_log.csv. Every approved angler sees everyone's trips
+--     (leaderboard, history, the score's learning); you add trips only as yourself, and edit/delete your own —
+--     admins can edit/delete anyone's (fixing mistakes, imports).
+--   * Lake water-quality readings (fm_water_quality) and frozen forecast scores (fm_score_freeze): shared, any
+--     approved angler can add a new one; nobody can change or delete one (admins can delete).
+--   * (More tables — lures, spots, punch list, photos — are added here as each screen is rebuilt.)
 
 create table if not exists public.fm_users (
   email text primary key check (email = lower(email)),
   name  text not null,
   role  text not null default 'member' check (role in ('member', 'admin'))
+);
+
+create table if not exists public.fm_trips (
+  id text primary key,
+  owner text not null,                 -- email of the angler who logged it
+  trip_date text not null,             -- YYYY-MM-DD (lake-local)
+  session_id text,
+  data jsonb not null                  -- the full trip row (old trip_log.csv columns; conditions as an object)
+);
+create index if not exists fm_trips_date on public.fm_trips (trip_date);
+create table if not exists public.fm_water_quality (
+  observed_at text primary key,        -- USACE survey time, YYYY-MM-DDTHH:MM:SS (lake-local)
+  data jsonb not null                  -- {water_temp_f, do_mg_l, do_saturation_pct, station}
+);
+create table if not exists public.fm_score_freeze (
+  the_date text not null, segment_name text not null,
+  data jsonb not null,                 -- {score, solunar_overlap, notes, breakdown, frozen_at}
+  primary key (the_date, segment_name)
 );
 
 create or replace function public.fm_me() returns text language sql stable as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
@@ -25,7 +48,7 @@ revoke all on function public.fm_is_approved(), public.fm_is_admin() from public
 grant execute on function public.fm_me(), public.fm_is_approved(), public.fm_is_admin() to authenticated;
 
 do $$ declare t text; begin
-  foreach t in array array['fm_users'] loop
+  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant select, insert, update, delete on public.%I to authenticated', t);
@@ -43,6 +66,19 @@ end $$;
 -- (upsert = insert-or-update also has to pass the read rule on the new row: admins are approved, so it does)
 create policy "fm users read"  on public.fm_users for select to authenticated using (email = public.fm_me() or public.fm_is_approved());
 create policy "fm users admin" on public.fm_users for all    to authenticated using (public.fm_is_admin()) with check (public.fm_is_admin());
+
+create policy "fm trips read"   on public.fm_trips for select to authenticated using (public.fm_is_approved());
+create policy "fm trips add"    on public.fm_trips for insert to authenticated with check (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()));
+create policy "fm trips edit"   on public.fm_trips for update to authenticated using (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()))
+  with check (owner = public.fm_me() or public.fm_is_admin());
+create policy "fm trips delete" on public.fm_trips for delete to authenticated using (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()));
+
+create policy "fm wq read"   on public.fm_water_quality for select to authenticated using (public.fm_is_approved());
+create policy "fm wq add"    on public.fm_water_quality for insert to authenticated with check (public.fm_is_approved());
+create policy "fm wq delete" on public.fm_water_quality for delete to authenticated using (public.fm_is_admin());
+create policy "fm freeze read"   on public.fm_score_freeze for select to authenticated using (public.fm_is_approved());
+create policy "fm freeze add"    on public.fm_score_freeze for insert to authenticated with check (public.fm_is_approved());
+create policy "fm freeze delete" on public.fm_score_freeze for delete to authenticated using (public.fm_is_admin());
 
 -- the first anglers (re-running keeps any name/role changes made in the app)
 insert into public.fm_users (email, name, role) values

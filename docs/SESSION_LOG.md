@@ -18,3 +18,4 @@
 - Fixed (John asked): water-temperature band gaps (62.1–62.9 and 76.1–76.9 °F fell to "Extreme Thermal Load" and lost their score bonus) — in core/onwater.py (old app gets it too) and lib/onwater.js.
 - Ported lure recommendations (700 synthetic situations + 150 with John's real tackle box/trips match) and the daily/weekly leaderboard + awards.
 - Fixed (John asked): wind label gaps (3.5/9.5/16.5 mph showed "Heavy / Turbulent") in Python + JS; labels only, scores unchanged.
+- Built the Today screen (score ring + why, best window + 6 segments with breakdowns, lake level, USACE oxygen, today/week awards + table). New tables fm_trips / fm_water_quality / fm_score_freeze with RLS (18 more checks pass). Edge Function fm-usace-wq written (John deploys it).

@@ -187,6 +187,32 @@ def main():
     fx["dawn_rates_window"] = enc(calibration.moon_illumination_dawn_rates(trips, date(2026, 8, 10), date(2026, 9, 25)))
     fx["daily_catch"] = enc(calibration.daily_dawn_morning_catch(trips, date(2026, 8, 25), date(2026, 9, 14)))
 
+    # lake level (USGS) + USACE surface water quality parsing
+    from core import lake_level, lake_water_quality as lwq
+    from unittest import mock
+    usgs = {"value": {"timeSeries": [{"sourceInfo": {"siteName": "NOLIN RIVER LAKE NEAR KYROCK, KY"},
+             "values": [{"value": [{"value": "491.83", "dateTime": "2026-11-10T11:00:00.000-06:00"},
+                                    {"value": "491.825", "dateTime": "2026-11-10T11:15:00.000-06:00"}]}]}]}}
+    class R:
+        def __init__(self, j=None, t=""): self._j, self.text = j, t
+        def raise_for_status(self): pass
+        def json(self): return self._j
+    with mock.patch("core.lake_level.requests.get", return_value=R(usgs)):
+        fx["usgs"] = {"payload": usgs, "latest": enc(lake_level.fetch_lake_level()), "history": enc(lake_level.fetch_lake_level_history())}
+    html = """<table><tr><th>Station</th></tr>
+<tr><td>Upper Lake</td><td>20261020, 0930</td><td>0</td><td>17.1</td><td>9.2</td></tr>
+<tr><td> Dam Site </td><td>20261020, 1000</td><td>5</td><td>16.8</td><td>8.9</td></tr>
+<tr><TD>Dam Site</TD><td>20261020, 1015</td><td> 0 </td><td>17.35</td><td>9.48</td></tr>
+<tr><td>Dam Site</td><td>20260806, 1400</td><td>0</td><td>30.3</td><td>10.66</td></tr></table>"""
+    with mock.patch("core.lake_water_quality.requests.get", return_value=R(t=html)):
+        fx["usace"] = {"html": html, "r": enc(lwq.fetch_surface_water_quality())}
+    with mock.patch("core.lake_water_quality.requests.get", return_value=R(t="<tr><td>x</td></tr>")):
+        try:
+            lwq.fetch_surface_water_quality(); fx["usace_missing"] = None
+        except ValueError as e:
+            fx["usace_missing"] = str(e)
+    fx["do_sat"] = [[t, lwq._do_saturation_concentration_mg_l(t, 515.0)] for t in (0, 5.5, 12, 20, 25.3, 30, 34)]
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     import gzip
     OUT.write_bytes(gzip.compress(json.dumps(fx, separators=(",", ":")).encode(), mtime=0))

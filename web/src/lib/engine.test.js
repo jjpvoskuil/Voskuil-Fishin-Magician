@@ -89,3 +89,12 @@ test("calibration from trips", () => {
   same(cal.moonIlluminationDawnRates(FX.trips, "2026-08-10", "2026-09-25"), FX.dawn_rates_window, "dawn_rates_window");
   same(cal.dailyDawnMorningCatch(FX.trips, "2026-08-25", "2026-09-14"), FX.daily_catch, "daily_catch");
 });
+
+import * as lake from "./lake.js";
+test("lake level + USACE water quality parsing", () => {
+  same(lake.parseLakeLevel(FX.usgs.payload), FX.usgs.latest);
+  same(lake.parseLakeLevels(FX.usgs.payload), FX.usgs.history);
+  same(lake.parseSurfaceWaterQuality(FX.usace.html), FX.usace.r);
+  assert.throws(() => lake.parseSurfaceWaterQuality("<tr><td>x</td></tr>"), { message: FX.usace_missing });
+  for (const [t, v] of FX.do_sat) same(lake.doSaturationConcentrationMgL(t, 515.0), v);
+});
