@@ -52,7 +52,7 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Exactness traps: naive datetimes = µs numbers; Python round()/f"{:.0f}" round exact ties to even (`pyRound`,
   `pyFixed`); Python 3.12+ `sum()` of floats is compensated (`pySum`); Python `%` is floor-mod (`pmod`); timedelta
   division/multiplication rounds µs half-even. Fixtures MUST be made with TZ=UTC (astro treats naive times as server
-  local = UTC on Streamlit Cloud). Wind/visibility band gaps (3.5 mph) fall to the last band in the Python — kept. Water-temp band gaps FIXED 11-10 in both (John asked).
+  local = UTC on Streamlit Cloud). Water-temp and wind band gaps FIXED 11-10 in both Python and JS (John asked); wind table/proxies unchanged.
 - Also ported (11-10): `lures.js` (recommend/curate + lure_history + videos; data tables exported from the Python by
   `tools/export_lure_data.py` → `lib/data/lures.data.json` — re-run after editing core/lures.py or core/videos.py),
   `leaderboard.js` (daily_leaderboard + format_weight_lb_oz). Parity: `lures.test.js` vs

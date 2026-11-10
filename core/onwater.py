@@ -113,9 +113,14 @@ WIND_BANDS = [
 
 
 def wind_band(mph: float) -> dict:
-    """Returns {"label", "detail"} for the wind band a given mph reading falls in."""
-    for lo, hi, label, detail in WIND_BANDS:
-        if lo <= mph <= hi:
+    """Returns {"label", "detail"} for the wind band a given mph reading falls in.
+
+    A reading belongs to a band until it reaches the NEXT band's starting speed (2026-11-10: the table's whole-mph
+    ranges left gaps, so e.g. 3.5 or 9.5 mph used to fall through to "Heavy / Turbulent"). The table itself is
+    unchanged - its ranges are still what the Spot Session help text shows and what wind_mph_for_band() uses."""
+    for i, (lo, hi, label, detail) in enumerate(WIND_BANDS):
+        next_lo = WIND_BANDS[i + 1][0] if i + 1 < len(WIND_BANDS) else float("inf")
+        if mph < next_lo:
             return {"label": label, "detail": detail}
     return {"label": WIND_BANDS[-1][2], "detail": WIND_BANDS[-1][3]}
 

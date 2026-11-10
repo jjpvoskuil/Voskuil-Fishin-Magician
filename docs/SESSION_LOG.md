@@ -17,3 +17,4 @@
   (moon, solunar, 500 segment-score combos, 8 synthetic forecast weeks, calibration); real trip log also matches.
 - Fixed (John asked): water-temperature band gaps (62.1–62.9 and 76.1–76.9 °F fell to "Extreme Thermal Load" and lost their score bonus) — in core/onwater.py (old app gets it too) and lib/onwater.js.
 - Ported lure recommendations (700 synthetic situations + 150 with John's real tackle box/trips match) and the daily/weekly leaderboard + awards.
+- Fixed (John asked): wind label gaps (3.5/9.5/16.5 mph showed "Heavy / Turbulent") in Python + JS; labels only, scores unchanged.

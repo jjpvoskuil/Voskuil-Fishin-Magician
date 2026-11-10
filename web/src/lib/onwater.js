@@ -1,5 +1,5 @@
 // On-the-water condition vocabularies and conversions. Port of core/onwater.py + core/thermocline.py.
-// Wind/visibility band gaps (e.g. 3.5 mph) fall through to the LAST band exactly as in the Python — kept for parity.
+// Water-temp and wind band gaps were fixed in both Python and JS on 2026-11-10 (John asked).
 import { pyFixed } from "./py.js";
 
 export const WATER_CLARITY_OPTIONS = ["Clear", "Green stained", "Brown stained", "Muddy"];
@@ -25,7 +25,11 @@ export function lightConditionForCloudPct(p) {
 export const WIND_BANDS = [[0.0, 3.0, "Glassy", "Mirror surface intact."], [4.0, 9.0, "Light Ripple", "Breaks the surface mirror."],
   [10.0, 16.0, "Moderate Chop / Action Trigger", "Generates shoreward current."], [17.0, Infinity, "Heavy / Turbulent", "Bank turbidity, bait dislocation."]];
 const bandOf = (bands, x) => { for (const [lo, hi, label, detail] of bands) if (lo <= x && x <= hi) return { label, detail }; const l = bands[bands.length - 1]; return { label: l[2], detail: l[3] }; };
-export const windBand = (mph) => bandOf(WIND_BANDS, mph);
+/** A reading belongs to a band until it reaches the next band's starting speed (gaps fixed 2026-11-10, as in Python). */
+export function windBand(mph) {
+  for (let i = 0; i < WIND_BANDS.length; i++) { const nextLo = i + 1 < WIND_BANDS.length ? WIND_BANDS[i + 1][0] : Infinity; if (mph < nextLo) return { label: WIND_BANDS[i][2], detail: WIND_BANDS[i][3] }; }
+  const l = WIND_BANDS[WIND_BANDS.length - 1]; return { label: l[2], detail: l[3] };
+}
 export const WIND_BAND_LABELS = WIND_BANDS.map((b) => b[2]);
 const WIND_PROXY = Object.fromEntries(WIND_BANDS.map(([lo, hi, label]) => [label, (lo + Math.min(hi, 25.0)) / 2]));
 export const windMphForBand = (label) => WIND_PROXY[label] ?? 6.5;

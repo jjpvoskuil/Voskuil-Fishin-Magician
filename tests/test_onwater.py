@@ -17,6 +17,10 @@ def test_wind_band_boundaries():
     assert wind_band(16)["label"] == "Moderate Chop / Action Trigger"
     assert wind_band(17)["label"] == "Heavy / Turbulent"
     assert wind_band(40)["label"] == "Heavy / Turbulent"
+    # 2026-11-10: no gaps between whole-mph ranges any more
+    assert wind_band(3.5)["label"] == "Glassy"
+    assert wind_band(9.5)["label"] == "Light Ripple"
+    assert wind_band(16.5)["label"] == "Moderate Chop / Action Trigger"
 
 
 def test_visibility_band_boundaries():
