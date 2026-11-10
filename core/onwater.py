@@ -213,19 +213,22 @@ assert set(_VISIBILITY_TO_CLARITY.values()) | set(STAIN_COLOR_OPTIONS) <= set(WA
 # the app) still decides the actual season fed to the recommendation
 # engine. This is a supplementary "what does this reading mean for the
 # fish's metabolism" caption, shown alongside it.
+# (lo, hi, label, detail): a band covers lo <= temp < hi, except "Summer Stratified" which includes 84.0 itself, so
+# every reading lands in exactly one band. 2026-11-10: the bands used to stop at whole degrees (50-62, 63-76, 77-84)
+# and a reading in a gap (e.g. 62.5 or 76.4F) fell through to "Extreme Thermal Load" and lost its score bonus.
 WATER_TEMP_BANDS = [
-    (float("-inf"), 49.999, "Cold / Lethargic", "Digestion 48-72+ hrs; no fast chase."),
-    (50.0, 62.0, "Pre-Spawn Transition", "Accelerating metabolism, staging."),
-    (63.0, 76.0, "Peak Optimal Prime", "Maximum feeding efficiency."),
+    (float("-inf"), 50.0, "Cold / Lethargic", "Digestion 48-72+ hrs; no fast chase."),
+    (50.0, 63.0, "Pre-Spawn Transition", "Accelerating metabolism, staging."),
+    (63.0, 77.0, "Peak Optimal Prime", "Maximum feeding efficiency."),
     (77.0, 84.0, "Summer Stratified", "High metabolism, shallow O2 drop."),
-    (84.001, float("inf"), "Extreme Thermal Load", "Severe oxygen stress."),
+    (84.0, float("inf"), "Extreme Thermal Load", "Severe oxygen stress."),
 ]
 
 
 def water_temp_band(temp_f: float) -> dict:
     """Returns {"label", "detail"} for the metabolic band a given water-temp reading falls in."""
     for lo, hi, label, detail in WATER_TEMP_BANDS:
-        if lo <= temp_f <= hi:
+        if temp_f < hi or (label == "Summer Stratified" and temp_f == hi):
             return {"label": label, "detail": detail}
     return {"label": WATER_TEMP_BANDS[-1][2], "detail": WATER_TEMP_BANDS[-1][3]}
 

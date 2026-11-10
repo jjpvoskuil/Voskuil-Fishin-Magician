@@ -15,3 +15,4 @@
   app already In production). Sign-in works on his phone. Added outdoors.html + privacy.html for the Google branding.
 - Engine port started: astro, weather, onwater/thermocline, scoring, calibration — 8 parity test groups pass
   (moon, solunar, 500 segment-score combos, 8 synthetic forecast weeks, calibration); real trip log also matches.
+- Fixed (John asked): water-temperature band gaps (62.1–62.9 and 76.1–76.9 °F fell to "Extreme Thermal Load" and lost their score bonus) — in core/onwater.py (old app gets it too) and lib/onwater.js.

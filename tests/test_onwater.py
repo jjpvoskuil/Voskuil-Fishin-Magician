@@ -38,6 +38,12 @@ def test_water_temp_band_boundaries():
     assert water_temp_band(84.0)["label"] == "Summer Stratified"
     assert water_temp_band(84.5)["label"] == "Extreme Thermal Load"
     assert water_temp_band(95.0)["label"] == "Extreme Thermal Load"
+    # 2026-11-10: no gaps between bands any more (these used to fall through to "Extreme Thermal Load")
+    assert water_temp_band(49.9995)["label"] == "Cold / Lethargic"
+    assert water_temp_band(62.5)["label"] == "Pre-Spawn Transition"
+    assert water_temp_band(62.99)["label"] == "Pre-Spawn Transition"
+    assert water_temp_band(76.5)["label"] == "Peak Optimal Prime"
+    assert water_temp_band(84.0005)["label"] == "Extreme Thermal Load"
 
 
 def test_resolve_water_clarity_clear_and_muddy_need_no_stain_color():

@@ -1,5 +1,5 @@
 // On-the-water condition vocabularies and conversions. Port of core/onwater.py + core/thermocline.py.
-// Band gaps (e.g. 62.5 °F, 3.5 mph) fall through to the LAST band exactly as in the Python — kept for parity.
+// Wind/visibility band gaps (e.g. 3.5 mph) fall through to the LAST band exactly as in the Python — kept for parity.
 import { pyFixed } from "./py.js";
 
 export const WATER_CLARITY_OPTIONS = ["Clear", "Green stained", "Brown stained", "Muddy"];
@@ -48,9 +48,13 @@ export function resolveWaterClarity(secchi, stainColor = null, stirredUp = false
   return "Brown stained";
 }
 
-export const WATER_TEMP_BANDS = [[-Infinity, 49.999, "Cold / Lethargic", "Digestion 48-72+ hrs; no fast chase."], [50.0, 62.0, "Pre-Spawn Transition", "Accelerating metabolism, staging."],
-  [63.0, 76.0, "Peak Optimal Prime", "Maximum feeding efficiency."], [77.0, 84.0, "Summer Stratified", "High metabolism, shallow O2 drop."], [84.001, Infinity, "Extreme Thermal Load", "Severe oxygen stress."]];
-export const waterTempBand = (t) => bandOf(WATER_TEMP_BANDS, t);
+// lo <= t < hi, except "Summer Stratified" includes 84.0 — no gaps (fixed in both Python and JS on 2026-11-10)
+export const WATER_TEMP_BANDS = [[-Infinity, 50.0, "Cold / Lethargic", "Digestion 48-72+ hrs; no fast chase."], [50.0, 63.0, "Pre-Spawn Transition", "Accelerating metabolism, staging."],
+  [63.0, 77.0, "Peak Optimal Prime", "Maximum feeding efficiency."], [77.0, 84.0, "Summer Stratified", "High metabolism, shallow O2 drop."], [84.0, Infinity, "Extreme Thermal Load", "Severe oxygen stress."]];
+export function waterTempBand(t) {
+  for (const [, hi, label, detail] of WATER_TEMP_BANDS) if (t < hi || (label === "Summer Stratified" && t === hi)) return { label, detail };
+  const l = WATER_TEMP_BANDS[WATER_TEMP_BANDS.length - 1]; return { label: l[2], detail: l[3] };
+}
 
 export const PRECIPITATION_OPTIONS = ["None", "Light rain", "Steady rain", "Heavy rain / storm"];
 const PRECIP_PROXY = { "None": [0.0, 0.0], "Light rain": [0.3, 40.0], "Steady rain": [0.8, 70.0], "Heavy rain / storm": [1.5, 95.0] };
