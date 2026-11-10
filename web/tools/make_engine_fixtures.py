@@ -21,7 +21,7 @@ from core import astro, onwater, scoring, calibration, thermocline  # noqa: E402
 from core.weather import WeatherBundle, pressure_trend_hpa_per_24h, estimate_water_temp_f, HOURLY_VARS  # noqa: E402
 
 rng = random.Random(20261110)
-OUT = ROOT / "web" / "src" / "lib" / "fixtures" / "engine.fixtures.json"
+OUT = ROOT / "web" / "src" / "lib" / "fixtures" / "engine.fixtures.json.gz"
 
 
 def enc(o):
@@ -188,7 +188,8 @@ def main():
     fx["daily_catch"] = enc(calibration.daily_dawn_morning_catch(trips, date(2026, 8, 25), date(2026, 9, 14)))
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(fx, separators=(",", ":")))
+    import gzip
+    OUT.write_bytes(gzip.compress(json.dumps(fx, separators=(",", ":")).encode(), mtime=0))
     print(f"wrote {OUT} ({OUT.stat().st_size // 1024} KB)")
 
 

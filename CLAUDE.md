@@ -53,8 +53,12 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `pyFixed`); Python 3.12+ `sum()` of floats is compensated (`pySum`); Python `%` is floor-mod (`pmod`); timedelta
   division/multiplication rounds µs half-even. Fixtures MUST be made with TZ=UTC (astro treats naive times as server
   local = UTC on Streamlit Cloud). Wind/visibility band gaps (3.5 mph) fall to the last band in the Python — kept. Water-temp band gaps FIXED 11-10 in both (John asked).
-- Still to port: lures.py (+ lure_history, videos), daily_leaderboard, stringer, reports, activity_log, lake_level /
-  lake_water_quality parsing (USACE needs an Edge Function — no CORS), forecast_freeze.
+- Also ported (11-10): `lures.js` (recommend/curate + lure_history + videos; data tables exported from the Python by
+  `tools/export_lure_data.py` → `lib/data/lures.data.json` — re-run after editing core/lures.py or core/videos.py),
+  `leaderboard.js` (daily_leaderboard + format_weight_lb_oz). Parity: `lures.test.js` vs
+  `fixtures/lures.fixtures.json.gz` (`TZ=UTC python3 web/tools/make_lure_fixtures.py`); fixtures are gzipped.
+- Still to port: stringer (Leaderboard page), reports, rest of activity_log, lake_level / lake_water_quality parsing
+  (USACE needs an Edge Function — no CORS), forecast_freeze.
 
 ## Phone lessons (from Deercast)
 Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own

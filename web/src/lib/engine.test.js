@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import * as astro from "./astro.js";
 import * as ow from "./onwater.js";
 import * as sc from "./scoring.js";
@@ -10,7 +11,7 @@ import * as cal from "./calibration.js";
 import { estimateWaterTempF, pressureTrendHpaPer24h } from "./weather.js";
 import { parseIso, pyFixed, pyRound, roundHalfEven } from "./py.js";
 
-const FX = JSON.parse(readFileSync(new URL("./fixtures/engine.fixtures.json", import.meta.url)));
+const FX = JSON.parse(gunzipSync(readFileSync(new URL("./fixtures/engine.fixtures.json.gz", import.meta.url))));
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
 /** deep-compare actual (JS) with expected (Python JSON): numbers to 1e-9, Python datetimes vs JS µs to 2 µs */

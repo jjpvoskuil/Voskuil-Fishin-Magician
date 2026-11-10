@@ -1,0 +1,1543 @@
+{
+"BASE_STAIN_OPTIONS": [
+"Clear",
+"Green stained",
+"Brown stained"
+],
+"DEFAULT_BASE_STAIN": "Brown stained",
+"WATER_CLARITY_OPTIONS": [
+"Clear",
+"Green stained",
+"Brown stained",
+"Muddy"
+],
+"STRUCTURE_TYPES": [
+"Main-lake point",
+"Creek channel / ledge",
+"Cove / pocket (shallow cover)",
+"Flat",
+"Standing timber",
+"Riprap / dam face",
+"Bridge piling",
+"Boat dock"
+],
+"FORAGE_OPTIONS": [
+"Gizzard Shad",
+"Threadfin Shad",
+"Bluegill / Sunfish",
+"Crawfish",
+"Shiners / Minnows",
+"Stonerollers"
+],
+"DEFAULT_FORAGE": [
+"Gizzard Shad",
+"Bluegill / Sunfish"
+],
+"FORAGE_NOTES": {
+"Gizzard Shad": "Shad are in play - lean on shad-imitating colors (chrome/pearl/white, blue-back) on reaction baits.",
+"Threadfin Shad": "Threadfin shad are in play - similar to gizzard shad but smaller and slimmer; lean on smaller shad-imitating profiles/colors (chrome/pearl/white, blue-back) on reaction baits.",
+"Bluegill / Sunfish": "Bluegill are in play - bream-pattern colors (green pumpkin, orange belly, black/blue) shine around bedding areas, docks, and bluegill cover.",
+"Crawfish": "Crawfish are in play - craw patterns (green pumpkin, brown, red/orange) excel on bottom-contact baits deflecting off rock/wood, especially in cooler water.",
+"Shiners / Minnows": "Shiners/minnows are in play - natural, translucent, silver patterns on finesse baits match them well, especially in clearer water.",
+"Stonerollers": "Stonerollers are in play - these are small, dark, bottom-grazing minnows found around gravel/rock (creek arms, riprap, tributary mouths); dark natural/brown minnow patterns on bottom-contact or bottom-hugging baits match them well."
+},
+"FORAGE_LURE_BOOST": {
+"Gizzard Shad": [
+"lipless_crankbait",
+"spinnerbait",
+"suspending_jerkbait",
+"squarebill_crankbait",
+"deep_diving_crankbait",
+"swim_jig",
+"soft_swimbait"
+],
+"Threadfin Shad": [
+"lipless_crankbait",
+"spinnerbait",
+"suspending_jerkbait",
+"squarebill_crankbait",
+"medium_diving_crankbait",
+"swim_jig",
+"soft_swimbait"
+],
+"Bluegill / Sunfish": [
+"swim_jig",
+"walking_topwater",
+"popper",
+"squarebill_crankbait",
+"chatterbait"
+],
+"Crawfish": [
+"football_jig",
+"texas_rig_creature",
+"carolina_rig",
+"squarebill_crankbait"
+],
+"Shiners / Minnows": [
+"finesse_shaky_head",
+"wacky_rig_senko",
+"suspending_jerkbait",
+"weightless_soft_plastic"
+],
+"Stonerollers": [
+"football_jig",
+"carolina_rig",
+"finesse_shaky_head",
+"squarebill_crankbait"
+]
+},
+"LURE_PROFILES": {
+"football_jig": {
+"name": "Football Jig",
+"video_key": "football_jig",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon red"
+],
+"Green stained": [
+"Green pumpkin/chartreuse",
+"Brown/chartreuse"
+],
+"Brown stained": [
+"Brown/orange",
+"Red craw"
+],
+"Muddy": [
+"Black/blue",
+"Junebug"
+]
+},
+"trailer": {
+"type": "Craw trailer",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon red"
+],
+"Green stained": [
+"Green pumpkin chartreuse-tip",
+"Chartreuse"
+],
+"Brown stained": [
+"Brown/orange",
+"Red craw"
+],
+"Muddy": [
+"Black/blue",
+"Black"
+]
+}
+},
+"depth_range_ft": [
+12,
+30
+],
+"depth_style": "dragged/hopped on bottom",
+"presentation": "Long cast, let it settle to bottom, then drag/hop slowly with the rod tip at 9-10 o'clock, reeling up slack between strokes. Most bites come on the fall or the pause.",
+"depth_range_str": [
+"12",
+"30"
+]
+},
+"suspending_jerkbait": {
+"name": "Suspending Jerkbait",
+"video_key": "suspending_jerkbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Ghost minnow"
+],
+"Green stained": [
+"Chartreuse/black back",
+"Green shad"
+],
+"Brown stained": [
+"Craw pattern",
+"Brown/orange"
+],
+"Muddy": [
+"Firetiger",
+"Chartreuse/black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+2,
+8
+],
+"depth_style": "suspended in the water column",
+"presentation": "Jerk-jerk-pause cadence with the rod tip down - let it sit motionless on the pause (longer pause in colder water). Most strikes come on the pause, not the jerk.",
+"depth_range_str": [
+"2",
+"8"
+]
+},
+"blade_bait": {
+"name": "Blade Bait",
+"video_key": "blade_bait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Silver/natural shad"
+],
+"Green stained": [
+"Gold/chartreuse"
+],
+"Brown stained": [
+"Craw/brown-gold"
+],
+"Muddy": [
+"Chartreuse/black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+20
+],
+"depth_style": "lift-and-fall (yo-yo), bottom to mid-depth",
+"presentation": "Let it sink to bottom on semi-slack line, then lift-and-fall (yo-yo) vertically or on a slow retrieve - the vibration comes on the fall, so stay in contact for subtle bites.",
+"depth_range_str": [
+"0",
+"20"
+]
+},
+"spoon": {
+"name": "Spoon",
+"video_key": "spoon",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Silver/nickel shad",
+"Chrome/blue"
+],
+"Green stained": [
+"Gold/chartreuse",
+"Gold shad"
+],
+"Brown stained": [
+"Gold/craw",
+"Copper"
+],
+"Muddy": [
+"Chartreuse/gold",
+"Chartreuse/black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+10,
+30
+],
+"depth_style": "vertically jigged over deep structure or schooling/suspended fish",
+"presentation": "Drop it to the marked depth on semi-slack line, then work a lift-and-fall (yo-yo) rhythm - a sharp upward snap of the rod tip followed by a controlled fall on a semi-slack line so it flutters instead of dropping straight down. Most strikes come on the flutter fall, so stay in contact for a subtle tap rather than a hard thump.",
+"depth_range_str": [
+"10",
+"30"
+]
+},
+"lipless_crankbait": {
+"name": "Lipless Crankbait",
+"video_key": "lipless_crankbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Chrome/blue"
+],
+"Green stained": [
+"Chartreuse/black back",
+"Green shad"
+],
+"Brown stained": [
+"Red craw",
+"Brown craw"
+],
+"Muddy": [
+"Firetiger",
+"Solid chartreuse"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+2,
+10
+],
+"depth_style": "burned over grass flats/humps",
+"presentation": "Steady burn over grass with occasional bottom contact, or yo-yo (rip it free, let it flutter back down) when fish are less aggressive - most bites come on the flutter fall.",
+"depth_range_str": [
+"2",
+"10"
+]
+},
+"chatterbait": {
+"name": "Chatterbait (Bladed Jig)",
+"video_key": "chatterbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Bluegill"
+],
+"Green stained": [
+"Chartreuse/green pumpkin",
+"Green shad"
+],
+"Brown stained": [
+"Bama craw",
+"Brown/orange"
+],
+"Muddy": [
+"Black/blue",
+"Firetiger"
+]
+},
+"trailer": {
+"type": "Paddle-tail swimbait trailer",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"White pearl"
+],
+"Green stained": [
+"Chartreuse/white",
+"White pearl"
+],
+"Brown stained": [
+"White/brown",
+"Bama craw"
+],
+"Muddy": [
+"Black",
+"Chartreuse"
+]
+}
+},
+"depth_range_ft": [
+1,
+6
+],
+"depth_style": "swum just above grass/cover",
+"presentation": "Steady retrieve just above cover so it ticks the tops of grass/wood; occasional rip-and-fall when it hangs up triggers reaction strikes.",
+"depth_range_str": [
+"1",
+"6"
+]
+},
+"squarebill_crankbait": {
+"name": "Squarebill Crankbait",
+"video_key": "squarebill_crankbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Green craw"
+],
+"Green stained": [
+"Chartreuse/green craw",
+"Green shad"
+],
+"Brown stained": [
+"Brown craw",
+"Red craw"
+],
+"Muddy": [
+"Firetiger",
+"Chartreuse/black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+2,
+6
+],
+"depth_style": "deflecting off cover",
+"presentation": "Stop-and-go retrieve that bumps wood/rock/riprap - deflection off cover is what triggers the strike, so aim to hit something on every cast.",
+"depth_range_str": [
+"2",
+"6"
+]
+},
+"medium_diving_crankbait": {
+"name": "Medium-Diving Crankbait",
+"video_key": "medium_diving_crankbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Chrome/blue"
+],
+"Green stained": [
+"Chartreuse/black back",
+"Green shad"
+],
+"Brown stained": [
+"Craw pattern",
+"Brown/orange"
+],
+"Muddy": [
+"Firetiger",
+"Solid chartreuse"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+6,
+12
+],
+"depth_style": "grinding mid-depth cover, ledges, and secondary points",
+"presentation": "Long cast, reel down to get it into the 6-12 ft zone, then hold bottom/cover contact through the retrieve - deflection off wood or rock at this depth is what triggers reaction strikes.",
+"depth_range_str": [
+"6",
+"12"
+]
+},
+"deep_diving_crankbait": {
+"name": "Deep-Diving Crankbait",
+"video_key": "deep_diving_crankbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Chrome/blue"
+],
+"Green stained": [
+"Chartreuse/black back",
+"Green shad"
+],
+"Brown stained": [
+"Craw pattern",
+"Brown/orange"
+],
+"Muddy": [
+"Firetiger",
+"Solid chartreuse"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+15,
+25
+],
+"depth_style": "grinding bottom/ledges",
+"presentation": "Long cast, reel down to get it to depth, then grind bottom contact through ledges/humps - deflecting off hard bottom triggers reaction bites.",
+"depth_range_str": [
+"15",
+"25"
+]
+},
+"texas_rig_creature": {
+"name": "Texas-Rigged Creature Bait",
+"video_key": "texas_rig",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon red"
+],
+"Green stained": [
+"Green pumpkin/chartreuse",
+"Chartreuse"
+],
+"Brown stained": [
+"Junebug",
+"Brown/red craw"
+],
+"Muddy": [
+"Black/blue",
+"Black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+1,
+8
+],
+"depth_style": "pitched/flipped to cover",
+"presentation": "Pitch or flip to isolated cover/beds, let it sink on slack line, then hop/shake in place - most bites happen on the initial fall or right after it settles.",
+"depth_range_str": [
+"1",
+"8"
+]
+},
+"texas_rig_worm": {
+"name": "Texas-Rigged Worm",
+"video_key": "texas_rig",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon"
+],
+"Green stained": [
+"Green pumpkin chartreuse",
+"Chartreuse"
+],
+"Brown stained": [
+"Red bug",
+"June bug"
+],
+"Muddy": [
+"Black/blue",
+"Black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+2,
+10
+],
+"depth_style": "dragged along shoreline cover",
+"presentation": "Cast past cover, drag/hop it along the bottom back to the boat, pausing over wood or grass edges.",
+"depth_range_str": [
+"2",
+"10"
+]
+},
+"wacky_rig_senko": {
+"name": "Wacky-Rigged Senko",
+"video_key": "wacky_rig_senko",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon"
+],
+"Green stained": [
+"Green pumpkin/chartreuse-tip",
+"Chartreuse"
+],
+"Brown stained": [
+"June bug",
+"Brown/red"
+],
+"Muddy": [
+"Black",
+"Black/blue"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+6
+],
+"depth_style": "weightless fall",
+"presentation": "Cast to cover and let it sink with a slow, shimmying fall on slack line - most strikes happen before it hits bottom, so watch your line.",
+"depth_range_str": [
+"0",
+"6"
+]
+},
+"weightless_soft_plastic": {
+"name": "Weightless Soft Plastic (Fluke-style)",
+"video_key": "weightless_soft_plastic",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Pearl white"
+],
+"Green stained": [
+"Chartreuse/white",
+"White pearl"
+],
+"Brown stained": [
+"Bone",
+"Brown shad"
+],
+"Muddy": [
+"Black",
+"Chartreuse"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+4
+],
+"depth_style": "near surface",
+"presentation": "Twitch-twitch-pause so it darts and glides just under the surface, imitating a dying baitfish.",
+"depth_range_str": [
+"0",
+"4"
+]
+},
+"spinnerbait": {
+"name": "Spinnerbait",
+"video_key": "spinnerbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"White/silver blade",
+"Natural shad skirt"
+],
+"Green stained": [
+"Chartreuse/white skirt",
+"Gold blade"
+],
+"Brown stained": [
+"Brown/orange skirt",
+"Gold blade"
+],
+"Muddy": [
+"Black/blue skirt",
+"Colorado gold blade"
+]
+},
+"trailer": {
+"type": "Curly-tail grub or trailer hook",
+"colors": {
+"Clear": [
+"White",
+"Natural shad"
+],
+"Green stained": [
+"Chartreuse/white"
+],
+"Brown stained": [
+"Brown/orange"
+],
+"Muddy": [
+"Black",
+"Chartreuse"
+]
+}
+},
+"depth_range_ft": [
+1,
+10
+],
+"depth_style": "depending on retrieve speed/slow-roll depth",
+"presentation": "Slow-roll along the bottom near cover in cold/tough conditions, or burn it just under the surface over grass when fish are active.",
+"depth_range_str": [
+"1",
+"10"
+]
+},
+"swim_jig": {
+"name": "Swim Jig",
+"video_key": "swim_jig",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Green pumpkin/shad",
+"Bluegill"
+],
+"Green stained": [
+"Chartreuse/green pumpkin",
+"Green shad"
+],
+"Brown stained": [
+"Bama craw",
+"Brown/orange"
+],
+"Muddy": [
+"Black/blue",
+"Firetiger"
+]
+},
+"trailer": {
+"type": "Paddle-tail swimbait trailer",
+"colors": {
+"Clear": [
+"White pearl",
+"Green pumpkin"
+],
+"Green stained": [
+"Chartreuse/white",
+"White pearl"
+],
+"Brown stained": [
+"White/brown",
+"Bama craw"
+],
+"Muddy": [
+"Black",
+"Chartreuse"
+]
+}
+},
+"depth_range_ft": [
+1,
+6
+],
+"depth_style": "through/over grass and wood",
+"presentation": "Steady swim just fast enough to keep it ticking the top of cover; pause briefly when it deflects off wood to trigger a reaction bite.",
+"depth_range_str": [
+"1",
+"6"
+]
+},
+"carolina_rig": {
+"name": "Carolina-Rigged Worm",
+"video_key": "carolina_rig",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon"
+],
+"Green stained": [
+"Green pumpkin chartreuse",
+"Chartreuse"
+],
+"Brown stained": [
+"June bug",
+"Red bug"
+],
+"Muddy": [
+"Black/blue",
+"Black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+8,
+20
+],
+"depth_style": "dragged behind the weight on bottom",
+"presentation": "Long cast, drag the rig slowly along the bottom with sweeps of the rod - the clacking weight/bead calls fish in, then the trailing bait gets eaten.",
+"depth_range_str": [
+"8",
+"20"
+]
+},
+"buzzbait": {
+"name": "Buzzbait",
+"video_key": "buzzbait",
+"vertical_style": "surface",
+"colors": {
+"Clear": [
+"White",
+"Shad"
+],
+"Green stained": [
+"Chartreuse/white",
+"White"
+],
+"Brown stained": [
+"White/brown",
+"Black"
+],
+"Muddy": [
+"Black",
+"Solid chartreuse"
+]
+},
+"trailer": {
+"type": "Trailer hook, optional soft-plastic trailer (twin-tail grub)",
+"colors": {
+"Clear": [
+"White"
+],
+"Green stained": [
+"Chartreuse/white"
+],
+"Brown stained": [
+"White"
+],
+"Muddy": [
+"Black"
+]
+}
+},
+"depth_range_ft": [
+0,
+0
+],
+"depth_style": "",
+"presentation": "Cast past cover, start the retrieve the instant it lands so it plans out on top, and keep a steady-to-slow retrieve so it gurgles across the surface.",
+"depth_range_str": [
+"0",
+"0"
+]
+},
+"walking_topwater": {
+"name": "Walking Topwater (Spook-style)",
+"video_key": "walking_topwater",
+"vertical_style": "surface",
+"colors": {
+"Clear": [
+"Bone/white",
+"Chrome/blue"
+],
+"Green stained": [
+"Chartreuse/white",
+"Bone"
+],
+"Brown stained": [
+"Bone",
+"Brown/orange"
+],
+"Muddy": [
+"Black",
+"Solid white"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+0
+],
+"depth_style": "",
+"presentation": "Steady 'walk-the-dog' cadence with rod tip down, snapping slack rhythmically so the bait zig-zags side to side.",
+"depth_range_str": [
+"0",
+"0"
+]
+},
+"popper": {
+"name": "Popper",
+"video_key": "popper",
+"vertical_style": "surface",
+"colors": {
+"Clear": [
+"Shad/natural",
+"Bone"
+],
+"Green stained": [
+"Chartreuse/white",
+"Bone"
+],
+"Brown stained": [
+"Firetiger",
+"Brown/orange"
+],
+"Muddy": [
+"Black",
+"Solid chartreuse"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+0
+],
+"depth_style": "",
+"presentation": "Sharp pop-pause-pop with occasional long pauses over calm water/isolated cover - most strikes happen right after the pause, not the pop itself.",
+"depth_range_str": [
+"0",
+"0"
+]
+},
+"hollow_body_frog": {
+"name": "Hollow-Body Frog",
+"video_key": "hollow_body_frog",
+"vertical_style": "surface",
+"colors": {
+"Clear": [
+"Natural frog green",
+"White belly"
+],
+"Green stained": [
+"Natural frog green",
+"Black"
+],
+"Brown stained": [
+"Brown/black",
+"White belly"
+],
+"Muddy": [
+"Black",
+"Solid white"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+0,
+0
+],
+"depth_style": "over mats/pads/grass",
+"presentation": "Walk or hop it across matted grass/pads with pauses over holes in the cover; wait for the fish to fully engulf it before setting the hook.",
+"depth_range_str": [
+"0",
+"0"
+]
+},
+"finesse_shaky_head": {
+"name": "Finesse Worm / Shaky Head",
+"video_key": "finesse_shaky_head",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon"
+],
+"Green stained": [
+"Green pumpkin/chartreuse",
+"Chartreuse"
+],
+"Brown stained": [
+"June bug",
+"Brown/red"
+],
+"Muddy": [
+"Black/blue",
+"Black"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+6,
+20
+],
+"depth_style": "dragged/shaken in place",
+"presentation": "Cast out, let it hit bottom, then shake it in place with the rod tip without moving it far - a subtle, tough-bite bait for high-pressure days.",
+"depth_range_str": [
+"6",
+"20"
+]
+},
+"drop_shot": {
+"name": "Drop Shot",
+"video_key": "drop_shot",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"Watermelon shad"
+],
+"Green stained": [
+"Green pumpkin/chartreuse",
+"Natural shad"
+],
+"Brown stained": [
+"Green pumpkin",
+"June bug"
+],
+"Muddy": [
+"Black/blue",
+"Junebug"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+15,
+45
+],
+"depth_style": "suspended just off bottom on deep points/bluffs",
+"presentation": "Drop straight down (or cast and let it settle) on deep main-lake structure - dam-face points, bluff walls, humps - then work it in place with small, subtle rod-tip shakes rather than moving it far; a real Nolin angler report specifically describes this working ~45 ft off deep dam points for bass that won't commit to anything moving fast.",
+"depth_range_str": [
+"15",
+"45"
+]
+},
+"soft_swimbait": {
+"name": "Soft Swimbait (paddle tail)",
+"video_key": "soft_swimbait",
+"vertical_style": "column",
+"colors": {
+"Clear": [
+"Natural shad",
+"Ghost shad"
+],
+"Green stained": [
+"Chartreuse shad",
+"Natural shad"
+],
+"Brown stained": [
+"Natural shad",
+"Green pumpkin"
+],
+"Muddy": [
+"Black/chartreuse",
+"Solid white"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+2,
+12
+],
+"depth_style": "swum through the water column on a steady/rolling retrieve",
+"presentation": "Cast out and reel with a steady-to-rolling retrieve, letting the paddle tail do the work - a real, documented Nolin post-spawn and fall pattern (per Omnia Fishing's Nolin-specific pattern data) for shad-imitating baitfish presentations without a hard bill to snag cover.",
+"depth_range_str": [
+"2",
+"12"
+]
+}
+},
+"CATEGORY_KEYWORD_RULES": [
+[
+"hollow_body_frog",
+[
+"hollow body frog",
+"hollow-body frog",
+" frog"
+]
+],
+[
+"buzzbait",
+[
+"buzzbait",
+"buzz bait",
+"buzz king"
+]
+],
+[
+"walking_topwater",
+[
+"walking topwater",
+"walk the dog",
+"spook",
+"walking bait"
+]
+],
+[
+"popper",
+[
+"popper"
+]
+],
+[
+"chatterbait",
+[
+"chatterbait",
+"chatter bait",
+"bladed jig",
+"thunder cricket"
+]
+],
+[
+"swim_jig",
+[
+"swim jig",
+"swimjig",
+"rage swimmer"
+]
+],
+[
+"football_jig",
+[
+"football jig"
+]
+],
+[
+"finesse_shaky_head",
+[
+"shaky head",
+"ned rig",
+"finesse trd",
+"finesse worm"
+]
+],
+[
+"wacky_rig_senko",
+[
+"wacky rig",
+"senko",
+"wacky worm",
+"straight worm"
+]
+],
+[
+"carolina_rig",
+[
+"carolina rig",
+"c-rig"
+]
+],
+[
+"texas_rig_creature",
+[
+"creature bait",
+"beaver bait",
+"rage tail craw",
+"krackin"
+]
+],
+[
+"texas_rig_worm",
+[
+"texas rig",
+"ribbon tail worm"
+]
+],
+[
+"lipless_crankbait",
+[
+"lipless"
+]
+],
+[
+"squarebill_crankbait",
+[
+"square bill",
+"squarebill"
+]
+],
+[
+"deep_diving_crankbait",
+[
+"deep diving",
+"deep-diving",
+"5xd",
+"6xd",
+"dives to 15",
+"dives to 16",
+"dives to 17",
+"dives to 18",
+"dives to 19",
+"dives to 20",
+"dives to 25"
+]
+],
+[
+"medium_diving_crankbait",
+[
+"medium diving",
+"medium-diving",
+"3xd",
+"dt10",
+"dt-10",
+"dt 10",
+"dives to 8",
+"dives to 9",
+"dives to 10",
+"dives to 12"
+]
+],
+[
+"blade_bait",
+[
+"blade bait"
+]
+],
+[
+"spoon",
+[
+"spoon"
+]
+],
+[
+"suspending_jerkbait",
+[
+"jerkbait",
+"jerk bait"
+]
+],
+[
+"spinnerbait",
+[
+"spinnerbait",
+"spinner bait"
+]
+],
+[
+"drop_shot",
+[
+"drop shot",
+"dropshot",
+"drop-shot"
+]
+],
+[
+"weightless_soft_plastic",
+[
+"fluke",
+"soft jerkbait"
+]
+],
+[
+"soft_swimbait",
+[
+"swimbait",
+"paddle tail",
+"paddletail"
+]
+],
+[
+"medium_diving_crankbait",
+[
+"crankbait"
+]
+]
+],
+"VIDEO_LIBRARY": {
+"football_jig": [
+{
+"title": "Football Jig Bass Fishing Basics | How and Where to Fish",
+"url": "https://www.youtube.com/watch?v=catT-Ozq9oE"
+},
+{
+"title": "Football Jig MASTERCLASS!! (Everything You NEED To Know)",
+"url": "https://www.youtube.com/watch?v=BRgrhu8ad7g"
+}
+],
+"suspending_jerkbait": [
+{
+"title": "How To Fish A Jerkbait - Bass Basics (John Crews)",
+"url": "https://www.youtube.com/watch?v=Bi3jy_fWTZw"
+},
+{
+"title": "How to Fish a Jerkbait - What You Need to Know (Scott Martin)",
+"url": "https://www.youtube.com/watch?v=yfyE-d-U9qo"
+}
+],
+"blade_bait": [
+{
+"title": "Blade Baits 101, Bass Fishing",
+"url": "https://www.youtube.com/watch?v=89oYwmzNWcQ"
+},
+{
+"title": "Blade Baits Explained: Colors, Gear & Techniques for Winter",
+"url": "https://www.youtube.com/watch?v=scIGXsWItI8"
+}
+],
+"chatterbait": [
+{
+"title": "How to Fish a Chatterbait - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=RYikSKT11Qg"
+},
+{
+"title": "How To Fish A Chatterbait (Beginner Tips AND Advanced Tricks)",
+"url": "https://www.youtube.com/watch?v=tej0NsHeT5U"
+}
+],
+"squarebill_crankbait": [
+{
+"title": "NEW Way to Fish Squarebill Crankbaits for Bass (Mark Zona)",
+"url": "https://www.youtube.com/watch?v=iarou8m-5xw"
+},
+{
+"title": "How to Fish a Squarebill Crankbait for Bass",
+"url": "https://www.youtube.com/watch?v=5t236S94Ico"
+}
+],
+"deep_diving_crankbait": [
+{
+"title": "How to Fish Deep Diving Crankbaits (Scott Martin)",
+"url": "https://www.youtube.com/watch?v=kCv6eF23eRI"
+},
+{
+"title": "How To Fish The DEEP Diving Crankbait!",
+"url": "https://www.youtube.com/watch?v=z5TIUGNfiJ0"
+}
+],
+"texas_rig": [
+{
+"title": "Texas Rig 101 - How to Fish a Texas Rig Worm and Catch Bass",
+"url": "https://www.youtube.com/watch?v=aCpi3zzlLIk"
+},
+{
+"title": "How to Rig and Fish Texas Rig Worms for Bass",
+"url": "https://www.youtube.com/watch?v=8BT4f8DsmTU"
+}
+],
+"wacky_rig_senko": [
+{
+"title": "Wacky Rigging a Senko with an O-Ring, Fishing Lure Tutorial",
+"url": "https://www.youtube.com/watch?v=u8N--D8C--4"
+},
+{
+"title": "How to Fish a Wacky Rig and Other Details About a Senko",
+"url": "https://www.youtube.com/watch?v=zG2xIq1qd3o"
+}
+],
+"weightless_soft_plastic": [
+{
+"title": "Fluke Rigging Tricks to Catch Bass Shallow or Deep",
+"url": "https://www.youtube.com/watch?v=U3bP0HkJxk0"
+},
+{
+"title": "How To Fish A Fluke - An Easy Guide To Catching Bass",
+"url": "https://www.youtube.com/watch?v=zT_oHqxlfIU"
+}
+],
+"spinnerbait": [
+{
+"title": "How to Slow Roll a Spinnerbait!",
+"url": "https://www.youtube.com/watch?v=VQp0bsmnBf4"
+},
+{
+"title": "How to Fish a Spinnerbait - Basics of Bass Fishing",
+"url": "https://www.youtube.com/watch?v=DzAvvzxzcNo"
+}
+],
+"swim_jig": [
+{
+"title": "How to Fish Swim Jigs for Bass | When, Where, How, Gear Tips",
+"url": "https://www.youtube.com/watch?v=ekgbbPIqYmQ"
+},
+{
+"title": "Swim Jig Basics for Bass Fishing",
+"url": "https://www.youtube.com/watch?v=MOC2qje_bS0"
+}
+],
+"carolina_rig": [
+{
+"title": "The Last Carolina Rig Video You'll Ever Need (Masterclass)",
+"url": "https://www.youtube.com/watch?v=qCNGjKDg8UA"
+},
+{
+"title": "Carolina Rig 101 | How to Rig and Fish (Jacob Wheeler)",
+"url": "https://www.youtube.com/watch?v=LSUcMtyJN44"
+}
+],
+"buzzbait": [
+{
+"title": "How To Fish a Buzzbait, Fishing Lure Tutorial",
+"url": "https://www.youtube.com/watch?v=t5ioZ_iOBIo"
+},
+{
+"title": "Buzzbait Tips That Really Work!",
+"url": "https://www.youtube.com/watch?v=bvojy2K9G4Q"
+}
+],
+"walking_topwater": [
+{
+"title": "How To Walk The Dog | Topwater Fishing Tips",
+"url": "https://www.youtube.com/watch?v=h1sewNNLHsk"
+},
+{
+"title": "Exclusive Topwater Fishing Tip: How to \"Walk the Dog\" (Scott Martin)",
+"url": "https://www.youtube.com/watch?v=Sdim6e4HCik"
+}
+],
+"popper": [
+{
+"title": "Topwater Popper Tips & Tricks: Catch More Fish On The Surface",
+"url": "https://www.youtube.com/watch?v=frXgWsE6uWw"
+},
+{
+"title": "How to Fish a Topwater Popper - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=uDeMi3IdTcQ"
+}
+],
+"hollow_body_frog": [
+{
+"title": "Basics of Frog Fishing and How to Fish Hollow-Body Frog Lures",
+"url": "https://www.youtube.com/watch?v=czTtqyDKDcA"
+},
+{
+"title": "Hollow Body Frog Bass Fishing | Key Rods and Frogs",
+"url": "https://www.youtube.com/watch?v=EvbWaO8SNNs"
+}
+],
+"spoon": [
+{
+"title": "How to Fish Jigging Spoons - Full Tutorial",
+"url": "https://www.youtube.com/watch?v=jp8M4ruKZW4"
+},
+{
+"title": "How To Fish a Jigging Spoon for Late Summer Bass (Bait School)",
+"url": "https://www.youtube.com/watch?v=hNW8bMwqrFI"
+}
+],
+"lipless_crankbait": [
+{
+"title": "How to Fish Lipless Crankbaits - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=Qhw4BlOJsCs"
+},
+{
+"title": "Lipless Crankbaits - Everything You Need To Know (Beginner To Advanced)",
+"url": "https://www.youtube.com/watch?v=0bhRq6t1N3E"
+}
+],
+"medium_diving_crankbait": [
+{
+"title": "Learn How to Master All Medium Diving Crankbaits",
+"url": "https://www.youtube.com/watch?v=Jmhvojczf1Q"
+},
+{
+"title": "Crankbaits For Beginners | How To | Bass Fishing",
+"url": "https://www.youtube.com/watch?v=c2KUZgv6dHo"
+}
+],
+"finesse_shaky_head": [
+{
+"title": "How to Fish a Shaky Head - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=alUOqhOlziY"
+},
+{
+"title": "How To Fish A Shaky Head - Everything You Need To Know (Beginner To Advanced)",
+"url": "https://www.youtube.com/watch?v=woo-Edy43Pg"
+}
+],
+"drop_shot": [
+{
+"title": "How-To Rig a Drop Shot - The Most Productive Finesse Technique in Bass Fishing",
+"url": "https://www.youtube.com/watch?v=I0aMto_cTQI"
+},
+{
+"title": "How to Fish the Drop Shot Rig 2 Ways - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=Lk9vCW7rvcg"
+}
+],
+"soft_swimbait": [
+{
+"title": "Paddle Tail Swimbaits - Bass Fishing",
+"url": "https://www.youtube.com/watch?v=bPXPFPxGcXc"
+},
+{
+"title": "Best Paddle Tail Swimbait Tips for Bass Fishing (These Work!)",
+"url": "https://www.youtube.com/watch?v=WR3ogOkdWZ8"
+}
+]
+},
+"VIDEO_KEYWORD_MAP": [
+[
+"football jig",
+"football_jig"
+],
+[
+"suspending jerkbait",
+"suspending_jerkbait"
+],
+[
+"jerkbait",
+"suspending_jerkbait"
+],
+[
+"blade bait",
+"blade_bait"
+],
+[
+"spoon",
+"spoon"
+],
+[
+"chatterbait",
+"chatterbait"
+],
+[
+"squarebill",
+"squarebill_crankbait"
+],
+[
+"deep-diving crankbait",
+"deep_diving_crankbait"
+],
+[
+"deep diving crankbait",
+"deep_diving_crankbait"
+],
+[
+"medium-diving crankbait",
+"medium_diving_crankbait"
+],
+[
+"medium diving crankbait",
+"medium_diving_crankbait"
+],
+[
+"lipless crankbait",
+"lipless_crankbait"
+],
+[
+"lipless",
+"lipless_crankbait"
+],
+[
+"texas-rigged",
+"texas_rig"
+],
+[
+"texas rig",
+"texas_rig"
+],
+[
+"wacky-rigged senko",
+"wacky_rig_senko"
+],
+[
+"wacky rig",
+"wacky_rig_senko"
+],
+[
+"senko",
+"wacky_rig_senko"
+],
+[
+"weightless soft plastic",
+"weightless_soft_plastic"
+],
+[
+"fluke",
+"weightless_soft_plastic"
+],
+[
+"drop shot",
+"drop_shot"
+],
+[
+"drop-shot",
+"drop_shot"
+],
+[
+"dropshot",
+"drop_shot"
+],
+[
+"spinnerbait",
+"spinnerbait"
+],
+[
+"swim jig",
+"swim_jig"
+],
+[
+"soft swimbait",
+"soft_swimbait"
+],
+[
+"paddle tail",
+"soft_swimbait"
+],
+[
+"paddle-tail",
+"soft_swimbait"
+],
+[
+"swimbait",
+"soft_swimbait"
+],
+[
+"carolina-rigged",
+"carolina_rig"
+],
+[
+"carolina rig",
+"carolina_rig"
+],
+[
+"buzzbait",
+"buzzbait"
+],
+[
+"walking topwater",
+"walking_topwater"
+],
+[
+"popper",
+"popper"
+],
+[
+"hollow-body frog",
+"hollow_body_frog"
+],
+[
+"frog",
+"hollow_body_frog"
+],
+[
+"shaky head",
+"finesse_shaky_head"
+],
+[
+"finesse worm",
+"finesse_shaky_head"
+],
+[
+"jig",
+"football_jig"
+],
+[
+"crankbait",
+"squarebill_crankbait"
+]
+]
+}
