@@ -1,12 +1,17 @@
 // Pieces every screen shares: the screen header, the menu (appearance, account, build stamp) and the bottom tab bar.
+import { createContext, useContext } from "react";
 import Icon from "./Icon.jsx";
 
 export const TABS = [["today", "Today", "home"], ["forecast", "Forecast", "calendar"], ["session", "Session", "session"], ["map", "Map", "map"], ["more", "More", "more"]];
 export const BUILD = typeof __BUILD__ === "undefined" ? "dev" : __BUILD__;
 const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-/** Screen header: small uppercase line, big title, light/dark button (onMenu = flip the theme). */
+/** ✎ punch-list note from any screen (App provides open(screen, kicker); PunchSheet.jsx). */
+export const NoteCtx = createContext(null);
+
+/** Screen header: small uppercase line, big title, ✎ punch-list note, light/dark button (onMenu = flip the theme). */
 export function Head({ kicker, title, onMenu, demo, children }) {
+  const note = useContext(NoteCtx);
   return (
     <header className="head">
       <div>
@@ -15,6 +20,7 @@ export function Head({ kicker, title, onMenu, demo, children }) {
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         {children}
+        {note && <button className="iconbtn note" aria-label="Add a punch-list note about this screen" title="Punch-list note" onClick={() => note(title, kicker)}>✎</button>}
         <ThemeButton onFlip={onMenu} />
       </div>
     </header>

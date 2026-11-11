@@ -3,7 +3,9 @@
 // "fish per hour by water temperature in the fall" into report settings. It never sees the trip log and returns no
 // numbers — the app computes the board from the log (lib/boards.js). Uses the same secret as fm-lure-scan
 // (ANTHROPIC_API_KEY; optional ANTHROPIC_MODEL). Runs as the signed-in angler and only answers approved anglers.
-//   POST {question, today, mode?: "board" | "report", choices: {species[], anglers[], spots[], lure_types[[key, name]]}}
+//   POST {question, today, mode?: "board" | "report" | "punch", choices: {species[], anglers[], spots[], lure_types[[key, name]]}}
+//   mode "punch" (Punch list "Tidy with Claude"): question = the angler's dictated note, choices = {page, pages[], context}
+//   → {title, details, kind, priority, page, note}
 //   → {measure, by, species[], lure_types[], spots[], anglers[], segments[], months[], temp_min, temp_max,
 //      lure_text, color_text, from, to, period, who, title, note}
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -82,6 +84,28 @@ const reportPrompt = (q, today, c) =>
   `A species filter takes one species; for "bass" in general leave species empty. A lure word means every matching lure type. ` +
   `Leave a filter out when the request doesn't limit it. Answer only by calling set_report.`;
 
+// ---- punch list (mode "punch"): tidy a dictated note into a clear item; nothing is saved here
+function punchTool(pages) {
+  return {
+    name: "set_item",
+    description: "Write the angler's note up as one clear punch-list item for the app's developer (Claude).",
+    input_schema: { type: "object", additionalProperties: false, required: ["title", "details", "kind", "priority", "page", "note"],
+      properties: {
+        title: { type: "string", description: "Short imperative title, under 70 characters, e.g. 'Make the + Fish button bigger'." },
+        details: { type: "string", description: "What's wrong or wanted, then what it should do instead — in the angler's own terms, 1–4 short sentences or bullet lines. Keep every specific (numbers, names, lures, screens). Invent nothing." },
+        kind: { type: "string", enum: ["Bug", "Change", "Idea"], description: "Bug = something broken or wrong; Change = adjust something that works; Idea = new feature." },
+        priority: { type: "string", enum: ["High", "Medium", "Low"], description: "High only if it blocks fishing/logging or loses data, or the angler says it's urgent." },
+        page: pages.length ? { type: "string", enum: pages } : { type: "string" },
+        note: { type: "string", description: "Empty, or one short question if the note is genuinely unclear." },
+      } },
+  };
+}
+const punchPrompt = (q, c) =>
+  `An angler using the Fishin Magician phone app (bass fishing on Nolin Lake) dictated this note for the app's punch list` +
+  `${c.page ? ` while on the ${c.page} screen` : ""}${c.context ? ` (${c.context})` : ""}:\n\n"${q}"\n\n` +
+  `Tidy it into one item by calling set_item. Fix dictation errors, keep their meaning and every detail, add nothing they didn't say. ` +
+  `If it's about the screen they were on, use that page. Answer only by calling set_item.`;
+
 const prompt = (q, today, c) =>
   `Today is ${today}. Anglers on Nolin River Lake, Kentucky log bass-fishing trips (date, angler, spot, lure, lure type, color, time of day, ` +
   `water temperature, and each fish's species, weight and length). Turn this question into leaderboard settings by calling set_board:\n\n"${q}"\n\n` +
@@ -119,10 +143,20 @@ Deno.serve(async (req) => {
     const ap = await sb.rpc("fm_is_approved");
     if (ap.error || ap.data !== true) throw new Friendly("You're not on the Fishin Magician list.", 403);
     const body = await req.json().catch(() => ({}));
-    const q = String(body.question || "").trim().slice(0, 300);
+    const q = String(body.question || "").trim().slice(0, body.mode === "punch" ? 3000 : 300);
     if (q.length < 3) throw new Friendly("Type a question first.", 400);
     const today = /^\d{4}-\d{2}-\d{2}$/.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
     const ch = body.choices || {};
+    if (body.mode === "punch") {
+      const pages = strList(ch.pages, 30), pc = { page: String(ch.page || "").slice(0, 60), context: String(ch.context || "").slice(0, 300) };
+      const t = punchTool(pages);
+      for (let i = 0; i < 2; i++) {
+        const msg = await claude({ model: model(), max_tokens: 1500, tools: [t], tool_choice: { type: "auto" }, messages: [{ role: "user", content: punchPrompt(q, pc) }] });
+        const use = (msg.content || []).find((b) => b.type === "tool_use" && b.name === t.name);
+        if (use) return reply(200, use.input);
+      }
+      throw new Friendly("The AI didn't tidy that note — save it as you wrote it, or try again.");
+    }
     const c = { species: strList(ch.species), anglers: strList(ch.anglers), spots: strList(ch.spots, 120),
       lure_types: (Array.isArray(ch.lure_types) ? ch.lure_types : []).filter((x) => Array.isArray(x) && x.length === 2).map(([k, n]) => [String(k).slice(0, 40), String(n).slice(0, 60)]).slice(0, 60) };
     const report = body.mode === "report", t = report ? reportTool(c) : tool(c);

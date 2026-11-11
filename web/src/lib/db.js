@@ -47,6 +47,11 @@ export function supabaseDb(sb, email) {
     listSpots: async () => ok(await sb.from("fm_spots").select("id,data").order("id")).map((r) => ({ ...r.data, spot_id: r.id })),
     saveSpot: async (sp) => ok(await sb.from("fm_spots").upsert({ id: sp.spot_id, data: sp })),
     deleteSpot: async (id) => ok(await sb.from("fm_spots").delete().eq("id", id)),
+    // punch list (shared; numbers from fm_next_task_no, never reused)
+    listPunch: async () => ok(await sb.from("fm_punch").select("task_no,owner,data").order("task_no")).map((r) => ({ ...r.data, task_no: r.task_no, owner: r.owner })),
+    nextTaskNo: async () => ok(await sb.rpc("fm_next_task_no")),
+    savePunch: async (p) => { const { task_no, owner, ...data } = p; return ok(await sb.from("fm_punch").upsert({ task_no, owner, data })); },
+    deletePunch: async (no) => ok(await sb.from("fm_punch").delete().eq("task_no", no)),
     // saved custom boards / reports (private to whoever saved them)
     listSaved: async (kind) => ok(await sb.from("fm_saved").select("id,owner,data,created_at").eq("kind", kind).order("created_at")).map((r) => ({ ...r.data, id: r.id, owner: r.owner })),
     saveSaved: async (kind, item) => { const { id, owner, ...data } = item; return ok(await sb.from("fm_saved").upsert({ id, owner, kind, data })); },
@@ -147,10 +152,15 @@ export function demoDb(seed, email = "demo@example.com") {
     listSpots: async () => clone(st.spots || []),
     saveSpot: async (sp) => up((st.spots ||= []), clone(sp), "spot_id"),
     deleteSpot: async (id) => del(st.spots || [], (sp) => sp.spot_id === id),
+    listPunch: async () => clone(st.punch || [{ task_no: 98, owner: "demo@example.com", description: "Example open item from the old app", page: "General / whole app", status: "Open", priority: "Medium", author: "Demo Angler", created_at: "2026-11-01T10:00:00", from_old_app: true }]),
+    nextTaskNo: async () => { st.punchNext = Math.max(st.punchNext || 99, ...(st.punch || []).map((p) => p.task_no + 1)); const n = st.punchNext; st.punchNext += 1; save(); return n; },
+    savePunch: async (p) => { st.punch ||= [{ task_no: 98, owner: "demo@example.com", description: "Example open item from the old app", page: "General / whole app", status: "Open", priority: "Medium", author: "Demo Angler", created_at: "2026-11-01T10:00:00", from_old_app: true }]; up(st.punch, clone(p), "task_no"); },
+    deletePunch: async (no) => del(st.punch || [], (p) => p.task_no === no),
     listSaved: async (kind) => clone((st.saved || []).filter((x) => x.kind === kind)),
     saveSaved: async (kind, item) => up((st.saved ||= []), { ...clone(item), kind }),
     deleteSaved: async (id) => del(st.saved || [], (x) => x.id === id),
     askBoard: async (question, choices, today, mode = "board") => { await new Promise((r) => setTimeout(r, 600));
+      if (mode === "punch") { const t = question.trim(); return { title: t.split(/[.!?\n]/)[0].slice(0, 70), details: t, kind: /broke|wrong|bug|error|doesn.t|won.t|crash/i.test(t) ? "Bug" : "Change", priority: "Medium", page: choices.page || "General / whole app", note: "Demo answer — the real app asks Claude to tidy your note." }; }
       if (mode === "report") { const q = question.toLowerCase();
         return { factor: /temp/.test(q) ? "water_temp_bucket" : /moon/.test(q) ? "moon_illumination_bin" : /pressure/.test(q) ? "pressure_trend_band" : /wind/.test(q) ? "wind_band" : /color/.test(q) ? "color" : "segment",
           metric: /big/.test(q) ? "biggest_fish" : /total|how many/.test(q) ? "total_fish" : "fish_per_hour", title: question.slice(0, 60), note: "Demo answer — the real app asks Claude to read your request." }; }

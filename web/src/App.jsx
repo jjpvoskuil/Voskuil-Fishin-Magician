@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, configured } from "./supabase.js";
 import { LAKE } from "./config.js";
-import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
+import { Head, NoteCtx, NotYet, TabBar, TABS } from "./Shell.jsx";
 import { update, useNewVersion } from "./lib/update.js";
 import MoreScreen from "./MoreScreen.jsx";
 import SessionScreen from "./SessionScreen.jsx";
@@ -9,6 +9,8 @@ import HistoryScreen from "./HistoryScreen.jsx";
 import TackleScreen from "./TackleScreen.jsx";
 import LeaderboardScreen from "./LeaderboardScreen.jsx";
 import ReportsScreen from "./ReportsScreen.jsx";
+import PunchScreen from "./PunchScreen.jsx";
+import PunchSheet, { captureContext } from "./PunchSheet.jsx";
 import MapScreen from "./MapScreen.jsx";
 import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
@@ -49,6 +51,7 @@ function Splash({ children }) {
 
 export default function App() {
   const fresh = useNewVersion();
+  const [noteCtx, setNoteCtx] = useState(null), [punchVer, setPunchVer] = useState(0);  // ✎ punch-list note sheet
   const demo = !configured || new URLSearchParams(location.search).has("demo"); // ?demo = made-up data only
   const [session, setSession] = useState(undefined); // undefined = still checking
   const [me, setMe] = useState(undefined);            // fm_users row; null = not on the allow-list
@@ -117,8 +120,9 @@ export default function App() {
       <div className="body"><NotYet what={what} /></div>
     </div>
   );
+  const openNote = (screen, kicker) => setNoteCtx(captureContext(screen, kicker));
   return (
-    <>
+    <NoteCtx.Provider value={openNote}>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} reloadTrips={reloadTrips}
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }} />
       <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
@@ -133,9 +137,11 @@ export default function App() {
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <LeaderboardScreen {...common} active={tab === "more" && page === "leaderboard"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
       <ReportsScreen {...common} active={tab === "more" && page === "reports"} trips={trips} weather={weather} onBack={() => setPage(null)} />
+      <PunchScreen {...common} active={tab === "more" && page === "punch"} version={punchVer} onAdd={(screen) => openNote(screen, "")} onBack={() => setPage(null)} />
+      <PunchSheet open={!!noteCtx} ctx={noteCtx} db={db} me={me} toast={setToast} onClose={() => setNoteCtx(null)} onSaved={() => setPunchVer((v) => v + 1)} />
       <TabBar tab={tab} onTab={onTab} />
       {toast && <div className="toast" role="status">{toast}</div>}
       {fresh && <div className="toast undo" role="status">New version ready<button onClick={update}>Update</button></div>}
-    </>
+    </NoteCtx.Provider>
   );
 }

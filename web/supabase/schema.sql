@@ -16,7 +16,9 @@
 --   * The tackle box (fm_lures) and saved lake spots (fm_spots) are shared by all anglers, as in the old app: any
 --     approved angler can add, edit and remove them.
 --   * Saved custom boards and reports (fm_saved): private to the angler who saved them.
---   * Tackle-box photos live in the private storage bucket fm-lures (approved anglers only). (Punch list is added later.)
+--   * Punch list (fm_punch): every approved angler sees it and adds to it; admins edit/close/delete any item, others
+--     their own. Item numbers come from fm_next_task_no() and are never reused, even after a delete.
+--   * Tackle-box photos live in the private storage bucket fm-lures (approved anglers only).
 
 create table if not exists public.fm_users (
   email text primary key check (email = lower(email)),
@@ -59,6 +61,16 @@ create table if not exists public.fm_saved (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.fm_punch (
+  task_no integer primary key,         -- the "#98" people refer to; never reused
+  owner text not null,                 -- email of who added it
+  data jsonb not null                  -- {description, page, status, priority, author, created_at, updated_at, completed_at}
+);
+create table if not exists public.fm_punch_counter (
+  id boolean primary key default true check (id),   -- one row
+  next_no integer not null
+);
+
 create or replace function public.fm_me() returns text language sql stable as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
 create or replace function public.fm_is_approved() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.fm_users where email = public.fm_me()) $$;
@@ -67,8 +79,23 @@ create or replace function public.fm_is_admin() returns boolean language sql sta
 revoke all on function public.fm_is_approved(), public.fm_is_admin() from public, anon;
 grant execute on function public.fm_me(), public.fm_is_approved(), public.fm_is_admin() to authenticated;
 
+-- the next punch-list number (approved anglers only); counts up past any number ever used, so none is reused
+create or replace function public.fm_next_task_no() returns integer language plpgsql security definer set search_path = public as $$
+declare n integer; top integer;
+begin
+  if not public.fm_is_approved() then raise exception 'not approved' using errcode = '42501'; end if;
+  select coalesce(max(task_no), 0) + 1 into top from public.fm_punch;
+  insert into public.fm_punch_counter (id, next_no) values (true, top) on conflict (id) do nothing;
+  update public.fm_punch_counter set next_no = greatest(next_no, top) + 1 where id returning next_no - 1 into n;
+  return n;
+end $$;
+revoke all on function public.fm_next_task_no() from public, anon;
+grant execute on function public.fm_next_task_no() to authenticated;
+alter table public.fm_punch_counter enable row level security;
+revoke all on public.fm_punch_counter from anon, authenticated;
+
 do $$ declare t text; begin
-  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze','fm_lures','fm_spots','fm_saved'] loop
+  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze','fm_lures','fm_spots','fm_saved','fm_punch'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant select, insert, update, delete on public.%I to authenticated', t);
@@ -99,6 +126,12 @@ create policy "fm wq delete" on public.fm_water_quality for delete to authentica
 create policy "fm freeze read"   on public.fm_score_freeze for select to authenticated using (public.fm_is_approved());
 create policy "fm freeze add"    on public.fm_score_freeze for insert to authenticated with check (public.fm_is_approved());
 create policy "fm freeze delete" on public.fm_score_freeze for delete to authenticated using (public.fm_is_admin());
+
+create policy "fm punch read"   on public.fm_punch for select to authenticated using (public.fm_is_approved());
+create policy "fm punch add"    on public.fm_punch for insert to authenticated with check (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()));
+create policy "fm punch edit"   on public.fm_punch for update to authenticated using (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()))
+  with check (owner = public.fm_me() or public.fm_is_admin());
+create policy "fm punch delete" on public.fm_punch for delete to authenticated using (public.fm_is_approved() and (owner = public.fm_me() or public.fm_is_admin()));
 
 -- saved boards/reports: each angler sees and changes only their own
 create policy "fm saved own" on public.fm_saved for all to authenticated

@@ -198,6 +198,18 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `write-excel-file/browser` (sheets Report + Trips; iPhone share sheet when available), 🔮 Predict a day (next 7
   days: moon history lookup always, pressure lookup only inside the forecast window). Reports group by the spot
   NAME stored on each trip (as the old app did), not the current spot list.
+- Punch list (`PunchScreen.jsx` + `PunchSheet.jsx` + `lib/punch.js` + `punch.test.js`, 11-11): table `fm_punch`
+  (task_no int pk, owner, data) + `fm_punch_counter` via security-definer `fm_next_task_no()` (approved only; never
+  reuses a number; RLS `test/test_punch.sql`, 14 checks): everyone approved reads/adds, admins edit/delete any, others
+  their own. ✎ button in every screen Head (Shell `NoteCtx`, App `openNote`) opens PunchSheet with the screen + what was
+  showing captured (`captureContext`: title, kicker, hash, theme, build, viewport); "✨ Tidy with Claude" = fm-board-ask
+  mode "punch" (tool set_item: title/details/kind/priority/page; original words kept as `original`). "📋 Copy for
+  Claude" = `exportText` (open items by status/priority, context line, author/date; optional recently closed).
+  Import: make_import.py writes `punch_list_import.sql` (97 items from data/dev_tasks.csv, old page names mapped,
+  counter continues at 99). Plan: backups also write the punch list to the private backup repo so Claude can read it.
+- NEXT after this app (John 11-11): **Deercast shot recovery puts probable deer spots in the lake** — give its recovery
+  model real water: Nolin's shoreline from the KyFromAbove lidar water line (as tools/build_contours.py finds it) or
+  OSM water polygons; exclude/penalize water cells in Deercast `deercast/recovery.py` + `web/src/lib/recovery.js` (parity).
 - App icon (John 11-11, picked "D2 + VO medallion"): Voskuil Outdoors family look shared with Deercast — dark forest
   field #1f2b22, patch band (teal #3d9a88 here, orange #e07b24 on Deercast) with small stars, cream "VO" medallion at
   6 o'clock, leaping largemouth (Deercast: its deer, ring removed). Generator `web/tools/make_icons.py OUTDIR

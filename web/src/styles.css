@@ -358,3 +358,13 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .rp-track { height: 12px; border-radius: 99px; background: var(--accent-track); overflow: hidden; }
 .rp-track span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
 .rp-val { text-align: right; white-space: nowrap; min-width: 62px; line-height: 1.15; }
+
+/* Punch list */
+.iconbtn.note { font-size: 20px; color: var(--accent); }
+.pl-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
+.pl-row:last-child { border-bottom: 0; }
+.pl-row .grow { flex: 1; min-width: 0; }
+.pl-no { flex: none; min-width: 44px; padding: 3px 6px; border-radius: 8px; background: var(--band); font-weight: 800; font-size: 13px; text-align: center; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pl-no.hi { background: var(--accent); color: var(--on-accent); }
+.pl-export { white-space: pre-wrap; font-size: 12px; line-height: 1.4; background: var(--band); border-radius: var(--r-sm); padding: 10px; max-height: 46vh; overflow: auto; margin: 0; user-select: text; -webkit-user-select: text; }
+.sheet textarea, .field textarea { border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--input); padding: 10px 12px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; }

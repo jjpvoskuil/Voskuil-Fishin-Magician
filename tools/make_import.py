@@ -11,7 +11,8 @@ Writes, into OUTDIR (NEVER commit these - they hold private data; send them to J
 What maps where: trip_log.csv → fm_trips (owner = the angler's email; conditions_json → conditions object; other
 columns kept as text, as the Python app wrote them), lake_spots.csv → fm_spots, lure_inventory.csv → fm_lures (+
 image_path/thumb_path for own photos), water_quality_log.csv → fm_water_quality, segment_score_freeze.csv →
-fm_score_freeze (notes/breakdown parsed). Not here yet: dev_tasks.csv (Punch list - comes with that screen).
+fm_score_freeze (notes/breakdown parsed), dev_tasks.csv → fm_punch (+ fm_punch_counter, so new items continue the old
+numbering and never reuse one). Also writes punch_list_import.sql (just the punch list) for the 11-11 Punch list step.
 """
 import csv
 import io
@@ -63,6 +64,30 @@ def upsert(table, cols, values, conflict, update):
     for i in range(0, len(values), 200):   # keep statements a manageable size
         out.append(head + ",\n".join(values[i:i + 200]) + tail)
     return "".join(out)
+
+
+PAGE_RENAMES = {"Today (Home)": "Today", "7 Day Forecast": "Forecast", "Spot Session": "Session", "Lake Map": "Map",
+                "Development": "Punch list"}
+
+
+def punch_sql():
+    vals, top = [], 0
+    for r in rows("dev_tasks.csv"):
+        n = int(r["task_no"]); top = max(top, n)
+        d = {"description": r.get("description") or "", "page": PAGE_RENAMES.get(r.get("page"), r.get("page") or "General / whole app"),
+             "status": r.get("status") or "Open", "priority": "Medium", "author": "John", "created_at": r.get("created_at") or None,
+             "updated_at": r.get("completed_at") or r.get("created_at") or None, "completed_at": r.get("completed_at") or None,
+             "from_old_app": True}
+        vals.append(f"({n}, {lit(DEFAULT_OWNER)}, {js(d)})")
+    try:
+        nxt = int(read("dev_tasks_counter.txt").strip())
+    except (subprocess.CalledProcessError, ValueError):
+        nxt = top + 1
+    nxt = max(nxt, top + 1)
+    sql = upsert("fm_punch", ["task_no", "owner", "data"], vals, "task_no", ["owner", "data"])
+    sql += (f"insert into public.fm_punch_counter (id, next_no) values (true, {nxt}) on conflict (id) do update "
+            f"set next_no = greatest(public.fm_punch_counter.next_no, excluded.next_no);\n")
+    return {"sql": sql, "n": len(vals), "next": nxt}
 
 
 def main(outdir):
@@ -133,10 +158,18 @@ def main(outdir):
     sql.append(upsert("fm_score_freeze", ["the_date", "segment_name", "data"], vals, "the_date, segment_name", None))
     counts["frozen scores"] = len(vals)
 
+    # punch list (numbers kept; counter continues past the old dev_tasks_counter.txt)
+    punch = punch_sql()
+    sql.append(punch["sql"]); counts["punch items"] = punch["n"]
+
     sql.append("commit;")
     sql.append("-- check: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
     sql.append("select (select count(*) from public.fm_trips) as trips, (select count(*) from public.fm_spots) as spots, "
                "(select count(*) from public.fm_lures) as lures, (select count(*) from public.fm_water_quality) as water_readings;")
+    (out / "punch_list_import.sql").write_text("\n".join([
+        "-- Fishin Magician punch list from the old app (tools/make_import.py). Safe to run more than once.", "begin;",
+        punch["sql"], "commit;", f"-- check: {punch['n']} items, next number #{punch['next']}",
+        "select count(*) as items, (select next_no from public.fm_punch_counter) as next_number from public.fm_punch;"]))
     p = out / "fishin_magician_import.sql"
     p.write_text("\n".join(sql))
     print(f"wrote {p} ({p.stat().st_size / 1e6:.2f} MB): {counts}")
