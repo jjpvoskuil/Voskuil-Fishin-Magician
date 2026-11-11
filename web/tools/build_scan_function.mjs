@@ -53,7 +53,8 @@ async function claude(req) {
     if (r.status === 401) throw new Friendly("The Anthropic API key wasn't accepted — replace ANTHROPIC_API_KEY in Supabase → Edge Functions → Secrets.");
     if (low.includes("credit balance") || low.includes("billing")) throw new Friendly("The Anthropic account is out of credit — add credit at platform.claude.com/settings/billing.");
     if (r.status === 404 || (low.includes("model") && low.includes("not found"))) throw new Friendly("The AI model name isn't recognized (" + model() + ") — set ANTHROPIC_MODEL in Supabase secrets.");
-    throw new Friendly("AI error " + r.status + ": " + text.slice(0, 200));
+    let detail = text.slice(0, 300); try { detail = JSON.parse(text).error.message || detail; } catch { /* keep raw text */ }
+    throw new Friendly("AI error " + r.status + ": " + detail);
   }
 }
 
@@ -69,7 +70,8 @@ Deno.serve(async (req) => {
     if (b64.length < 100) throw new Friendly("No photo was sent.", 400);
     if (b64.length > 6_000_000) throw new Friendly("That photo is too large — try again (the app shrinks photos before sending).", 400);
     for (let i = 0; i < 2; i++) {
-      const msg = await claude({ model: model(), max_tokens: 1024, tools: [TOOL], tool_choice: { type: "tool", name: "identify_lure" },
+      // tool_choice "auto" (newer models reject forcing a tool — 11-11); the prompt says to answer only via the tool
+      const msg = await claude({ model: model(), max_tokens: 4096, tools: [TOOL], tool_choice: { type: "auto" },
         messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: type, data: b64 } }, { type: "text", text: PROMPT }] }] });
       const use = (msg.content || []).find((b) => b.type === "tool_use" && b.name === "identify_lure");
       if (use) return reply(200, use.input);
