@@ -5,7 +5,7 @@ import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import { NumberBox } from "./LakeSetup.jsx";
 import { ConditionsForm, FishSheet, conditionsSummary } from "./SessionParts.jsx";
-import { Sheet } from "./ui.jsx";
+import { Multi, Pick, Sheet } from "./ui.jsx";
 import { parseConditions } from "./lib/calibration.js";
 import { buildSessions, fishTotals, lureTypeLabel, matches, summarize, applyLegEdit, LEG_CONDITION_KEYS } from "./lib/history.js";
 import { formatWeightLbOz } from "./lib/leaderboard.js";
@@ -94,18 +94,6 @@ export default function HistoryScreen({ active, db, me, trips, spots, outbox, re
         onDelete={() => { for (const r of open.rows) outbox.remove(r.trip_id); setOpenKey(null); toast("Session deleted"); setTimeout(reloadTrips, 1200); }} />}
     </div>
   );
-}
-
-function Multi({ label, options, value, onChange }) {
-  return <div className="field">{label}<div className="chips">{options.map((o) => { const on = value.includes(o); return (
-    <button type="button" key={o} className={`chip ${on ? "on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o) : [...value, o])}>{o}</button>); })}</div></div>;
-}
-/** Long option lists: a select to add, chips of what's picked (tap to remove). */
-function Pick({ label, options, value, onChange }) {
-  return <div className="field"><label className="field" style={{ gap: 4 }}>{label}
-    <select value="" onChange={(e) => e.target.value && onChange([...value, e.target.value])}>
-      <option value="">{value.length ? "Add another…" : "Any"}</option>{options.filter((o) => !value.includes(o)).map((o) => <option key={o} value={o}>{o}</option>)}</select></label>
-    {value.length > 0 && <div className="chips">{value.map((v) => <button type="button" key={v} className="chip on" onClick={() => onChange(value.filter((x) => x !== v))}>{v} ✕</button>)}</div>}</div>;
 }
 
 function SessionCard({ s, onOpen }) {

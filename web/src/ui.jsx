@@ -102,3 +102,17 @@ export function useKeyboardSafeInputs() {
     return () => { vv?.removeEventListener("resize", update); vv?.removeEventListener("scroll", update); vv?.removeEventListener("resize", reveal); document.removeEventListener("focusin", onFocus); };
   }, []);
 }
+
+/** Chip multi-select (short option lists). */
+export function Multi({ label, options, value, onChange }) {
+  return <div className="field">{label}<div className="chips">{options.map((o) => { const on = value.includes(o); return (
+    <button type="button" key={o} className={`chip ${on ? "on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o) : [...value, o])}>{o}</button>); })}</div></div>;
+}
+/** Long option lists: a select to add, chips of what's picked (tap to remove). */
+export function Pick({ label, options, value, onChange }) {
+  return <div className="field"><label className="field" style={{ gap: 4 }}>{label}
+    <select value="" onChange={(e) => e.target.value && onChange([...value, e.target.value])}>
+      <option value="">{value.length ? "Add another…" : "Any"}</option>{options.filter((o) => !value.includes(o)).map((o) => <option key={o} value={o}>{o}</option>)}</select></label>
+    {value.length > 0 && <div className="chips">{value.map((v) => <button type="button" key={v} className="chip on" onClick={() => onChange(value.filter((x) => x !== v))}>{v} ✕</button>)}</div>}</div>;
+}
+

@@ -15,6 +15,7 @@
 --     approved angler can add a new one; nobody can change or delete one (admins can delete).
 --   * The tackle box (fm_lures) and saved lake spots (fm_spots) are shared by all anglers, as in the old app: any
 --     approved angler can add, edit and remove them.
+--   * Saved custom boards and reports (fm_saved): private to the angler who saved them.
 --   * Tackle-box photos live in the private storage bucket fm-lures (approved anglers only). (Punch list is added later.)
 
 create table if not exists public.fm_users (
@@ -50,6 +51,14 @@ create table if not exists public.fm_spots (
   data jsonb not null                  -- the old lake_spots.csv row (name, lat, lon, location_type, depths, notes, …)
 );
 
+create table if not exists public.fm_saved (
+  id text primary key,
+  owner text not null,                 -- email of the angler who saved it (only they see it)
+  kind text not null check (kind in ('board', 'report')),
+  data jsonb not null,                 -- {title, spec, …} — a saved custom leaderboard or report
+  created_at timestamptz not null default now()
+);
+
 create or replace function public.fm_me() returns text language sql stable as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
 create or replace function public.fm_is_approved() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.fm_users where email = public.fm_me()) $$;
@@ -59,7 +68,7 @@ revoke all on function public.fm_is_approved(), public.fm_is_admin() from public
 grant execute on function public.fm_me(), public.fm_is_approved(), public.fm_is_admin() to authenticated;
 
 do $$ declare t text; begin
-  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze','fm_lures','fm_spots'] loop
+  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze','fm_lures','fm_spots','fm_saved'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant select, insert, update, delete on public.%I to authenticated', t);
@@ -90,6 +99,10 @@ create policy "fm wq delete" on public.fm_water_quality for delete to authentica
 create policy "fm freeze read"   on public.fm_score_freeze for select to authenticated using (public.fm_is_approved());
 create policy "fm freeze add"    on public.fm_score_freeze for insert to authenticated with check (public.fm_is_approved());
 create policy "fm freeze delete" on public.fm_score_freeze for delete to authenticated using (public.fm_is_admin());
+
+-- saved boards/reports: each angler sees and changes only their own
+create policy "fm saved own" on public.fm_saved for all to authenticated
+  using (public.fm_is_approved() and owner = public.fm_me()) with check (public.fm_is_approved() and owner = public.fm_me());
 
 create policy "fm lures shared" on public.fm_lures for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());
 create policy "fm spots shared" on public.fm_spots for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());

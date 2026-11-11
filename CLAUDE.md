@@ -179,8 +179,18 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   sorts to kind="stable" — default quicksort leaves ties in no fixed order). Ring of season stats (swipe / ‹ › / dots),
   six ranked tabs, catches-by-day bars, species mix. New: period This year / Last 30 days / All time + Everyone / Just me
   (localStorage `fm.leaderboard`). Biggest Fish shows species as the title (the Python repeats the weight).
-  NEXT (John 11-11, approved): custom boards — Measure × Ranked by × Filters, plus a typed question turned into those
-  picks by Claude (new Edge Function), computed locally from the trip log; saved boards appear as tabs.
+  Custom boards (John 11-11, `CustomBoard.jsx` + `lib/boards.js` + `boards.test.js`, new app only): Measure (fish, lbs,
+  biggest, longest, avg weight, fish/hr, outings) × Ranked by (angler, lure, lure type, color, spot, month, time of
+  day, species, year, outing, each fish, none) × filters (species, lure types, lure/color text, spots, anglers, time
+  of day, months, water temp, date range). "Ask for a board": Edge Function `fm-board-ask`
+  (web/supabase/functions/fm-board-ask/index.ts, same ANTHROPIC_API_KEY secret) gets the question + the log's real
+  species/lure types/spots/anglers and returns ONLY settings via tool set_board ("bass" = black bass, not white bass);
+  `cleanSpec` whitelists them; numbers always computed on the phone. Fish/hr counts fishless hours; ≥0.5 h per stint.
+  Saved boards → table `fm_saved` (kind board|report, private to owner; RLS `test/test_saved.sql`, 10 checks) → ★ tabs.
+  Reports must get the same pattern (John 11-11): stock reports + typed custom report + save (kind 'report').
+  Shared filter widgets `Multi` / `Pick` now live in ui.jsx.
+- App icon (John 11-11): redo before Matt installs; a "Voskuil Outdoors" family look shared with Deercast, clearly
+  fishing. Show options.
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 

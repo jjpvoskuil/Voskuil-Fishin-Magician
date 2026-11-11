@@ -29,6 +29,8 @@ CASES = [
     ("Map", ["📍 Save where I am"], ["Name"]),
     ("Map", ["css=.map-dock .btn >> nth=1", "Any time", "css=.rank-row >> nth=0", "Edit details"], ["Name", "Main area depth (ft)", "Notes"]),
     ("More", ["Tackle Box", "＋ Add by hand"], ["Brand", "Name, color, size"]),
+    ("More", ["Leaderboard", "css=.lb-tabs button >> text=Custom"], ["Ask for a board", "Board name"]),
+    ("More", ["Leaderboard", "css=.lb-tabs button >> text=Custom", "Filters ›"], ["Lure name contains", "Color contains", "Water from (°F)", "Water to (°F)"]),
     ("More", ["Trip History", "css=button.card.hist >> nth=1", "Edit"], ["Lure", "Color", "Technique", "Notes"]),
 ]
 bad = 0

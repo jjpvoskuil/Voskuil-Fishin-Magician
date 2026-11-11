@@ -47,6 +47,22 @@ export function supabaseDb(sb, email) {
     listSpots: async () => ok(await sb.from("fm_spots").select("id,data").order("id")).map((r) => ({ ...r.data, spot_id: r.id })),
     saveSpot: async (sp) => ok(await sb.from("fm_spots").upsert({ id: sp.spot_id, data: sp })),
     deleteSpot: async (id) => ok(await sb.from("fm_spots").delete().eq("id", id)),
+    // saved custom boards / reports (private to whoever saved them)
+    listSaved: async (kind) => ok(await sb.from("fm_saved").select("id,owner,data,created_at").eq("kind", kind).order("created_at")).map((r) => ({ ...r.data, id: r.id, owner: r.owner })),
+    saveSaved: async (kind, item) => { const { id, owner, ...data } = item; return ok(await sb.from("fm_saved").upsert({ id, owner, kind, data })); },
+    deleteSaved: async (id) => ok(await sb.from("fm_saved").delete().eq("id", id)),
+    /** Claude turns a typed question into custom-board settings (fm-board-ask Edge Function) — no numbers come back. */
+    async askBoard(question, choices, today) {
+      const { data, error } = await sb.functions.invoke("fm-board-ask", { body: { question, choices, today } });
+      if (error) {
+        let msg = error.message;
+        try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch { /* keep the generic message */ }
+        if (/Failed to send|not found|404/i.test(msg)) msg = "The question box isn't set up yet (Edge Function fm-board-ask).";
+        throw new Error(msg);
+      }
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
     // tackle-box photos (private bucket fm-lures)
     /** Upload {full, thumb} JPEGs for a lure → {image_path, thumb_path}. */
     async uploadLurePhoto(itemId, { full, thumb }) {
@@ -131,6 +147,14 @@ export function demoDb(seed, email = "demo@example.com") {
     listSpots: async () => clone(st.spots || []),
     saveSpot: async (sp) => up((st.spots ||= []), clone(sp), "spot_id"),
     deleteSpot: async (id) => del(st.spots || [], (sp) => sp.spot_id === id),
+    listSaved: async (kind) => clone((st.saved || []).filter((x) => x.kind === kind)),
+    saveSaved: async (kind, item) => up((st.saved ||= []), { ...clone(item), kind }),
+    deleteSaved: async (id) => del(st.saved || [], (x) => x.id === id),
+    askBoard: async (question, choices) => { await new Promise((r) => setTimeout(r, 600));
+      const q = question.toLowerCase(), bass = (choices.species || []).filter((x) => /largemouth|smallmouth|spotted/i.test(x));
+      return { measure: /lb|weight|pound/.test(q) ? "lbs" : /biggest|heav/.test(q) ? "biggest" : /hour/.test(q) ? "fish_per_hour" : "fish",
+        by: /spot|where/.test(q) ? "spot" : /lure/.test(q) && !/jerk/.test(q) ? "lure" : "angler", species: /bass/.test(q) ? bass : [],
+        lure_types: /jerk/.test(q) ? ["suspending_jerkbait"] : [], title: question.slice(0, 60), note: "Demo answer — the real app asks Claude to read your question." }; },
     reset: () => { localStorage.removeItem(DEMO_KEY); },
   };
 }

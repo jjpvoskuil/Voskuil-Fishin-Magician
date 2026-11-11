@@ -2,7 +2,9 @@
 // tabs (Biggest Fish, Top Anglers, Hot Lures, Top Spots, Longest Fish, Top Sessions), daily catch bars and the
 // species mix. Logic in lib/stringer.js (parity-tested port of core/stringer.py). New here: a period choice
 // (This year / Last 30 days / All time) and Everyone / Just me, both remembered on the phone.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import CustomBoard, { BoardRows } from "./CustomBoard.jsx";
+import { choicesFrom } from "./lib/boards.js";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import { buildFrames, CATEGORIES, dailyActivitySeries, formatDateShort, heroStates, seasonLabel, speciesMix } from "./lib/stringer.js";
@@ -41,7 +43,7 @@ function Bars({ days }) {
   </>;
 }
 
-export default function LeaderboardScreen({ active, me, trips, spots, onBack, onMenu, demo }) {
+export default function LeaderboardScreen({ active, db, me, trips, spots, onBack, onMenu, demo, toast }) {
   const [f, setFState] = useState(read);
   const setF = (p) => setFState((x) => { const n = { ...x, ...p }; try { localStorage.setItem(KEY, JSON.stringify(n)); } catch { /* ignore */ } return n; });
   const [ring, setRing] = useState(0);
@@ -52,6 +54,12 @@ export default function LeaderboardScreen({ active, me, trips, spots, onBack, on
     const today = lakeToday(), from = f.period === "year" ? `${today.slice(0, 4)}-01-01` : f.period === "30" ? minusDays(today, 29) : "";
     return (trips || []).filter((r) => (!from || String(r.trip_date) >= from) && (f.who === "all" || r.owner === me.email));
   }, [trips, f.period, f.who, me]);
+  const rowsWho = useMemo(() => (trips || []).filter((r) => f.who === "all" || r.owner === me.email), [trips, f.who, me]);
+  const choices = useMemo(() => choicesFrom(trips || [], names), [trips, names]);
+  const [saved, setSaved] = useState([]);
+  useEffect(() => { if (active && db?.listSaved) db.listSaved("board").then(setSaved).catch(() => {}); }, [active, db]);
+  const custom = f.tab === "custom" || f.tab.startsWith("saved:");
+  const board = f.tab.startsWith("saved:") ? saved.find((b) => `saved:${b.id}` === f.tab) || null : null;
   const { fish, trips: tr } = useMemo(() => buildFrames(rows, names), [rows, names]);
   const states = useMemo(() => heroStates(fish, tr, true), [fish, tr]);
   const cat = CATEGORIES.find(([k]) => k === f.tab) || CATEGORIES[0];
@@ -94,18 +102,18 @@ export default function LeaderboardScreen({ active, me, trips, spots, onBack, on
             {states.length > 1 && <div className="lb-dots">{states.map((_, k) => <button key={k} className={k === i ? "on" : ""} aria-label={`Show stat ${k + 1}`} onClick={() => setRing(k)} />)}</div>}
           </section>}
 
-          <div className="lb-tabs" role="tablist">{CATEGORIES.map(([k, l]) => <button key={k} role="tab" aria-selected={f.tab === k} className={f.tab === k ? "on" : ""} onClick={() => setF({ tab: k })}>{l}</button>)}</div>
+          <div className="lb-tabs" role="tablist">{CATEGORIES.map(([k, l]) => <button key={k} role="tab" aria-selected={f.tab === k} className={f.tab === k ? "on" : ""} onClick={() => setF({ tab: k })}>{l}</button>)}
+            {saved.map((b) => <button key={b.id} role="tab" aria-selected={f.tab === `saved:${b.id}`} className={f.tab === `saved:${b.id}` ? "on" : ""} onClick={() => setF({ tab: `saved:${b.id}` })}>★ {b.title}</button>)}
+            <button role="tab" aria-selected={f.tab === "custom"} className={f.tab === "custom" ? "on" : ""} onClick={() => setF({ tab: "custom" })}>＋ Custom</button></div>
+          {custom ? <CustomBoard db={db} me={me} board={board} rowsPeriod={rows} rowsWho={rowsWho} names={names} choices={choices} toast={toast}
+            setPeriodWho={(p) => setF(p)}
+            onSaved={(item) => { setSaved((l) => [...l.filter((x) => x.id !== item.id), item]); setF({ tab: `saved:${item.id}` }); }}
+            onDeleted={() => { setSaved((l) => l.filter((x) => x.id !== board.id)); setF({ tab: "custom" }); }} /> : <>
           <section className="card">
             <div className="card-h"><span className="t">{cat[1]}</span><span className="muted small">{cat[2]}</span></div>
-            {!list.length ? <p className="empty">Nothing for this one yet.</p> : list.map((r0, n) => {
-              // Biggest Fish repeats the weight as its title — show the species there instead
-              const parts = r0.secondary.split(" · "), r = r0.primary === r0.num && parts.length > 1 ? { ...r0, primary: parts[0], secondary: parts.slice(1).join(" · ") } : r0;
-              return (
-              <div key={n} className="lb-row">
-                <span className={`lb-rank ${n === 0 ? "r1" : ""}`}>{n + 1}</span>
-                <span className="grow"><b>{r.primary}</b><span className="muted small block">{r.secondary}</span></span>
-                <span className="lb-num"><b className="num">{r.num}</b>{r.tag && <span className="pill">{r.tag}</span>}</span>
-              </div>); })}
+            <BoardRows list={list.map((r0) => { // Biggest Fish repeats the weight as its title — show the species there instead
+              const parts = r0.secondary.split(" · ");
+              return r0.primary === r0.num && parts.length > 1 ? { ...r0, primary: parts[0], secondary: parts.slice(1).join(" · ") } : r0; })} />
           </section>
 
           <section className="card">
@@ -119,6 +127,7 @@ export default function LeaderboardScreen({ active, me, trips, spots, onBack, on
                 <span className="lb-sp-bar"><span style={{ width: `${(c / mix[0][1]) * 100}%` }} className={c === mix[0][1] ? "top" : ""} /></span>
                 <b className="num">{c}</b></div>))}</div>
           </section>}
+          </>}
         </>}
       </div>
     </div>
