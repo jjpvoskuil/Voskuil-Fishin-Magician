@@ -17,6 +17,6 @@ jobs:
       - run: python tools/build_contours.py out
       - name: Push to the depth-build branch
         run: |
-          cd out && git init -q && git checkout -q -b depth-build && git add contours.json
+          cd out && git init -q && git checkout -q -b depth-build && git add contours.json suggestions.json
           git -c user.name="contour builder" -c user.email="actions@github.com" commit -qm "contours $(date -u +%F)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" depth-build

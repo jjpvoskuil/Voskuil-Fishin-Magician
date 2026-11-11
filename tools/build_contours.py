@@ -129,11 +129,15 @@ def main(out):
     slope = np.hypot(gx, gy)
     slope = np.where(seen & np.isfinite(slope), slope, np.nan)
     # slope near the edge, smoothed so one odd pixel doesn't steer a whole flat
-    s_ok = np.isfinite(slope)
-    s_med = ndimage.median_filter(np.where(s_ok, slope, 0), size=5)
-    d_ft, (ir, ic) = ndimage.distance_transform_edt(~seen | ~s_ok, sampling=PIX, return_indices=True)
-    edge_slope = np.clip(s_med[ir, ic], 0.03, 0.6)
-    edge_wl = np.where(np.isnan(WL), 496.0, WL)
+    # slope of the measured bottom near the lidar water line, spread smoothly over the unseen water (normalized
+    # convolution, ~300 ft): a nearest-bank lookup jumps mid-channel and drew cross-channel ticks (11-11)
+    band = seen & np.isfinite(slope) & (ndimage.distance_transform_edt(~unseen, sampling=PIX) < 120)
+    num = ndimage.gaussian_filter(np.where(band, np.clip(slope, 0.02, 0.8), 0), 38)
+    den = ndimage.gaussian_filter(band.astype("float32"), 38)
+    edge_slope = np.clip(np.where(den > 1e-4, num / np.maximum(den, 1e-4), 0.12), 0.03, 0.6)
+    wl_known = ~np.isnan(WL)
+    wl_num = ndimage.gaussian_filter(np.where(wl_known, WL, 0), 60); wl_den = ndimage.gaussian_filter(wl_known.astype("float32"), 60)
+    edge_wl = np.where(wl_known, WL, np.where(wl_den > 1e-4, wl_num / np.maximum(wl_den, 1e-4), 496.0))
     d_unseen = ndimage.distance_transform_edt(unseen, sampling=PIX)  # ft from the lidar water line
 
     # floor: 480 ft everywhere, sinking toward 455 ft along the old river channel (corridor from nolin_channel.json)
@@ -160,20 +164,25 @@ def main(out):
     cap = np.maximum(edge_wl - floor, 1.0)
     depth_below = cap * (1 - np.exp(-edge_slope * d_unseen / cap))
     est = edge_wl - depth_below
-    est = ndimage.gaussian_filter(np.where(unseen, est, np.where(seen, Z, TOP)), 2.0)
+    est = ndimage.gaussian_filter(np.where(unseen, est, np.where(seen, Z, TOP)), 3.0)
     surface = np.where(unseen, est, np.where(seen, Z, TOP + 10))   # outside the lake: high, so shore lines close
     print(f"estimated bottom: min {np.nanmin(np.where(unseen, est, np.nan)):.1f} ft, "
           f"deepest at summer pool {SUMMER_POOL - np.nanmin(np.where(unseen, est, np.nan)):.0f} ft ({time.time() - t0:.0f}s)")
 
     # --- contour lines, split where they cross between measured and estimated bottom
-    unseen_d = ndimage.binary_dilation(unseen, iterations=1)
     lines, kept_pts = [], 0
     for e in LEVELS:
         for cs in measure.find_contours(np.nan_to_num(surface, nan=TOP + 10), e):
             rr = np.clip(cs[:, 0].round().astype(int), 0, H - 1); ccx = np.clip(cs[:, 1].round().astype(int), 0, W - 1)
             if not lake[rr, ccx].any():
                 continue
-            flag = unseen_d[rr, ccx]
+            flag = e < edge_wl[rr, ccx] - 0.3          # below the lidar's water line = estimated
+            # merge flicker: runs shorter than 8 vertices take their neighbors' value
+            runs = np.flatnonzero(np.diff(flag.astype(int))) + 1
+            bounds = np.concatenate([[0], runs, [len(flag)]])
+            for a, b in zip(bounds[:-1], bounds[1:]):
+                if b - a < 8 and a > 0:
+                    flag[a:b] = flag[a - 1]
             start = 0
             for i in range(1, len(cs) + 1):
                 if i == len(cs) or flag[i] != flag[start]:
@@ -181,13 +190,16 @@ def main(out):
                     if len(seg) >= 3:
                         xs = x0 + seg[:, 1] * PIX; ys = y1 - seg[:, 0] * PIX
                         ls = LineString(np.column_stack([xs, ys])).simplify(PIX * 0.75)
-                        if ls.length >= 80:
+                        closed = np.hypot(*(seg[0] - seg[-1])) < 2
+                        if ls.length >= (400 if closed else 150):
                             lon, lat = to_ll.transform(*np.array(ls.coords).T)
                             coords = [[round(a, 5), round(b, 5)] for a, b in zip(lon, lat)]
                             kept_pts += len(coords)
                             lines.append({"e": int(e), "est": int(bool(flag[start])), "c": coords})
                     start = i
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
+    (out / "suggestions.json").write_text(json.dumps(suggest(surface, lake, seen, unseen, d_ch, slope, edge_wl, x0, y1, to_ll),
+                                                     separators=(",", ":")))
     doc = {"generated": time.strftime("%Y-%m-%d"), "levels": LEVELS.astype(int).tolist(),
            "source": "KyFromAbove Phase 2 lidar (Kentucky Division of Geographic Information), flown winter 2022-23 at "
                      "~496 ft; below that the bottom is estimated (est=1).",
@@ -197,6 +209,68 @@ def main(out):
     print(f"wrote {p}: {len(lines)} lines, {kept_pts} points, {p.stat().st_size / 1e6:.1f} MB "
           f"(measured {sum(1 for l in lines if not l['est'])}, estimated {sum(1 for l in lines if l['est'])}) "
           f"in {time.time() - t0:.0f}s")
+
+
+def suggest(surface, lake, seen, unseen, d_ch, slope, edge_wl, x0, y1, to_ll):
+    """'Spots to try' (John 11-10/11-11): structure bass relate to, found in the lake's shape and the measured bottom.
+    Judged at summer pool (515 ft); each entry keeps bottom elevations so the app shows depths at today's level."""
+    H, W = lake.shape
+    land = ~lake
+    d_land = ndimage.distance_transform_edt(lake, sampling=PIX)          # ft from shore (in the lake)
+    d_lake = ndimage.distance_transform_edt(land, sampling=PIX)          # ft from water (on land)
+    water_around = ndimage.gaussian_filter(lake.astype("float32"), 30)  # ~250 ft neighborhood
+    depth_sp = SUMMER_POOL - surface
+    cands = []
+    def clusters(mask, kind, why, min_px, weight):
+        lab, n = ndimage.label(ndimage.binary_dilation(mask, iterations=2))
+        if not n:
+            return
+        sizes = ndimage.sum(mask, lab, range(1, n + 1))
+        for i, sz in enumerate(sizes, start=1):
+            if sz < min_px:
+                continue
+            rr, cc = np.nonzero((lab == i) & mask)
+            k = len(rr) // 2
+            r, c = int(np.median(rr)), int(np.median(cc))
+            if not mask[r, c]:
+                r, c = int(rr[k]), int(cc[k])
+            # depth range around it (within ~150 ft), at summer pool
+            win = (slice(max(0, r - 19), r + 20), slice(max(0, c - 19), c + 20))
+            el = surface[win][lake[win]]
+            if el.size == 0:
+                continue
+            cands.append({"r": r, "c": c, "kind": kind, "why": why, "score": weight * math.log1p(sz),
+                          "emin": float(np.percentile(el, 5)), "emax": float(np.percentile(el, 95)),
+                          "est": bool(unseen[win].mean() > 0.5)})
+    # 1. points: land sticking out into the lake (lots of water around a shoreline pixel)
+    tips = land & (d_lake <= PIX * 2) & (water_around > 0.66)
+    clusters(tips, "point", "Point sticking out into the lake — bass use the tip and the sides where it tapers into deeper water.", 6, 1.3)
+    # 2. steep breaks / bluff walls in the measured band (6-19 ft at summer pool)
+    steep = seen & (depth_sp > 6) & (depth_sp < 19) & (slope > 0.5)
+    clusters(steep, "break", "Steep break or bluff wall — fast drop from shallow to deep, good for jerkbaits, cranks and jigs down the face.", 25, 1.0)
+    # 3. old channel swinging in against the bank
+    swing = lake & (d_ch < 120) & (d_land < 200) & (depth_sp > 10)
+    clusters(swing, "swing", "Old river channel swings close to the bank — deep water right next to shallow; fish hold on the edge.", 15, 1.1)
+    # 4. shallow flat next to deep water (measured flat 3-12 ft, deep water within ~250 ft)
+    deep_near = ndimage.maximum_filter(np.where(lake, depth_sp, 0), size=63) > 25
+    flat = seen & (depth_sp > 3) & (depth_sp < 12) & (np.nan_to_num(slope, nan=1) < 0.05) & deep_near
+    clusters(flat, "flat", "Shallow flat next to deep water — a feeding area in low light and spring/fall; work the edge where it drops.", 120, 0.9)
+    # keep the best, spread out (>= ~250 m apart), up to 70
+    cands.sort(key=lambda d: -d["score"])
+    kept = []
+    for cnd in cands:
+        if all(math.hypot(cnd["r"] - k["r"], cnd["c"] - k["c"]) * PIX > 820 for k in kept):
+            kept.append(cnd)
+        if len(kept) >= 70:
+            break
+    outl = []
+    for k in kept:
+        lon, lat = to_ll.transform(x0 + (k["c"] + 0.5) * PIX, y1 - (k["r"] + 0.5) * PIX)
+        outl.append({"lat": round(lat, 5), "lon": round(lon, 5), "kind": k["kind"], "why": k["why"], "emin": round(k["emin"], 1),
+                     "emax": round(k["emax"], 1), "est": int(k["est"]), "score": round(k["score"], 2)})
+    counts = {x: sum(1 for o in outl if o["kind"] == x) for x in ("point", "break", "swing", "flat")}
+    print(f"spots to try: {len(outl)} {counts}")
+    return {"generated": time.strftime("%Y-%m-%d"), "spots": outl}
 
 
 if __name__ == "__main__":
