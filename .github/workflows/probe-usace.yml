@@ -1,0 +1,13 @@
+name: Probe USACE site (temporary diagnostic)
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set +e
+          echo "== openssl chain"; echo | openssl s_client -connect www.lrl-wc.usace.army.mil:443 -servername www.lrl-wc.usace.army.mil -showcerts 2>/dev/null | grep -E "^ *[0-9] s:|^ *i:|Verify return"
+          echo "== curl https"; curl -sS -o /tmp/a.html -w "%{http_code} %{size_download}\n" https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html
+          echo "== curl http"; curl -sS -o /tmp/b.html -w "%{http_code} %{size_download} redirect=%{redirect_url}\n" http://www.lrl-wc.usace.army.mil/reports/wq/NRR.html
+          echo "== python requests"; python3 -c "import requests;r=requests.get('https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html',timeout=20);print(r.status_code,len(r.text))"
+          echo "== dam site rows"; grep -io "<tr><td>Dam Site</td>[^\n]\{0,120\}" /tmp/b.html /tmp/a.html | head -3
