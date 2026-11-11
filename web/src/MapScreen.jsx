@@ -113,6 +113,36 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
     layers.current.spots?.bringToFront?.();
   }, [f.depth, contours, level, zoom]);
 
+  // depth numbers along the drawn lines (John 11-11): only on screen, ~1 per 280 px of line, never within 75 px of
+  // another, max 45 — recomputed after each pan/zoom
+  const [view, setView] = useState(0);
+  useEffect(() => { const m = map.current; if (!m) return; const on = () => setView((v) => v + 1); m.on("moveend", on); return () => m.off("moveend", on); }, []);
+  useEffect(() => {
+    const m = map.current; if (!m) return;
+    layers.current.depthLbl?.remove(); layers.current.depthLbl = null;
+    if (!f.depth || !contours || level == null) return;
+    const every = zoom >= 15 ? 2 : zoom >= 14 ? 4 : 10, size = m.getSize(), placed = [], g = L.layerGroup();
+    const lines = contours.lines.map((ln) => ({ ln, d: level - ln.e }))
+      .filter(({ d }) => d >= 1 && !(Math.round(d) % every > 1 && every > 2))
+      .sort((a, b) => (Math.round(b.d) % 10 === 0) - (Math.round(a.d) % 10 === 0));  // round tens first
+    for (const { ln, d } of lines) {
+      let prev = null, run = 140;
+      for (const [lo, la] of ln.c) {
+        const pt = m.latLngToContainerPoint([la, lo]);
+        if (prev) run += pt.distanceTo(prev);
+        prev = pt;
+        if (run < 280) continue;
+        if (pt.x < 20 || pt.y < 20 || pt.x > size.x - 20 || pt.y > size.y - 20) continue;
+        if (placed.some((q) => q.distanceTo(pt) < 75)) continue;
+        placed.push(pt); run = 0;
+        L.marker([la, lo], { interactive: false, keyboard: false, icon: L.divIcon({ className: "depth-lbl", html: `<span style="border-color:${depthColor(d)}">${Math.round(d)}</span>`, iconSize: [26, 16], iconAnchor: [13, 8] }) }).addTo(g);
+        if (placed.length >= 45) break;
+      }
+      if (placed.length >= 45) break;
+    }
+    layers.current.depthLbl = g.addTo(m);
+  }, [f.depth, contours, level, zoom, view]);
+
   // ---- spots to try (structure from the lidar: points, breaks, channel swings, flats by deep water)
   const [tries, setTries] = useState(null), [trySel, setTrySel] = useState(null);
   useEffect(() => { if (f.tries && !tries) loadSuggestions().then((d) => setTries(d.spots)).catch(() => {}); }, [f.tries]);

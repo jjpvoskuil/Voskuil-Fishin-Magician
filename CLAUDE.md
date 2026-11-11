@@ -59,6 +59,8 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   rock/wood/timber/flats (re-exported lures.data.json + lure fixtures); `NOT_SUGGESTED_ON_NOLIN = {hollow_body_frog}`
   (Python + JS) keeps the frog out of tackle-box gaps / Cabela's gap picks — the type stays valid for tagging/logging.
 - Map spot pins: no permanent name labels (John 11-11, clutter); only the tapped spot shows its name.
+- Contour depth numbers (John 11-11): small labels on the drawn lines, on screen only, ~1 per 280 px, ≥75 px apart,
+  max 45, round tens first; recomputed on moveend (`.depth-lbl`).
 - Season fix (John, 11-10, both apps): fall (day > 250) is checked before the spring rules: 58-65 °F = Fall Turnover
   (no bonus), 50-58 °F = new **Late Fall** (+0.6 `season_late_fall_bonus`, own lure plan: jerkbait / mid crank /
   swimbait, then football jig / blade / lipless — labeled as a general pattern, not Nolin-documented); 60-75 °F
