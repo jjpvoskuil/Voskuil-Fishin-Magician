@@ -215,8 +215,10 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `gh api -X POST repos/jjpvoskuil/deercast-data/actions/workflows/backup.yml/dispatches -f ref=main` (gh's
   GraphQL is blocked here; use REST). Restore: `python3 tools/make_restore.py <deercast-data>/backups/fishin-magician
   > restore.sql` (replaces fm_* contents; round trip tested identical on local PG). Output is private: never commit.
-  11-11 finding: bucket fm-lures in the Deercast project was EMPTY (the 26 photo jpgs John uploaded aren't there —
-  check which project/bucket they went to; the Tackle Box silently falls back to Cabela's image_url).
+  11-11: bucket fm-lures was EMPTY (John's dashboard upload never landed; the Tackle Box silently fell back to Cabela's
+  image_url). Fixed by Claude: the 26 jpgs are in deercast-data/backups/fishin-magician/lure_photos/ and manual
+  workflow `restore-photos.yml` (backup/fishin_restore_photos.py) uploads any missing ones to fm-lures/lures/ (never
+  overwrites) — run 11-11: 26 uploaded, backup then saw 26 files. Use the same job after any Storage loss.
 - NEXT after this app (John 11-11): **Deercast shot recovery puts probable deer spots in the lake** — give its recovery
   model real water: Nolin's shoreline from the KyFromAbove lidar water line (as tools/build_contours.py finds it) or
   OSM water polygons; exclude/penalize water cells in Deercast `deercast/recovery.py` + `web/src/lib/recovery.js` (parity).
