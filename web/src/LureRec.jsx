@@ -5,15 +5,16 @@ import { pyFixed } from "./lib/py.js";
 
 const lureImage = (it) => it.image_src || it.image_url || null; // own photos (image_src) arrive with the Tackle Box move
 
-export function LureBlock({ block }) {
+export function LureBlock({ block, offColor, bare }) {
+  const Wrap = bare ? "div" : "article";
   return (
-    <article className="lure">
-      <h4>{block.name}</h4>
+    <Wrap className={bare ? "lure-bare" : "lure"}>
+      {!bare && <h4>{block.name}</h4>}
       {block.why.length > 0 && <p className="muted small">💡 Why: {block.why.join(" ")}</p>}
       {block.note && <p className="lure-note">{block.note}</p>}
       {block.owned_items.length > 0 ? (
         <div className="owned">
-          <b className="ok">✅ In your tackle box:</b>
+          <b className="ok">✅ In your tackle box{offColor ? " (other colors than today's chart)" : ""}:</b>
           {block.owned_items.map((it, i) => (
             <div key={it.item_id || i} className="owned-i">
               {lureImage(it) && <img src={lureImage(it)} alt="" loading="lazy" referrerPolicy="no-referrer" />}
@@ -34,15 +35,34 @@ export function LureBlock({ block }) {
         <dt>How</dt><dd>{block.presentation}</dd>
       </dl>
       <p className="small vids">📺 {block.videos.map((v, i) => <span key={v.url}>{i > 0 && " · "}<a href={v.url} target="_blank" rel="noopener noreferrer">{v.title}</a></span>)}</p>
-    </article>
+    </Wrap>
   );
 }
 
-export default function LureRec({ rec, inventory }) {
+export const TIER = { proven: ["Proven", "for you in conditions like these"], steady: ["Steady", "catches fish most trips"],
+  seasonal: ["Seasonal", "Nolin pattern for right now"], try: ["Worth a try", "fits, but barely tried here"] };
+export const TierBadge = ({ tier }) => <span className={`tier tier-${tier}`}>{TIER[tier][0]}</span>;
+
+/** Lure picks v2 (lib/picks.js): ranked by your own similar-conditions catch history, labeled, with reasons. */
+export function PicksList({ picks }) {
+  return <>
+    {picks.picks.map((p) => <article key={p.key} className="lure">
+      <h4><TierBadge tier={p.tier} /> {p.block.name}</h4>
+      {p.reasons.map((x, i) => <p key={i} className={i === 0 ? "small" : "muted small"} style={{ margin: "2px 0" }}>{x}</p>)}
+      <LureBlock bare block={{ ...p.block, why: [], note: "" }} offColor={p.block.off_color} />
+    </article>)}
+    {picks.cold.length > 0 && <p className="muted small">🥶 Not producing for you in conditions like these: {picks.cold.map((c) => `${c.name} (${c.text})`).join(" · ")}</p>}
+  </>;
+}
+
+export default function LureRec({ rec, inventory, picks }) {
   const c = curateRecommendation(rec, inventory);
   return (
     <div className="lurerec">
-      {c.recommended.length > 0 ? <>
+      {picks && picks.picks.length > 0 ? <>
+        <div className="lr-h">🎣 Your picks for this window</div>
+        <PicksList picks={picks} />
+      </> : c.recommended.length > 0 ? <>
         <div className="lr-h">🎣 Top picks from your tackle box</div>
         {c.recommended.map((b) => <LureBlock key={b.key} block={b} />)}
       </> : <p className="note-bar">Nothing in your tackle box is a strong fit for this exact situation yet — see the tackle box gaps below for what would rank well.</p>}

@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
-import LureRec from "./LureRec.jsx";
+import LureRec, { TierBadge } from "./LureRec.jsx";
+import { buildPicks } from "./lib/picks.js";
 import { ConditionsForm, FishSheet, LurePicker, RigSelect, TrailerSheet, conditionsSummary } from "./SessionParts.jsx";
 import { LOCATION_TYPE_TO_STRUCTURE_TYPE } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, fmtTime, verdict } from "./ui.jsx";
@@ -112,6 +113,8 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     pressure_trend_24h: scoring.rt.pressure_trend_24h, structure_type: STRUCT(spot), water_clarity: scoring.water_clarity, fish_depth_ft: cond.values.fish_depth_ft || null,
     forage: cond.values.forage_seen, inventory: lures, trip_history: trips, spot_id: spot.spot_id, fish_activity: cond.values.fish_activity,
     forage_activity: cond.values.forage_activity, wind_mph: windMphForBand(cond.values.wind_band) }) : null), [spot, scoring, lures, trips, cond, segment]);
+  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: cond.values.water_temp_f, water_clarity: scoring.water_clarity,
+    segment_name: segment, structure_type: STRUCT(spot), spot_id: spot.spot_id, wind_band: cond.values.wind_band, me: me.email, fish_depth_ft: cond.values.fish_depth_ft || null } }) : null), [rec]);
   const pending = draft.lures || [];
   const pendingIds = new Set(pending.map((l) => l.item_id).filter(Boolean));
   const addLure = (stub) => { if (stub.item_id && pendingIds.has(stub.item_id)) return; setDraft({ lures: [...pending, stub] }); toast(`Added ${stub.label}`); };
@@ -189,9 +192,9 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
         {rec && <section className="card">
           <div className="card-h"><span className="t"><Icon name="tackle" />Suggested — tap + to fish it</span></div>
           <div className="card-b">
-            <QuickPicks rec={rec} lures={lures} added={pendingIds} onAdd={quickAdd} />
+            <QuickPicks picks={picks} added={pendingIds} onAdd={quickAdd} />
             <button className="link" onClick={() => setShowDetails(!showDetails)}>{showDetails ? "Hide" : "Colors, depth, how to fish them, gaps"} ›</button>
-            {showDetails && <LureRec rec={rec} inventory={lures} />}
+            {showDetails && <LureRec rec={rec} inventory={lures} picks={picks} />}
           </div>
         </section>}
 
@@ -217,16 +220,19 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
   </>;
 }
 
-/** One line per owned top pick with a "+ Add" button (old _render_recommendation_with_quick_add). */
-function QuickPicks({ rec, lures, added, onAdd }) {
-  const c = curateRecommendation(rec, lures);
-  if (!c.recommended.length) return <p className="muted small">Nothing in your tackle box is a strong fit right now — see the gaps under details.</p>;
-  return <div className="qp">{c.recommended.map((b) => (
-    <div key={b.key} className="qp-b"><b>{b.name}</b>
-      {b.owned_items.map((it) => { const on = added.has(it.item_id); return (
-        <div key={it.item_id} className="qp-i"><span className="grow small">{it.brand} – {it.description}{it._item_fish_per_hour ? <span className="ok"> · {pyFixed(it._item_fish_per_hour, 1)} fish/hr for you</span> : null}</span>
-          <button className={on ? "btn small-btn" : "btn primary small-btn"} disabled={on} onClick={() => onAdd(it, b.key)}>{on ? "✓ Added" : "+ Add"}</button></div>); })}
-    </div>))}</div>;
+/** Picks (lib/picks.js) with a "+ Add" per owned item: label, the main reason, your items. */
+function QuickPicks({ picks, added, onAdd }) {
+  if (!picks || !picks.picks.length) return <p className="muted small">Nothing in your tackle box is a strong fit right now — see the details for gaps.</p>;
+  return <div className="qp">{picks.picks.map((p) => (
+    <div key={p.key} className="qp-b"><span><TierBadge tier={p.tier} /> <b>{p.block.name}</b></span>
+      <span className="muted small">{p.reasons[0]}</span>
+      {p.block.owned_items.map((it) => { const on = added.has(it.item_id); return (
+        <div key={it.item_id} className="qp-i"><span className="grow small">{it.brand} – {it.description}{it._item_fish_per_hour ? <span className="ok"> · {pyFixed(it._item_fish_per_hour, 1)} fish/hr</span> : null}</span>
+          <button className={on ? "btn small-btn" : "btn primary small-btn"} disabled={on} onClick={() => onAdd(it, p.key)}>{on ? "✓ Added" : "+ Add"}</button></div>); })}
+      {!p.block.owned_items.length && <span className="muted small">Not in your tackle box.</span>}
+    </div>))}
+    {picks.cold.length > 0 && <p className="muted small">🥶 Not producing in conditions like these: {picks.cold.map((c) => c.name).join(", ")}</p>}
+  </div>;
 }
 
 function NoSpots({ db, toast }) {
@@ -323,7 +329,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
     <div className="dock dock2"><button className="btn primary big" onClick={() => setConfirm({ text: `End this session? ${totalFish} fish will be saved.`, ok: "End session", run: end })}>■ End session</button>
       <button className="btn danger" onClick={() => setConfirm({ text: "Cancel this session? Everything logged in it (lures and fish) will be deleted. This can't be undone.", ok: "Delete session", danger: true, run: () => onCancel(rows.map((r) => r.trip_id)) })}>Cancel</button></div>
     <FishSheet lure={fishFor} onClose={() => setFishFor(null)} onSave={(f) => logFish(fishFor, f)} />
-    <AddLureSheet open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
+    <AddLureSheet me={me} open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
     <MoveSheet open={moving} onClose={() => setMoving(false)} rows={rows} setRows={setRows} base={base} current={current} spots={spots} bundle={bundle} weights={weights} locAdj={locAdj} me={me} toast={toast} />
     <Sheet open={!!confirm} title="Are you sure?" onClose={() => setConfirm(null)}>
       {confirm && <div className="setup"><p>{confirm.text}</p>
@@ -333,7 +339,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
   </>;
 }
 
-function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds }) {
+function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me }) {
   const [tackle, setTackle] = useState(false);
   const [trailerFor, setTrailerFor] = useState(null);
   const rec = useMemo(() => {
@@ -343,13 +349,15 @@ function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weig
       structure_type: current.structure_type, water_clarity: current.water_clarity, fish_depth_ft: base.fish_depth_ft || null, forage: base.forage_seen,
       inventory: lures, trip_history: trips, spot_id: current.spot_id, fish_activity: base.fish_activity, forage_activity: base.forage_activity, wind_mph: windMphForBand(base.wind_band) });
   }, [open, lures, trips, base, current, bundle, weights, locAdj]);
+  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: base.water_temp_f, water_clarity: current.water_clarity,
+    segment_name: current.segment, structure_type: current.structure_type, spot_id: current.spot_id, wind_band: base.wind_band, me: me.email, fish_depth_ft: base.fish_depth_ft || null } }) : null), [rec]);
   const pick = (item, category) => { const stub = { label: S.itemLabel(item), category, item_id: item.item_id }; if (S.canTakeTrailer({ category })) setTrailerFor(stub); else onAdd(stub); };
   return <>
     <Sheet open={open && !tackle && !trailerFor} title="Add a lure" onClose={onClose}>
       <div className="setup">
         <button className="btn wide" onClick={() => setTackle(true)}>Search the tackle box</button>
         <div className="lr-h">Suggested for right now</div>
-        {rec ? <QuickPicks rec={rec} lures={lures} added={openIds} onAdd={pick} /> : <p className="muted">Loading…</p>}
+        {picks ? <QuickPicks picks={picks} added={openIds} onAdd={pick} /> : <p className="muted">Loading…</p>}
       </div>
     </Sheet>
     <LurePicker open={open && tackle} onClose={() => setTackle(false)} inventory={lures} already={openIds} onPick={(s) => { setTackle(false); onAdd(s); }} />

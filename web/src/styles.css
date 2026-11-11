@@ -268,3 +268,9 @@ button.card.hist { display: block; width: 100%; text-align: left; padding: 0; }
 .live-card .live-dot { color: var(--good); }
 .others-line { display: block; width: 100%; text-align: left; font-size: 13px; }
 .three .award .v { font-size: 15px; font-family: inherit; white-space: nowrap; }
+.tier { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; vertical-align: 2px; margin-right: 4px; }
+.tier-proven { background: var(--accent); color: var(--on-accent); }
+.tier-steady { background: var(--good); color: var(--on-accent); }
+.tier-seasonal { background: var(--band); color: var(--text-2); border: 1px solid var(--line); }
+.tier-try { background: transparent; color: var(--warn); border: 1px dashed var(--warn); }
+.lure-bare { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }

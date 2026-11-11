@@ -34,7 +34,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 ## Plan (order agreed 11-10)
 1. Foundation (done 11-10: scaffold, theme, sign-in + fm_users, Pages workflow). 2. Port the engine (scoring, lures,
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
-4. Spot Session + Trip History (both done 11-10). Then lure picks v2 (personal, similarity/recency-weighted, proven + seasonal + worth-a-try, with reasons) and more per-angler personalization (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
+4. Spot Session + Trip History (both done 11-10). Lure picks v2 done 11-10. More per-angler personalization as screens come over (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
 6. Lake Map (Leaflet satellite; bathymetry precomputed in Python, shipped static). 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ one-time GitHub Action copying the 80 Cabela's lure images into the bucket),
@@ -84,6 +84,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`, incl. Ned Rig `ned_rig` added 11-10) — the rig is the
   lure_category the picks learn from. Walk-through: `python3 web/tools/session_flow.py OUTDIR` (demo seeds an open
   session for the demo angler, so it exercises Live, cancels, then Setup).
+- Lure picks v2 (`lib/picks.js` + `picks.test.js`, John 11-10, NEW APP ONLY — core/lures.py unchanged): recommend()
+  still supplies the Nolin seasonal pattern; buildPicks() ranks by similarity-weighted personal history: each lure
+  stretch weighted by water temp (σ10 °F), time of year (σ35 days, any year), recency (half-life 540 d), clarity,
+  time of day, structure, same spot ×1.4, wind band, and you vs other anglers (others ×0.7); stretches count ≥0.5 h
+  (some were logged with seconds-long times); rates shrunk toward your weighted average with 2 "similar hours".
+  Tiers: Proven (eff ≥2 h, >1.2× average), Steady (≥5 sessions, catches fish in ≥60–75% of similar sessions — the
+  drop shot), Seasonal (pattern first choices), Worth a try (in the pattern, <2.5 similar h); "not producing" =
+  ≥2.5 similar h and rarely any fish. Used in Forecast (`LureRec picks`) and Session quick-add (`QuickPicks`).
+  Checked on the real log locally (Nov morning 55 °F: ChatterBait + jerkbait Proven, drop shot Steady).
 - Fishing together (John 11-10): in Session setup, another angler's open session today offers "Fishing with X?" → use
   their spot + all conditions (sources `shared:<angler>`), my rows get `conditions.group_id` = their group (anchor =
   first session's id). Every start/move/conditions change stamps `conditions_set_at`; in Live each member polls every

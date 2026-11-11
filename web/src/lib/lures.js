@@ -156,7 +156,7 @@ export function itemLabel(it) {
   const label = [(it.brand || "").trim(), (it.description || "").trim()].filter(Boolean).join(" - ");
   return label || it.item_id || "";
 }
-function groupOwnedByCategory(inventory) {
+export function groupOwnedByCategory(inventory) {
   const g = {};
   for (const row of inventory || []) {
     const cat = (row.category || "").trim();
@@ -170,7 +170,7 @@ function groupOwnedByCategory(inventory) {
 }
 export const findInventoryGaps = (inv) => { const o = groupOwnedByCategory(inv); return Object.keys(LURE_PROFILES).filter((k) => !(k in o)); };
 
-function buildBlock(key, clarity, fishDepth = null, { note = "", owned = null, why = null, history = null, situation = null } = {}) {
+export function buildBlock(key, clarity, fishDepth = null, { note = "", owned = null, why = null, history = null, situation = null } = {}) {
   const p = LURE_PROFILES[key];
   const colors = p.colors[clarity] || p.colors[DEFAULT_BASE_STAIN];
   const trailer = p.trailer ? { type: p.trailer.type, colors: p.trailer.colors[clarity] || p.trailer.colors[DEFAULT_BASE_STAIN] } : null;

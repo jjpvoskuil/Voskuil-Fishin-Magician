@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import LureRec from "./LureRec.jsx";
+import { buildPicks } from "./lib/picks.js";
 import { LakeSetupForm, resolveSetup, setupSummary } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, ago, fmtTime, signed } from "./ui.jsx";
 import { calibrateWeights } from "./lib/calibration.js";
@@ -15,7 +16,7 @@ import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 
 const dayLabel = (d, opts) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
 
-export default function ForecastScreen({ active, demo, onMenu, db, weather, trips, lures, spots, setup, setSetup }) {
+export default function ForecastScreen({ active, demo, onMenu, db, me, weather, trips, lures, spots, setup, setSetup }) {
   const today = lakeToday();
   const [frozen, setFrozen] = useState(null);
   const [pick, setPick] = useState(today);
@@ -54,6 +55,8 @@ export default function ForecastScreen({ active, demo, onMenu, db, weather, trip
       inventory: lures, trip_history: trips, wind_mph: day.weather_summary.avg_wind_mph });
   }, [day, seg, lures, trips, effSeason, effTemp, r.structure, r.clarity, r.fishDepth, r.forage]);
 
+  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: effTemp, water_clarity: r.clarity, segment_name: seg?.name,
+    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: me?.email, fish_depth_ft: r.fishDepth } }) : null), [rec, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth]);
   const ws = day?.weather_summary;
   return (
     <div className="screen" hidden={!active} id="screen-forecast">
@@ -124,7 +127,7 @@ export default function ForecastScreen({ active, demo, onMenu, db, weather, trip
                 ))}
               </div>
               <p className="muted small" style={{ margin: "8px 0 10px" }}>{seg.name}: {fmtTime(seg.start)} – {fmtTime(seg.end)}</p>
-              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={rec} inventory={lures} />}
+              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={rec} inventory={lures} picks={picks} />}
             </div>
           </section>
           <p className="muted small" style={{ textAlign: "center", margin: "0 8px" }}>Scores are 1 (least active) to 10 (most active), built from pressure trend, moon phase, solunar windows, cloud cover, wind, and season.</p>
