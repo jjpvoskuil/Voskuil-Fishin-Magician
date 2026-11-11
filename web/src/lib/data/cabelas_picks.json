@@ -1,0 +1,370 @@
+{
+ "football_jig": [
+  {
+   "sku": "4139649",
+   "brand": "VMC",
+   "description": "VMC Weedless Football Jig - Pumpkin Brown Black - 1/2 oz.",
+   "price": 4.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4139649.json"
+  },
+  {
+   "sku": "4139648",
+   "brand": "VMC",
+   "description": "VMC Weedless Football Jig - Green Pumpkin Orange - 1/2 oz.",
+   "price": 4.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4139648.json"
+  }
+ ],
+ "suspending_jerkbait": [
+  {
+   "sku": "4294036",
+   "brand": "XPS",
+   "description": "Bass Pro Shops XPS Staredown Suspending Jerkbait - Chartreuse Ice - 3-7/8\" - Max Diving Depth 7'",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4294036.json"
+  },
+  {
+   "sku": "4294041",
+   "brand": "XPS",
+   "description": "Bass Pro Shops XPS Staredown Suspending Jerkbait - Coldwater Shad - 4-1/3\" - Max Diving Depth 7'",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4294041.json"
+  }
+ ],
+ "blade_bait": [
+  {
+   "sku": "4261489",
+   "brand": "SteelShad",
+   "description": "SteelShad Original Series Blade Bait",
+   "price": 11.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4261489.json"
+  },
+  {
+   "sku": "4261488",
+   "brand": "SteelShad",
+   "description": "SteelShad Mini Series Blade Bait",
+   "price": 13.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4261488.json"
+  }
+ ],
+ "lipless_crankbait": [
+  {
+   "sku": "3227729",
+   "brand": "Rapala",
+   "description": "Rapala Rippin' Rap Rattling Lipless Crankbait - 2-1/2\" - Moldy Fruit",
+   "price": 8.19,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3227729.json"
+  },
+  {
+   "sku": "3227730",
+   "brand": "Rapala",
+   "description": "Rapala Rippin' Rap Rattling Lipless Crankbait - 2-1/2\" - Voodoo Haze",
+   "price": 8.19,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3227730.json"
+  }
+ ],
+ "chatterbait": [
+  {
+   "sku": "4498552",
+   "brand": "Z-Man",
+   "description": "Z-Man ChatterBait MicroMax Bladed Jig - Spot Remover - 3/16 oz.",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4498552.json"
+  },
+  {
+   "sku": "4498553",
+   "brand": "Z-Man",
+   "description": "Z-Man ChatterBait MicroMax Bladed Jig - Fire Craw - 3/16 oz.",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4498553.json"
+  }
+ ],
+ "squarebill_crankbait": [
+  {
+   "sku": "2778169",
+   "brand": "BOOYAH",
+   "description": "BOOYAH XCS Squarebill Crankbait - 2-5/16\" - Tennessee Special",
+   "price": 6.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2778169.json"
+  },
+  {
+   "sku": "2778168",
+   "brand": "BOOYAH",
+   "description": "BOOYAH XCS Squarebill Crankbait - 2-5/16\" - Citrus Shad",
+   "price": 6.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2778168.json"
+  }
+ ],
+ "medium_diving_crankbait": [
+  {
+   "sku": "1007408",
+   "brand": "Storm",
+   "description": "STORM ThunderCraw Crankbait - 2-3/4\" - Phantom Brown Crayfish",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1007408.json"
+  },
+  {
+   "sku": "1007407",
+   "brand": "Storm",
+   "description": "STORM ThunderCraw Crankbait - 2-3/4\" - Brown Crayfish",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1007407.json"
+  }
+ ],
+ "deep_diving_crankbait": [
+  {
+   "sku": "2774976",
+   "brand": "Strike King",
+   "description": "Strike King Pro Model Crankbait 8XD Series - 3-1/2\" - The Shizzle",
+   "price": 17.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2774976.json"
+  },
+  {
+   "sku": "1973843",
+   "brand": "Strike King",
+   "description": "Strike King Pro Model Crankbait - 10XD Series - 4\" - Sexy Shad",
+   "price": 18.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1973843.json"
+  }
+ ],
+ "texas_rig_creature": [
+  {
+   "sku": "2449321",
+   "brand": "Berkley PowerBait MaxScent",
+   "description": "Berkley PowerBait MaxScent Creature Hawg - 4\" - Watermelon Red Magic",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2449321.json"
+  },
+  {
+   "sku": "2449320",
+   "brand": "Berkley PowerBait MaxScent",
+   "description": "Berkley PowerBait MaxScent Creature Hawg - 4\" - South African Special",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2449320.json"
+  }
+ ],
+ "texas_rig_worm": [
+  {
+   "sku": "626292",
+   "brand": "Gambler",
+   "description": "Gambler Ribbon Tail Worm - 10\" - Red Shad Green Flake",
+   "price": 5.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/626292.json"
+  },
+  {
+   "sku": "626278",
+   "brand": "Gambler",
+   "description": "Gambler Ribbon Tail Worm - 10\" - Junebug",
+   "price": 5.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/626278.json"
+  }
+ ],
+ "wacky_rig_senko": [
+  {
+   "sku": "4111580",
+   "brand": "Yamamoto Baits",
+   "description": "Yamamoto Baits Fat Senko - Watermelon/Copper, Orange, Red - 4\"",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4111580.json"
+  },
+  {
+   "sku": "4111577",
+   "brand": "Yamamoto Baits",
+   "description": "Yamamoto Baits Fat Senko - Black/Blue Flake - 4\"",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4111577.json"
+  }
+ ],
+ "weightless_soft_plastic": [
+  {
+   "sku": "4523092",
+   "brand": "Zoom",
+   "description": "Zoom Winged Fluke - Biwako Wagasaki - 6-1/2\"",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4523092.json"
+  },
+  {
+   "sku": "4523091",
+   "brand": "Zoom",
+   "description": "Zoom Winged Fluke - Silver Shad - 6-1/2\"",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4523091.json"
+  }
+ ],
+ "spinnerbait": [
+  {
+   "sku": "2922221",
+   "brand": "BOOYAH",
+   "description": "BOOYAH Pikee Spinnerbait - 1/2 oz. - Red Craw",
+   "price": 8.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2922221.json"
+  },
+  {
+   "sku": "1635342",
+   "brand": "BOOYAH",
+   "description": "BOOYAH Pikee Spinnerbait - 1/2 oz. - Perch",
+   "price": 8.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1635342.json"
+  }
+ ],
+ "swim_jig": [
+  {
+   "sku": "3233447",
+   "brand": "Berkley",
+   "description": "Berkley F19 Swim Jig - 3/8 oz. - White",
+   "price": 5.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3233447.json"
+  },
+  {
+   "sku": "3233452",
+   "brand": "Berkley",
+   "description": "Berkley F19 Swim Jig - 1/2 oz. - White",
+   "price": 5.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3233452.json"
+  }
+ ],
+ "carolina_rig": [
+  {
+   "sku": "2046207",
+   "brand": "Gambler",
+   "description": "Gambler Ribbon Tail Worm - 7\" - Watermelon/Red Flake",
+   "price": 5.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2046207.json"
+  },
+  {
+   "sku": "2046206",
+   "brand": "Gambler",
+   "description": "Gambler Ribbon Tail Worm - 10\" - Watermelon/Red Flake",
+   "price": 5.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2046206.json"
+  }
+ ],
+ "buzzbait": [
+  {
+   "sku": "2588616",
+   "brand": "BOOYAH",
+   "description": "Booyah Squelcher Buzzbait - 1/2 oz. - Silver White",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2588616.json"
+  },
+  {
+   "sku": "2588622",
+   "brand": "BOOYAH",
+   "description": "Booyah Squelcher Buzzbait - 3/8 oz. - Silver White",
+   "price": 9.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2588622.json"
+  }
+ ],
+ "walking_topwater": [
+  {
+   "sku": "2388307",
+   "brand": "Livingston Lures",
+   "description": "Livingston Lures Walking Boss II Magnum Topwater - 8\" - Matte Tiger",
+   "price": 31.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2388307.json"
+  },
+  {
+   "sku": "2388310",
+   "brand": "Livingston Lures",
+   "description": "Livingston Lures Walking Boss II Magnum Topwater - 8\" - Black Perch",
+   "price": 31.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/2388310.json"
+  }
+ ],
+ "popper": [
+  {
+   "sku": "942308",
+   "brand": "Rebel",
+   "description": "Rebel CrickHopper Popper - Firetiger",
+   "price": 6.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/942308.json"
+  },
+  {
+   "sku": "10021806",
+   "brand": "Arbogast",
+   "description": "Arbogast Hula Popper - 2\" - Yellow",
+   "price": 7.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/10021806.json"
+  }
+ ],
+ "hollow_body_frog": [
+  {
+   "sku": "4532645",
+   "brand": "LIVETARGET",
+   "description": "LIVETARGET Hollow-Body Frog - Black/Black - 2\"",
+   "price": 11.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4532645.json"
+  },
+  {
+   "sku": "4532650",
+   "brand": "LIVETARGET",
+   "description": "LIVETARGET Hollow-Body Frog - Emerald/Brown - 2-1/2\"",
+   "price": 11.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/4532650.json"
+  }
+ ],
+ "finesse_shaky_head": [
+  {
+   "sku": "389934",
+   "brand": "Zoom",
+   "description": "Zoom Finesse Worm - June Bug",
+   "price": 5.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/389934.json"
+  },
+  {
+   "sku": "389944",
+   "brand": "Zoom",
+   "description": "Zoom Finesse Worm - Green Pumpkin",
+   "price": 5.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/389944.json"
+  }
+ ],
+ "drop_shot": [
+  {
+   "sku": "1002026",
+   "brand": "Chompers",
+   "description": "Chompers Drop Shot Worms - Plum",
+   "price": 3.29,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1002026.json"
+  },
+  {
+   "sku": "952297",
+   "brand": "Chompers",
+   "description": "Chompers Drop Shot Worms - Watermelon/Red Flake",
+   "price": 3.29,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/952297.json"
+  }
+ ],
+ "soft_swimbait": [
+  {
+   "sku": "1903409",
+   "brand": "Bass Pro Shops",
+   "description": "Bass Pro Shops Paddle Tail Shad - Smokin Shad",
+   "price": 4.29,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1903409.json"
+  },
+  {
+   "sku": "1903405",
+   "brand": "Bass Pro Shops",
+   "description": "Bass Pro Shops Paddle Tail Shad - White Pearl",
+   "price": 4.29,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/1903405.json"
+  }
+ ],
+ "spoon": [
+  {
+   "sku": "3852197",
+   "brand": "Bass Pro Shops",
+   "description": "Bass Pro Shops RealImage Jigging Spoon - 2-1/2\" - 3/4 oz. - McMuffin Glow in Dark",
+   "price": 5.49,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3852197.json"
+  },
+  {
+   "sku": "3474739",
+   "brand": "Cotton Cordell",
+   "description": "Cotton Cordell CC Spoon - 2-1/8\" - 1/2 oz.",
+   "price": 4.99,
+   "image_url": "https://assets.basspro.com/image/list/fn_select:jq:first(.%5B%5D%7Cselect(.public_id%20%7C%20endswith(%22main%22)))/3474739.json"
+  }
+ ]
+}

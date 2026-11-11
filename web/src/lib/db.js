@@ -9,8 +9,13 @@ export const nowIso = () => new Date().toISOString();
 export const lower = (e) => (e || "").trim().toLowerCase();
 
 // ---------------------------------------------------------------- Supabase
+const URL_SECONDS = 6 * 3600;
+const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
+
 export function supabaseDb(sb, email) {
   const me = lower(email);
+  const bucket = () => sb.storage.from("fm-lures");
+  const urlCache = new Map(); // path -> {url, until}
   const ok = (r) => { if (r.error) throw new Error(r.error.message); return r.data; };
   return {
     kind: "supabase", email: me,
@@ -42,6 +47,37 @@ export function supabaseDb(sb, email) {
     listSpots: async () => ok(await sb.from("fm_spots").select("id,data").order("id")).map((r) => ({ ...r.data, spot_id: r.id })),
     saveSpot: async (sp) => ok(await sb.from("fm_spots").upsert({ id: sp.spot_id, data: sp })),
     deleteSpot: async (id) => ok(await sb.from("fm_spots").delete().eq("id", id)),
+    // tackle-box photos (private bucket fm-lures)
+    /** Upload {full, thumb} JPEGs for a lure → {image_path, thumb_path}. */
+    async uploadLurePhoto(itemId, { full, thumb }) {
+      const stem = `lures/${itemId}-${rnd()}`;
+      ok(await bucket().upload(`${stem}.jpg`, full, { contentType: "image/jpeg" }));
+      ok(await bucket().upload(`${stem}_thumb.jpg`, thumb, { contentType: "image/jpeg" }));
+      return { image_path: `${stem}.jpg`, thumb_path: `${stem}_thumb.jpg` };
+    },
+    removePhotos: async (paths) => { const p = paths.filter(Boolean); if (p.length) ok(await bucket().remove(p)); },
+    /** Temporary private links for photos: {path: url}, cached until shortly before they expire. */
+    async photoUrls(paths) {
+      const want = [...new Set(paths.filter(Boolean))], now = Date.now();
+      const missing = want.filter((p) => !(urlCache.get(p)?.until > now));
+      for (let i = 0; i < missing.length; i += 100) {
+        const res = ok(await bucket().createSignedUrls(missing.slice(i, i + 100), URL_SECONDS));
+        for (const r of res) if (r.signedUrl) urlCache.set(r.path, { url: r.signedUrl, until: now + (URL_SECONDS - 600) * 1000 });
+      }
+      return Object.fromEntries(want.filter((p) => urlCache.has(p)).map((p) => [p, urlCache.get(p).url]));
+    },
+    /** Claude reads a lure photo (fm-lure-scan Edge Function) → {visible, brand, product_name, color, size, lure_type, search_query, notes} */
+    async scanLure(image_b64, media_type = "image/jpeg") {
+      const { data, error } = await sb.functions.invoke("fm-lure-scan", { body: { image_b64, media_type } });
+      if (error) {
+        let msg = error.message;
+        try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch { /* keep the generic message */ }
+        if (/Failed to send|not found|404/i.test(msg)) msg = "The lure scanner isn't set up yet (Edge Function fm-lure-scan).";
+        throw new Error(msg);
+      }
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
     /** Army Corps report page HTML, through the fm-usace-wq Edge Function */
     usaceHtml: async () => { const { data, error } = await sb.functions.invoke("fm-usace-wq"); if (error) throw new Error(error.message); if (data?.error) throw new Error(data.error); return data.html; },
   };
@@ -81,6 +117,17 @@ export function demoDb(seed, email = "demo@example.com") {
     listLures: async () => clone(st.lures || []),
     saveLure: async (l) => up((st.lures ||= []), clone(l), "item_id"),
     deleteLure: async (id) => del(st.lures || [], (l) => l.item_id === id),
+    // photos: the thumbnail is kept in this browser as a data URL (full size isn't needed for the demo)
+    async uploadLurePhoto(itemId, { thumb }) {
+      const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(thumb); });
+      const path = `lures/${itemId}-${rnd()}_thumb.jpg`; (st.photos ||= {})[path] = url; save();
+      return { image_path: path, thumb_path: path };
+    },
+    removePhotos: async (paths) => { for (const p of paths) if (st.photos) delete st.photos[p]; save(); },
+    photoUrls: async (paths) => Object.fromEntries(paths.filter((p) => st.photos?.[p]).map((p) => [p, st.photos[p]])),
+    scanLure: async () => { await new Promise((r) => setTimeout(r, 700));
+      return { visible: true, brand: "Strike King", product_name: "KVD Squarebill 1.5", color: "Sexy Shad", size: "1/2 oz", lure_type: "squarebill_crankbait",
+        search_query: "Strike King KVD Squarebill 1.5", notes: "Demo answer — the real scanner reads your photo." }; },
     listSpots: async () => clone(st.spots || []),
     saveSpot: async (sp) => up((st.spots ||= []), clone(sp), "spot_id"),
     deleteSpot: async (id) => del(st.spots || [], (sp) => sp.spot_id === id),

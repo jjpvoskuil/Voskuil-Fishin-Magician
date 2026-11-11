@@ -2,6 +2,7 @@
 // old app's render_lure_recommendation / render_lure_block. Cabela's suggestions come back with the Tackle Box screen.
 import { curateRecommendation } from "./lib/lures.js";
 import { pyFixed } from "./lib/py.js";
+import { cabelasSearchUrl, savedPicks } from "./lib/tackle.js";
 
 const lureImage = (it) => it.image_src || it.image_url || null; // own photos (image_src) arrive with the Tackle Box move
 
@@ -26,7 +27,10 @@ export function LureBlock({ block, offColor, bare }) {
       ) : block.owned_off_color_items.length > 0 ? (
         <p className="lure-note">🎣 Already in your tackle box, just not today's suggested color: {block.owned_off_color_items.slice(0, 2).map((it) => `${it.brand} – ${it.description}`).join("; ")}</p>
       ) : (
-        <p className="muted small">🛒 Not in your inventory yet — worth picking one up for this presentation.</p>
+        <div className="small">🛒 Not in your tackle box — worth picking one up for this presentation.
+          {savedPicks(block.key).map((p) => <a key={p.sku} className="gap-i" style={{ marginTop: 6 }} href={cabelasSearchUrl(`${p.brand} ${p.description}`)} target="_blank" rel="noopener noreferrer">
+            <img src={p.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" /><span className="grow">{p.description}{p.price ? ` · $${p.price.toFixed(2)}` : ""}</span><span className="link">Cabela's ›</span></a>)}
+        </div>
       )}
       <dl className="lure-facts">
         <dt>Colors</dt><dd>{block.colors.join(", ")}</dd>

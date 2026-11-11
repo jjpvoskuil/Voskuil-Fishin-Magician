@@ -25,6 +25,8 @@ CASES = [
     # Session: the demo has an open session, so these open from the live screen
     ("Session", "↻ Moved / conditions", ["Water temp (°F)", "Visibility (ft)", "Depth fish are showing on electronics (ft, optional)"]),
     ("Session", ["＋ Add a lure", "Search the tackle box"], ["Search"]),
+    ("More", ["Tackle Box"], ["Search your tackle"]),
+    ("More", ["Tackle Box", "＋ Add by hand"], ["Brand", "Name, color, size"]),
     ("More", ["Trip History", "css=button.card.hist >> nth=1", "Edit"], ["Lure", "Color", "Technique", "Notes"]),
 ]
 bad = 0

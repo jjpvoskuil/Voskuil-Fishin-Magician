@@ -15,7 +15,7 @@
 --     approved angler can add a new one; nobody can change or delete one (admins can delete).
 --   * The tackle box (fm_lures) and saved lake spots (fm_spots) are shared by all anglers, as in the old app: any
 --     approved angler can add, edit and remove them.
---   * (More tables — punch list, photos — are added here as each screen is rebuilt.)
+--   * Tackle-box photos live in the private storage bucket fm-lures (approved anglers only). (Punch list is added later.)
 
 create table if not exists public.fm_users (
   email text primary key check (email = lower(email)),
@@ -93,6 +93,21 @@ create policy "fm freeze delete" on public.fm_score_freeze for delete to authent
 
 create policy "fm lures shared" on public.fm_lures for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());
 create policy "fm spots shared" on public.fm_spots for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());
+
+-- tackle-box photos: private bucket "fm-lures" (lures/<item_id>-<random>.jpg + _thumb.jpg); approved anglers only.
+-- Wrapped so the local test database (no Supabase storage schema) can still run this file.
+do $$ declare p record; begin
+  if exists (select 1 from information_schema.schemata where schema_name = 'storage') then
+    insert into storage.buckets (id, name, public) values ('fm-lures', 'fm-lures', false) on conflict (id) do nothing;
+    for p in select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'fm-lures %' loop
+      execute format('drop policy %I on storage.objects', p.policyname);
+    end loop;
+    execute $q$create policy "fm-lures read"   on storage.objects for select to authenticated using (bucket_id = 'fm-lures' and public.fm_is_approved())$q$;
+    execute $q$create policy "fm-lures add"    on storage.objects for insert to authenticated with check (bucket_id = 'fm-lures' and public.fm_is_approved())$q$;
+    execute $q$create policy "fm-lures change" on storage.objects for update to authenticated using (bucket_id = 'fm-lures' and public.fm_is_approved()) with check (bucket_id = 'fm-lures' and public.fm_is_approved())$q$;
+    execute $q$create policy "fm-lures remove" on storage.objects for delete to authenticated using (bucket_id = 'fm-lures' and public.fm_is_approved())$q$;
+  end if;
+end $$;
 
 -- the first anglers (re-running keeps any name/role changes made in the app)
 insert into public.fm_users (email, name, role) values

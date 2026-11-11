@@ -5,6 +5,7 @@ import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
 import MoreScreen from "./MoreScreen.jsx";
 import SessionScreen from "./SessionScreen.jsx";
 import HistoryScreen from "./HistoryScreen.jsx";
+import TackleScreen from "./TackleScreen.jsx";
 import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
 import ForecastScreen from "./ForecastScreen.jsx";
@@ -120,6 +121,7 @@ export default function App() {
       {stub("map", "Lake Map", "The lake map")}
       <MoreScreen {...common} active={tab === "more" && !page} onSignOut={signOut} onOpen={setPage} />
       <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />
+      <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <TabBar tab={tab} onTab={onTab} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
