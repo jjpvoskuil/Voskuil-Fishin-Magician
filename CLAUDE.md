@@ -63,7 +63,9 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 ## Screens built
 - Today (`TodayScreen.jsx`, 11-10). Shared live data is loaded once in App (`lib/live.js`: weather + USGS cached in
   localStorage 30 min; USACE via Edge Function `fm-usace-wq` = `web/supabase/functions/fm-usace-wq/index.ts`, a plain
-  HTML proxy deployed from the Supabase dashboard; readings logged add-only to `fm_water_quality`; trips from
+  HTML proxy deployed from the Supabase dashboard (John pastes index.ts → Edge Functions → fm-usace-wq → Deploy; the USACE server omits
+  its intermediate cert, so the function ships DigiCert's public intermediate via Deno.createHttpClient + a browser-like
+  User-Agent, with 3 tries — same fix in core/lake_water_quality.py via core/certs/); readings logged add-only to `fm_water_quality`; trips from
   `fm_trips`). Sheets render through a portal on <body> (each `.screen` is its own fixed layer).
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
