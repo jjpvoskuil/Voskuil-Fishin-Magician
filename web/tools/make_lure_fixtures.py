@@ -30,7 +30,7 @@ for i in range(400):
                   "water_clarity": rng.choice(lures.WATER_CLARITY_OPTIONS), "fish_caught": rng.choice(["0", "0", "1", "2", "4", "", "z"]),
                   "biggest_fish_lb": rng.choice(["", "1.25", "3.5", "abc", None, "0"]), "lure_used": rng.choice(labels),
                   "conditions_json": json.dumps(cond)})
-seasons = ["winter", "pre_spawn", "spawn", "summer_peak", "post_spawn_summer", "fall_turnover", "fall_feed_up"]
+seasons = ["winter", "pre_spawn", "spawn", "summer_peak", "post_spawn_summer", "fall_turnover", "fall_feed_up", "late_fall"]
 cases = []
 for i in range(700):
     args = dict(season=rng.choice(seasons), water_temp_f=rng.choice([45, 55, 60, 62.5, 68, 69, 75, 84]), segment_name=rng.choice(scoring.SEGMENTS),

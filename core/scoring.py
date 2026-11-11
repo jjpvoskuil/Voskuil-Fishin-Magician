@@ -124,6 +124,9 @@ DEFAULT_WEIGHTS = {
     "wind_sweet_spot_bonus": 0.5,
     "wind_calm_or_high_penalty": -0.5,
     "season_spring_fall_bonus": 1.3,
+    # Late fall (post-turnover, 50-58F, added 2026-11-10): bass feed on shad ahead of winter - a real but slower
+    # bite than the early-fall feed-up, so roughly half its bonus.
+    "season_late_fall_bonus": 0.6,
     "season_summer_midday_penalty": -1.5,
     "season_winter_penalty": -1.0,
     "storm_penalty": -3.0,
@@ -246,9 +249,19 @@ def _dawn_moon_illumination_delta(moon: "astro.MoonPhase", w: dict) -> tuple:
     return d, note
 
 
+# 2026-11-10 (John): the fall rules used to be checked AFTER the spring "50-60F = pre_spawn" rule, so cooling
+# November water (50-60F) was labeled Pre Spawn and got the +1.3 spring/fall bonus, and 60-75F water from June to
+# early September was labeled Fall Feed Up. Fall (after day 250, ~Sep 7) is now checked first and split into
+# Fall Turnover (58-65F, no bonus) and a new Late Fall stage (50-58F, its own smaller bonus); 60-75F water between
+# June and early September is Post-Spawn/Summer.
+LATE_FALL_MAX_F = 58.0
+
+
 def season_stage(day_of_year: int, water_temp_f: float) -> str:
     if water_temp_f < 50:
         return "winter"
+    if day_of_year > 250 and water_temp_f < 65:
+        return "late_fall" if water_temp_f < LATE_FALL_MAX_F else "fall_turnover"
     if 50 <= water_temp_f < 60:
         return "pre_spawn"
     if 60 <= water_temp_f < 75 and 60 <= day_of_year <= 150:
@@ -257,8 +270,8 @@ def season_stage(day_of_year: int, water_temp_f: float) -> str:
         return "summer_peak"
     if 75 <= water_temp_f < 80:
         return "post_spawn_summer"
-    if water_temp_f < 65 and day_of_year > 250:
-        return "fall_turnover"
+    if day_of_year <= 250:
+        return "post_spawn_summer"
     return "fall_feed_up"
 
 
@@ -534,6 +547,10 @@ def _segment_score(
         d = w["season_spring_fall_bonus"]
         score += d
         breakdown.append(("Season", d, f"{season.replace('_', ' ').title()} - typically more active feeding."))
+    if season == "late_fall":
+        d = w["season_late_fall_bonus"]
+        score += d
+        breakdown.append(("Season", d, "Late Fall - bass feeding on shad ahead of winter; steadier than turnover, slower than the early-fall feed-up."))
     if season == "summer_peak" and name in ("Midday", "Afternoon"):
         d = w["season_summer_midday_penalty"]
         note = "Summer heat - fish likely pushed to deeper, cooler structure midday."

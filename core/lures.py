@@ -1082,6 +1082,17 @@ def recommend(
             "bluff walls with woody cover, worked with popping topwater, Texas rigs, and drop shot as shad "
             "move shallow/into creeks and bass feed aggressively to follow."
         )
+    elif season == "late_fall":
+        # Added 2026-11-10 (John): post-turnover late fall, ~50-58F. General late-fall bass behaviour, not a
+        # Nolin-specific published pattern: bass follow shad into creek arms and onto secondary points.
+        first_keys = ["suspending_jerkbait", "medium_diving_crankbait", "soft_swimbait"]
+        second_keys = ["football_jig", "blade_bait", "lipless_crankbait"]
+        season_reason = "Part of a general late-fall pattern (bass following shad into creek arms and onto secondary points before winter)."
+        rationale.append(
+            "Late fall (post-turnover, ~50-58F) - bass group up on shad in creek arms and on secondary points "
+            "before winter; jerkbaits, mid-depth cranks and swimbaits around bait, with a jig or blade bait when "
+            "they slow down. This is a general late-fall approach, not a Nolin-specific published pattern."
+        )
     else:  # fall_turnover
         first_keys = ["football_jig", "suspending_jerkbait", "blade_bait"]
         second_keys = ["drop_shot", "lipless_crankbait", "deep_diving_crankbait"]

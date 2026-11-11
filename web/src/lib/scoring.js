@@ -11,7 +11,7 @@ export const DEFAULT_WEIGHTS = {
   pressure_falling: 1.5, pressure_high_stable_post_front: -1.5, pressure_rising_slow: -0.4,
   moon_new_full_bonus: 0.6, moon_quarter_penalty: -0.5, moon_dawn_new_bonus: 0.85, moon_dawn_full_penalty: -0.5,
   cloud_overcast_bonus: 1.0, cloud_clear_sky_penalty: -0.8, wind_sweet_spot_bonus: 0.5, wind_calm_or_high_penalty: -0.5,
-  season_spring_fall_bonus: 1.3, season_summer_midday_penalty: -1.5, season_winter_penalty: -1.0, storm_penalty: -3.0,
+  season_spring_fall_bonus: 1.3, season_late_fall_bonus: 0.6, season_summer_midday_penalty: -1.5, season_winter_penalty: -1.0, storm_penalty: -3.0,
   solunar_major_bonus: 0.6, solunar_minor_bonus: 0.3, precip_light_rain_bonus: 0.6,
   water_temp_cold_penalty: -1.0, water_temp_prespawn_bonus: 0.3, water_temp_prime_bonus: 1.0, water_temp_hot_floor_penalty: -1.5,
   water_clarity_stained_bonus: 0.4, water_clarity_muddy_penalty: -0.3, forage_present_bonus: 0.3,
@@ -31,13 +31,16 @@ function dawnMoonIlluminationDelta(moon, w) {
   return [d, `Moon was ~${pyFixed(illum, 0)}% illuminated last night - dawn/morning activity has tracked better on darker nights this season.`];
 }
 
+export const LATE_FALL_MAX_F = 58.0;
+/** Fall (after day 250) is checked before the spring rules (fixed 2026-11-10, as in the Python). */
 export function seasonStage(doy, t) {
   if (t < 50) return "winter";
+  if (doy > 250 && t < 65) return t < LATE_FALL_MAX_F ? "late_fall" : "fall_turnover";
   if (t >= 50 && t < 60) return "pre_spawn";
   if (t >= 60 && t < 75 && doy >= 60 && doy <= 150) return "spawn";
   if (t >= 80) return "summer_peak";
   if (t >= 75 && t < 80) return "post_spawn_summer";
-  if (t < 65 && doy > 250) return "fall_turnover";
+  if (doy <= 250) return "post_spawn_summer";
   return "fall_feed_up";
 }
 export function effectiveSeasonAndTemp(day, override = null) {
@@ -91,6 +94,7 @@ export function segmentScore(name, pTrend, moon, overlap, avgCloud, avgWind, sea
   if (avgWind >= 4 && avgWind <= 14) add("Wind", w.wind_sweet_spot_bonus, "Light-moderate wind/chop - good for reaction baits and windblown banks.");
   else if (avgWind < 2 || avgWind > 20) add("Wind", w.wind_calm_or_high_penalty, "Dead calm or very strong wind.", false);
   if (["spawn", "pre_spawn", "fall_feed_up"].includes(season)) add("Season", w.season_spring_fall_bonus, `${titleWords(season)} - typically more active feeding.`, false);
+  if (season === "late_fall") add("Season", w.season_late_fall_bonus, "Late Fall - bass feeding on shad ahead of winter; steadier than turnover, slower than the early-fall feed-up.", false);
   if (season === "summer_peak" && (name === "Midday" || name === "Afternoon")) add("Season", w.season_summer_midday_penalty, "Summer heat - fish likely pushed to deeper, cooler structure midday.");
   if (season === "winter") add("Season", w.season_winter_penalty, "Winter - slower metabolism.", false);
   if (totalPrecip > 1.0 || maxPrecipProb > 85) add("Precipitation", w.storm_penalty, "Storm-level rain - unfavorable, and unsafe to be out in.", false);

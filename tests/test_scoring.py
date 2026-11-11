@@ -641,3 +641,24 @@ def test_aggregate_day_overall_matches_averaging_each_segments_raw_total_before_
 
 def test_aggregate_day_overall_returns_neutral_default_for_no_segments():
     assert aggregate_day_overall([]) == (5.0, [])
+
+
+def test_season_stage_fall_is_not_labeled_pre_spawn_and_late_fall_exists():
+    """2026-11-10 (John): cooling November water used to come out "pre_spawn" (+1.3)."""
+    from core.scoring import season_stage, score_day  # noqa: F401
+    assert season_stage(310, 55.0) == "late_fall"        # Nov 6, 55F
+    assert season_stage(300, 60.0) == "fall_turnover"    # Oct 27, 60F
+    assert season_stage(300, 57.9) == "late_fall"
+    assert season_stage(300, 49.9) == "winter"
+    assert season_stage(100, 55.0) == "pre_spawn"        # spring unchanged
+    assert season_stage(120, 65.0) == "spawn"
+    assert season_stage(160, 72.0) == "post_spawn_summer"  # early June used to be "fall_feed_up"
+    assert season_stage(280, 70.0) == "fall_feed_up"
+    assert season_stage(200, 85.0) == "summer_peak"
+
+
+def test_late_fall_gets_its_own_smaller_bonus():
+    from core.scoring import manual_segment_score, DEFAULT_WEIGHTS
+    r = manual_segment_score("Morning", "late_fall", 45.0, 6.5, at_time=__import__("datetime").datetime(2026, 11, 10, 9))
+    season_rows = [b for b in r.breakdown if b[0] == "Season"]
+    assert season_rows and season_rows[0][1] == DEFAULT_WEIGHTS["season_late_fall_bonus"] == 0.6

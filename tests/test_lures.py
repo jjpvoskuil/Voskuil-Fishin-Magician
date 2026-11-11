@@ -45,7 +45,7 @@ def test_no_lure_appears_in_both_lists():
 
 
 def test_all_seasons_and_segments_produce_recommendations():
-    seasons = ["winter", "pre_spawn", "spawn", "post_spawn_summer", "summer_peak", "fall_feed_up", "fall_turnover"]
+    seasons = ["winter", "pre_spawn", "spawn", "post_spawn_summer", "summer_peak", "fall_feed_up", "fall_turnover", "late_fall"]
     segments = ["Dawn", "Morning", "Midday", "Afternoon", "Dusk", "Night"]
     for season in seasons:
         for seg in segments:
@@ -56,7 +56,7 @@ def test_all_seasons_and_segments_produce_recommendations():
 
 
 def test_crankbait_jerkbait_topwater_show_up_broadly():
-    seasons = ["winter", "pre_spawn", "spawn", "post_spawn_summer", "summer_peak", "fall_feed_up", "fall_turnover"]
+    seasons = ["winter", "pre_spawn", "spawn", "post_spawn_summer", "summer_peak", "fall_feed_up", "fall_turnover", "late_fall"]
     segments = ["Dawn", "Morning", "Midday", "Afternoon", "Dusk", "Night"]
     crank_hits = jerk_hits = topwater_hits = total = 0
     for season in seasons:

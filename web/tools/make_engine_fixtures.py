@@ -105,7 +105,7 @@ def main():
     # onwater / thermocline grids
     temps = [x / 2 for x in range(60, 200)] + [49.999, 50.0, 62.0, 62.5, 63.0, 76.0, 76.5, 84.0, 84.0005, 84.001]
     fx["water_temp_band"] = [[t, onwater.water_temp_band(t)["label"]] for t in temps]
-    fx["season_stage"] = [[doy, t, scoring.season_stage(doy, t)] for doy in (30, 60, 100, 150, 151, 200, 250, 251, 300, 350) for t in (45, 50, 55, 59.9, 60, 64.9, 65, 70, 74.9, 75, 79.9, 80, 90)]
+    fx["season_stage"] = [[doy, t, scoring.season_stage(doy, t)] for doy in (30, 60, 100, 150, 151, 200, 250, 251, 300, 350) for t in (45, 50, 55, 57.9, 58, 59.9, 60, 64.9, 65, 70, 74.9, 75, 79.9, 80, 90)]
     fx["wind_band"] = [[m, onwater.wind_band(m)["label"]] for m in [0, 1, 3, 3.5, 4, 9, 9.5, 10, 16, 16.5, 17, 30]]
     fx["wind_dir"] = [[deg, onwater.wind_direction_for_degrees(deg)] for deg in [0, 22.4, 22.5, 44.9, 45, 180, 337.4, 337.5, 359.9, 360, 725, -10]]
     fx["light"] = [[c, onwater.light_condition_for_cloud_pct(c)] for c in [0, 12.5, 13, 32.5, 33, 60, 61, 85, 86, 100]]
@@ -116,7 +116,7 @@ def main():
 
     # segment scores over many combinations
     fx["segment"] = []
-    seasons = ["winter", "pre_spawn", "spawn", "summer_peak", "post_spawn_summer", "fall_turnover", "fall_feed_up"]
+    seasons = ["winter", "pre_spawn", "spawn", "summer_peak", "post_spawn_summer", "fall_turnover", "fall_feed_up", "late_fall"]
     clarities = [None, "Clear", "Green stained", "Brown stained", "Muddy"]
     for i in range(500):
         moon_t = t0 + timedelta(days=rng.uniform(0, 300))
