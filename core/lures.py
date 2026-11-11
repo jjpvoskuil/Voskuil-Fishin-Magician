@@ -230,8 +230,8 @@ LURE_PROFILES = {
             "Muddy": ["Firetiger", "Solid chartreuse"],
         },
         "trailer": None,
-        "depth_range_ft": (2, 10), "depth_style": "burned over grass flats/humps",
-        "presentation": "Steady burn over grass with occasional bottom contact, or yo-yo (rip it free, let it flutter back down) when fish are less aggressive - most bites come on the flutter fall.",
+        "depth_range_ft": (2, 10), "depth_style": "burned over flats, humps and rock",
+        "presentation": "Steady burn over flats and humps, ticking rock and gravel on the way, or yo-yo (rip it free, let it flutter back down) when fish are less aggressive - most bites come on the flutter fall.",
     },
     "chatterbait": {
         "name": "Chatterbait (Bladed Jig)",
@@ -252,8 +252,8 @@ LURE_PROFILES = {
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
-        "depth_range_ft": (1, 6), "depth_style": "swum just above grass/cover",
-        "presentation": "Steady retrieve just above cover so it ticks the tops of grass/wood; occasional rip-and-fall when it hangs up triggers reaction strikes.",
+        "depth_range_ft": (1, 6), "depth_style": "swum just above rock/wood cover",
+        "presentation": "Steady retrieve just above cover so it ticks the tops of rock, stumps and wood; occasional rip-and-fall when it hangs up triggers reaction strikes.",
     },
     "squarebill_crankbait": {
         "name": "Squarebill Crankbait",
@@ -323,7 +323,7 @@ LURE_PROFILES = {
         },
         "trailer": None,
         "depth_range_ft": (2, 10), "depth_style": "dragged along shoreline cover",
-        "presentation": "Cast past cover, drag/hop it along the bottom back to the boat, pausing over wood or grass edges.",
+        "presentation": "Cast past cover, drag/hop it along the bottom back to the boat, pausing over wood, stumps and rock edges.",
     },
     "wacky_rig_senko": {
         "name": "Wacky-Rigged Senko",
@@ -373,7 +373,7 @@ LURE_PROFILES = {
             },
         },
         "depth_range_ft": (1, 10), "depth_style": "depending on retrieve speed/slow-roll depth",
-        "presentation": "Slow-roll along the bottom near cover in cold/tough conditions, or burn it just under the surface over grass when fish are active.",
+        "presentation": "Slow-roll along the bottom near cover in cold/tough conditions, or burn it just under the surface over flats and points when fish are active.",
     },
     "swim_jig": {
         "name": "Swim Jig",
@@ -394,7 +394,7 @@ LURE_PROFILES = {
                 "Muddy": ["Black", "Chartreuse"],
             },
         },
-        "depth_range_ft": (1, 6), "depth_style": "through/over grass and wood",
+        "depth_range_ft": (1, 6), "depth_style": "through/over wood and timber",
         "presentation": "Steady swim just fast enough to keep it ticking the top of cover; pause briefly when it deflects off wood to trigger a reaction bite.",
     },
     "carolina_rig": {
@@ -823,7 +823,12 @@ def find_inventory_gaps(inventory: list) -> list:
     sorted some other way, so the Tackle Box page's gap-filling section
     reads as a sensible priority list."""
     owned = _group_owned_by_category(inventory)
-    return [key for key in LURE_PROFILES if key not in owned]
+    return [key for key in LURE_PROFILES if key not in owned and key not in NOT_SUGGESTED_ON_NOLIN]
+
+
+# John 11-10: Nolin is rocky with almost no vegetation, so grass/mat-only lures are never suggested as a gap
+# (the type stays valid so a frog you already own can still be tagged and logged).
+NOT_SUGGESTED_ON_NOLIN = {"hollow_body_frog"}
 
 
 @dataclass
@@ -1133,7 +1138,7 @@ def recommend(
     structure_notes = {
         "Main-lake point": "Fan-cast the point from shallow to deep, focus on the fastest breakline.",
         "Creek channel / ledge": "Idle/graph to find the ledge lip, then work baits parallel to it.",
-        "Cove / pocket (shallow cover)": "Target isolated wood, laydowns, and grass clumps inside the cove.",
+        "Cove / pocket (shallow cover)": "Target isolated wood, laydowns, stumps and rock inside the cove.",
         "Flat": "Cover water efficiently - flats reward moving baits (spinnerbait, swim jig, crank).",
         "Standing timber": "Vertical presentations (jig, drop shot) worked tight to individual trees.",
         "Riprap / dam face": (

@@ -55,8 +55,10 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   510 ft. Below 496: John has no Quickdraw export (no SD card) → ESTIMATE (dashed, labeled): extend edge slopes inward,
   deepen along old channels (data/nolin_channel.json), cap by John's rule: most areas ≤35 ft at summer pool (≥480),
   channel near dam / a few holes 55–60 ft (~455–460). Sandbox can't reach S3: process in a GitHub Action.
-- TO DO (John 11-10): Nolin is rocky with almost no vegetation — drop grass/weed-specific suggestions (hollow-body frog,
-  "over grass" presentations/wording; re-word to rock/wood/timber). Do it in the lure data + picks when convenient.
+- No-grass cleanup DONE 11-11 (John: Nolin is rocky, almost no vegetation): "over grass" wording in core/lures.py →
+  rock/wood/timber/flats (re-exported lures.data.json + lure fixtures); `NOT_SUGGESTED_ON_NOLIN = {hollow_body_frog}`
+  (Python + JS) keeps the frog out of tackle-box gaps / Cabela's gap picks — the type stays valid for tagging/logging.
+- Map spot pins: no permanent name labels (John 11-11, clutter); only the tapped spot shows its name.
 - Season fix (John, 11-10, both apps): fall (day > 250) is checked before the spring rules: 58-65 °F = Fall Turnover
   (no bonus), 50-58 °F = new **Late Fall** (+0.6 `season_late_fall_bonus`, own lure plan: jerkbait / mid crank /
   swimbait, then football jig / blade / lipless — labeled as a general pattern, not Nolin-documented); 60-75 °F

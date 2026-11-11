@@ -7,7 +7,7 @@ import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import { Sheet } from "./ui.jsx";
 import { newId } from "./lib/db.js";
-import { guessCategoryFromText, itemLabel, LURE_CATEGORY_OPTIONS, LURE_PROFILES } from "./lib/lures.js";
+import { guessCategoryFromText, itemLabel, LURE_CATEGORY_OPTIONS, LURE_PROFILES, NOT_SUGGESTED_ON_NOLIN } from "./lib/lures.js";
 import { blobB64, preparePhoto } from "./lib/photo.js";
 import { cabelasSearchUrl, describeScan, groupByType, newItem, savedPicks, typeName, usageByLabel, usageFor } from "./lib/tackle.js";
 
@@ -28,7 +28,7 @@ export default function TackleScreen({ active, db, me, trips, lures, reloadLures
   const shown = items.filter((i) => !q.trim() || `${i.brand} ${i.description} ${typeName(i.category)}`.toLowerCase().includes(q.trim().toLowerCase()));
   const groups = groupByType(shown);
   const owned = new Set(items.filter((i) => Number(i.quantity) > 0).map((i) => i.category));
-  const gaps = Object.keys(LURE_PROFILES).filter((k) => !owned.has(k) && savedPicks(k).length);
+  const gaps = Object.keys(LURE_PROFILES).filter((k) => !owned.has(k) && !NOT_SUGGESTED_ON_NOLIN.has(k) && savedPicks(k).length);
   const totalQty = items.reduce((a, i) => a + (Number(i.quantity) || 0), 0);
 
   // ---- scan / add

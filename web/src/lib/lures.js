@@ -168,7 +168,9 @@ export function groupOwnedByCategory(inventory) {
   }
   return g;
 }
-export const findInventoryGaps = (inv) => { const o = groupOwnedByCategory(inv); return Object.keys(LURE_PROFILES).filter((k) => !(k in o)); };
+// John 11-10: Nolin is rocky with almost no vegetation — grass/mat-only lures are never suggested as a gap.
+export const NOT_SUGGESTED_ON_NOLIN = new Set(["hollow_body_frog"]);
+export const findInventoryGaps = (inv) => { const o = groupOwnedByCategory(inv); return Object.keys(LURE_PROFILES).filter((k) => !(k in o) && !NOT_SUGGESTED_ON_NOLIN.has(k)); };
 
 export function buildBlock(key, clarity, fishDepth = null, { note = "", owned = null, why = null, history = null, situation = null } = {}) {
   const p = LURE_PROFILES[key];
@@ -224,7 +226,7 @@ const SEASON_PLANS = {
 const STRUCTURE_NOTES = {
   "Main-lake point": "Fan-cast the point from shallow to deep, focus on the fastest breakline.",
   "Creek channel / ledge": "Idle/graph to find the ledge lip, then work baits parallel to it.",
-  "Cove / pocket (shallow cover)": "Target isolated wood, laydowns, and grass clumps inside the cove.",
+  "Cove / pocket (shallow cover)": "Target isolated wood, laydowns, stumps and rock inside the cove.",
   "Flat": "Cover water efficiently - flats reward moving baits (spinnerbait, swim jig, crank).",
   "Standing timber": "Vertical presentations (jig, drop shot) worked tight to individual trees.",
   "Riprap / dam face": "Parallel casts down the rock, crawl a jig or crank to deflect off rip-rap. A real Nolin angler report also specifically describes bluff walls with channels nearby and deep points along the dam (~45 ft) as a drop-shot pattern for fish that won't commit to anything faster.",

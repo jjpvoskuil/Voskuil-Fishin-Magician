@@ -99,7 +99,8 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   useEffect(() => {
     const m = map.current; if (!m) return;
     layers.current.depth?.remove(); layers.current.depth = null;
-    if (!f.depth || !contours || level == null) return;
+    if (!f.depth || !contours) return;
+    if (level == null) { toast("Depth lines need today's lake level — it hasn't loaded yet"); return; }
     const every = zoom >= 15 ? 2 : zoom >= 14 ? 4 : 10;  // fewer lines when zoomed out
     const g = L.layerGroup();
     for (const ln of contours.lines) {
@@ -134,7 +135,8 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
     for (const s of list) {
       const st = stats.spots[s.spot_id], r = 9 + Math.min(7, Math.sqrt(st?.sessions || 0) * 1.5);
       const mk = L.circleMarker([+s.lat, +s.lon], { radius: r, weight: s.spot_id === sel ? 4 : 2, color: "#fff", fillColor: heatColor(st), fillOpacity: 0.95 });
-      mk.bindTooltip(s.name, { permanent: true, direction: "right", offset: [r, 0], className: "spot-label" });
+      // John 11-11: no labels on the map (clutter) — only the tapped spot shows its name
+      if (s.spot_id === sel) mk.bindTooltip(s.name, { permanent: true, direction: "right", offset: [r, 0], className: "spot-label" });
       mk.on("click", (e) => { L.DomEvent.stopPropagation(e); setSel(s.spot_id); });
       mk.addTo(g);
     }
