@@ -4,6 +4,16 @@ John has no coding background: Claude writes all code and pushes straight to `ma
 at a time, and confirms each. He wants direct, accurate answers. Keep this file current and append a dated entry to
 `docs/SESSION_LOG.md` at the end of every session.
 
+## CUTOVER DONE 2026-11-11
+The phone web app is THE app. Streamlit `app.py` now only shows "moved" + a link (st.stop(); nothing reads/saves).
+Private data purged from ALL git history with git-filter-repo (trip_log, lake_spots, lure_inventory, lure_images/*.jpg,
+anglers, dev_tasks(+counter), water_quality_log, segment_score_freeze, and .github/workflows/probe-lidar.yml which held
+3 exact spot coordinates) and force-pushed; public lake reference files in data/ kept (channel, shoreline, cover,
+attractors, bathymetry, nolin_spots research, cabelas cache). The old `data` branch is archived in private
+deercast-data/archive/fishin-magician-streamlit-data/. `tools/make_import.py` is obsolete (it read origin/data).
+NEVER commit private data again: live data = Supabase fm_*, backups = deercast-data/backups/fishin-magician/.
+This session can't delete GitHub branches (proxy) — John deletes them in the GitHub UI.
+
 ## What's happening (Nov 2026): moving off Streamlit
 The Streamlit app (`app.py`, `home.py`, `pages/`, `core/`, `SESSION_NOTES.md`) is being rebuilt as a phone-first web
 app in `web/`, the same way Deercast was (repo jjpvoskuil/Deercast is the finished reference). The Python stays as the
