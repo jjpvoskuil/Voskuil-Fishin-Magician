@@ -42,7 +42,12 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
   John's OK for the force-push), revoke the Streamlit GITHUB_TOKEN, delete the Streamlit Cloud app.
 - Later (John, 11-10): show him other home-screen icon options once everything else is done.
-- Lake Map (John, 11-10): BEFORE building it, review its functionality, UX and look with him — he thinks it needs improvement.
+- Lake Map (John, 11-10, reviewed): satellite by default + switch to plain map, GPS dot. Main use = naming and pinning
+  spots, so make that fast ("Save where I am" + press-and-hold, name first, details optional). Spot pins colored by
+  catch; tap → spot panel (details, history, best lures/time, Fish here now, Edit). "Hotness" overlay filterable by
+  time of day and time of year. Keep fish attractors layer (KDFWR). Others fishing now on the map. Explore contours
+  again (failed before) and a layer suggesting structurally promising areas (points, steep breaks, channel bends).
+  Unanswered (assumed yes): rank spots for today.
 - Season fix (John, 11-10, both apps): fall (day > 250) is checked before the spring rules: 58-65 °F = Fall Turnover
   (no bonus), 50-58 °F = new **Late Fall** (+0.6 `season_late_fall_bonus`, own lure plan: jerkbait / mid crank /
   swimbait, then football jig / blade / lipless — labeled as a general pattern, not Nolin-documented); 60-75 °F
