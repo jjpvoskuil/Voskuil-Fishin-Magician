@@ -188,4 +188,6 @@ CASES and run it (fakes a 380 px iOS keyboard; the simulated iPhone 13 viewport 
 ## Phone lessons (from Deercast)
 Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own
 container — scroll that to top. iPhone pauses GPS on lock/background (wake lock, restart watchPosition, 20 s watchdog,
-save on hide). Users must fully close and reopen the home-screen app to get a new version.
+save on hide). New versions (11-11): Pages lets phones cache the page ~10 min, so `lib/update.js` fetches
+`version.json` (emitted by vite.config.js with the build stamp) on open / return to screen (≤1/min) and shows
+"New version ready · Update" (reload with a fresh `?v=`). No close-and-reopen needed any more.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, configured } from "./supabase.js";
 import { LAKE } from "./config.js";
 import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
+import { update, useNewVersion } from "./lib/update.js";
 import MoreScreen from "./MoreScreen.jsx";
 import SessionScreen from "./SessionScreen.jsx";
 import HistoryScreen from "./HistoryScreen.jsx";
@@ -45,6 +46,7 @@ function Splash({ children }) {
 }
 
 export default function App() {
+  const fresh = useNewVersion();
   const demo = !configured || new URLSearchParams(location.search).has("demo"); // ?demo = made-up data only
   const [session, setSession] = useState(undefined); // undefined = still checking
   const [me, setMe] = useState(undefined);            // fm_users row; null = not on the allow-list
@@ -129,6 +131,7 @@ export default function App() {
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <TabBar tab={tab} onTab={onTab} />
       {toast && <div className="toast" role="status">{toast}</div>}
+      {fresh && <div className="toast undo" role="status">New version ready<button onClick={update}>Update</button></div>}
     </>
   );
 }
