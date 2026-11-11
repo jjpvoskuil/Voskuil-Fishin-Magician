@@ -534,7 +534,8 @@ def test_guess_category_from_text_matches_known_product_names():
         ("Strike King Red Eyed Shad Tungsten 2 Tap Lipless Crankbait", "lipless_crankbait"),
         ("Strike King Tour Grade Football Jig - Black/Blue", "football_jig"),
         ("Z-Man Finesse TRD - Green Pumpkin", "finesse_shaky_head"),
-        ("Roboworm FAT Straight Worm - Margarita Mutilator", "wacky_rig_senko"),
+        ("Roboworm FAT Straight Worm - Margarita Mutilator", "drop_shot"),  # was wrongly wacky until 2026-11-10
+        ("Yamamoto Senko 5in - Green Pumpkin", "wacky_rig_senko"),
         ("Strike King KVD Rattling Square Bill Crankbait", "squarebill_crankbait"),
         ("Strike King Rage Tail Craw Soft Bait - Fire Craw", "texas_rig_creature"),
         ("Booyah Poppin' Pad Crasher Frog", "hollow_body_frog"),

@@ -22,6 +22,9 @@ FAKE_VV = """
 CASES = [
     ("Forecast", "Lake setup", ["Water visibility / Secchi depth (ft)", "Water temp (°F)", "Fish depth (ft)", "Location", "Structure type"]),
     ("More", "Add", ["Google email", "Name (shown on trips and the leaderboard)"]),
+    # Session: the demo has an open session, so these open from the live screen
+    ("Session", "↻ Moved / conditions", ["Water temp (°F)", "Visibility (ft)", "Depth fish are showing on electronics (ft, optional)"]),
+    ("Session", ["＋ Add a lure", "Search the tackle box"], ["Search"]),
 ]
 bad = 0
 with sync_playwright() as p:
@@ -37,8 +40,8 @@ with sync_playwright() as p:
     for tab, opener, fields in CASES:
         pg.goto("http://localhost:4173/Voskuil-Fishin-Magician/?demo"); pg.wait_for_timeout(700)
         pg.get_by_role("button", name=tab, exact=True).last.click(); pg.wait_for_timeout(400)
-        if opener:
-            pg.get_by_role("button", name=opener, exact=True).first.click(); pg.wait_for_timeout(400)
+        for o in ([opener] if isinstance(opener, str) else opener or []):
+            pg.get_by_role("button", name=o, exact=True).first.click(); pg.wait_for_timeout(400)
         for name in fields:
             box = pg.get_by_label(name, exact=True).first if pg.get_by_label(name, exact=True).count() else pg.get_by_label(name).first
             box.tap() if False else box.click(); pg.wait_for_timeout(1000)

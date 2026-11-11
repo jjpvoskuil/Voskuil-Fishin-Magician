@@ -209,3 +209,43 @@ button.pill { min-height: 30px; }
 .check input { width: 22px; height: 22px; accent-color: var(--accent); }
 
 .iconbtn.theme { color: var(--accent-strong); }
+
+/* ---- Spot Session ---- */
+.btn.big { min-height: 56px; font-size: 17px; font-weight: 800; }
+.btn.small-btn { min-height: 40px; padding: 0 12px; font-size: 14px; flex: none; }
+.btn:disabled { opacity: .5; }
+.btn.danger { color: var(--bad); border-color: var(--bad); }
+.btn.danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }
+.src { font-weight: 500; font-size: 11px; color: var(--muted); margin-left: 4px; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.three select { width: 100%; min-width: 0; }
+.steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin-top: 4px; }
+.steps button { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 11px; font-weight: 700; color: var(--text-2); padding: 0 2px; line-height: 1.1; }
+.steps button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; font-weight: 600; }
+.check input { width: 22px; height: 22px; accent-color: var(--accent); }
+.pick-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line-soft); border-radius: var(--r-sm); }
+.pick-list .row { padding: 6px 12px; font-size: 14px; }
+.static { min-height: 46px; display: flex; align-items: center; gap: 4px; color: var(--text); font-size: 15px; font-weight: 700; }
+.qp { display: flex; flex-direction: column; gap: 12px; margin-bottom: 6px; }
+.qp-b { display: flex; flex-direction: column; gap: 6px; }
+.qp-i { display: flex; align-items: center; gap: 10px; }
+.qp-i .grow { flex: 1; min-width: 0; }
+.fishbtns { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 10px; }
+.fishlist { margin-top: 10px; border-top: 1px solid var(--line-soft); }
+.fishline { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 40px; border-bottom: 1px solid var(--line-soft); }
+.fishline .grow { flex: 1; min-width: 0; }
+.fishline .iconbtn { width: 34px; height: 34px; }
+.dock { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar) + var(--kb, 0px)); z-index: 50; padding: 10px 16px; background: var(--bg);
+  border-top: 1px solid var(--line); display: flex; gap: 8px; }
+.dock2 .btn.primary { flex: 1; }
+.toast.undo { display: flex; align-items: center; gap: 14px; bottom: calc(var(--tabbar) + 90px); }
+.toast.undo button { color: var(--accent); font-weight: 800; min-height: 36px; padding: 0 4px; }
+.outbox { position: fixed; left: 12px; right: 12px; top: calc(var(--safe-top, 0px) + 8px); z-index: 150; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 6px 12px; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; box-shadow: 0 2px 8px var(--shadow); }
+.rig { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.rig select { flex: 1; min-width: 0; min-height: 40px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--input); padding: 0 10px; font-size: 16px; color: var(--text); }
+.pend { border-bottom: 1px solid var(--line-soft); padding-bottom: 8px; margin-bottom: 4px; }
+body:has(.dock) .toast { bottom: calc(var(--tabbar) + var(--kb, 0px) + 90px); }
+body:has(.dock) .toast.undo { bottom: calc(var(--tabbar) + var(--kb, 0px) + 150px); }
+.pill { white-space: nowrap; }

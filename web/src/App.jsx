@@ -3,6 +3,7 @@ import { supabase, configured } from "./supabase.js";
 import { LAKE } from "./config.js";
 import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
 import MoreScreen from "./MoreScreen.jsx";
+import SessionScreen from "./SessionScreen.jsx";
 import TodayScreen from "./TodayScreen.jsx";
 import ForecastScreen from "./ForecastScreen.jsx";
 import { useLakeSetup } from "./LakeSetup.jsx";
@@ -65,7 +66,7 @@ export default function App() {
   const db = useMemo(() => (session ? (demo ? demoDb(demoSeed, session.user.email) : supabaseDb(supabase, session.user.email)) : null), [session?.user?.email, demo]);
   useEffect(() => { if (!db) return; db.whoami().then(setMe, (e) => setError(e.message)); }, [db]);
   const approvedDb = me ? db : null; // shared data loads only once we know this person is on the list
-  const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips } = useTrips(approvedDb);
+  const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips, reload: reloadTrips } = useTrips(approvedDb);
   const lures = useList(approvedDb, "listLures"), spots = useList(approvedDb, "listSpots");
   const [setup, setSetup] = useLakeSetup();
 
@@ -107,7 +108,7 @@ export default function App() {
     <>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} />
       <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
-      {stub("session", "Spot Session", "Spot Session")}
+      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} />
       {stub("map", "Lake Map", "The lake map")}
       <MoreScreen {...common} active={tab === "more"} onSignOut={signOut} />
       <TabBar tab={tab} onTab={onTab} />

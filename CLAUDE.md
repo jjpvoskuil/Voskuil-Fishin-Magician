@@ -34,7 +34,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 ## Plan (order agreed 11-10)
 1. Foundation (done 11-10: scaffold, theme, sign-in + fm_users, Pages workflow). 2. Port the engine (scoring, lures,
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
-4. Spot Session + Trip History. 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
+4. Spot Session (done 11-10) + Trip History. Then lure picks v2 (personal, similarity/recency-weighted, proven + seasonal + worth-a-try, with reasons) and more per-angler personalization (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
 6. Lake Map (Leaflet satellite; bathymetry precomputed in Python, shipped static). 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ one-time GitHub Action copying the 80 Cabela's lure images into the bucket),
@@ -75,6 +75,19 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `lib/freeze.js` → `fm_score_freeze`), lure picks per segment (`LureRec.jsx`) driven by Lake setup (`LakeSetup.jsx`,
   kept in localStorage `fm.setup`; blank water temp = today's estimate, like the old default). Cabela's suggestions in
   lure blocks come back with the Tackle Box screen. Tackle box = `fm_lures`, spots = `fm_spots` (shared, any approved).
+- Spot Session (`SessionScreen.jsx` + `SessionParts.jsx`, logic in `lib/session.js`, 11-10): you = the signed-in angler
+  (no "who's fishing" picker; owner = email, conditions.angler = name). Setup (GPS picks the nearest saved spot ≤300 m,
+  conditions one-liner + Edit with per-field `field_sources` you/forecast/estimate/shared:<angler>/default, suggested
+  lures with + Add, "Same lures as last time", draft kept in localStorage `fm.sessionDraft`) → Live (+ Fish two taps,
+  10 s Undo, Change = retire, Add a lure, Moved/conditions: in-place within 10 min else close+reopen rows, End, Cancel =
+  delete) → Watch (others' open sessions, 20 s refresh). Every change saves as a trip row through `lib/outbox.js`
+  (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`) — the rig is the
+  lure_category the picks learn from. Walk-through: `python3 web/tools/session_flow.py OUTDIR` (demo seeds an open
+  session for the demo angler, so it exercises Live, cancels, then Setup).
+- Drop shot fix (11-10, John): the auto-tagger put "straight worm" → wacky before drop shot, so both Roboworm FAT
+  Straight Worms were tagged wacky_rig_senko and every drop-shot session was logged as wacky. Tagger fixed (drop shot
+  first, + "roboworm"); the `data` branch was corrected (43 trip rows + 2 tackle-box items → drop_shot; nothing in the
+  log was a real wacky rig). Drop shot = 71 fish / 27 sessions — what earlier stats called "Senko".
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 

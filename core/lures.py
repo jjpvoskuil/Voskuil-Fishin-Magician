@@ -1474,7 +1474,10 @@ _CATEGORY_KEYWORD_RULES = [
     ("swim_jig", ["swim jig", "swimjig", "rage swimmer"]),
     ("football_jig", ["football jig"]),
     ("finesse_shaky_head", ["shaky head", "ned rig", "finesse trd", "finesse worm"]),
-    ("wacky_rig_senko", ["wacky rig", "senko", "wacky worm", "straight worm"]),
+    # Drop shot is checked before wacky: Roboworm straight worms are drop-shot worms, and "straight worm" used to
+    # tag them wacky_rig_senko, which mislabeled every drop-shot session (fixed + data corrected 2026-11-10).
+    ("drop_shot", ["drop shot", "dropshot", "drop-shot", "roboworm", "fat straight worm"]),
+    ("wacky_rig_senko", ["wacky rig", "senko", "wacky worm"]),
     ("carolina_rig", ["carolina rig", "c-rig"]),
     ("texas_rig_creature", ["creature bait", "beaver bait", "rage tail craw", "krackin"]),
     ("texas_rig_worm", ["texas rig", "ribbon tail worm"]),
@@ -1493,7 +1496,6 @@ _CATEGORY_KEYWORD_RULES = [
     ("spoon", ["spoon"]),  # punch-list #70 - "flutter spoon", "jigging spoon", "Duh Spoon", etc. all contain "spoon"
     ("suspending_jerkbait", ["jerkbait", "jerk bait"]),
     ("spinnerbait", ["spinnerbait", "spinner bait"]),
-    ("drop_shot", ["drop shot", "dropshot", "drop-shot"]),  # punch-list #37
     # Punch-list #37: "swimbait" used to route here too (weightless_soft_plastic
     # was this app's only soft-plastic-that-swims category before soft_swimbait
     # existed) - now that a real paddle-tail swimbait category exists, "swimbait"
