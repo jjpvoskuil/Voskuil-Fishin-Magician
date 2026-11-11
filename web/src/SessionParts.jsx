@@ -1,6 +1,6 @@
 // Spot Session building blocks: conditions summary/form, tackle-box lure picker with the trailer question,
 // and the log-a-fish panel. Every value you touch is tagged "you" in conditions.field_sources.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon.jsx";
 import { NumberBox } from "./LakeSetup.jsx";
 import { Sheet } from "./ui.jsx";
@@ -9,7 +9,7 @@ import { LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, PRECIPITATION_OPTIONS, STAIN_CO
   visibilityBand, waterTempBand } from "./lib/onwater.js";
 import { FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS, HIT_TYPE_OPTIONS, LENGTH_OPTIONS, RETRIEVE_SPEED_OPTIONS,
   RETRIEVE_STYLE_OPTIONS, WEIGHT_LB_OPTIONS, WEIGHT_OZ_OPTIONS, canTakeTrailer, itemLabel, lengthInForDropdown, weightLbForDropdown } from "./lib/session.js";
-import { LURE_CATEGORY_OPTIONS, isTrailerEligible } from "./lib/lures.js";
+import { LURE_CATEGORY_OPTIONS, LURE_PROFILES, isTrailerEligible } from "./lib/lures.js";
 import * as S from "./lib/session.js";
 
 const SHORT = { "Inactive / shut down": "Shut down", "Sluggish": "Sluggish", "Moderate": "Moderate", "Active": "Active", "Very active": "Very active",
@@ -75,9 +75,12 @@ export function ConditionsForm({ cond, onChange, electronics = true }) {
 }
 
 /** Search the tackle box and pick lures; asks about a trailer for lures that take one. */
-export function LurePicker({ open, onClose, inventory, onPick, already }) {
+export function LurePicker({ open, onClose, inventory, onPick, already, db }) {
   const [q, setQ] = useState("");
   const [trailerFor, setTrailerFor] = useState(null);
+  const [urls, setUrls] = useState({});  // own photos (signed URLs), as in the Tackle Box
+  const thumbs = useMemo(() => (inventory || []).map((i) => i.thumb_path).filter(Boolean), [inventory]);
+  useEffect(() => { if (open && thumbs.length && db?.photoUrls) db.photoUrls(thumbs).then(setUrls).catch(() => {}); }, [open, thumbs.join("|")]);
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (inventory || []).filter((i) => Number(i.quantity) > 0 || i.quantity === "" || i.quantity == null)
@@ -90,9 +93,10 @@ export function LurePicker({ open, onClose, inventory, onPick, already }) {
     <Sheet open={open && !trailerFor} title="Add from your tackle box" onClose={onClose}>
       <label className="field" style={{ paddingTop: 10 }}>Search<input type="text" value={q} placeholder="brand, name, color or type" onChange={(e) => setQ(e.target.value)} /></label>
       <div className="pick-list">
-        {list.map((it) => { const added = already?.has(it.item_id); return (
-          <button key={it.item_id} className="row" disabled={added} onClick={() => pick(it)}>
-            <span className="grow">{itemLabel(it)}<div className="muted small">{it.category ? it.category.replace(/_/g, " ") : "no type"} · qty {it.quantity || "?"}</div></span>
+        {list.map((it) => { const added = already?.has(it.item_id), img = urls[it.thumb_path] || it.image_url; return (
+          <button key={it.item_id} className="row lp-row" disabled={added} onClick={() => pick(it)}>
+            {img ? <img className="lp-img" src={img} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="lp-img ph"><Icon name="tackle" /></span>}
+            <span className="grow"><b>{it.brand}</b> {it.description}<span className="muted small block">{LURE_PROFILES[it.category]?.name || (it.category ? it.category.replace(/_/g, " ") : "no type")} · qty {it.quantity || "?"}</span></span>
             <span className={added ? "muted small" : "pill"}>{added ? "added" : "+ Add"}</span>
           </button>); })}
         {!list.length && <p className="muted">Nothing matches.</p>}

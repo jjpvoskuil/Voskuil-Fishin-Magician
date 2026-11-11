@@ -239,6 +239,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 
+## Phone layout fixes (John 11-11, after a real session)
+- Lure picker (`SessionParts.jsx LurePicker`, used in Session setup + Live "Add a lure"): rows were crushed because
+  `.pick-list` is a height-capped flex column and rows shrank instead of scrolling → `.pick-list > * { flex: none }`;
+  rows now 68 px+ with a 52 px photo on the left (own photo via `db.photoUrls(thumb_path)`, else Cabela's image_url,
+  else tackle icon), brand bold + lure-type name + qty.
+- iPhone Safari's date input keeps its intrinsic width and spilled over neighbors in `.two` grids → Session's
+  Where & when stacks Date and Time of day; global `.field input[type="date"]` rule (appearance none, width 100%,
+  min-width 0) so no date box overflows anywhere.
+
 ## Keyboard rule (John, 11-10)
 Every text box must stay visible above the iPhone keyboard. `ui.jsx useKeyboardSafeInputs()` (mounted in App) sets
 `--kb` from visualViewport (sheets sit above it; screens get that much extra bottom room) and scrolls the focused box

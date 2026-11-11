@@ -226,6 +226,17 @@ button.pill { min-height: 30px; }
 .check input { width: 22px; height: 22px; accent-color: var(--accent); }
 .pick-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line-soft); border-radius: var(--r-sm); }
 .pick-list .row { padding: 6px 12px; font-size: 14px; }
+/* lure picker rows (John 11-11: were crunched) — tap-sized, photo on the left like the Tackle Box */
+/* rows must not shrink: the list is a height-capped flex column, so they were being squeezed instead of scrolling */
+.pick-list > * { flex: none; }
+.pick-list .row.lp-row { min-height: 68px; padding: 8px 12px; gap: 12px; font-size: 15px; line-height: 1.25; }
+.pick-list .row.lp-row .block { margin-top: 3px; }
+.pick-list { max-height: 62vh; }
+.lp-img { width: 52px; height: 52px; border-radius: 10px; object-fit: contain; background: #fff; flex: none; border: 1px solid var(--line-soft); }
+.lp-img.ph { display: grid; place-items: center; background: var(--band); color: var(--muted); }
+/* iPhone's date box keeps its own width and spills out of narrow columns — make it fit its field everywhere */
+.field input[type="date"] { -webkit-appearance: none; appearance: none; display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; text-align: left; }
+.field input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 .static { min-height: 46px; display: flex; align-items: center; gap: 4px; color: var(--text); font-size: 15px; font-weight: 700; }
 .qp { display: flex; flex-direction: column; gap: 12px; margin-bottom: 6px; }
 .qp-b { display: flex; flex-direction: column; gap: 6px; }

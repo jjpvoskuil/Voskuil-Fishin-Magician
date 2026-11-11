@@ -58,7 +58,7 @@ export default function SessionScreen({ active, demo, onMenu, db, me, weather, t
 
   if (!active) return <div className="screen" hidden id="screen-session" />;
   const watched = watching ? others.find((s) => s.key === watching) : null;
-  const common = { bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet };
+  const common = { bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, db };
   return (
     <div className="screen" id="screen-session">
       {watched ? <Watch s={watched} onStop={() => setWatching(null)} onMenu={onMenu} demo={demo} hasOwn={!!(local && local.length)} />
@@ -166,10 +166,9 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
               </select></label>
             {gps && draft.spot_source === "gps" && <p className="muted small">📍 Picked by GPS — you're about {gps.m} m from {gps.name}.</p>}
             {spot && <p className="muted small">{spotMeta(spot) || "No saved details for this spot yet."}</p>}
-            <div className="two">
-              <label className="field">Date<input type="date" value={date} max={today} onChange={(e) => setDraft({ date: e.target.value || today })} /></label>
-              <div className="field">Time of day<div className="static">{segment}{segRanges?.[segment] && <span className="muted small"> {fmtTime(segRanges[segment][0])}–{fmtTime(segRanges[segment][1])}</span>}</div></div>
-            </div>
+            {/* stacked: iPhone's date box won't shrink to half width and ran over the time of day (John 11-11) */}
+            <label className="field">Date<input type="date" value={date} max={today} onChange={(e) => setDraft({ date: e.target.value || today })} /></label>
+            <div className="field">Time of day<div className="static">{segment}{segRanges?.[segment] && <span className="muted small"> {fmtTime(segRanges[segment][0])}–{fmtTime(segRanges[segment][1])}</span>}</div></div>
             {date !== today && <p className="muted small">Logging a past session — pressure trend and solunar timing may fall back to their no-data defaults outside the forecast window.</p>}
             {todaysHere.length > 0 && <p className="muted small">📋 Already logged here on {date}: {todaysHere.map((t) => `${t.lure_used || "unknown lure"} (${t.fish_caught || 0} fish)`).join(", ")}</p>}
           </>}
@@ -221,7 +220,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
       </>}
     </div>
     {spot && <div className="dock"><button className="btn primary wide big" disabled={!pending.length} onClick={start}>▶ Start session{pending.length ? ` (${pending.length} lure${pending.length > 1 ? "s" : ""})` : ""}</button></div>}
-    <LurePicker open={picker} onClose={() => setPicker(false)} inventory={lures} already={pendingIds} onPick={(s) => { addLure(s); }} />
+    <LurePicker db={db} open={picker} onClose={() => setPicker(false)} inventory={lures} already={pendingIds} onPick={(s) => { addLure(s); }} />
     <TrailerSheet stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); addLure(s); }} />
   </>;
 }
@@ -246,7 +245,7 @@ function NoSpots({ db, toast }) {
 }
 
 /* ------------------------------------------------------------------ live session */
-function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo, reloadTrips, onWatch }) {
+function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo, reloadTrips, onWatch, db }) {
   const [fishFor, setFishFor] = useState(null);
   const [picker, setPicker] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -335,7 +334,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
     <div className="dock dock2"><button className="btn primary big" onClick={() => setConfirm({ text: `End this session? ${totalFish} fish will be saved.`, ok: "End session", run: end })}>■ End session</button>
       <button className="btn danger" onClick={() => setConfirm({ text: "Cancel this session? Everything logged in it (lures and fish) will be deleted. This can't be undone.", ok: "Delete session", danger: true, run: () => onCancel(rows.map((r) => r.trip_id)) })}>Cancel</button></div>
     <FishSheet lure={fishFor} onClose={() => setFishFor(null)} onSave={(f) => logFish(fishFor, f)} />
-    <AddLureSheet me={me} open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
+    <AddLureSheet db={db} me={me} open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
     <MoveSheet open={moving} onClose={() => setMoving(false)} rows={rows} setRows={setRows} base={base} current={current} spots={spots} bundle={bundle} weights={weights} locAdj={locAdj} me={me} toast={toast} />
     <Sheet open={!!confirm} title="Are you sure?" onClose={() => setConfirm(null)}>
       {confirm && <div className="setup"><p>{confirm.text}</p>
@@ -345,7 +344,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
   </>;
 }
 
-function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me }) {
+function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me, db }) {
   const [picksMode, setPicksMode] = usePicksMode();
   const [tackle, setTackle] = useState(false);
   const [trailerFor, setTrailerFor] = useState(null);
@@ -368,7 +367,7 @@ function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weig
         {picks ? <QuickPicks picks={picks} added={openIds} onAdd={pick} /> : <p className="muted">Loading…</p>}
       </div>
     </Sheet>
-    <LurePicker open={open && tackle} onClose={() => setTackle(false)} inventory={lures} already={openIds} onPick={(s) => { setTackle(false); onAdd(s); }} />
+    <LurePicker db={db} open={open && tackle} onClose={() => setTackle(false)} inventory={lures} already={openIds} onPick={(s) => { setTackle(false); onAdd(s); }} />
     <TrailerSheet stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onAdd(s); }} />
   </>;
 }
