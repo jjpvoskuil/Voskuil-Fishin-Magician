@@ -1,0 +1,27 @@
+name: probe-cabelas (temporary)
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: v2.x }
+      - name: Deno fetch (same runtime as Supabase Edge Functions)
+        run: |
+          cat > p.ts <<'TS'
+          const H = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9", "Referer": "https://www.cabelas.com/", "Origin": "https://www.cabelas.com" };
+          for (let i = 0; i < 2; i++) {
+            try {
+              const r = await fetch("https://www.cabelas.com/api/v2/10651/prod/coveo/getCoveoToken", { headers: H });
+              const t = await r.text(); let tok = null; try { tok = JSON.parse(t).token; } catch {}
+              console.log("token status", r.status, "got token:", !!tok, tok ? "" : t.slice(0, 120).replace(/\s+/g, " "));
+              if (tok) {
+                const s = await fetch("https://platform.cloud.coveo.com/rest/search/v2?organizationId=bassproshopsproductionl92epymr", { method: "POST", headers: { ...H, Authorization: "Bearer " + tok, "Content-Type": "application/json" }, body: JSON.stringify({ q: "chatterbait jackhammer", numberOfResults: 3 }) });
+                const j = await s.json(); console.log("search status", s.status, (j.results || []).map((x) => x.title).join(" | "));
+                const c = await fetch("https://platform.cloud.coveo.com/rest/search/v2?organizationId=bassproshopsproductionl92epymr", { method: "OPTIONS", headers: { Origin: "https://jjpvoskuil.github.io", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type" } });
+                console.log("coveo CORS allow-origin:", c.headers.get("access-control-allow-origin"));
+              }
+            } catch (e) { console.log("error", String(e)); }
+          }
+          TS
+          deno run --allow-net p.ts
