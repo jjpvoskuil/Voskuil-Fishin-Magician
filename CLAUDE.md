@@ -36,7 +36,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
 4. Spot Session + Trip History (both done 11-10). Lure picks v2 done 11-10. More per-angler personalization as screens come over (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
-6. Lake Map (phase A done 11-10; phase B = contours from KyFromAbove lidar + estimate below 496 ft + structure layer, precomputed in a GitHub Action, shipped static). 7. Leaderboard, Reports (Excel in
+6. Lake Map (phase A done 11-10; phase B contours + spots to try done 11-11). NEXT (John 11-11): move the real data now (import), re-run the same import at cutover (upserts by id). 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ upload the 13 own lure photos from data/lure_images to the fm-lures bucket),
 backups (private repo, twice weekly), make_restore.py, cutover.
 - Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
@@ -155,8 +155,18 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   saved and its panel opens. Spot panel: details, fish / fish/hr / sessions for the filter, best lures, best time of
   day, Fish here now (writes `fm.sessionDraft` spot_id + switches to Session), Edit details (type, bottom chips, depths,
   grade, notes, delete), Directions (Apple Maps). Others fishing now = green pins → Watch. Walk-through:
-  `python3 web/tools/map_flow.py OUTDIR` (tiles are blocked in the sandbox). Phase B next: lidar contours + estimate +
-  structure layer.
+  `python3 web/tools/map_flow.py OUTDIR` (tiles are blocked in the sandbox).
+- Lake Map phase B (11-11): `tools/build_contours.py` run by `.github/workflows/build-contours.yml` (workflow_dispatch;
+  it pushes contours.json + suggestions.json to side branch `depth-build` because the sandbox can't download artifacts;
+  Claude copies them into `web/public/depth/` with `git fetch --force origin depth-build:refs/remotes/origin/depth-build`).
+  100 lidar tiles read at 8 ft via COG overviews; lake = ground ≤516 ft connected to the dam (5,128 acres in the bbox);
+  flat water per tile = the lidar water line (495.8–499.4 ft); estimate below it = edge slope (normalized-convolution
+  smoothed, ~300 ft) × distance, leveling to floor 480 ft (455 ft along the old channel corridor), Gaussian smoothed;
+  deepest ≈ 58 ft at summer pool. Lines: 2-ft elevation steps 456–514, est = below the lidar water line, tiny loops
+  dropped (~2.2 MB). Map: 〰️ toggles depth; lines below today's USGS level only, depth = level − e, every 10/4/2 ft by
+  zoom, colored by depth, dashed = estimated, tap for "N ft deep — measured/estimated". ⭐ spots to try
+  (suggestions.json, 70: points / steep breaks / channel swings / flats by deep water, spaced ≥250 m, hidden within
+  120 m of a saved spot): tap → why + depth range at today's level + Save as my spot (type preset) + Directions.
 - Drop shot fix (11-10, John): the auto-tagger put "straight worm" → wacky before drop shot, so both Roboworm FAT
   Straight Worms were tagged wacky_rig_senko and every drop-shot session was logged as wacky. Tagger fixed (drop shot
   first, + "roboworm"); the `data` branch was corrected (43 trip rows + 2 tackle-box items → drop_shot; nothing in the
