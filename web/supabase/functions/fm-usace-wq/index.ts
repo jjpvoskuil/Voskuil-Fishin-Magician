@@ -46,15 +46,26 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  try {
-    const r = await fetch(REPORT_URL, {
+async function getReport(): Promise<Response> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) { // the USACE server sometimes drops the first connection
+    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+    try {
+      return await fetch(REPORT_URL, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; FishinMagician/1.0; +https://jjpvoskuil.github.io/Voskuil-Fishin-Magician/)" },
       signal: AbortSignal.timeout(20000),
       // @ts-ignore Deno-specific fetch option
       ...(client ? { client } : {}),
-    });
+      });
+    } catch (e) { last = e; }
+  }
+  throw last;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  try {
+    const r = await getReport();
     if (!r.ok) return json({ error: `USACE answered ${r.status}` }, 502);
     return json({ html: await r.text(), fetched_at: new Date().toISOString() });
   } catch (e) {

@@ -10,9 +10,7 @@ jobs:
       - run: |
           set +e
           pip install -q requests certifi 2>/dev/null
-          echo "== python core.lake_water_quality"
-          python3 -c "from core.lake_water_quality import fetch_surface_water_quality as f; print(f())"
-          echo "== edge function code under deno"
+          echo "== edge function code under deno, 5 calls"
           (deno run --allow-net --allow-env web/supabase/functions/fm-usace-wq/index.ts &) ; sleep 6
-          curl -sS -X POST localhost:8000 | head -c 300; echo
-          curl -sS -X POST localhost:8000 | grep -o "Dam Site</td><td>[^<]*</td><td>0</td><td>[^<]*</td><td>[^<]*" | head -1
+          for i in 1 2 3 4 5; do curl -sS -X POST localhost:8000 | grep -o "Dam Site</td><td>[^<]*</td><td>0</td><td>[^<]*</td><td>[^<]*" | head -1 || echo FAILED; done
+          curl -sS -X POST localhost:8000 | head -c 150
