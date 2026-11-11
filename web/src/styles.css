@@ -379,3 +379,10 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .pl-no.hi { background: var(--accent); color: var(--on-accent); }
 .pl-export { white-space: pre-wrap; font-size: 12px; line-height: 1.4; background: var(--band); border-radius: var(--r-sm); padding: 10px; max-height: 46vh; overflow: auto; margin: 0; user-select: text; -webkit-user-select: text; }
 .sheet textarea, .field textarea { border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--input); padding: 10px 12px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; }
+
+/* lure picker filters (John 11-11) — one swipeable row each */
+.lp-filter { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 2px; }
+.lp-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.lp-chips::-webkit-scrollbar { display: none; }
+.lp-chips .chip { flex: none; }
+.pick-list .row.lp-row.on { background: var(--accent-soft-bg, var(--band)); box-shadow: inset 3px 0 0 var(--accent); }

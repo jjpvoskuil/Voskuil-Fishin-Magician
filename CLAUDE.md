@@ -244,6 +244,11 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `.pick-list` is a height-capped flex column and rows shrank instead of scrolling → `.pick-list > * { flex: none }`;
   rows now 68 px+ with a 52 px photo on the left (own photo via `db.photoUrls(thumb_path)`, else Cabela's image_url,
   else tackle icon), brand bold + lure-type name + qty.
+- Lure picker filters (John 11-11): Type + Color chip rows (`lib/lurefilter.js` + test): broad TYPE_FAMILIES
+  (Crankbaits = squarebill/medium/deep/lipless, Jerkbaits, Bladed & spinners, Jigs, Topwater, Finesse, Soft
+  plastics, Swimbaits, Spoons) and COLOR_FAMILIES by keyword on the color part ("Model - Color, size"); only chips
+  with matches show; an item can be in several color families. Shared `LureRow` + `useLurePhotos` in SessionParts;
+  TrailerSheet now lists trailers with the same rows (tap = "✓ Using", search when >6, or type one).
 - iPhone Safari's date input keeps its intrinsic width and spilled over neighbors in `.two` grids → Session's
   Where & when stacks Date and Time of day; global `.field input[type="date"]` rule (appearance none, width 100%,
   min-width 0) so no date box overflows anywhere.

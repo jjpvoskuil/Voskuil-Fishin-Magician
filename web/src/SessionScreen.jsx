@@ -221,7 +221,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     </div>
     {spot && <div className="dock"><button className="btn primary wide big" disabled={!pending.length} onClick={start}>▶ Start session{pending.length ? ` (${pending.length} lure${pending.length > 1 ? "s" : ""})` : ""}</button></div>}
     <LurePicker db={db} open={picker} onClose={() => setPicker(false)} inventory={lures} already={pendingIds} onPick={(s) => { addLure(s); }} />
-    <TrailerSheet stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); addLure(s); }} />
+    <TrailerSheet db={db} stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); addLure(s); }} />
   </>;
 }
 
@@ -368,7 +368,7 @@ function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weig
       </div>
     </Sheet>
     <LurePicker db={db} open={open && tackle} onClose={() => setTackle(false)} inventory={lures} already={openIds} onPick={(s) => { setTackle(false); onAdd(s); }} />
-    <TrailerSheet stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onAdd(s); }} />
+    <TrailerSheet db={db} stub={trailerFor} inventory={lures} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onAdd(s); }} />
   </>;
 }
 

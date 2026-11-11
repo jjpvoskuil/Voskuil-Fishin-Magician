@@ -35,6 +35,7 @@ CASES = [
     ("Today", ["css=#screen-today button.iconbtn.note"], ["What should change?"]),
     ("More", ["Punch list", "＋ Add an item"], ["What should change?"]),
     ("More", ["Punch list", "css=.pl-row >> nth=0"], ["Title", "Details"]),
+    ("Session", ["＋ Add a lure", "Search the tackle box", "css=.lp-row >> text=Football Jig", "css=.sheet label.check"], ["Or type a trailer"]),
     ("More", ["Trip History", "css=button.card.hist >> nth=1", "Edit"], ["Lure", "Color", "Technique", "Notes"]),
 ]
 bad = 0

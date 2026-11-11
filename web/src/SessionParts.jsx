@@ -10,6 +10,7 @@ import { LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, PRECIPITATION_OPTIONS, STAIN_CO
 import { FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS, HIT_TYPE_OPTIONS, LENGTH_OPTIONS, RETRIEVE_SPEED_OPTIONS,
   RETRIEVE_STYLE_OPTIONS, WEIGHT_LB_OPTIONS, WEIGHT_OZ_OPTIONS, canTakeTrailer, itemLabel, lengthInForDropdown, weightLbForDropdown } from "./lib/session.js";
 import { LURE_CATEGORY_OPTIONS, LURE_PROFILES, isTrailerEligible } from "./lib/lures.js";
+import { colorFamiliesIn, inColorFamily, inTypeFamily, typeFamiliesIn } from "./lib/lurefilter.js";
 import * as S from "./lib/session.js";
 
 const SHORT = { "Inactive / shut down": "Shut down", "Sluggish": "Sluggish", "Moderate": "Moderate", "Active": "Active", "Very active": "Very active",
@@ -74,54 +75,82 @@ export function ConditionsForm({ cond, onChange, electronics = true }) {
   );
 }
 
-/** Search the tackle box and pick lures; asks about a trailer for lures that take one. */
+/** Own tackle-box photos (signed URLs) for a list of items, loaded while a sheet is open — as in the Tackle Box. */
+function useLurePhotos(db, items, open) {
+  const [urls, setUrls] = useState({});
+  const thumbs = useMemo(() => (items || []).map((i) => i.thumb_path).filter(Boolean), [items]);
+  useEffect(() => { if (open && thumbs.length && db?.photoUrls) db.photoUrls(thumbs).then(setUrls).catch(() => {}); }, [open, thumbs.join("|")]);
+  return urls;
+}
+/** One tackle-box item as a tap-sized row: photo (own, else Cabela's, else icon), brand + name, type · qty. */
+function LureRow({ it, urls, right, on, disabled, onClick }) {
+  const img = urls[it.thumb_path] || it.image_url;
+  return (
+    <button className={`row lp-row ${on ? "on" : ""}`} disabled={disabled} aria-pressed={on ?? undefined} onClick={onClick}>
+      {img ? <img className="lp-img" src={img} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="lp-img ph"><Icon name="tackle" /></span>}
+      <span className="grow"><b>{it.brand}</b> {it.description}<span className="muted small block">{LURE_PROFILES[it.category]?.name || (it.category ? it.category.replace(/_/g, " ") : "no type")} · qty {it.quantity || "?"}</span></span>
+      {right}
+    </button>
+  );
+}
+const inStock = (i) => Number(i.quantity) > 0 || i.quantity === "" || i.quantity == null;
+const byLabel = (a, b) => itemLabel(a).localeCompare(itemLabel(b));
+
+/** Search the tackle box and pick lures (type + color filters, John 11-11); asks about a trailer for lures that take one. */
 export function LurePicker({ open, onClose, inventory, onPick, already, db }) {
   const [q, setQ] = useState("");
+  const [type, setType] = useState(""), [color, setColor] = useState("");
   const [trailerFor, setTrailerFor] = useState(null);
-  const [urls, setUrls] = useState({});  // own photos (signed URLs), as in the Tackle Box
-  const thumbs = useMemo(() => (inventory || []).map((i) => i.thumb_path).filter(Boolean), [inventory]);
-  useEffect(() => { if (open && thumbs.length && db?.photoUrls) db.photoUrls(thumbs).then(setUrls).catch(() => {}); }, [open, thumbs.join("|")]);
+  const urls = useLurePhotos(db, inventory, open);
+  const stock = useMemo(() => (inventory || []).filter(inStock), [inventory]);
+  const types = useMemo(() => typeFamiliesIn(stock), [stock]);
+  const colors = useMemo(() => colorFamiliesIn(stock.filter((i) => inTypeFamily(i, type))), [stock, type]);
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (inventory || []).filter((i) => Number(i.quantity) > 0 || i.quantity === "" || i.quantity == null)
-      .filter((i) => !t || `${i.brand} ${i.description} ${i.category}`.toLowerCase().includes(t))
-      .sort((a, b) => itemLabel(a).localeCompare(itemLabel(b)));
-  }, [inventory, q]);
+    return stock.filter((i) => inTypeFamily(i, type) && inColorFamily(i, color))
+      .filter((i) => !t || `${i.brand} ${i.description} ${i.category} ${LURE_PROFILES[i.category]?.name || ""}`.toLowerCase().includes(t)).sort(byLabel);
+  }, [stock, q, type, color]);
   const pick = (it) => { const stub = { label: itemLabel(it), category: it.category || null, item_id: it.item_id };
     if (canTakeTrailer(it)) setTrailerFor(stub); else onPick(stub); };
+  const chips = (label, opts, val, set) => opts.length > 1 && <div className="lp-filter"><span className="muted small b">{label}</span>
+    <div className="lp-chips">{["", ...opts].map((o) => <button key={o || "all"} className={`chip ${val === o ? "on" : ""}`} aria-pressed={val === o} onClick={() => set(o)}>{o || "All"}</button>)}</div></div>;
   return <>
     <Sheet open={open && !trailerFor} title="Add from your tackle box" onClose={onClose}>
       <label className="field" style={{ paddingTop: 10 }}>Search<input type="text" value={q} placeholder="brand, name, color or type" onChange={(e) => setQ(e.target.value)} /></label>
+      {chips("Type", types, type, (v) => { setType(v); if (v && color && !stock.some((i) => inTypeFamily(i, v) && inColorFamily(i, color))) setColor(""); })}
+      {chips("Color", colors, color, setColor)}
       <div className="pick-list">
-        {list.map((it) => { const added = already?.has(it.item_id), img = urls[it.thumb_path] || it.image_url; return (
-          <button key={it.item_id} className="row lp-row" disabled={added} onClick={() => pick(it)}>
-            {img ? <img className="lp-img" src={img} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="lp-img ph"><Icon name="tackle" /></span>}
-            <span className="grow"><b>{it.brand}</b> {it.description}<span className="muted small block">{LURE_PROFILES[it.category]?.name || (it.category ? it.category.replace(/_/g, " ") : "no type")} · qty {it.quantity || "?"}</span></span>
-            <span className={added ? "muted small" : "pill"}>{added ? "added" : "+ Add"}</span>
-          </button>); })}
-        {!list.length && <p className="muted">Nothing matches.</p>}
+        {list.map((it) => { const added = already?.has(it.item_id); return (
+          <LureRow key={it.item_id} it={it} urls={urls} disabled={added} onClick={() => pick(it)}
+            right={<span className={added ? "muted small" : "pill"}>{added ? "added" : "+ Add"}</span>} />); })}
+        {!list.length && <p className="muted" style={{ padding: "0 12px" }}>Nothing matches{type || color ? " — try All" : ""}.</p>}
         <button className="row" onClick={() => { const label = q.trim(); if (label) pick({ item_id: null, brand: "", description: label, category: null }); }} disabled={!q.trim()}>
           <span className="grow">Not in the tackle box? Add "{q.trim() || "…"}" as typed</span><Icon name="plus" size={18} /></button>
       </div>
       <button className="btn primary wide" style={{ marginTop: 10 }} onClick={onClose}>Done</button>
     </Sheet>
-    <TrailerSheet stub={trailerFor} inventory={inventory} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onPick(s); }} />
+    <TrailerSheet db={db} stub={trailerFor} inventory={inventory} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onPick(s); }} />
   </>;
 }
 
-export function TrailerSheet({ stub, inventory, onClose, onDone }) {
+/** After picking a lure that takes one: tap a trailer from the tackle box (same rows as the lure list), type one, or none. */
+export function TrailerSheet({ stub, inventory, onClose, onDone, db }) {
   const [use, setUse] = useState(false);
   const [pickId, setPickId] = useState("");
   const [typed, setTyped] = useState("");
-  const trailers = (inventory || []).filter(isTrailerEligible);
+  const [q, setQ] = useState("");
+  const trailers = useMemo(() => (inventory || []).filter(isTrailerEligible).filter(inStock).sort(byLabel), [inventory]);
+  const urls = useLurePhotos(db, trailers, !!stub && use);
   if (!stub) return null;
+  const t = q.trim().toLowerCase();
+  const shown = trailers.filter((it) => !t || `${it.brand} ${it.description}`.toLowerCase().includes(t));
   const finish = () => {
     let trailer = null;
     if (use) {
-      const it = trailers.find((t) => t.item_id === pickId);
+      const it = trailers.find((x) => x.item_id === pickId);
       trailer = it ? { item_id: it.item_id, label: itemLabel(it), category: it.category, color: it.description || "" } : typed.trim() ? { item_id: null, label: typed.trim(), category: null, color: null } : null;
     }
-    setUse(false); setPickId(""); setTyped("");
+    setUse(false); setPickId(""); setTyped(""); setQ("");
     onDone({ ...stub, trailer });
   };
   return (
@@ -129,9 +158,15 @@ export function TrailerSheet({ stub, inventory, onClose, onDone }) {
       <div className="setup">
         <b>{stub.label}</b>
         <label className="check"><input type="checkbox" checked={use} onChange={(e) => setUse(e.target.checked)} /> Used a trailer with this lure</label>
-        {use && <label className="field">Trailer
-          <select value={pickId} onChange={(e) => setPickId(e.target.value)}><option value="">Type it in…</option>{trailers.map((t) => <option key={t.item_id} value={t.item_id}>{itemLabel(t)}</option>)}</select></label>}
-        {use && !pickId && <label className="field">Trailer name<input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} /></label>}
+        {use && <>
+          {trailers.length > 6 && <label className="field">Search trailers<input type="text" value={q} placeholder="brand, name or color" onChange={(e) => setQ(e.target.value)} /></label>}
+          {trailers.length > 0 && <div className="pick-list">
+            {shown.map((it) => <LureRow key={it.item_id} it={it} urls={urls} on={pickId === it.item_id} onClick={() => setPickId(pickId === it.item_id ? "" : it.item_id)}
+              right={<span className={pickId === it.item_id ? "pill" : "muted small"}>{pickId === it.item_id ? "✓ Using" : "Use"}</span>} />)}
+            {!shown.length && <p className="muted" style={{ padding: "0 12px" }}>No trailer matches.</p>}
+          </div>}
+          {!pickId && <label className="field">{trailers.length ? "Or type a trailer" : "Trailer name"}<input type="text" value={typed} placeholder="e.g. Zoom Super Chunk - Green Pumpkin" onChange={(e) => setTyped(e.target.value)} /></label>}
+        </>}
         <button className="btn primary wide" onClick={finish}>Add lure</button>
       </div>
     </Sheet>
