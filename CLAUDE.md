@@ -13,6 +13,7 @@ attractors, bathymetry, nolin_spots research, cabelas cache). The old `data` bra
 deercast-data/archive/fishin-magician-streamlit-data/. `tools/make_import.py` is obsolete (it read origin/data).
 NEVER commit private data again: live data = Supabase fm_*, backups = deercast-data/backups/fishin-magician/.
 This session can't delete GitHub branches (proxy) — John deletes them in the GitHub UI.
+John finished the cutover clicks 11-11 evening: data branch deleted, Streamlit GITHUB_TOKEN revoked, Streamlit Cloud app deleted.
 
 ## What's happening (Nov 2026): moving off Streamlit
 The Streamlit app (`app.py`, `home.py`, `pages/`, `core/`, `SESSION_NOTES.md`) is being rebuilt as a phone-first web
@@ -49,8 +50,6 @@ ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint im
 6. Lake Map (phase A done 11-10; phase B contours + spots to try done 11-11). Data import (11-11, John: do it now): `tools/make_import.py OUTDIR` (always reads origin/data — main has STALE data/ copies) → fishin_magician_import.sql (upserts by id; tested twice on local PG: 377 trips 212 John/164 Matthew/1 Alex, 17 spots, 95 lures) + lure photo zip (13 photos → 26 jpgs for Storage fm-lures/lures/). Never commit the output; send to John. Re-run at cutover. 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ upload the 13 own lure photos from data/lure_images to the fm-lures bucket),
 backups (private repo, twice weekly), make_restore.py, cutover.
-- Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
-  John's OK for the force-push), revoke the Streamlit GITHUB_TOKEN, delete the Streamlit Cloud app.
 - Later (John, 11-10): show him other home-screen icon options once everything else is done.
 - Lake Map (John, 11-10, reviewed): satellite by default + switch to plain map, GPS dot. Main use = naming and pinning
   spots, so make that fast ("Save where I am" + press-and-hold, name first, details optional). Spot pins colored by
