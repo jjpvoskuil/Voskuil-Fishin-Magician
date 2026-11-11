@@ -97,7 +97,7 @@ export default function TodayScreen({ active, demo, onMenu, weather, lake, water
           <div className="card-b muted small" style={{ borderTop: "1px solid var(--line-soft)", lineHeight: 1.45 }}>
             {level ? `Level from USGS ${levelTime.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })}. ` : lake.error ? "Couldn't reach USGS for the lake level just now. " : ""}
             {water.reading ? <>Oxygen from the Army Corps Dam Site survey {mdy(water.reading.observed_at.slice(0, 10))} (surface water {water.reading.water_temp_f}°F) — a periodic manual survey, not a daily feed.{!water.live && " The Army Corps site couldn't be reached, so this is the last reading logged."}</>
-              : water.loading ? "Checking the Army Corps survey…" : "No Army Corps oxygen reading yet."}
+              : water.loading ? "Checking the Army Corps survey…" : water.error ? `Couldn't get the Army Corps oxygen reading: ${water.error}` : "No Army Corps oxygen reading yet."}
           </div>
         </section>
 
