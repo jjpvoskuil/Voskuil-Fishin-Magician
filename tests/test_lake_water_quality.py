@@ -38,7 +38,7 @@ def test_fetch_surface_water_quality_requests_the_right_url(monkeypatch):
 
     captured = {}
 
-    def _fake_get(url, timeout=None):
+    def _fake_get(url, timeout=None, **kw):
         captured["url"] = url
         return _FakeResp(_REAL_REPORT_HTML)
 
@@ -52,7 +52,7 @@ def test_fetch_surface_water_quality_picks_the_dam_site_surface_row_not_tailwate
     # NOT be picked - only the Dam Site row at depth 0 is the lake surface.
     import core.lake_water_quality as mod
 
-    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None: _FakeResp(_REAL_REPORT_HTML))
+    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None, **kw: _FakeResp(_REAL_REPORT_HTML))
     result = fetch_surface_water_quality()
     assert result.station == SURFACE_STATION_NAME
     # 30.3 deg C -> 86.5 deg F, not the Tailwater's 23.6 C (74.5F) or any
@@ -64,7 +64,7 @@ def test_fetch_surface_water_quality_picks_the_dam_site_surface_row_not_tailwate
 def test_fetch_surface_water_quality_parses_the_observation_datetime(monkeypatch):
     import core.lake_water_quality as mod
 
-    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None: _FakeResp(_REAL_REPORT_HTML))
+    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None, **kw: _FakeResp(_REAL_REPORT_HTML))
     result = fetch_surface_water_quality()
     assert (result.observed_at.year, result.observed_at.month, result.observed_at.day) == (2026, 8, 6)
     assert (result.observed_at.hour, result.observed_at.minute) == (14, 0)
@@ -77,7 +77,7 @@ def test_fetch_surface_water_quality_computes_a_plausible_supersaturation_pct(mo
     # sign of a broken formula.
     import core.lake_water_quality as mod
 
-    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None: _FakeResp(_REAL_REPORT_HTML))
+    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None, **kw: _FakeResp(_REAL_REPORT_HTML))
     result = fetch_surface_water_quality()
     assert 140.0 <= result.do_saturation_pct <= 155.0
 
@@ -91,7 +91,7 @@ def test_fetch_surface_water_quality_raises_when_no_dam_site_surface_row_found(m
     <tr><td>Tailwater</td><td>20260806, 1200</td><td>0</td><td>23.6</td><td>8.76</td></tr>
     </tbody></table>
     """
-    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None: _FakeResp(html_without_dam_site))
+    monkeypatch.setattr(mod.requests, "get", lambda url, timeout=None, **kw: _FakeResp(html_without_dam_site))
     with pytest.raises(ValueError):
         fetch_surface_water_quality()
 
@@ -108,3 +108,18 @@ def test_fetch_surface_water_quality_raises_on_network_failure(monkeypatch):
     monkeypatch.setattr(mod.requests, "get", _boom)
     with pytest.raises(ConnectionError):
         fetch_surface_water_quality()
+
+
+def test_usace_fetch_adds_the_missing_intermediate_cert_and_a_browser_user_agent(monkeypatch):
+    """2026-11-10: the USACE server omits its intermediate certificate and 403s python-requests' User-Agent."""
+    import core.lake_water_quality as mod
+    seen = {}
+    def _fake_get(url, timeout=None, headers=None, verify=None):
+        seen.update(headers=headers, verify=verify)
+        return _FakeResp(_REAL_REPORT_HTML)
+    monkeypatch.setattr(mod.requests, "get", _fake_get)
+    mod.fetch_surface_water_quality()
+    assert "Mozilla" in seen["headers"]["User-Agent"]
+    bundle = open(seen["verify"], encoding="utf-8").read()
+    intermediate = open(mod._USACE_INTERMEDIATE_PEM, encoding="utf-8").read().strip()
+    assert intermediate in bundle and bundle.count("BEGIN CERTIFICATE") > 50

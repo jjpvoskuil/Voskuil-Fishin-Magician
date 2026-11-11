@@ -4,23 +4,15 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with: { deno-version: v2.x }
       - run: |
           set +e
-          curl -sS -o /tmp/ica.crt http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt
-          openssl x509 -inform DER -in /tmp/ica.crt -out /tmp/ica.pem && openssl x509 -in /tmp/ica.pem -noout -subject -issuer -enddate -fingerprint -sha256
-          echo "== PEM"; cat /tmp/ica.pem
-          echo "== curl with intermediate added"; cat /etc/ssl/certs/ca-certificates.crt /tmp/ica.pem > /tmp/bundle.pem
-          curl -sS --cacert /tmp/bundle.pem -o /tmp/a.html -w "%{http_code} %{size_download}\n" https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html
-          grep -io "Dam Site</td>.\{0,80\}" /tmp/a.html | head -2
-          echo "== python with bundle"; python3 -c "import requests;r=requests.get('https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html',timeout=20,verify='/tmp/bundle.pem');print(r.status_code,len(r.text))"
-          echo "== deno createHttpClient caCerts=[intermediate]"
-          cat > /tmp/t.ts <<'TS'
-          const pem = await Deno.readTextFile("/tmp/ica.pem");
-          // @ts-ignore
-          const client = Deno.createHttpClient({ caCerts: [pem] });
-          const r = await fetch("https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html", { client });
-          console.log("deno", r.status, (await r.text()).length);
-          TS
-          deno run --allow-net --allow-read /tmp/t.ts
+          pip install -q requests certifi 2>/dev/null
+          echo "== python core.lake_water_quality"
+          python3 -c "from core.lake_water_quality import fetch_surface_water_quality as f; print(f())"
+          echo "== edge function code under deno"
+          (deno run --allow-net --allow-env web/supabase/functions/fm-usace-wq/index.ts &) ; sleep 6
+          curl -sS -X POST localhost:8000 | head -c 300; echo
+          curl -sS -X POST localhost:8000 | grep -o "Dam Site</td><td>[^<]*</td><td>0</td><td>[^<]*</td><td>[^<]*" | head -1

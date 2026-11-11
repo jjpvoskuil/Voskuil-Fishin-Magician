@@ -28,7 +28,11 @@ source in this app.
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
+import functools
+import os
 import re
+import tempfile
+import certifi
 import requests
 
 from .lake_level import NORMAL_SUMMER_POOL_FT
@@ -79,6 +83,27 @@ def _do_saturation_concentration_mg_l(water_temp_c: float, elevation_ft: float) 
     return cs_sea_level * pressure_ratio
 
 
+# 2026-11-10: the USACE server doesn't send its intermediate TLS certificate (browsers fetch it themselves; requests
+# doesn't), so every fetch failed with CERTIFICATE_VERIFY_FAILED - and it rejects python-requests' default
+# User-Agent with a 403. We add DigiCert's public intermediate (core/certs/, valid to 2031-03-29) to certifi's bundle
+# and send a browser-like User-Agent. The new web app's Edge Function (web/supabase/functions/fm-usace-wq) does the same.
+_USACE_INTERMEDIATE_PEM = os.path.join(os.path.dirname(__file__), "certs", "digicert_global_g2_tls_rsa_sha256_2020_ca1.pem")
+_USACE_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; FishinMagician/1.0)"}
+
+
+@functools.lru_cache(maxsize=1)
+def _usace_ca_bundle() -> str:
+    """certifi's CA bundle + the USACE site's missing intermediate, written once to a temp file."""
+    with open(certifi.where(), encoding="utf-8") as f:
+        base = f.read()
+    with open(_USACE_INTERMEDIATE_PEM, encoding="utf-8") as f:
+        extra = f.read()
+    fd, path = tempfile.mkstemp(prefix="usace-ca-", suffix=".pem")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(base + "\n" + extra)
+    return path
+
+
 def fetch_surface_water_quality(url: str = USACE_WQ_REPORT_URL) -> SurfaceWaterQuality:
     """Fetches and parses USACE's periodic water-quality report, returning
     the most recent "Dam Site" surface (0 ft) reading: measured water
@@ -89,7 +114,7 @@ def fetch_surface_water_quality(url: str = USACE_WQ_REPORT_URL) -> SurfaceWaterQ
     expected surface row isn't found in the page) on any failure - callers
     should catch and degrade gracefully, same convention as
     core.weather.fetch_forecast() and core.lake_level.fetch_lake_level()."""
-    resp = requests.get(url, timeout=20)
+    resp = requests.get(url, timeout=20, headers=_USACE_HEADERS, verify=_usace_ca_bundle())
     resp.raise_for_status()
     for station, date_time, depth, temp_c, do_mg_l in _ROW_RE.findall(resp.text):
         if station.strip() != SURFACE_STATION_NAME or depth.strip() != SURFACE_DEPTH_FT:
