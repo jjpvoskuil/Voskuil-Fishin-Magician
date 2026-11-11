@@ -36,7 +36,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
 4. Spot Session + Trip History (both done 11-10). Lure picks v2 done 11-10. More per-angler personalization as screens come over (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
-6. Lake Map (phase A done 11-10; phase B contours + spots to try done 11-11). NEXT (John 11-11): move the real data now (import), re-run the same import at cutover (upserts by id). 7. Leaderboard, Reports (Excel in
+6. Lake Map (phase A done 11-10; phase B contours + spots to try done 11-11). Data import (11-11, John: do it now): `tools/make_import.py OUTDIR` (always reads origin/data — main has STALE data/ copies) → fishin_magician_import.sql (upserts by id; tested twice on local PG: 377 trips 212 John/164 Matthew/1 Alex, 17 spots, 95 lures) + lure photo zip (13 photos → 26 jpgs for Storage fm-lures/lures/). Never commit the output; send to John. Re-run at cutover. 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ upload the 13 own lure photos from data/lure_images to the fm-lures bucket),
 backups (private repo, twice weekly), make_restore.py, cutover.
 - Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs

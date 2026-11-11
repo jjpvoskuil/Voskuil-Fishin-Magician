@@ -10,3 +10,6 @@ web/dist/
 *.import.sql
 import.sql
 restore.sql
+fishin_magician_import*.sql
+import_out/
+fishin_magician_lure_photos*.zip
