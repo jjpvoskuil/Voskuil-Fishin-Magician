@@ -189,8 +189,10 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   Saved boards → table `fm_saved` (kind board|report, private to owner; RLS `test/test_saved.sql`, 10 checks) → ★ tabs.
   Reports must get the same pattern (John 11-11): stock reports + typed custom report + save (kind 'report').
   Shared filter widgets `Multi` / `Pick` now live in ui.jsx.
-- App icon (John 11-11): redo before Matt installs; a "Voskuil Outdoors" family look shared with Deercast, clearly
-  fishing. Show options.
+- App icon (John 11-11, picked "D2 + VO medallion"): Voskuil Outdoors family look shared with Deercast — dark forest
+  field #1f2b22, patch band (teal #3d9a88 here, orange #e07b24 on Deercast) with small stars, cream "VO" medallion at
+  6 o'clock, leaping largemouth (Deercast: its deer, ring removed). Generator `web/tools/make_icons.py OUTDIR
+  --style medal` (SVG → Chrome → PNG 512/192/180/64; writes both apps' icons — copy deercast-medal-* into Deercast).
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 

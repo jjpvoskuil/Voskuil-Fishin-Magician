@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#1f2b22"/><g transform="translate(256 256) scale(.84) translate(-256 -270)"><defs><linearGradient id="belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5f7f34"/><stop offset=".55" stop-color="#8ea64f"/><stop offset=".8" stop-color="#e4dcae"/></linearGradient></defs>
+<g transform="rotate(-28 256 256) translate(0 6)">
+ <path d="M155 232 L96 186 C110 228 110 264 96 304 L155 258 Z" fill="#5f7f34"/>
+ <path d="M232 190 L238 156 L250 166 L258 150 L270 164 L280 152 L290 168 L298 160 L304 192 Z" fill="#4c6a28"/>
+ <path d="M190 206 C196 176 222 172 232 192 Z" fill="#5f7f34"/>
+ <path d="M405 245 C390 205 340 188 290 186 C230 184 180 205 150 228 L150 262 C185 292 240 318 300 316 C350 314 390 296 410 274 L368 260 Z" fill="url(#belly)"/>
+ <path d="M338 252 C300 250 250 246 200 244 C185 244 168 245 156 246" stroke="#3a5020" stroke-width="13" fill="none" stroke-linecap="round" stroke-dasharray="26 8 18 10 30 6"/>
+ <path d="M336 200 C318 236 320 274 342 306" stroke="#3a5020" stroke-width="5" fill="none" stroke-linecap="round" opacity=".7"/>
+ <path d="M300 300 L276 338 L322 312 Z" fill="#8ea64f"/>
+ <path d="M408 274 L368 260 L404 246" fill="#7a2c1c"/>
+ <circle cx="366" cy="228" r="12" fill="#1a1a14"/><circle cx="369" cy="224" r="4" fill="#f4ecd2"/>
+</g>
+<path d="M120 380 C170 352 210 396 256 372 C300 350 340 394 392 372" stroke="#efe2c4" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M150 412 C200 392 230 420 280 404 C320 392 350 414 372 406" stroke="#e07b24" stroke-width="9" fill="none" stroke-linecap="round" opacity=".9"/>
+<circle cx="168" cy="338" r="7" fill="#efe2c4"/><circle cx="196" cy="318" r="5" fill="#efe2c4"/><circle cx="360" cy="342" r="6" fill="#efe2c4"/><circle cx="336" cy="322" r="4" fill="#efe2c4"/></g><circle cx="256" cy="256" r="214" fill="none" stroke="#3d9a88" stroke-width="46"/><circle cx="256" cy="256" r="191" fill="none" stroke="#1f2b22" stroke-width="2" opacity=".35"/><text x="70.7" y="156.2" font-size="20" fill="#f4ecd2" text-anchor="middle" font-family="DejaVu Sans, Helvetica">★</text><text x="256.0" y="49.9" font-size="22" fill="#f4ecd2" text-anchor="middle" font-family="DejaVu Sans, Helvetica">★</text><text x="441.3" y="156.2" font-size="20" fill="#f4ecd2" text-anchor="middle" font-family="DejaVu Sans, Helvetica">★</text><circle cx="256" cy="466" r="46" fill="#f4ecd2" stroke="#1f2b22" stroke-width="5"/><text x="256" y="481" font-family="DejaVu Serif, Georgia, serif" font-weight="700" font-size="42" letter-spacing="1" fill="#1f2b22" text-anchor="middle">VO</text></svg>
