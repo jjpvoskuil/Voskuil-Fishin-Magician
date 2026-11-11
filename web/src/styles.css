@@ -23,6 +23,7 @@
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px);
   --tabbar: calc(62px + var(--safe-bottom));
+  --kb: 0px; /* height of the on-screen keyboard over the page (set by useKeyboardSafeInputs) */
   font-family: var(--font); color: var(--text); background: var(--page);
   -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%;
 }
@@ -43,7 +44,7 @@ input, select, textarea { font: inherit; color: var(--text); }
 .head { padding: calc(var(--safe-top) + 14px) 20px 12px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
 .head .kicker { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .head h1 { margin: 2px 0 0; font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
-.body { padding: 4px var(--pad) 24px; display: flex; flex-direction: column; gap: var(--gap); }
+.body { padding: 4px var(--pad) calc(24px + var(--kb)); display: flex; flex-direction: column; gap: var(--gap); }
 .iconbtn { width: 44px; height: 44px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--card);
   display: grid; place-items: center; flex: none; }
 
@@ -132,11 +133,11 @@ input, select, textarea { font: inherit; color: var(--text); }
 .bd-total { display: flex; justify-content: space-between; padding: 12px 0 4px; font-weight: 800; font-size: 16px; }
 
 /* sheet */
-.sheet-scrim { position: fixed; inset: 0; z-index: 150; background: var(--scrim); display: flex; align-items: flex-end; }
-.sheet { width: 100%; max-height: 82vh; background: var(--card); border-radius: 20px 20px 0 0; display: flex; flex-direction: column;
+.sheet-scrim { position: fixed; inset: 0 0 var(--kb) 0; z-index: 150; background: var(--scrim); display: flex; align-items: flex-end; }
+.sheet { width: 100%; max-height: calc(100% - 40px); background: var(--card); border-radius: 20px 20px 0 0; display: flex; flex-direction: column;
   padding-bottom: var(--safe-bottom); box-shadow: 0 -8px 30px var(--shadow); }
 .sheet-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 12px 8px 18px; border-bottom: 1px solid var(--line-soft); }
-.sheet-b { overflow-y: auto; padding: 4px 18px 18px; -webkit-overflow-scrolling: touch; }
+.sheet-b { overflow-y: auto; padding: 4px 18px 18px; scroll-padding: 80px 0; -webkit-overflow-scrolling: touch; }
 
 /* activity */
 .roster { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; font-weight: 600; margin-bottom: 12px; }

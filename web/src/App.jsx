@@ -10,6 +10,7 @@ import { useLakeLevel, useList, useTrips, useWaterQuality, useWeather } from "./
 import { demoSeed, DEMO_EMAIL } from "./demo.js";
 import { demoDb, supabaseDb } from "./lib/db.js";
 import { resolveTheme } from "./lib/theme.js";
+import { useKeyboardSafeInputs } from "./ui.jsx";
 
 const THEME_PREF = "fm.theme";
 const TAB_IDS = TABS.map((t) => t[0]);
@@ -46,6 +47,7 @@ export default function App() {
   const [tab, setTabState] = useState(() => { const h = location.hash.slice(1); return TAB_IDS.includes(h) ? h : "today"; });
   const [toast, setToast] = useState("");
   const theme = useTheme();
+  useKeyboardSafeInputs();
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); }, [toast]);
 
   const onTab = (id) => {

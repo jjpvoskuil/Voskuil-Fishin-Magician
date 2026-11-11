@@ -75,6 +75,13 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 
+## Keyboard rule (John, 11-10)
+Every text box must stay visible above the iPhone keyboard. `ui.jsx useKeyboardSafeInputs()` (mounted in App) sets
+`--kb` from visualViewport (sheets sit above it; screens get that much extra bottom room) and scrolls the focused box
+into the middle of the still-visible area. When a screen gains inputs, add them to `web/tools/keyboard_check.py`
+CASES and run it (fakes a 380 px iOS keyboard; the simulated iPhone 13 viewport is 390×664) — it must print
+"ALL FIELDS VISIBLE ABOVE THE KEYBOARD". Still confirm on John's phone.
+
 ## Phone lessons (from Deercast)
 Number boxes = text inputs with numeric keypad that select on tap (not type="number"). Screens scroll inside their own
 container — scroll that to top. iPhone pauses GPS on lock/background (wake lock, restart watchPosition, 20 s watchdog,

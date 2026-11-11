@@ -68,3 +68,37 @@ export function ScoreRing({ score, size = 92 }) {
 }
 
 export const verdict = (s) => (s >= 8 ? "Excellent day" : s >= 6.5 ? "Good day" : s >= 5 ? "Fair day" : s >= 3.5 ? "Tough day" : "Poor day");
+
+/** Keep text boxes visible above the on-screen keyboard (iPhone slides it OVER the page without resizing it):
+ *  - sets --kb on <html> = how much of the bottom of the screen the keyboard covers (from visualViewport); sheets
+ *    lift above it and every screen gets that much extra room to scroll;
+ *  - scrolls the box you tapped into the middle of what's still visible. Mounted once in App. */
+export function useKeyboardSafeInputs() {
+  useEffect(() => {
+    const vv = window.visualViewport, root = document.documentElement;
+    const update = () => {
+      const kb = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+      root.style.setProperty("--kb", `${kb > 80 ? kb : 0}px`); // ignore small toolbar changes
+    };
+    const isField = (el) => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") && el.type !== "checkbox" && el.type !== "radio";
+    const reveal = () => {
+      const el = document.activeElement;
+      if (!isField(el)) return;
+      const r = el.getBoundingClientRect(), visibleBottom = vv ? vv.height + vv.offsetTop : window.innerHeight;
+      if (r.top >= 60 && r.bottom <= visibleBottom - 12) return;
+      // scroll the box's own scrolling container so the box sits in the middle of what the keyboard leaves visible
+      let sc = el.parentElement;
+      while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+      const box = sc ? sc.getBoundingClientRect() : { top: 0 };
+      const top = Math.max(box.top, 0), bottom = Math.min(visibleBottom, sc ? box.bottom : visibleBottom);
+      const delta = (r.top + r.bottom) / 2 - (top + bottom) / 2;
+      if (sc) sc.scrollBy({ top: delta, behavior: "smooth" }); else window.scrollBy({ top: delta, behavior: "smooth" });
+    };
+    const onFocus = (e) => { if (isField(e.target)) { setTimeout(() => { update(); reveal(); }, 320); setTimeout(reveal, 650); } };
+    update();
+    vv?.addEventListener("resize", update); vv?.addEventListener("scroll", update); vv?.addEventListener("resize", reveal);
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("focusout", () => setTimeout(update, 120));
+    return () => { vv?.removeEventListener("resize", update); vv?.removeEventListener("scroll", update); vv?.removeEventListener("resize", reveal); document.removeEventListener("focusin", onFocus); };
+  }, []);
+}
