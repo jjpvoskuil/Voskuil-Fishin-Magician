@@ -297,3 +297,24 @@ details.tgroup > summary::-webkit-details-marker { display: none; }
 .gap-i { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; }
 .gap-i img { width: 48px; height: 48px; object-fit: contain; background: #fff; border-radius: 8px; flex: none; }
 a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--text); }
+
+/* ---- Lake Map ---- */
+.map-screen { display: flex; flex-direction: column; overflow: hidden; }
+.map-screen .head { padding-bottom: 8px; }
+.map-wrap { position: relative; flex: 1; min-height: 0; }
+.map-box { position: absolute; inset: 0; background: #0e1a14; }
+.map-ctl { position: absolute; top: 10px; right: 10px; z-index: 500; display: flex; flex-direction: column; gap: 8px; }
+.map-ctl .iconbtn { font-size: 20px; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+.map-ctl .iconbtn.on { border-color: var(--accent); border-width: 2px; }
+.map-dock { position: absolute; left: 10px; right: 64px; bottom: 12px; z-index: 500; display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
+.map-dock .btn { box-shadow: 0 2px 8px rgba(0,0,0,.3); min-height: 52px; font-size: 15px; padding: 0 10px; }
+.map-hint { position: absolute; top: 10px; left: 10px; z-index: 500; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
+.spot-label { background: rgba(0,0,0,.6); color: #fff; border: 0; box-shadow: none; font-weight: 700; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
+.spot-label::before { display: none; }
+.live-pin span { display: inline-block; white-space: nowrap; background: var(--good); color: #fff; font-weight: 800; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); transform: translate(-50%, -150%); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i, .rank-row i { width: 12px; height: 12px; border-radius: 999px; display: inline-block; flex: none; border: 1px solid rgba(0,0,0,.2); }
+.rank-row { display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line-soft); width: 100%; }
+.rank-row .grow { flex: 1; min-width: 0; }
+.leaflet-container { font-family: inherit; }

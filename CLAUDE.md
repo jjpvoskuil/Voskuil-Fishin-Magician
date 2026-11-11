@@ -36,7 +36,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
 4. Spot Session + Trip History (both done 11-10). Lure picks v2 done 11-10. More per-angler personalization as screens come over (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
-6. Lake Map (Leaflet satellite; bathymetry precomputed in Python, shipped static). 7. Leaderboard, Reports (Excel in
+6. Lake Map (phase A done 11-10; phase B = contours from KyFromAbove lidar + estimate below 496 ft + structure layer, precomputed in a GitHub Action, shipped static). 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ upload the 13 own lure photos from data/lure_images to the fm-lures bucket),
 backups (private repo, twice weekly), make_restore.py, cutover.
 - Cutover also: delete the `data` branch, remove private `data/` files from `main` and purge them from history (needs
@@ -49,6 +49,12 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   again (failed before) and a layer suggesting structurally promising areas (points, steep breaks, channel bends).
   Unanswered (assumed yes): rank spots for today.
   Contours (John 11-10): must follow the lake level — store bottom ELEVATION, depth = live USGS pool level − bottom.
+  Lidar (checked 11-10): KyFromAbove Phase 2 DEM (STAC https://spved5ihrl.execute-api.us-west-2.amazonaws.com/,
+  collection dem-phase2, 2-ft COG tiles in EPSG:3089 US ft, public S3 s3://kyfromabove) was flown Dec 2022–Apr 2023
+  with Nolin at ~495.8 ft (flat water value) → real bottom above 496 (summer-pool depths 0–19 ft). Phase 1 (2014) at
+  510 ft. Below 496: John has no Quickdraw export (no SD card) → ESTIMATE (dashed, labeled): extend edge slopes inward,
+  deepen along old channels (data/nolin_channel.json), cap by John's rule: most areas ≤35 ft at summer pool (≥480),
+  channel near dam / a few holes 55–60 ft (~455–460). Sandbox can't reach S3: process in a GitHub Action.
 - TO DO (John 11-10): Nolin is rocky with almost no vegetation — drop grass/weed-specific suggestions (hollow-body frog,
   "over grass" presentations/wording; re-word to rock/wood/timber). Do it in the lure data + picks when convenient.
 - Season fix (John, 11-10, both apps): fall (day > 250) is checked before the spring rules: 58-65 °F = Fall Turnover
@@ -139,6 +145,18 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   (`tools/export_cabelas_picks.py` → `lib/data/cabelas_picks.json`, public catalog info). No need to copy the 80
   Cabela's images into the bucket at cutover (they load directly); only the 13 own photos in data/lure_images need
   uploading by make_import.
+- Lake Map (`MapScreen.jsx`, `lib/spotstats.js`, 11-10, phase A): Leaflet, Esri World Imagery satellite by default
+  (+ Esri place labels), 🗺️/🛰️ switch to OpenStreetMap, 🪵 fish attractors (KDFWR, `lib/data/attractors.json`, public),
+  ◎ center on me, GPS dot (watchPosition only while the map is open). Spot pins = circle markers colored by "heat"
+  (spot fish/hr shrunk 2 h toward the lake average ÷ that average; gray = <1 h data), sized by sessions, name labels.
+  🔥 Hot spots sheet: time-of-day chips, time of year (any / this time of year ±30 d / seasons), Everyone/Just me,
+  "Right now" shortcut, legend, ranked best spots. Filters kept in localStorage `fm.mapFilters`. Pinning: "📍 Save
+  where I am" (GPS) or press-and-hold (Leaflet contextmenu, tapHold) → NameSheet (name + optional type chip) → spot
+  saved and its panel opens. Spot panel: details, fish / fish/hr / sessions for the filter, best lures, best time of
+  day, Fish here now (writes `fm.sessionDraft` spot_id + switches to Session), Edit details (type, bottom chips, depths,
+  grade, notes, delete), Directions (Apple Maps). Others fishing now = green pins → Watch. Walk-through:
+  `python3 web/tools/map_flow.py OUTDIR` (tiles are blocked in the sandbox). Phase B next: lidar contours + estimate +
+  structure layer.
 - Drop shot fix (11-10, John): the auto-tagger put "straight worm" → wacky before drop shot, so both Roboworm FAT
   Straight Worms were tagged wacky_rig_senko and every drop-shot session was logged as wacky. Tagger fixed (drop shot
   first, + "roboworm"); the `data` branch was corrected (43 trip rows + 2 tackle-box items → drop_shot; nothing in the

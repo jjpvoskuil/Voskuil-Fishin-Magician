@@ -6,6 +6,7 @@ import MoreScreen from "./MoreScreen.jsx";
 import SessionScreen from "./SessionScreen.jsx";
 import HistoryScreen from "./HistoryScreen.jsx";
 import TackleScreen from "./TackleScreen.jsx";
+import MapScreen from "./MapScreen.jsx";
 import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
 import ForecastScreen from "./ForecastScreen.jsx";
@@ -118,7 +119,11 @@ export default function App() {
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }} />
       <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
       <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
-      {stub("map", "Lake Map", "The lake map")}
+      <MapScreen {...common} active={tab === "map"} trips={trips} spots={spots.items} reloadSpots={spots.reload} weather={weather}
+        onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }}
+        onFishHere={(spotId) => { // Session setup reads its draft when it opens
+          try { const d = JSON.parse(localStorage.getItem("fm.sessionDraft") || "{}"); localStorage.setItem("fm.sessionDraft", JSON.stringify({ ...d, spot_id: spotId, spot_source: "map", together: null })); } catch { /* ignore */ }
+          onTab("session"); }} />
       <MoreScreen {...common} active={tab === "more" && !page} onSignOut={signOut} onOpen={setPage} />
       <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />

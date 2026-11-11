@@ -26,13 +26,15 @@ CASES = [
     ("Session", "↻ Moved / conditions", ["Water temp (°F)", "Visibility (ft)", "Depth fish are showing on electronics (ft, optional)"]),
     ("Session", ["＋ Add a lure", "Search the tackle box"], ["Search"]),
     ("More", ["Tackle Box"], ["Search your tackle"]),
+    ("Map", ["📍 Save where I am"], ["Name"]),
+    ("Map", ["css=.map-dock .btn >> nth=1", "Any time", "css=.rank-row >> nth=0", "Edit details"], ["Name", "Main area depth (ft)", "Notes"]),
     ("More", ["Tackle Box", "＋ Add by hand"], ["Brand", "Name, color, size"]),
     ("More", ["Trip History", "css=button.card.hist >> nth=1", "Edit"], ["Lure", "Color", "Technique", "Notes"]),
 ]
 bad = 0
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path="/usr/bin/google-chrome")
-    ctx = b.new_context(**p.devices["iPhone 13"])
+    ctx = b.new_context(**p.devices["iPhone 13"], geolocation={"latitude": 37.3285, "longitude": -86.1405}, permissions=["geolocation"])
     fx = json.loads(gzip.open(Path(__file__).resolve().parents[1] / "src/lib/fixtures/engine.fixtures.json.gz").read())
     bundle = next(x for x in fx["bundles"] if x["anchor"] == "2026-11-10")["bundle"]
     ctx.route("**/api.open-meteo.com/**", lambda r: r.fulfill(json=bundle))
