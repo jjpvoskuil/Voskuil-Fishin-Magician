@@ -98,3 +98,15 @@ test("lake level + USACE water quality parsing", () => {
   assert.throws(() => lake.parseSurfaceWaterQuality("<tr><td>x</td></tr>"), { message: FX.usace_missing });
   for (const [t, v] of FX.do_sat) same(lake.doSaturationConcentrationMgL(t, 515.0), v);
 });
+
+import { applyFreeze } from "./freeze.js";
+test("score freezing", () => {
+  const b = FX.bundles.find((x) => x.anchor === "2026-11-10").bundle;
+  for (const c of FX.freeze) {
+    const day = sc.scoreDay(b, "2026-11-10");
+    const rows = applyFreeze(day, c.frozen, parseIso(c.now));
+    assert.deepEqual(rows.map((r) => r.segment_name), c.names, c.now);
+    same(rows.map((r) => ({ segment_name: r.segment_name, score: r.score })), c.saved, `saved ${c.now}`);
+    same(day, c.day, `day ${c.now}`);
+  }
+});

@@ -13,7 +13,9 @@
 --     admins can edit/delete anyone's (fixing mistakes, imports).
 --   * Lake water-quality readings (fm_water_quality) and frozen forecast scores (fm_score_freeze): shared, any
 --     approved angler can add a new one; nobody can change or delete one (admins can delete).
---   * (More tables — lures, spots, punch list, photos — are added here as each screen is rebuilt.)
+--   * The tackle box (fm_lures) and saved lake spots (fm_spots) are shared by all anglers, as in the old app: any
+--     approved angler can add, edit and remove them.
+--   * (More tables — punch list, photos — are added here as each screen is rebuilt.)
 
 create table if not exists public.fm_users (
   email text primary key check (email = lower(email)),
@@ -39,6 +41,15 @@ create table if not exists public.fm_score_freeze (
   primary key (the_date, segment_name)
 );
 
+create table if not exists public.fm_lures (
+  id text primary key,                 -- item_id
+  data jsonb not null                  -- the old lure_inventory.csv row (brand, description, category, quantity, …)
+);
+create table if not exists public.fm_spots (
+  id text primary key,                 -- spot_id
+  data jsonb not null                  -- the old lake_spots.csv row (name, lat, lon, location_type, depths, notes, …)
+);
+
 create or replace function public.fm_me() returns text language sql stable as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
 create or replace function public.fm_is_approved() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.fm_users where email = public.fm_me()) $$;
@@ -48,7 +59,7 @@ revoke all on function public.fm_is_approved(), public.fm_is_admin() from public
 grant execute on function public.fm_me(), public.fm_is_approved(), public.fm_is_admin() to authenticated;
 
 do $$ declare t text; begin
-  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze'] loop
+  foreach t in array array['fm_users','fm_trips','fm_water_quality','fm_score_freeze','fm_lures','fm_spots'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('revoke all on public.%I from anon, authenticated', t);
     execute format('grant select, insert, update, delete on public.%I to authenticated', t);
@@ -79,6 +90,9 @@ create policy "fm wq delete" on public.fm_water_quality for delete to authentica
 create policy "fm freeze read"   on public.fm_score_freeze for select to authenticated using (public.fm_is_approved());
 create policy "fm freeze add"    on public.fm_score_freeze for insert to authenticated with check (public.fm_is_approved());
 create policy "fm freeze delete" on public.fm_score_freeze for delete to authenticated using (public.fm_is_admin());
+
+create policy "fm lures shared" on public.fm_lures for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());
+create policy "fm spots shared" on public.fm_spots for all to authenticated using (public.fm_is_approved()) with check (public.fm_is_approved());
 
 -- the first anglers (re-running keeps any name/role changes made in the app)
 insert into public.fm_users (email, name, role) values

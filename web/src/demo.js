@@ -46,9 +46,23 @@ export function demoTrips(today = lakeToday()) {
 
 export const DEMO_USACE_HTML = `<table><tr><td>Dam Site</td><td>${lakeToday().replace(/-/g, "").slice(0, 8)}, 0930</td><td>0</td><td>15.4</td><td>9.1</td></tr></table>`;
 
+const DEMO_LURES = [
+  ["dl1", "Strike King", "KVD Squarebill 1.5 - Sexy Shad", "squarebill_crankbait", "2"], ["dl2", "Z-Man", "ChatterBait Jackhammer - Green Pumpkin", "chatterbait", "1"],
+  ["dl3", "Berkley", "MaxScent Flat Worm - Watermelon Red", "finesse_shaky_head", "5"], ["dl4", "Booyah", "Football Jig - Brown/Orange", "football_jig", "2"],
+  ["dl5", "Rapala", "Shadow Rap - Ghost Shad", "suspending_jerkbait", "1"], ["dl6", "Strike King", "Red Eye Shad - Chrome Blue", "lipless_crankbait", "2"],
+  ["dl7", "Heddon", "Zara Spook - Bone", "walking_topwater", "1"], ["dl8", "Yamamoto", "Senko 5in - Green Pumpkin", "wacky_rig_senko", "10"],
+  ["dl9", "Strike King", "6XD - Citrus Shad", "deep_diving_crankbait", "1"], ["dl10", "Zoom", "Brush Hog - Black/Blue", "texas_rig_creature", "8"],
+];
+export const demoLures = () => DEMO_LURES.map(([item_id, brand, description, category, quantity]) => ({ item_id, brand, description, category, quantity, sku: "", image_url: "", image_filename: "", source: "demo" }));
+export const demoSpots = () => [
+  { spot_id: "d1", name: "Demo Point", lat: 37.31, lon: -86.15, location_type: "Main-lake point", bottom_structure: "Rocky", main_depth_ft: "6", transition_depth_ft: "25", transition_grade: "Medium", notes: "Made-up demo spot." },
+  { spot_id: "d2", name: "Sample Cove", lat: 37.30, lon: -86.17, location_type: "Cove / pocket (shallow cover)", bottom_structure: "Wood", main_depth_ft: "4", transition_depth_ft: "12", transition_grade: "Gradual", notes: "Made-up demo spot." },
+  { spot_id: "d3", name: "Example Bluff", lat: 37.32, lon: -86.13, location_type: "Rock face / bluff", bottom_structure: "Boulders", main_depth_ft: "10", transition_depth_ft: "35", transition_grade: "High (steep break)", notes: "Made-up demo spot." },
+];
+
 export function demoSeed() {
   return {
     users: [{ email: DEMO_EMAIL, name: "Demo Angler", role: "admin" }, { email: BUDDY, name: "Fishing Buddy", role: "member" }],
-    trips: demoTrips(), water_quality: [], freezes: [], usace_html: DEMO_USACE_HTML,
+    trips: demoTrips(), water_quality: [], freezes: [], usace_html: DEMO_USACE_HTML, lures: demoLures(), spots: demoSpots(),
   };
 }

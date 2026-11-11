@@ -56,5 +56,22 @@ select pg_temp.expect('member cannot delete readings', (select count(*) from pub
 select pg_temp.as_user('jjpvoskuil@gmail.com');
 delete from public.fm_score_freeze;
 select pg_temp.expect('admin can delete a frozen score', (select count(*) from public.fm_score_freeze), 0);
+-- tackle box + spots: shared by all approved anglers, invisible to everyone else
+select pg_temp.as_user('akvoskuil94@gmail.com');
+insert into public.fm_lures values ('l1','{"brand":"Z-Man"}') on conflict (id) do update set data = excluded.data;
+insert into public.fm_spots values ('s1','{"name":"Stripe Island Point"}') on conflict (id) do update set data = excluded.data;
+select pg_temp.as_user('jjpvoskuil@gmail.com');
+update public.fm_lures set data = '{"brand":"Z-Man","quantity":"2"}' where id = 'l1';
+select pg_temp.expect('anglers share and edit the tackle box', (select count(*) from public.fm_lures where data->>'quantity' = '2'), 1);
+select pg_temp.as_user('stranger@gmail.com');
+select pg_temp.expect('outsider sees no lures', (select count(*) from public.fm_lures), 0);
+select pg_temp.expect('outsider sees no spots', (select count(*) from public.fm_spots), 0);
+do $$ begin insert into public.fm_spots values ('x','{}'); raise exception 'FAIL outsider added a spot';
+  exception when insufficient_privilege then raise notice 'ok  outsider cannot add spots'; end $$;
+select pg_temp.as_user('deer@gmail.com');
+select pg_temp.expect('Deercast-only user sees no lures', (select count(*) from public.fm_lures), 0);
+select pg_temp.as_user('mattvoskuil@gmail.com');
+delete from public.fm_lures; delete from public.fm_spots;
+select pg_temp.expect('angler removes from the shared tackle box', (select count(*) from public.fm_lures), 0);
 reset role;
 \echo ALL shared-table TESTS PASSED

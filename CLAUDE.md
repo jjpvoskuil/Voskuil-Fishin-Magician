@@ -21,7 +21,8 @@ fixtures generated from the Python. Until cutover, the live data is still on the
   links point at web/public/outdoors.html and privacy.html here (they cover both apps — keep them current).
 - Anglers: John (jjpvoskuil@gmail.com, admin), Matthew (mattvoskuil@gmail.com, admin), Alex (akvoskuil94@gmail.com).
 - Theme: "Lakeside Pro" (direction A, picked 11-10) — all colors/fonts/spacing in `web/src/styles.css` tokens; light by
-  day, dark 30 min before sunset → 30 min after sunrise (`lib/theme.js`), manual override in the menu.
+  day, dark 30 min before sunset → 30 min after sunrise (`lib/theme.js`). Header has a sun/moon button (John, 11-10:
+  no menu) that flips until the next automatic switch; More → Screen has Automatic / Light / Dark; Sign out is on More.
 - Data layer: `web/src/lib/db.js` — `supabaseDb` and a browser-only `demoDb` (made-up data, `?demo`). The sandbox can't
   reach Supabase: build/test against demo. Check screens with Playwright (iPhone 13, light + dark;
   `/usr/bin/google-chrome`; run `vite preview` WITH `BASE=/Voskuil-Fishin-Magician/`).
@@ -67,6 +68,10 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   its intermediate cert, so the function ships DigiCert's public intermediate via Deno.createHttpClient + a browser-like
   User-Agent, with 3 tries — same fix in core/lake_water_quality.py via core/certs/); readings logged add-only to `fm_water_quality`; trips from
   `fm_trips`). Sheets render through a portal on <body> (each `.screen` is its own fixed layer).
+- 7-Day Forecast (`ForecastScreen.jsx`, 11-10): week strip, day facts, segments (tap for why, ended ones frozen via
+  `lib/freeze.js` → `fm_score_freeze`), lure picks per segment (`LureRec.jsx`) driven by Lake setup (`LakeSetup.jsx`,
+  kept in localStorage `fm.setup`; blank water temp = today's estimate, like the old default). Cabela's suggestions in
+  lure blocks come back with the Tackle Box screen. Tackle box = `fm_lures`, spots = `fm_spots` (shared, any approved).
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 

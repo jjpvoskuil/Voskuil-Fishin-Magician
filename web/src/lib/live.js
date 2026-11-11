@@ -66,3 +66,11 @@ export function useTrips(db) {
   useRefreshing(load, 5 * 60e3);
   return { ...state, reload: load };
 }
+
+/** A shared list from the database (e.g. "listLures", "listSpots"), reloaded when the app returns to the screen. */
+export function useList(db, method) {
+  const [state, setState] = useState({ items: null, error: "" });
+  const load = useCallback(async () => { if (!db) return; try { setState({ items: await db[method](), error: "" }); } catch (e) { setState((s) => ({ ...s, error: e.message })); } }, [db, method]);
+  useRefreshing(load, 10 * 60e3);
+  return { ...state, reload: load };
+}

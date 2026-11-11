@@ -187,6 +187,29 @@ def main():
     fx["dawn_rates_window"] = enc(calibration.moon_illumination_dawn_rates(trips, date(2026, 8, 10), date(2026, 9, 25)))
     fx["daily_catch"] = enc(calibration.daily_dawn_morning_catch(trips, date(2026, 8, 25), date(2026, 9, 14)))
 
+    # score freezing (core/forecast_freeze.apply_freeze)
+    import tempfile
+    from core import forecast_freeze
+    fb = next(b for b in fx["bundles"] if b["anchor"] == "2026-11-10")["bundle"]
+    fx["freeze"] = []
+    for now_s, pre in [("2026-11-10T05:00:00", None), ("2026-11-10T13:30:00", None), ("2026-11-10T13:30:00", ("Dawn", 9.9)), ("2026-11-11T07:00:00", ("Morning", 1.0))]:
+        tmp = Path(tempfile.mkdtemp()) / "f.csv"
+        forecast_freeze.ensure_file_exists(tmp)
+        day = scoring.score_day(WeatherBundle(hourly=fb["hourly"], daily=fb["daily"]), date(2026, 11, 10))
+        frozen_rows = []
+        if pre:
+            seg = next(s for s in day.segments if s.name == pre[0])
+            frozen_rows = [{"the_date": "2026-11-10", "segment_name": pre[0], "score": pre[1], "solunar_overlap": "major", "notes": ["x"], "breakdown": [["Base", 5.0, "y"], ["Pretend", pre[1] - 5.0, "z"]]}]
+            import csv as _csv
+            with open(tmp, "a", newline="") as f:
+                _csv.DictWriter(f, fieldnames=forecast_freeze.FIELDNAMES).writerow({"the_date": "2026-11-10", "segment_name": pre[0], "score": pre[1], "solunar_overlap": "major",
+                    "notes_json": json.dumps(["x"]), "breakdown_json": json.dumps([["Base", 5.0, "y"], ["Pretend", pre[1] - 5.0, "z"]]), "frozen_at": "2026-11-10T08:00:00"})
+        now = datetime.fromisoformat(now_s)
+        names = forecast_freeze.apply_freeze(day, now=now, path=tmp)
+        saved = [r for r in forecast_freeze._read_all_rows(tmp) if r["frozen_at"] == now.isoformat()]
+        fx["freeze"].append({"now": now_s, "frozen": frozen_rows, "names": names, "day": enc(day),
+                             "saved": [{"segment_name": r["segment_name"], "score": float(r["score"])} for r in saved]})
+
     # lake level (USGS) + USACE surface water quality parsing
     from core import lake_level, lake_water_quality as lwq
     from unittest import mock

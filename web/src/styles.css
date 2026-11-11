@@ -1,5 +1,5 @@
 /* Fishin Magician theme — "Lakeside Pro" (direction A, picked 2026-11-10).
-   Light by day, dark from 30 min before sunset to 30 min after sunrise (lib/theme.js), manual override in the menu.
+   Light by day, dark from 30 min before sunset to 30 min after sunrise (lib/theme.js), manual override: the sun/moon button in each screen header (until the next switch) or More → Screen.
    Every screen builds only from these tokens; change a value here and every page follows. */
 :root, [data-theme="light"] {
   --page: #F3F5F0; --card: #FFFFFF; --band: #EEF0EA; --line: #E1E5DD; --line-soft: #E7E9E2;
@@ -154,3 +154,57 @@ input, select, textarea { font: inherit; color: var(--text); }
 .tbl td:first-child { white-space: normal; }
 .tbl .r { text-align: right; }
 .tbl tr.sub td { font-weight: 700; }
+
+/* forecast: week strip */
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.wday { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 64px; }
+.wday .wd { font-size: 11px; font-weight: 700; color: var(--muted); }
+.wday .ws { font-size: 15px; }
+.wday .wbar { width: 70%; height: 4px; border-radius: 2px; background: var(--band); overflow: hidden; }
+.wday .wbar > span { display: block; height: 100%; background: var(--accent); }
+.wday.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.wday.on .wd { color: var(--accent-strong); }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.facts > div { display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.facts .muted { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.sol { font-size: 10px; font-weight: 700; color: var(--accent-strong); white-space: nowrap; }
+button.pill { min-height: 30px; }
+
+/* chips */
+.chips, .segchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.segchips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.segchips .chip { justify-content: center; padding: 0 6px; }
+.chip { min-height: 38px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 13px; font-weight: 600; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.setup-sum { width: 100%; text-align: left; font-size: 13px; color: var(--text-2); background: var(--band); border-radius: var(--r-sm); padding: 10px 12px; line-height: 1.45; margin-bottom: 10px; }
+
+/* lure blocks */
+.lurerec { display: flex; flex-direction: column; gap: 10px; }
+.lr-h { font-weight: 800; font-size: 14px; }
+.lure { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.lure h4 { margin: 0; font-size: 16px; }
+.lure p { margin: 0; line-height: 1.45; }
+.lure-note { background: var(--band); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+.owned { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.owned-i { display: flex; gap: 10px; align-items: center; }
+.owned-i img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: var(--band); flex: none; }
+.ok { color: var(--good); }
+.lure-facts { display: grid; grid-template-columns: 62px 1fr; gap: 4px 8px; margin: 2px 0 0; font-size: 13px; line-height: 1.45; }
+.lure-facts dt { color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.lure-facts dd { margin: 0; }
+.vids a { color: var(--accent-strong); font-weight: 600; }
+.gaps { border: 1px dashed var(--line); border-radius: var(--r-sm); padding: 4px 12px; }
+.gaps summary { min-height: 44px; display: flex; align-items: center; font-weight: 700; font-size: 14px; cursor: pointer; }
+.gaps[open] { padding-bottom: 12px; }
+.gaps .lure { margin-top: 10px; }
+.rationale { line-height: 1.5; margin: 0; }
+
+/* setup form */
+.setup { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.setup p { margin: -4px 0 0; line-height: 1.45; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.field input, .field select { width: 100%; min-width: 0; }
+.check { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14px; }
+.check input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.iconbtn.theme { color: var(--accent-strong); }

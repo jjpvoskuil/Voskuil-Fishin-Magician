@@ -35,6 +35,13 @@ export function supabaseDb(sb, email) {
     addWaterQuality: async (w) => { const { observed_at, ...data } = w; return ok(await sb.from("fm_water_quality").upsert({ observed_at, data }, { ignoreDuplicates: true })); },
     listFreezes: async (date) => ok(await sb.from("fm_score_freeze").select("the_date,segment_name,data").eq("the_date", date)).map((r) => ({ the_date: r.the_date, segment_name: r.segment_name, ...r.data })),
     addFreezes: async (rows) => (rows.length ? ok(await sb.from("fm_score_freeze").upsert(rows.map(({ the_date, segment_name, ...data }) => ({ the_date, segment_name, data })), { ignoreDuplicates: true })) : null),
+    // shared tackle box + lake spots (every approved angler can edit)
+    listLures: async () => ok(await sb.from("fm_lures").select("id,data").order("id")).map((r) => ({ ...r.data, item_id: r.id })),
+    saveLure: async (l) => ok(await sb.from("fm_lures").upsert({ id: l.item_id, data: l })),
+    deleteLure: async (id) => ok(await sb.from("fm_lures").delete().eq("id", id)),
+    listSpots: async () => ok(await sb.from("fm_spots").select("id,data").order("id")).map((r) => ({ ...r.data, spot_id: r.id })),
+    saveSpot: async (sp) => ok(await sb.from("fm_spots").upsert({ id: sp.spot_id, data: sp })),
+    deleteSpot: async (id) => ok(await sb.from("fm_spots").delete().eq("id", id)),
     /** Army Corps report page HTML, through the fm-usace-wq Edge Function */
     usaceHtml: async () => { const { data, error } = await sb.functions.invoke("fm-usace-wq"); if (error) throw new Error(error.message); if (data?.error) throw new Error(data.error); return data.html; },
   };
@@ -45,7 +52,7 @@ export const tripRow = (r) => ({ ...r.data, trip_id: r.id, owner: r.owner, trip_
 export const tripRecord = (t, me) => { const { owner, ...data } = t; return { id: t.trip_id, owner: lower(owner || me), trip_date: t.trip_date, session_id: t.session_id || null, data }; };
 
 // ---------------------------------------------------------------- demo (browser-only)
-const DEMO_KEY = "fm.demo.v2";
+const DEMO_KEY = "fm.demo.v3";
 export function demoDb(seed, email = "demo@example.com") {
   let st;
   try { st = JSON.parse(localStorage.getItem(DEMO_KEY)); } catch { st = null; }
@@ -71,6 +78,12 @@ export function demoDb(seed, email = "demo@example.com") {
     listFreezes: async (date) => clone((st.freezes || []).filter((f) => f.the_date === date)),
     addFreezes: async (rows) => { st.freezes ||= []; for (const r of rows) if (!st.freezes.some((f) => f.the_date === r.the_date && f.segment_name === r.segment_name)) st.freezes.push(clone(r)); save(); },
     usaceHtml: async () => st.usace_html || "",
+    listLures: async () => clone(st.lures || []),
+    saveLure: async (l) => up((st.lures ||= []), clone(l), "item_id"),
+    deleteLure: async (id) => del(st.lures || [], (l) => l.item_id === id),
+    listSpots: async () => clone(st.spots || []),
+    saveSpot: async (sp) => up((st.spots ||= []), clone(sp), "spot_id"),
+    deleteSpot: async (id) => del(st.spots || [], (sp) => sp.spot_id === id),
     reset: () => { localStorage.removeItem(DEMO_KEY); },
   };
 }

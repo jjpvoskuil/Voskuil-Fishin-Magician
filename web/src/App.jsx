@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, configured } from "./supabase.js";
 import { LAKE } from "./config.js";
-import { Head, Menu, NotYet, TabBar, TABS } from "./Shell.jsx";
+import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
 import MoreScreen from "./MoreScreen.jsx";
 import TodayScreen from "./TodayScreen.jsx";
-import { useLakeLevel, useTrips, useWaterQuality, useWeather } from "./lib/live.js";
+import ForecastScreen from "./ForecastScreen.jsx";
+import { useLakeSetup } from "./LakeSetup.jsx";
+import { useLakeLevel, useList, useTrips, useWaterQuality, useWeather } from "./lib/live.js";
 import { demoSeed, DEMO_EMAIL } from "./demo.js";
 import { demoDb, supabaseDb } from "./lib/db.js";
 import { resolveTheme } from "./lib/theme.js";
@@ -19,6 +21,7 @@ function useTheme() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60e3); return () => clearInterval(t); }, []);
   const info = resolveTheme(pref, LAKE.lat, LAKE.lon, now);
+  if (document.documentElement.dataset.theme !== info.theme) document.documentElement.dataset.theme = info.theme; // now, so the sun/moon button renders right
   useEffect(() => {
     document.documentElement.dataset.theme = info.theme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", info.theme === "dark" ? "#0F1512" : "#F3F5F0");
@@ -41,7 +44,6 @@ export default function App() {
   const [me, setMe] = useState(undefined);            // fm_users row; null = not on the allow-list
   const [error, setError] = useState("");
   const [tab, setTabState] = useState(() => { const h = location.hash.slice(1); return TAB_IDS.includes(h) ? h : "today"; });
-  const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState("");
   const theme = useTheme();
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); }, [toast]);
@@ -62,6 +64,8 @@ export default function App() {
   useEffect(() => { if (!db) return; db.whoami().then(setMe, (e) => setError(e.message)); }, [db]);
   const approvedDb = me ? db : null; // shared data loads only once we know this person is on the list
   const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips } = useTrips(approvedDb);
+  const lures = useList(approvedDb, "listLures"), spots = useList(approvedDb, "listSpots");
+  const [setup, setSetup] = useLakeSetup();
 
   /** Run a save, report failure as a toast. Returns true on success. */
   const save = useCallback(async (fn, { ok } = {}) => {
@@ -69,7 +73,7 @@ export default function App() {
   }, [db]);
 
   const signIn = () => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin + BASE } });
-  const signOut = () => { setMenu(false); if (demo) { db.reset?.(); location.reload(); } else supabase.auth.signOut(); };
+  const signOut = () => { if (demo) { db.reset?.(); location.reload(); } else supabase.auth.signOut(); };
 
   if (error) return <Splash><p className="err">Couldn't load: {error}</p><button className="btn" onClick={() => location.reload()}>Try again</button></Splash>;
   if (session === undefined) return <Splash><p className="muted">Loading…</p></Splash>;
@@ -88,7 +92,7 @@ export default function App() {
     </Splash>
   );
 
-  const onMenu = () => setMenu(true);
+  const onMenu = () => theme.flip(); // the header's sun/moon button
   const common = { db, me, demo, theme, save, toast: setToast, onMenu };
   const today = new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: LAKE.tz });
   const stub = (id, title, what) => (
@@ -100,12 +104,11 @@ export default function App() {
   return (
     <>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} />
-      {stub("forecast", "7-Day Forecast", "The 7-day forecast")}
+      <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
       {stub("session", "Spot Session", "Spot Session")}
       {stub("map", "Lake Map", "The lake map")}
-      <MoreScreen {...common} active={tab === "more"} />
+      <MoreScreen {...common} active={tab === "more"} onSignOut={signOut} />
       <TabBar tab={tab} onTab={onTab} />
-      <Menu open={menu} onClose={() => setMenu(false)} theme={theme} me={me} onSignOut={signOut} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
   );

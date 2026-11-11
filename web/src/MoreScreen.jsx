@@ -2,12 +2,12 @@
 // and the build stamp. Pages that aren't rebuilt yet say so.
 import { useEffect, useState } from "react";
 import Icon from "./Icon.jsx";
-import { BUILD, Head } from "./Shell.jsx";
+import { Appearance, BUILD, Head } from "./Shell.jsx";
 
 const PAGES = [["history", "Trip History", "history"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
   ["tackle", "Tackle Box", "tackle"], ["punch", "Punch list", "tools"]];
 
-export default function MoreScreen({ active, db, me, demo, onMenu, save, toast }) {
+export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, theme, onSignOut }) {
   const [users, setUsers] = useState(null);
   const [form, setForm] = useState(null); // {email, name, role, isNew}
   const admin = me?.role === "admin";
@@ -64,6 +64,16 @@ export default function MoreScreen({ active, db, me, demo, onMenu, save, toast }
             </form>
           )}
           {!admin && <div className="note muted small" style={{ padding: "10px 14px" }}>Only admins can add or remove anglers.</div>}
+        </section>
+
+        <section className="card">
+          <div className="card-h"><span className="t"><Icon name={theme.theme === "dark" ? "moon" : "sun"} />Screen</span></div>
+          <div className="card-b"><Appearance theme={theme} /></div>
+        </section>
+
+        <section className="card">
+          <div className="row"><Icon name="user" /><span className="grow">{me?.name}<div className="muted small">{me?.email}</div></span></div>
+          <button className="row" onClick={onSignOut}><span className="grow">Sign out</span><Icon name="chev" size={18} /></button>
         </section>
 
         <p className="muted small" style={{ textAlign: "center", margin: "4px 0" }}>App updated {BUILD}</p>
