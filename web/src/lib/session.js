@@ -192,7 +192,7 @@ export { dateOf, astro };
 
 /** Soft plastics can be rigged several ways, and the rig is what the lure picks learn from — so a session lets you say
  *  how this one is rigged (the Roboworm sessions were drop shot but got logged as wacky; corrected 2026-11-10). */
-export const SOFT_PLASTIC_RIGS = ["drop_shot", "wacky_rig_senko", "finesse_shaky_head", "texas_rig_worm", "texas_rig_creature", "carolina_rig", "weightless_soft_plastic"];
+export const SOFT_PLASTIC_RIGS = ["drop_shot", "ned_rig", "wacky_rig_senko", "finesse_shaky_head", "texas_rig_worm", "texas_rig_creature", "carolina_rig", "weightless_soft_plastic"];
 export const isSoftPlastic = (category) => SOFT_PLASTIC_RIGS.includes(category);
 export const withRig = (row, category) => ({ ...row, conditions: { ...row.conditions, lure_category: category } });
 

@@ -891,6 +891,40 @@
 "20"
 ]
 },
+"ned_rig": {
+"name": "Ned Rig",
+"video_key": "ned_rig",
+"vertical_style": "bottom",
+"colors": {
+"Clear": [
+"Green pumpkin",
+"The Deal / natural"
+],
+"Green stained": [
+"Green pumpkin orange",
+"Coppertreuse"
+],
+"Brown stained": [
+"Hot craw",
+"Green pumpkin orange"
+],
+"Muddy": [
+"Black/blue",
+"Hot craw"
+]
+},
+"trailer": null,
+"depth_range_ft": [
+3,
+20
+],
+"depth_style": "hopped/dragged on bottom",
+"presentation": "Cast, let it fall on slack line to the bottom, then slow-drag or pop it a few inches and let it sit - the tail stands up. Deadly on rock, points and riprap when the bite is tough or the water is cold.",
+"depth_range_str": [
+"3",
+"20"
+]
+},
 "drop_shot": {
 "name": "Drop Shot",
 "video_key": "drop_shot",
@@ -1016,11 +1050,18 @@
 ]
 ],
 [
+"ned_rig",
+[
+"ned rig",
+"finesse trd",
+"ned head"
+]
+],
+[
 "finesse_shaky_head",
 [
 "shaky head",
-"ned rig",
-"finesse trd",
+"shakey head",
 "finesse worm"
 ]
 ],
@@ -1358,6 +1399,12 @@
 "url": "https://www.youtube.com/watch?v=woo-Edy43Pg"
 }
 ],
+"ned_rig": [
+{
+"title": "The Ned Rig - a deep dive (TylersReelFishing)",
+"url": "https://www.youtube.com/watch?v=0R8d1I8co7Q"
+}
+],
 "drop_shot": [
 {
 "title": "How-To Rig a Drop Shot - The Most Productive Finesse Technique in Bass Fishing",
@@ -1523,6 +1570,14 @@
 [
 "frog",
 "hollow_body_frog"
+],
+[
+"ned rig",
+"ned_rig"
+],
+[
+"ned-rig",
+"ned_rig"
 ],
 [
 "shaky head",

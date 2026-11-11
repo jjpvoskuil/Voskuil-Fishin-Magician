@@ -489,6 +489,22 @@ LURE_PROFILES = {
         "depth_range_ft": (6, 20), "depth_style": "dragged/shaken in place",
         "presentation": "Cast out, let it hit bottom, then shake it in place with the rod tip without moving it far - a subtle, tough-bite bait for high-pressure days.",
     },
+    # John (2026-11-10): Ned rig as its own rig, split from shaky head - a short floating ElaZtech stick (Z-Man Finesse
+    # TRD) on a mushroom head that stands up on bottom. General finesse pattern, not Nolin-documented.
+    "ned_rig": {
+        "name": "Ned Rig",
+        "video_key": "ned_rig",
+        "vertical_style": "bottom",
+        "colors": {
+            "Clear": ["Green pumpkin", "The Deal / natural"],
+            "Green stained": ["Green pumpkin orange", "Coppertreuse"],
+            "Brown stained": ["Hot craw", "Green pumpkin orange"],
+            "Muddy": ["Black/blue", "Hot craw"],
+        },
+        "trailer": None,
+        "depth_range_ft": (3, 20), "depth_style": "hopped/dragged on bottom",
+        "presentation": "Cast, let it fall on slack line to the bottom, then slow-drag or pop it a few inches and let it sit - the tail stands up. Deadly on rock, points and riprap when the bite is tough or the water is cold.",
+    },
     # Punch-list #37: drop_shot and soft_swimbait below are new - neither
     # existed in this taxonomy before. Both came out of actually researching
     # real, documented Nolin Lake experience (not just generic bass-fishing
@@ -869,7 +885,7 @@ class LureRecommendation:
 REACTION_BAIT_KEYS = [
     "walking_topwater", "buzzbait", "chatterbait", "swim_jig", "lipless_crankbait", "spinnerbait",
 ]
-FINESSE_BAIT_KEYS = ["finesse_shaky_head", "drop_shot", "wacky_rig_senko", "football_jig"]
+FINESSE_BAIT_KEYS = ["finesse_shaky_head", "ned_rig", "drop_shot", "wacky_rig_senko", "football_jig"]
 
 # 10 mph matches core.onwater.WIND_BANDS' own "Moderate Chop / Action
 # Trigger" band's lower bound - reused here as a plain number instead of
@@ -1473,7 +1489,8 @@ _CATEGORY_KEYWORD_RULES = [
     ("chatterbait", ["chatterbait", "chatter bait", "bladed jig", "thunder cricket"]),
     ("swim_jig", ["swim jig", "swimjig", "rage swimmer"]),
     ("football_jig", ["football jig"]),
-    ("finesse_shaky_head", ["shaky head", "ned rig", "finesse trd", "finesse worm"]),
+    ("ned_rig", ["ned rig", "finesse trd", "ned head"]),
+    ("finesse_shaky_head", ["shaky head", "shakey head", "finesse worm"]),
     # Drop shot is checked before wacky: Roboworm straight worms are drop-shot worms, and "straight worm" used to
     # tag them wacky_rig_senko, which mislabeled every drop-shot session (fixed + data corrected 2026-11-10).
     ("drop_shot", ["drop shot", "dropshot", "drop-shot", "roboworm", "fat straight worm"]),

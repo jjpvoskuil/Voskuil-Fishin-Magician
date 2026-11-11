@@ -81,7 +81,7 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   lures with + Add, "Same lures as last time", draft kept in localStorage `fm.sessionDraft`) → Live (+ Fish two taps,
   10 s Undo, Change = retire, Add a lure, Moved/conditions: in-place within 10 min else close+reopen rows, End, Cancel =
   delete) → Watch (others' open sessions, 20 s refresh). Every change saves as a trip row through `lib/outbox.js`
-  (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`) — the rig is the
+  (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`, incl. Ned Rig `ned_rig` added 11-10) — the rig is the
   lure_category the picks learn from. Walk-through: `python3 web/tools/session_flow.py OUTDIR` (demo seeds an open
   session for the demo angler, so it exercises Live, cancels, then Setup).
 - Drop shot fix (11-10, John): the auto-tagger put "straight worm" → wacky before drop shot, so both Roboworm FAT

@@ -108,6 +108,9 @@ VIDEO_LIBRARY = {
         {"title": "How to Fish a Shaky Head - Bass Fishing", "url": "https://www.youtube.com/watch?v=alUOqhOlziY"},
         {"title": "How To Fish A Shaky Head - Everything You Need To Know (Beginner To Advanced)", "url": "https://www.youtube.com/watch?v=woo-Edy43Pg"},
     ],
+    "ned_rig": [  # John 2026-11-10; video embedded in Outdoor Life's Ned rig guide
+        {"title": "The Ned Rig - a deep dive (TylersReelFishing)", "url": "https://www.youtube.com/watch?v=0R8d1I8co7Q"},
+    ],
     "drop_shot": [
         {"title": "How-To Rig a Drop Shot - The Most Productive Finesse Technique in Bass Fishing", "url": "https://www.youtube.com/watch?v=I0aMto_cTQI"},
         {"title": "How to Fish the Drop Shot Rig 2 Ways - Bass Fishing", "url": "https://www.youtube.com/watch?v=Lk9vCW7rvcg"},
@@ -157,6 +160,8 @@ _KEYWORD_MAP = [
     ("popper", "popper"),
     ("hollow-body frog", "hollow_body_frog"),
     ("frog", "hollow_body_frog"),
+    ("ned rig", "ned_rig"),
+    ("ned-rig", "ned_rig"),
     ("shaky head", "finesse_shaky_head"),  # punch-list #82 (used to fall through to search)
     ("finesse worm", "finesse_shaky_head"),  # punch-list #82
     ("jig", "football_jig"),  # generic jig fallback (e.g. "Jig + craw trailer")
