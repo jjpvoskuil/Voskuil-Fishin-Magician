@@ -8,7 +8,7 @@ import { useElectronics } from "./lib/prefs.js";
 const PAGES = [["history", "Trip History", "history"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
   ["tackle", "Tackle Box", "tackle"], ["punch", "Punch list", "tools"]];
 
-const READY = new Set(["history", "tackle"]);
+const READY = new Set(["history", "tackle", "leaderboard"]);
 
 export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, theme, onSignOut, onOpen }) {
   const [users, setUsers] = useState(null);

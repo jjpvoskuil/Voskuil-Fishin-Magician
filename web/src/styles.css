@@ -320,3 +320,32 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .leaflet-container { font-family: inherit; }
 .depth-lbl span { display: grid; place-items: center; min-width: 22px; height: 15px; padding: 0 3px; border-radius: 4px; border: 1.5px solid; background: rgba(10,25,45,.78); color: #fff; font-size: 10.5px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 .try-pin span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; border: 2px solid #fff; color: #3a2a00; font-size: 14px; font-weight: 900; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+
+/* Leaderboard (The Stringer) */
+.lb-hero-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 0; }
+.lb-hero-h h2 { margin: 0; font-size: 18px; text-align: center; flex: 1; }
+.lb-hero-h .iconbtn { font-size: 26px; line-height: 1; }
+.lb-hero-h .iconbtn:disabled { opacity: .3; }
+.lb-hero-b { display: flex; gap: 16px; align-items: center; padding: 12px 16px 8px; }
+.lb-dots { display: flex; justify-content: center; gap: 4px; padding: 0 0 8px; }
+.lb-dots button { width: 28px; height: 28px; display: grid; place-items: center; }
+.lb-dots button::after { content: ""; width: 8px; height: 8px; border-radius: 99px; background: var(--line); }
+.lb-dots button.on::after { background: var(--accent); width: 20px; }
+.lb-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: none; }
+.lb-tabs::-webkit-scrollbar { display: none; }
+.lb-tabs button { flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 14px; font-weight: 700; color: var(--text-2); }
+.lb-tabs button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.lb-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
+.lb-row:last-child { border-bottom: 0; }
+.lb-rank { width: 28px; height: 28px; flex: none; border-radius: 99px; display: grid; place-items: center; background: var(--band); font-weight: 800; font-size: 13px; color: var(--muted); }
+.lb-rank.r1 { background: var(--accent); color: var(--on-accent); }
+.lb-num { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; white-space: nowrap; }
+.lb-axis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.lb-sp { display: grid; grid-template-columns: 110px 1fr 36px; gap: 10px; align-items: center; min-height: 30px; font-size: 14px; }
+.lb-sp-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-sp-bar { height: 10px; border-radius: 99px; background: var(--accent-track); overflow: hidden; }
+.lb-sp-bar span { display: block; height: 100%; background: var(--accent-soft); border-radius: 99px; }
+.lb-sp-bar span.top { background: var(--accent); }
+.lb-sp .num { text-align: right; }
+.lb-row .grow, .lb-hero-b .grow { flex: 1; min-width: 0; }
+.b { font-weight: 700; }

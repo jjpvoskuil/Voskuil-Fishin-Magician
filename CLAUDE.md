@@ -79,8 +79,7 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `tools/export_lure_data.py` → `lib/data/lures.data.json` — re-run after editing core/lures.py or core/videos.py),
   `leaderboard.js` (daily_leaderboard + format_weight_lb_oz). Parity: `lures.test.js` vs
   `fixtures/lures.fixtures.json.gz` (`TZ=UTC python3 web/tools/make_lure_fixtures.py`); fixtures are gzipped.
-- Also ported: `lake.js` (USGS level, USACE report parsing + DO saturation). Still to port: stringer (Leaderboard page),
-  reports, rest of activity_log, forecast_freeze (table `fm_score_freeze` exists; Forecast screen applies it).
+- Also ported: `lake.js` (USGS level, USACE report parsing + DO saturation). Still to port: reports, rest of activity_log, forecast_freeze (table `fm_score_freeze` exists; Forecast screen applies it).
 
 ## Screens built
 - Today (`TodayScreen.jsx`, 11-10). Shared live data is loaded once in App (`lib/live.js`: weather + USGS cached in
@@ -175,6 +174,13 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   Straight Worms were tagged wacky_rig_senko and every drop-shot session was logged as wacky. Tagger fixed (drop shot
   first, + "roboworm"); the `data` branch was corrected (43 trip rows + 2 tackle-box items → drop_shot; nothing in the
   log was a real wacky rig). Drop shot = 71 fish / 27 sessions — what earlier stats called "Senko".
+- Leaderboard (`LeaderboardScreen.jsx`, 11-11): port of core/stringer.py = `lib/stringer.js` (parity `stringer.test.js` vs
+  `fixtures/stringer.fixtures.json.gz` from `TZ=UTC python3 web/tools/make_stringer_fixtures.py`, which forces pandas'
+  sorts to kind="stable" — default quicksort leaves ties in no fixed order). Ring of season stats (swipe / ‹ › / dots),
+  six ranked tabs, catches-by-day bars, species mix. New: period This year / Last 30 days / All time + Everyone / Just me
+  (localStorage `fm.leaderboard`). Biggest Fish shows species as the title (the Python repeats the weight).
+  NEXT (John 11-11, approved): custom boards — Measure × Ranked by × Filters, plus a typed question turned into those
+  picks by Claude (new Edge Function), computed locally from the trip log; saved boards appear as tabs.
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 
