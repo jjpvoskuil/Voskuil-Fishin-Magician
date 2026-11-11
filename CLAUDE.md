@@ -207,6 +207,16 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   Claude" = `exportText` (open items by status/priority, context line, author/date; optional recently closed).
   Import: make_import.py writes `punch_list_import.sql` (97 items from data/dev_tasks.csv, old page names mapped,
   counter continues at 99). Plan: backups also write the punch list to the private backup repo so Claude can read it.
+- Backups (11-11, John chose deercast-data): `deercast-data/backup/fishin_backup.py`, run by that repo's existing
+  Mon/Thu backup.yml right after Deercast's (same SUPABASE_SECRET_KEY; step `if: always()` so one app's failure never
+  blocks the other) → `deercast-data/backups/fishin-magician/`: one JSON per fm_* table, `lure_photos/` (every photo
+  the tackle box points to + anything in bucket fm-lures, any folder; storage calls send the key as bearer too),
+  `punch_list.md` (open items, Copy-for-Claude layout — read it at session start), summary.json. Trigger on demand:
+  `gh api -X POST repos/jjpvoskuil/deercast-data/actions/workflows/backup.yml/dispatches -f ref=main` (gh's
+  GraphQL is blocked here; use REST). Restore: `python3 tools/make_restore.py <deercast-data>/backups/fishin-magician
+  > restore.sql` (replaces fm_* contents; round trip tested identical on local PG). Output is private: never commit.
+  11-11 finding: bucket fm-lures in the Deercast project was EMPTY (the 26 photo jpgs John uploaded aren't there —
+  check which project/bucket they went to; the Tackle Box silently falls back to Cabela's image_url).
 - NEXT after this app (John 11-11): **Deercast shot recovery puts probable deer spots in the lake** — give its recovery
   model real water: Nolin's shoreline from the KyFromAbove lidar water line (as tools/build_contours.py finds it) or
   OSM water polygons; exclude/penalize water cells in Deercast `deercast/recovery.py` + `web/src/lib/recovery.js` (parity).
