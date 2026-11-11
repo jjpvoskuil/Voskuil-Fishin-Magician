@@ -35,6 +35,10 @@ with sync_playwright() as p:
             pg.get_by_role("button", name="Delete session").click(); pg.wait_for_timeout(800)
         sel = pg.locator("select").first
         sel.select_option(index=1); pg.wait_for_timeout(500)
+        tog = pg.get_by_role("button", name="Fishing with Fishing Buddy?")
+        if tog.count():
+            tog.first.click(); pg.wait_for_timeout(500)
+            full(pg, f"2b-together-{theme}.png")
         full(pg, f"2-setup-{theme}.png")
         pg.get_by_role("button", name="Tackle box").click(); pg.wait_for_timeout(300)
         pg.get_by_role("textbox").last.fill("roboworm"); pg.wait_for_timeout(200)
@@ -50,6 +54,14 @@ with sync_playwright() as p:
         pg.screenshot(path=str(out / f"5-fish-{theme}.png"))
         pg.get_by_role("button", name="Save").first.click(); pg.wait_for_timeout(500)
         full(pg, f"6-logged-{theme}.png")
+        # the buddy changes conditions on their phone: bump their open row in the demo store, reload, our session should follow
+        pg.evaluate("""() => { const k = 'fm.demo.v3', st = JSON.parse(localStorage.getItem(k));
+          for (const t of st.trips) if (t.owner && t.owner.startsWith('buddy') && t.conditions && !t.conditions.lure_end_time && t.conditions.source === 'spot_session') {
+            t.conditions.water_temp_f = 52.5; t.conditions.wind_band = 'Moderate Chop'; t.conditions.conditions_set_at = '2099-01-01T00:00:00'; }
+          localStorage.setItem(k, JSON.stringify(st)); }""")
+        pg.reload(); pg.wait_for_timeout(1800)
+        full(pg, f"7-followed-{theme}.png")
+        print(theme, "followed:", pg.locator("body").inner_text().count("updated conditions") > 0 or "52.5" in pg.content())
         print(theme, "errors:", errs)
         ctx.close()
     b.close()

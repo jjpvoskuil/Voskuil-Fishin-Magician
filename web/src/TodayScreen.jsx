@@ -1,6 +1,7 @@
 // Today: the day's score and why, best window + all six segments, lake right now (USGS level, USACE oxygen),
 // and today's / this week's fishing activity. Port of the Streamlit home.py.
-import { useMemo, useState } from "react";
+import { durationText, liveSummary, openSessions } from "./lib/session.js";
+import { useEffect, useMemo, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import { Breakdown, ScoreRing, Sheet, ago, fmtTime, signed, verdict } from "./ui.jsx";
@@ -12,7 +13,9 @@ import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 
 const mdy = (d) => `${Number(d.slice(5, 7))}/${d.slice(8, 10)}`;
 
-export default function TodayScreen({ active, demo, onMenu, weather, lake, water, trips }) {
+const fmtHms = (t) => { const [h, m] = t.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+
+export default function TodayScreen({ active, demo, onMenu, weather, lake, water, trips, me, onWatch, reloadTrips }) {
   const today = lakeToday();
   const [sheet, setSheet] = useState(null); // {title, breakdown, score}
   const [period, setPeriod] = useState("today");
@@ -32,6 +35,9 @@ export default function TodayScreen({ active, demo, onMenu, weather, lake, water
 
   const stats = trips ? (period === "today" ? buildDailyActivity(trips, today) : buildWeeklyActivity(trips, today)) : null;
   const [wkStart, wkEnd] = weekBounds(today);
+  // who's on the water right now (not you) — tap to see how it's going
+  const live = useMemo(() => (trips ? openSessions(trips).filter((o) => o.owner !== me?.email && o.rows[0].trip_date === today).map((o) => liveSummary(o, lakeNowNaive())) : []), [trips, me, today]);
+  useEffect(() => { if (!active || !live.length) return; const t = setInterval(reloadTrips, 60e3); return () => clearInterval(t); }, [active, live.length, reloadTrips]);
 
   return (
     <div className="screen" hidden={!active} id="screen-today">
@@ -41,6 +47,15 @@ export default function TodayScreen({ active, demo, onMenu, weather, lake, water
         {weather.error && weather.value && <p className="note-bar">No connection to the weather service — showing the forecast from {ago(weather.at)}.</p>}
         {dayError && <div className="card"><div className="empty">Today's forecast isn't available yet: {dayError}</div></div>}
         {!day && !dayError && !(weather.error && !weather.value) && <div className="card"><div className="empty">Loading today's forecast…</div></div>}
+
+        {live.map((l) => <button key={l.key} className="card hist live-card" onClick={() => onWatch(l.key)}>
+          <div className="card-b">
+            <div className="hist-top"><span className="kicker live-dot">● On the water now</span><span className="pill">{l.total} fish</span></div>
+            <b className="hist-loc">{l.angler} · {l.spot}</b>
+            <div className="muted small">{[`${durationText(l.mins)} so far`, l.biggest && `biggest ${formatWeightLbOz(l.biggest)}`, l.perHour != null && `${l.perHour.toFixed(1)} fish/hr`].filter(Boolean).join(" · ")}</div>
+            <div className="small hist-lures">{l.latest ? `Latest: ${l.latest.species}${l.latest.weight_lb ? ` ${formatWeightLbOz(l.latest.weight_lb)}` : ""} on ${(l.latest.lure || "").split(" - ").slice(0, 2).join(" ")}${l.latest.caught_at ? ` at ${fmtHms(l.latest.caught_at)}` : ""}`
+              : `Fishing ${l.lures.filter((x) => x.open).map((x) => (x.label || "").split(" - ").slice(0, 2).join(" ")).join(", ")} — no fish yet`} <span className="link">See more ›</span></div>
+          </div></button>)}
 
         {day && <>
           <section className="card">

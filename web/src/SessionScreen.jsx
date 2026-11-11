@@ -12,9 +12,10 @@ import { calibrateWeights, locationAdjustments, parseConditions } from "./lib/ca
 import { curateRecommendation, recommend } from "./lib/lures.js";
 import { formatWeightLbOz } from "./lib/leaderboard.js";
 import { windMphForBand } from "./lib/onwater.js";
-import { dateOf, parseIso, pyFixed } from "./lib/py.js";
+import { dateOf, isoNaive, parseIso, pyFixed } from "./lib/py.js";
 import { segmentTimeRanges } from "./lib/scoring.js";
 import * as S from "./lib/session.js";
+import { durationText } from "./lib/session.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 
 const DRAFT = "fm.sessionDraft";
@@ -22,16 +23,17 @@ const readDraft = () => { try { return JSON.parse(localStorage.getItem(DRAFT)) |
 const writeDraft = (d) => { try { localStorage.setItem(DRAFT, JSON.stringify(d)); } catch { /* ignore */ } };
 const STRUCT = (spot) => LOCATION_TYPE_TO_STRUCTURE_TYPE[spot?.location_type] || "Main-lake point";
 const t12 = (hms) => { if (!hms) return "?"; const [h, m] = hms.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
-const fishLine = (f) => [t12(f.caught_at), f.count > 1 ? `${f.count} × ${f.species}` : f.species, f.weight_lb ? formatWeightLbOz(f.weight_lb) : null,
+const fishLine = (f) => [f.caught_at ? t12(f.caught_at) : null, f.count > 1 ? `${f.count} × ${f.species}` : f.species, f.weight_lb ? formatWeightLbOz(f.weight_lb) : null,
   f.length_in ? `${f.length_in} in` : null, (f.hit_types || []).join(", ") || null, [f.retrieve_speed, f.retrieve_style].filter(Boolean).join(" / ") || null].filter(Boolean).join(" · ");
 const spotMeta = (s) => [s.location_type, (s.bottom_structure || "").split("|").filter(Boolean).join(", "), s.main_depth_ft && `main area ${s.main_depth_ft} ft`,
   s.transition_depth_ft && `transition ${s.transition_depth_ft} ft (${s.transition_grade || ""})`].filter(Boolean).join(" · ");
 
-export default function SessionScreen({ active, demo, onMenu, db, me, weather, trips, reloadTrips, lures, spots, toast, outbox }) {
+export default function SessionScreen({ active, demo, onMenu, db, me, weather, trips, reloadTrips, lures, spots, toast, outbox, watchReq }) {
   const [local, setLocal] = useState(null);          // my open session rows (edited here, saved through the outbox)
   const [watching, setWatching] = useState(null);    // session key of someone else's session
   const [sheet, setSheet] = useState(null);
   const [undo, setUndo] = useState(null);
+  useEffect(() => { if (watchReq?.key) setWatching(watchReq.key); }, [watchReq]); // "See more" on Today
   const bundle = weather.value;
 
   // my open session comes from the database (another device, or a reload) unless I have unsaved edits here
@@ -54,9 +56,9 @@ export default function SessionScreen({ active, demo, onMenu, db, me, weather, t
   const common = { bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet };
   return (
     <div className="screen" id="screen-session">
-      {watched ? <Watch s={watched} onStop={() => setWatching(null)} onMenu={onMenu} demo={demo} />
+      {watched ? <Watch s={watched} onStop={() => setWatching(null)} onMenu={onMenu} demo={demo} hasOwn={!!(local && local.length)} />
         : local && local.length ? <Live rows={local} setRows={(rows, changed) => { setLocal(rows); saveRows(changed); }} {...common}
-          outbox={outbox} onMenu={onMenu} demo={demo} setUndo={setUndo}
+          outbox={outbox} onMenu={onMenu} demo={demo} setUndo={setUndo} reloadTrips={reloadTrips} onWatch={setWatching}
           onEnded={(msg) => { setLocal(null); setUndo(null); toast(msg); setTimeout(reloadTrips, 1500); }}
           onCancel={(ids) => { for (const id of ids) outbox.remove(id); setLocal(null); setUndo(null); toast("Session canceled — nothing from it was saved"); setTimeout(reloadTrips, 1500); }} />
         : <Setup {...common} others={others} onWatch={setWatching} onMenu={onMenu} demo={demo}
@@ -88,17 +90,22 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
   // pick the nearest saved spot by GPS once, unless you already chose one
   const asked = useRef(false);
   useEffect(() => {
-    if (asked.current || draft.spot_id || !sorted.length || !navigator.geolocation) return;
+    if (asked.current || draft.spot_id || draft.together || !sorted.length || !navigator.geolocation) return;
     asked.current = true;
     navigator.geolocation.getCurrentPosition((p) => {
       const n = S.nearestSpot(sorted, p.coords.latitude, p.coords.longitude);
       if (n) { setGps({ name: n.spot.name, m: Math.round(n.d) }); setDraft({ spot_id: n.spot.spot_id, spot_source: "gps" }); }
     }, () => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
   }, [sorted, draft.spot_id]);
-  const spot = sorted.find((s) => s.spot_id === draft.spot_id) || null;
+  // fishing together: someone else's open session today whose spot + conditions we take over (John 11-10)
+  const partner = date === today && draft.together ? others.find((o) => o.key === draft.together) || null : null;
+  const partnerCond = partner ? S.currentConditions(partner) : null;
+  const spot = partnerCond ? sorted.find((s) => s.spot_id === partnerCond.spot_id) || { spot_id: partnerCond.spot_id, name: partnerCond.spot_name, location_type: null }
+    : sorted.find((s) => s.spot_id === draft.spot_id) || null;
 
   const cond = useMemo(() => S.mergeConditions(S.weatherDefaults(bundle, date, date === today ? now : at), S.sharedWaterConditions(trips, date),
-    { values: draft.cond || {}, sources: Object.fromEntries(Object.keys(draft.cond || {}).map((k) => [k, "you"])) }), [bundle, date, trips, draft.cond]);
+    partnerCond ? { values: partnerCond.values, sources: Object.fromEntries(Object.keys(partnerCond.values).map((k) => [k, `shared:${partner.angler || "partner"}`])) } : { values: {}, sources: {} },
+    { values: draft.cond || {}, sources: Object.fromEntries(Object.keys(draft.cond || {}).map((k) => [k, "you"])) }), [bundle, date, trips, draft.cond, partnerCond]);
   const scoring = useMemo(() => (spot ? S.computeScoring(cond.values, date, bundle, date === today ? now : at, segment, { spotId: spot.spot_id, locAdj, weights }) : null),
     [spot, cond, date, bundle, segment, locAdj, weights]);
   const rec = useMemo(() => (spot && scoring && lures && trips ? recommend({ season: scoring.season, water_temp_f: cond.values.water_temp_f, segment_name: segment,
@@ -116,10 +123,12 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     const startAt = lakeNowNaive(), startDate = date, seg = date === today ? S.guessSegment(startAt, segmentTimeRanges(bundle, date)) : segment;
     const sc = S.computeScoring(cond.values, startDate, bundle, date === today ? startAt : at, seg, { spotId: spot.spot_id, locAdj, weights });
     const base = { ...S.baseConditions(cond.values, cond.sources, sc, new Date(startAt / 1000).toISOString().slice(11, 19), seg, me.name), spot_source: draft.spot_source || "picked",
-      predicted_breakdown: sc.score.breakdown };
+      predicted_breakdown: sc.score.breakdown, ...(partnerCond ? { spot_source: "shared", group_id: partnerCond.group_id && !partnerCond.group_id.startsWith("solo:") ? partnerCond.group_id : partnerCond.session_id } : {}),
+      // joining without changing anything keeps the partner's timestamp, so their phone has nothing new to follow
+      conditions_set_at: partnerCond && !Object.keys(draft.cond || {}).length ? partnerCond.set_at : isoNaive(startAt) };
     const session = { id: S.newTripId(), date: startDate };
     const rows = pending.map((l) => S.lureRow({ base, lure: l, at: startAt, session, spot, structure: STRUCT(spot), clarity: sc.water_clarity, segment: seg, predicted: sc.score.score, owner: me.email }));
-    writeDraft({ spot_id: draft.spot_id, cond: draft.cond }); // keep the spot + your readings for next time, clear the lures
+    writeDraft({ spot_id: spot.spot_id, cond: partnerCond ? undefined : draft.cond }); // keep the spot + your readings for next time, clear the lures
     setDraftState(readDraft());
     onStart(rows);
   };
@@ -128,8 +137,14 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     <Head kicker={`${spot ? spot.name : "Spot Session"} · ${segment}`} title="Session" onMenu={onMenu} demo={demo} />
     <div className="body" style={{ paddingBottom: "calc(96px + var(--kb))" }}>
       {others.length > 0 && <section className="card"><div className="card-b">
-        {others.map((o) => <button key={o.key} className="row" style={{ padding: 0, borderBottom: 0 }} onClick={() => onWatch(o.key)}>
-          <Icon name="session" /><span className="grow">👀 <b>{o.angler || "Someone"}</b> is fishing {o.rows[o.rows.length - 1].spot_name} now</span><span className="link">Watch</span></button>)}
+        {others.map((o) => { const on = draft.together === o.key; return <div key={o.key} className="together">
+          <span className="grow">👥 <b>{o.angler || "Someone"}</b> is fishing {S.currentConditions(o).spot_name} now</span>
+          <div className="two">
+            {date === today && <button className={`btn ${on ? "primary" : ""}`} aria-pressed={on} onClick={() => setDraft(on ? { together: null } : { together: o.key, cond: undefined })}>
+              {on ? `✓ Fishing with ${o.angler || "them"}` : `Fishing with ${o.angler || "them"}?`}</button>}
+            <button className="btn" onClick={() => onWatch(o.key)}>👀 Watch</button></div>
+          {on && <p className="muted small">Using {o.angler || "their"} spot and conditions. When either of you moves or changes conditions, the other's session follows.</p>}
+        </div>; })}
       </div></section>}
 
       <section className="card">
@@ -137,7 +152,8 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
         <div className="card-b setup" style={{ paddingTop: 12 }}>
           {!sorted.length ? <NoSpots db={db} toast={toast} /> : <>
             <label className="field">Spot
-              <select value={draft.spot_id || ""} onChange={(e) => setDraft({ spot_id: e.target.value, spot_source: "picked" })}>
+              <select value={spot?.spot_id || ""} disabled={!!partnerCond} onChange={(e) => setDraft({ spot_id: e.target.value, spot_source: "picked" })}>
+                {partnerCond && !sorted.some((x) => x.spot_id === spot.spot_id) && <option value={spot.spot_id}>{spot.name}</option>}
                 <option value="">— choose a saved spot —</option>{sorted.map((s) => <option key={s.spot_id} value={s.spot_id}>{s.name}</option>)}
               </select></label>
             {gps && draft.spot_source === "gps" && <p className="muted small">📍 Picked by GPS — you're about {gps.m} m from {gps.name}.</p>}
@@ -158,7 +174,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
           <div className="card-b">
             {!editing ? <button className="setup-sum" onClick={() => setEditing(true)}>{conditionsSummary(cond.values)} <span className="link">Edit</span></button>
               : <ConditionsForm cond={cond} onChange={(f, v) => setDraft({ cond: { ...(draft.cond || {}), [f]: v } })} />}
-            <p className="muted small" style={{ margin: "8px 0 0" }}>Filled from the forecast{Object.values(cond.sources).some((s) => s.startsWith("shared:")) ? " and today's readings from another angler" : ""} — anything you change is saved as yours.</p>
+            <p className="muted small" style={{ margin: "8px 0 0" }}>{partner ? `Taken from ${partner.angler || "your partner"}'s session — anything you change is saved as yours and shared with them.` : <>Filled from the forecast{Object.values(cond.sources).some((s) => s.startsWith("shared:")) ? " and today's readings from another angler" : ""} — anything you change is saved as yours.</>}</p>
           </div>
         </section>
 
@@ -218,7 +234,7 @@ function NoSpots({ db, toast }) {
 }
 
 /* ------------------------------------------------------------------ live session */
-function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo }) {
+function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo, reloadTrips, onWatch }) {
   const [fishFor, setFishFor] = useState(null);
   const [picker, setPicker] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -232,6 +248,33 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
   const startHms = S.sessionStartTime(rows) || "00:00:00";
   const mins = Math.max(0, Math.round((lakeNowNaive() - parseIso(`${rows[0].trip_date}T${startHms.slice(0, 8)}`)) / 60e6));
   const replace = (r) => rows.map((x) => (x.trip_id === r.trip_id ? r : x));
+
+  // fishing together: follow the newest conditions/spot in the group (checked every 30 s while grouped)
+  const groupId = base.group_id ? (base.group_id.startsWith("solo:") ? null : base.group_id) : current.session_id;
+  const members = useMemo(() => S.groupMembers(trips, current.session_id, groupId), [trips, current.session_id, groupId]);
+  const partners = [...new Set(members.map((m) => m.angler || "someone"))];
+  useEffect(() => { if (!members.length) return; const t = setInterval(reloadTrips, 30e3); return () => clearInterval(t); }, [members.length, reloadTrips]);
+  const followed = useRef(null);
+  useEffect(() => {
+    const latest = S.newestInGroup(members); if (!latest) return;
+    const mineSetAt = base.conditions_set_at || `${current.trip_date}T${base.start_time || "00:00:00"}`;
+    if (latest.set_at <= mineSetAt || followed.current === latest.set_at) return;
+    followed.current = latest.set_at;
+    const mine = { spot_id: current.spot_id, values: Object.fromEntries(Object.keys(S.CONDITION_FIELDS).map((k) => [k, base[k] ?? S.CONDITION_FIELDS[k]])) };
+    if (S.sameConditions(latest, mine)) return;
+    const now = lakeNowNaive(), seg = S.guessSegment(now, segmentTimeRanges(bundle, current.trip_date));
+    const spot = (spots || []).find((x) => x.spot_id === latest.spot_id) || { spot_id: latest.spot_id, name: latest.spot_name, location_type: null };
+    const sc = S.computeScoring(latest.values, current.trip_date, bundle, now, seg, { spotId: spot.spot_id, locAdj, weights });
+    const sources = Object.fromEntries(Object.keys(latest.values).map((k) => [k, `shared:${latest.angler || "partner"}`]));
+    const newBase = { ...S.baseConditions(latest.values, sources, sc, base.start_time, seg, me.name), spot_source: "shared", predicted_breakdown: sc.score.breakdown,
+      conditions_set_at: latest.set_at, group_id: base.group_id || null };
+    const { next, changed } = S.relocateRows(rows, { newBase, spot, structure: STRUCT(spot), clarity: sc.water_clarity, segment: seg, predicted: sc.score.score, owner: me.email, now });
+    setRows(next, changed);
+    toast(spot.spot_id !== current.spot_id ? `👥 ${latest.angler} moved to ${spot.name} — your session followed` : `👥 ${latest.angler} updated conditions — applied to yours`);
+  }, [members]);
+  const fishApart = () => { const open = rows.filter((r) => !r.conditions.lure_end_time);
+    const changed = open.map((r) => ({ ...r, conditions: { ...r.conditions, group_id: `solo:${current.session_id}` } })); setRows(rows.map((r) => changed.find((c) => c.trip_id === r.trip_id) || r), changed);
+    toast("Fishing on your own now — your conditions won't follow anyone"); };
   const undoable = (text, before, changed) => { setUndo({ text, run: () => { setRows(before, changed.map((c) => before.find((b) => b.trip_id === c.trip_id)).filter(Boolean)); } });
     setTimeout(() => setUndo((u) => (u && u.text === text ? null : u)), 10e3); };
 
@@ -256,7 +299,12 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
       <section className="card"><div className="card-b" style={{ flexDirection: "row", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span className="muted small">{current.segment} · {current.water_clarity} water · predicted <b className="num">{current.predicted_score}</b>{" "}
           {base.predicted_breakdown && <button className="link" onClick={() => setSheet({ title: "Predicted score", body: <Breakdown breakdown={base.predicted_breakdown} score={Number(current.predicted_score)} /> })}>why</button>}</span>
-        <span className="pill">{totalFish} fish</span></div></section>
+        <span className="pill">{totalFish} fish</span></div>
+        {partners.length > 0 && <div className="card-b together-live"><span className="grow small">👥 Fishing with <b>{partners.join(", ")}</b> — conditions and moves are shared</span>
+          <button className="link" onClick={() => setConfirm({ text: `Stop sharing conditions with ${partners.join(", ")}? Your session keeps going on its own.`, ok: "Fish on my own", run: fishApart })}>Fish apart</button></div>}
+      </section>
+      {(trips ? S.openSessions(trips).filter((o) => o.owner !== me.email && !members.some((m) => m.key === o.key)) : []).map((o) => { const l = S.liveSummary(o, lakeNowNaive()); return (
+        <button key={o.key} className="note-bar others-line" onClick={() => onWatch(o.key)}>👀 {l.angler} at {l.spot}: <b>{l.total} fish</b>{l.biggest ? `, biggest ${formatWeightLbOz(l.biggest)}` : ""} <span className="link">See ›</span></button>); })}
       <p className="muted small" style={{ margin: "0 4px" }}>Tap <b>+ Fish</b> every time you land one. <b>Change</b> retires a lure without ending the session.</p>
       {open.map((r) => (
         <section key={r.trip_id} className="card"><div className="card-b">
@@ -323,22 +371,9 @@ function MoveSheet({ open, onClose, rows, setRows, base, current, spots, bundle,
   const now = lakeNowNaive(), seg = S.guessSegment(now, segmentTimeRanges(bundle, current.trip_date));
   const sc = S.computeScoring(cond.values, current.trip_date, bundle, now, seg, { spotId: spot.spot_id, locAdj, weights });
   const apply = () => {
-    const open = rows.filter((r) => !r.conditions.lure_end_time);
-    const newBase = { ...S.baseConditions(cond.values, cond.sources, sc, base.start_time, seg, me.name), spot_source: spotId === current.spot_id ? base.spot_source : "picked", predicted_breakdown: sc.score.breakdown };
-    const young = open.every((r) => (now - parseIso(`${r.trip_date}T${r.conditions.lure_start_time.slice(0, 8)}`)) < 10 * 60e6);
-    let next = rows, changed = [];
-    if (spotId === current.spot_id && young) {
-      changed = open.map((r) => ({ ...r, segment: seg, water_clarity: sc.water_clarity, predicted_score: sc.score.score,
-        conditions: { ...newBase, ...Object.fromEntries(Object.entries(r.conditions).filter(([k]) => ["lure_category", "trailer_used", "trailer_name", "trailer_color", "trailer_category", "item_id", "lure_start_time", "lure_end_time", "fish", "source"].includes(k))) } }));
-      next = rows.map((r) => changed.find((c) => c.trip_id === r.trip_id) || r);
-    } else {
-      const closed = open.map((r) => S.retireRow(r, now));
-      const reopened = open.map((r) => S.lureRow({ base: newBase, lure: { label: r.lure_used, category: r.conditions.lure_category, item_id: r.conditions.item_id,
-        trailer: r.conditions.trailer_used ? { label: r.conditions.trailer_name, color: r.conditions.trailer_color, category: r.conditions.trailer_category } : null },
-        at: now, session: { id: r.session_id, date: r.trip_date }, spot, structure: STRUCT(spot), clarity: sc.water_clarity, segment: seg, predicted: sc.score.score, owner: me.email }));
-      changed = [...closed, ...reopened];
-      next = [...rows.map((r) => closed.find((c) => c.trip_id === r.trip_id) || r), ...reopened];
-    }
+    const newBase = { ...S.baseConditions(cond.values, cond.sources, sc, base.start_time, seg, me.name), spot_source: spotId === current.spot_id ? base.spot_source : "picked",
+      predicted_breakdown: sc.score.breakdown, conditions_set_at: isoNaive(now), group_id: base.group_id || null };
+    const { next, changed } = S.relocateRows(rows, { newBase, spot, structure: STRUCT(spot), clarity: sc.water_clarity, segment: seg, predicted: sc.score.score, owner: me.email, now });
     setRows(next, changed); onClose(); toast(spotId === current.spot_id ? "Conditions updated" : `Moved to ${spot.name}`);
   };
   return (
@@ -356,26 +391,29 @@ function MoveSheet({ open, onClose, rows, setRows, base, current, spots, bundle,
 }
 
 /* ------------------------------------------------------------------ watching someone */
-function Watch({ s, onStop, onMenu, demo }) {
-  const rows = s.rows, c0 = parseConditions(rows[0]), last = rows[rows.length - 1];
-  const fish = rows.flatMap((r) => (parseConditions(r).fish || []).map((f) => ({ ...f, lure: r.lure_used })));
-  const total = fish.reduce((a, f) => a + (f.count || 1), 0), biggest = Math.max(0, ...fish.map((f) => Number(f.weight_lb) || 0));
-  const open = rows.filter((r) => !parseConditions(r).lure_end_time);
+function Watch({ s, onStop, onMenu, demo, hasOwn }) {
+  const l = S.liveSummary(s, lakeNowNaive());
+  const nm = (x) => (x || "").split(" - ").slice(0, 2).join(" ");
   return <>
-    <Head kicker="Watching · updates every 20 s" title={s.angler || "Someone"} onMenu={onMenu} demo={demo} />
+    <Head kicker={`Watching · ${durationText(l.mins)} so far · updates every 20 s`} title={l.angler} onMenu={onMenu} demo={demo} />
     <div className="body">
       <section className="card"><div className="card-b">
-        <span className="muted small">📍 {last.spot_name} · started {t12(S.sessionStartTime(rows))} · {last.segment} · predicted <b className="num">{last.predicted_score}</b></span>
-        <div className="two" style={{ marginTop: 10 }}>
-          <div className="award"><span className="v num">{total}</span><span className="muted small">fish</span></div>
-          <div className="award"><span className="v num">{biggest ? formatWeightLbOz(biggest) : "—"}</span><span className="muted small">biggest</span></div>
-        </div></div></section>
-      <section className="card"><div className="card-h"><span className="t">Fishing now</span></div><div className="card-b">
-        {open.map((r) => { const f = parseConditions(r).fish || []; return <div key={r.trip_id} style={{ marginBottom: 8 }}><b>{r.lure_used}</b>
-          <div className="muted small">since {t12(parseConditions(r).lure_start_time)} · {r.fish_caught || 0} fish{f.length ? ` · latest ${fishLine(f[f.length - 1])}` : ""}</div></div>; })}
+        <span className="muted small">📍 {l.spots.join(" → ")} · started {t12(l.start)} · {l.segment} · predicted <b className="num">{l.predicted}</b>{l.grouped ? " · fishing with others" : ""}</span>
+        <div className="three" style={{ marginTop: 10 }}>
+          <div className="award"><span className="v num">{l.total}</span><span className="muted small">fish</span></div>
+          <div className="award"><span className="v num">{l.biggest ? formatWeightLbOz(l.biggest) : "—"}</span><span className="muted small">biggest</span></div>
+          <div className="award"><span className="v num">{l.perHour != null ? l.perHour.toFixed(1) : "—"}</span><span className="muted small">fish / hr</span></div>
+        </div>
+        <p className="setup-sum" style={{ margin: "10px 0 0" }}>{conditionsSummary(l.cond)}</p></div></section>
+      <section className="card"><div className="card-h"><span className="t"><Icon name="tackle" />Lures</span></div><div className="card-b">
+        {l.lures.map((x, i) => <div key={i} className="fishline small"><span className="grow"><b>{nm(x.label)}</b> <span className="muted">· {x.open ? `since ${t12(x.from)}` : `${t12(x.from)}–${t12(x.to)}`}</span></span>
+          <span className={x.open ? "pill" : "muted"}>{x.fish} fish</span></div>)}
       </div></section>
-      <p className="muted small">Read-only — only {s.angler || "they"} can change this session.</p>
-      <button className="btn wide" onClick={onStop}>Stop watching — start my own session</button>
+      <section className="card"><div className="card-h"><span className="t">🐟 Catches</span></div><div className="card-b">
+        {l.fish.length ? l.fish.map((f, i) => <div key={i} className="fishline small">{fishLine(f)} <span className="muted">· {nm(f.lure)}</span></div>) : <p className="muted small" style={{ margin: 0 }}>No fish logged yet.</p>}
+      </div></section>
+      <p className="muted small">Read-only — only {l.angler} can change this session.</p>
+      <button className="btn wide" onClick={onStop}>{hasOwn ? "Back to my session" : "Done watching"}</button>
     </div>
   </>;
 }

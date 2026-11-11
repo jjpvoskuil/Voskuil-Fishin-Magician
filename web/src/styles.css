@@ -261,3 +261,10 @@ button.card.hist { display: block; width: 100%; text-align: left; padding: 0; }
 .lure-v { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--card); }
 .field textarea { border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--input); padding: 10px 12px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; }
 .gaps summary { line-height: 1.35; }
+.together { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 10px; border-bottom: 1px solid var(--line-soft); }
+.together:last-child { border-bottom: 0; padding-bottom: 0; }
+.together-live { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.field select:disabled { opacity: .75; }
+.live-card .live-dot { color: var(--good); }
+.others-line { display: block; width: 100%; text-align: left; font-size: 13px; }
+.three .award .v { font-size: 15px; font-family: inherit; white-space: nowrap; }

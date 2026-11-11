@@ -6,7 +6,7 @@
 import * as astro from "./astro.js";
 import { cloudProxyForLightCondition, lightConditionForCloudPct, precipitationOptionForForecast, precipitationProxy,
   resolveWaterClarity, windBand, windDirectionForDegrees, windMphForBand } from "./onwater.js";
-import { dayOfYear, dateOf, isoNaive, parts } from "./py.js";
+import { dayOfYear, dateOf, isoNaive, parseIso, parts } from "./py.js";
 import { manualSegmentScore, realtimeContextFromBundle, seasonStage, segmentTimeRanges, SEGMENTS } from "./scoring.js";
 import { estimateWaterTempF, hourlyRowsForDate } from "./weather.js";
 import { parseConditions } from "./calibration.js";
@@ -201,3 +201,70 @@ export function sessionStartTime(rows) {
   const cs = rows.map((r) => parseConditions(r));
   return cs.find((c) => c.start_time)?.start_time || cs.map((c) => c.lure_start_time).filter(Boolean).sort()[0] || null;
 }
+
+/* ---------------------------------------------------------------- fishing together (John 11-10)
+ * Anglers in the same boat share one set of conditions. A session joins another by storing that session's id as its
+ * conditions.group_id; the group is the anchor session plus every open session pointing at it. Every start, move or
+ * conditions change stamps conditions_set_at; each member's phone follows the newest change in the group. */
+const COND_KEYS = Object.keys(CONDITION_FIELDS);
+export const groupIdOf = (rows) => (rows?.length ? sessionConditions(rows[rows.length - 1]).group_id || null : null);
+
+/** Other open sessions in my group (or that I could be grouped with by id). */
+export function groupMembers(trips, mySessionId, groupId) {
+  if (!groupId) return [];
+  return openSessions(trips).filter((s) => s.key !== mySessionId && (s.key === groupId || s.rows.some((r) => parseConditions(r).group_id === groupId)));
+}
+
+/** The current conditions of an open session: its open lures' shared fields + spot + when they were set. */
+export function currentConditions(s) {
+  const open = s.rows.filter((r) => !parseConditions(r).lure_end_time), r = open[open.length - 1] || s.rows[s.rows.length - 1], c = sessionConditions(r);
+  return { values: Object.fromEntries(COND_KEYS.map((k) => [k, c[k] ?? CONDITION_FIELDS[k]])), set_at: c.conditions_set_at || `${r.trip_date}T${c.start_time || "00:00:00"}`,
+    spot_id: r.spot_id, spot_name: r.spot_name, angler: s.angler, group_id: c.group_id || null, session_id: s.key };
+}
+
+/** The newest conditions among group members, or null. */
+export function newestInGroup(members) {
+  let best = null;
+  for (const m of members) { const c = currentConditions(m); if (!best || c.set_at > best.set_at) best = c; }
+  return best;
+}
+
+/** Same conditions and spot? (then following would change nothing) */
+export function sameConditions(a, b) {
+  return a.spot_id === b.spot_id && COND_KEYS.every((k) => JSON.stringify(a.values[k] ?? null) === JSON.stringify(b.values[k] ?? null));
+}
+
+/** Move/condition change for an open session (old _relocate_active_session): small fixes in the first 10 minutes of the
+ *  current lures update them in place; otherwise current lures are closed and reopened under the new conditions, so
+ *  every row's conditions stay true for the time it covers. Returns {next, changed}. */
+export function relocateRows(rows, { newBase, spot, structure, clarity, segment, predicted, owner, now }) {
+  const open = rows.filter((r) => !r.conditions.lure_end_time);
+  const young = open.every((r) => now - parseIso(`${r.trip_date}T${r.conditions.lure_start_time.slice(0, 8)}`) < 10 * 60e6);
+  if (spot.spot_id === open[0]?.spot_id && young) {
+    const changed = open.map((r) => ({ ...r, segment, water_clarity: clarity, predicted_score: predicted,
+      conditions: { ...newBase, ...Object.fromEntries(Object.entries(r.conditions).filter(([k]) => PER_LURE_KEYS.has(k) || k === "item_id")) } }));
+    return { next: rows.map((r) => changed.find((c) => c.trip_id === r.trip_id) || r), changed };
+  }
+  const closed = open.map((r) => retireRow(r, now));
+  const reopened = open.map((r) => lureRow({ base: newBase, lure: { label: r.lure_used, category: r.conditions.lure_category, item_id: r.conditions.item_id,
+    trailer: r.conditions.trailer_used ? { label: r.conditions.trailer_name, color: r.conditions.trailer_color, category: r.conditions.trailer_category } : null },
+    at: now, session: { id: r.session_id, date: r.trip_date }, spot, structure, clarity, segment, predicted, owner }));
+  return { next: [...rows.map((r) => closed.find((c) => c.trip_id === r.trip_id) || r), ...reopened], changed: [...closed, ...reopened] };
+}
+
+/** How someone's open session is going (Today card, Watch view, the line in your own live session). now = naive µs. */
+export function liveSummary(s, now) {
+  const rows = s.rows, cs = rows.map(parseConditions), cur = currentConditions(s);
+  const fish = rows.flatMap((r, i) => (Array.isArray(cs[i].fish) ? cs[i].fish.map((f) => ({ ...f, lure: r.lure_used, category: cs[i].lure_category })) : []))
+    .sort((a, b) => (b.caught_at || "").localeCompare(a.caught_at || ""));
+  const total = fish.reduce((a, f) => a + (f.count || 1), 0), weights = fish.map((f) => Number(f.weight_lb) || 0);
+  const start = cs.find((c) => c.start_time)?.start_time || cs.map((c) => c.lure_start_time).filter(Boolean).sort()[0] || "00:00:00";
+  const mins = Math.max(0, Math.round((now - parseIso(`${rows[0].trip_date}T${start.slice(0, 8)}`)) / 60e6));
+  const lures = rows.map((r, i) => ({ label: r.lure_used, category: cs[i].lure_category, fish: Number(r.fish_caught) || 0, open: !cs[i].lure_end_time,
+    from: cs[i].lure_start_time, to: cs[i].lure_end_time }));
+  const spots = [...new Set(rows.map((r) => r.spot_name).filter(Boolean))];
+  return { key: s.key, angler: s.angler || "Someone", owner: s.owner, spot: cur.spot_name, spots, start, mins, total, biggest: Math.max(0, ...weights) || null,
+    perHour: mins >= 15 ? total / (mins / 60) : null, latest: fish[0] || null, fish, lures, cond: cur.values, segment: rows[rows.length - 1].segment,
+    predicted: rows[rows.length - 1].predicted_score, grouped: !!cur.group_id && !cur.group_id.startsWith("solo:") };
+}
+export const durationText = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} m` : `${mins} m`);

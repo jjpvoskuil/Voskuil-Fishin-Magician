@@ -84,6 +84,14 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`, incl. Ned Rig `ned_rig` added 11-10) — the rig is the
   lure_category the picks learn from. Walk-through: `python3 web/tools/session_flow.py OUTDIR` (demo seeds an open
   session for the demo angler, so it exercises Live, cancels, then Setup).
+- Fishing together (John 11-10): in Session setup, another angler's open session today offers "Fishing with X?" → use
+  their spot + all conditions (sources `shared:<angler>`), my rows get `conditions.group_id` = their group (anchor =
+  first session's id). Every start/move/conditions change stamps `conditions_set_at`; in Live each member polls every
+  30 s and follows the newest change in the group (`S.groupMembers/newestInGroup/relocateRows`; same timestamp or
+  identical conditions = no-op, so no ping-pong). "Fish apart" sets group_id `solo:<own id>` (each phone unlinks itself).
+- Watching (John 11-10): Today shows an "On the water now" card per other angler's open session (refresh 60 s);
+  tap → Session's Watch view (`S.liveSummary`: fish, biggest, fish/hr, conditions, lures, catches). Your own live
+  session shows a one-line summary of others not in your group. App `watchReq` routes Today → Session.
 - Trip History (`HistoryScreen.jsx`, logic `lib/history.js` + `history.test.js`, 11-10): More → Trip History (hash
   `#more/history`; More pages open via App `page` state, READY set in MoreScreen). Filters apply live and are remembered
   (localStorage `fm.historyFilters`): Everyone / Just me, date chips (default 30 days), more filters (angler, time of

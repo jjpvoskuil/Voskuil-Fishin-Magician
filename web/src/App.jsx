@@ -48,6 +48,7 @@ export default function App() {
   const [me, setMe] = useState(undefined);            // fm_users row; null = not on the allow-list
   const [error, setError] = useState("");
   const [tab, setTabState] = useState(() => { const h = location.hash.slice(1).split("/")[0]; return TAB_IDS.includes(h) ? h : "today"; });
+  const [watchReq, setWatchReq] = useState(null); // Today's "on the water now" card → Session's watch view
   const [page, setPageState] = useState(() => location.hash.slice(1).split("/")[1] || null); // a page under More (e.g. history)
   const [toast, setToast] = useState("");
   const theme = useTheme();
@@ -112,9 +113,10 @@ export default function App() {
   );
   return (
     <>
-      <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} />
+      <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} reloadTrips={reloadTrips}
+        onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }} />
       <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
-      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} />
+      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
       {stub("map", "Lake Map", "The lake map")}
       <MoreScreen {...common} active={tab === "more" && !page} onSignOut={signOut} onOpen={setPage} />
       <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />

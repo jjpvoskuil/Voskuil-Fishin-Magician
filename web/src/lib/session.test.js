@@ -56,3 +56,37 @@ test("nearest saved spot by GPS", () => {
   assert.equal(S.nearestSpot(spots, 37.3285, -86.1405).spot.spot_id, "a");
   assert.equal(S.nearestSpot(spots, 37.35, -86.10), null);
 });
+
+test("fishing together: members, newest conditions, follow without loops", async () => {
+  const S = await import("./session.js");
+  const mk = (id, sid, owner, angler, extra = {}) => ({ trip_id: id, session_id: sid, trip_date: "2026-11-10", logged_at: "2026-11-10T07:00:00", spot_id: "p1", spot_name: "Point",
+    owner, conditions: { ...S.CONDITION_FIELDS, source: "spot_session", angler, lure_start_time: "07:00:00", lure_end_time: null, start_time: "07:00:00", fish: [], ...extra } });
+  const matt = mk("m1", "sM", "m@x", "Matthew", { conditions_set_at: "2026-11-10T07:00:00", water_temp_f: 58 });
+  const john = mk("j1", "sJ", "j@x", "John", { group_id: "sM", conditions_set_at: "2026-11-10T07:00:00", water_temp_f: 58 });
+  const alex = mk("a1", "sA", "a@x", "Alex");
+  const trips = [matt, john, alex];
+  assert.deepEqual(S.groupMembers(trips, "sJ", "sM").map((s) => s.key), ["sM"]);
+  assert.deepEqual(S.groupMembers(trips, "sM", "sM").map((s) => s.key), ["sJ"]); // the anchor sees who joined
+  assert.equal(S.groupMembers(trips, "sA", "sA").length, 0);
+  // Matthew changes the water temp later → newest; John's identical-timestamp copy is not "newer"
+  const matt2 = { ...matt, conditions: { ...matt.conditions, water_temp_f: 56, conditions_set_at: "2026-11-10T08:00:00" } };
+  const newest = S.newestInGroup(S.groupMembers([matt2, john], "sJ", "sM"));
+  assert.equal(newest.values.water_temp_f, 56); assert.equal(newest.set_at, "2026-11-10T08:00:00");
+  assert.ok(!S.sameConditions(newest, S.currentConditions(S.openSessions([john])[0])));
+  assert.ok(S.sameConditions(S.currentConditions(S.openSessions([matt])[0]), S.currentConditions(S.openSessions([john])[0]))); // same spot + values (group/angler ignored)
+});
+
+test("relocateRows: in place when young, split when older or moved", async () => {
+  const S = await import("./session.js");
+  const { parseIso } = await import("./py.js");
+  const r = { trip_id: "t1", session_id: "s", trip_date: "2026-11-10", spot_id: "p1", spot_name: "Point", lure_used: "Jig", conditions: { ...S.CONDITION_FIELDS, source: "spot_session",
+    lure_category: "football_jig", lure_start_time: "07:00:00", lure_end_time: null, fish: [{ species: "Largemouth Bass" }] } };
+  const newBase = { ...S.CONDITION_FIELDS, water_temp_f: 50 };
+  const args = (now, spot) => ({ newBase, spot, structure: "Main-lake point", clarity: "Clear", segment: "Morning", predicted: 6, owner: "j@x", now });
+  const young = S.relocateRows([r], args(parseIso("2026-11-10T07:05:00"), { spot_id: "p1", name: "Point" }));
+  assert.equal(young.next.length, 1); assert.equal(young.next[0].conditions.water_temp_f, 50); assert.equal(young.next[0].conditions.fish.length, 1);
+  const old = S.relocateRows([r], args(parseIso("2026-11-10T08:00:00"), { spot_id: "p1", name: "Point" }));
+  assert.equal(old.next.length, 2); assert.equal(old.next[0].conditions.lure_end_time, "08:00:00"); assert.equal(old.next[1].conditions.water_temp_f, 50);
+  const moved = S.relocateRows([r], args(parseIso("2026-11-10T07:05:00"), { spot_id: "p2", name: "Cove" }));
+  assert.equal(moved.next.length, 2); assert.equal(moved.next[1].spot_id, "p2");
+});

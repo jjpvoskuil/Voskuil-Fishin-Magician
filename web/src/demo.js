@@ -20,7 +20,7 @@ export function demoTrips(today = lakeToday()) {
   for (let back = 75; back >= 0; back--) {
     if (back > 0 && r() < 0.6) continue;
     const day = addDays(today, -back);
-    const anglers = back === 0 ? [["Demo Angler", DEMO_EMAIL, true], ["Fishing Buddy", BUDDY, false]] : [[r() < 0.6 ? "Demo Angler" : "Fishing Buddy", null, false]];
+    const anglers = back === 0 ? [["Demo Angler", DEMO_EMAIL, true], ["Fishing Buddy", BUDDY, true]] : [[r() < 0.6 ? "Demo Angler" : "Fishing Buddy", null, false]];
     for (const [angler, email0, open] of anglers) {
       const email = email0 || (angler === "Demo Angler" ? DEMO_EMAIL : BUDDY);
       const seg = back === 0 ? (open ? "Morning" : "Dawn") : pick(SEGS), [sid, sname, struct] = pick(SPOTS);
