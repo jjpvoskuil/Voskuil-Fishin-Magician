@@ -1,0 +1,17 @@
+name: Build lake contours (lidar)
+# Run by hand when the contour method changes. Reads KyFromAbove's public lidar (too big for the dev sandbox) and
+# uploads web/public/depth/contours.json as an artifact; Claude downloads it and commits it (a commit from this
+# workflow wouldn't trigger the Pages build).
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q rasterio pystac-client pyproj numpy scipy scikit-image shapely
+      - run: python tools/build_contours.py out
+      - uses: actions/upload-artifact@v4
+        with: { name: contours, path: out/contours.json, retention-days: 7 }
