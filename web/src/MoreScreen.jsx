@@ -7,7 +7,9 @@ import { Appearance, BUILD, Head } from "./Shell.jsx";
 const PAGES = [["history", "Trip History", "history"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
   ["tackle", "Tackle Box", "tackle"], ["punch", "Punch list", "tools"]];
 
-export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, theme, onSignOut }) {
+const READY = new Set(["history"]);
+
+export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, theme, onSignOut, onOpen }) {
   const [users, setUsers] = useState(null);
   const [form, setForm] = useState(null); // {email, name, role, isNew}
   const admin = me?.role === "admin";
@@ -32,8 +34,8 @@ export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, 
       <div className="body">
         <section className="card">
           {PAGES.map(([id, label, ic]) => (
-            <button key={id} className="row" onClick={() => toast(`${label} is being rebuilt — use the old app for now`)}>
-              <Icon name={ic} /><span className="grow">{label}</span><span className="muted small">soon</span>
+            <button key={id} className="row" onClick={() => (READY.has(id) ? onOpen(id) : toast(`${label} is being rebuilt — use the old app for now`))}>
+              <Icon name={ic} /><span className="grow">{label}</span>{READY.has(id) ? <Icon name="chev" size={18} /> : <span className="muted small">soon</span>}
             </button>
           ))}
         </section>

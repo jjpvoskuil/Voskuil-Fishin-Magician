@@ -4,6 +4,8 @@ import { LAKE } from "./config.js";
 import { Head, NotYet, TabBar, TABS } from "./Shell.jsx";
 import MoreScreen from "./MoreScreen.jsx";
 import SessionScreen from "./SessionScreen.jsx";
+import HistoryScreen from "./HistoryScreen.jsx";
+import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
 import ForecastScreen from "./ForecastScreen.jsx";
 import { useLakeSetup } from "./LakeSetup.jsx";
@@ -45,15 +47,18 @@ export default function App() {
   const [session, setSession] = useState(undefined); // undefined = still checking
   const [me, setMe] = useState(undefined);            // fm_users row; null = not on the allow-list
   const [error, setError] = useState("");
-  const [tab, setTabState] = useState(() => { const h = location.hash.slice(1); return TAB_IDS.includes(h) ? h : "today"; });
+  const [tab, setTabState] = useState(() => { const h = location.hash.slice(1).split("/")[0]; return TAB_IDS.includes(h) ? h : "today"; });
+  const [page, setPageState] = useState(() => location.hash.slice(1).split("/")[1] || null); // a page under More (e.g. history)
   const [toast, setToast] = useState("");
   const theme = useTheme();
   useKeyboardSafeInputs();
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); }, [toast]);
 
+  const setPage = (p) => { setPageState(p); history.replaceState(null, "", `#more${p ? `/${p}` : ""}`); };
   const onTab = (id) => {
     if (id === tab) document.getElementById(`screen-${id}`)?.scrollTo({ top: 0, behavior: "smooth" }); // re-tap = back to top
-    setTabState(id); history.replaceState(null, "", `#${id}`);
+    if (id === tab && id === "more" && page) { setPage(null); return; } // re-tap More = back to the list
+    setTabState(id); history.replaceState(null, "", `#${id}${id === "more" && page ? `/${page}` : ""}`);
   };
 
   useEffect(() => {
@@ -67,6 +72,7 @@ export default function App() {
   useEffect(() => { if (!db) return; db.whoami().then(setMe, (e) => setError(e.message)); }, [db]);
   const approvedDb = me ? db : null; // shared data loads only once we know this person is on the list
   const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips, reload: reloadTrips } = useTrips(approvedDb);
+  const outbox = useOutbox(approvedDb); // one save queue for Session and History
   const lures = useList(approvedDb, "listLures"), spots = useList(approvedDb, "listSpots");
   const [setup, setSetup] = useLakeSetup();
 
@@ -108,9 +114,10 @@ export default function App() {
     <>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} />
       <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
-      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} />
+      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} />
       {stub("map", "Lake Map", "The lake map")}
-      <MoreScreen {...common} active={tab === "more"} onSignOut={signOut} />
+      <MoreScreen {...common} active={tab === "more" && !page} onSignOut={signOut} onOpen={setPage} />
+      <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />
       <TabBar tab={tab} onTab={onTab} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </>

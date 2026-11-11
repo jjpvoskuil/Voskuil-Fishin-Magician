@@ -34,7 +34,7 @@ fixtures generated from the Python. Until cutover, the live data is still on the
 ## Plan (order agreed 11-10)
 1. Foundation (done 11-10: scaffold, theme, sign-in + fm_users, Pages workflow). 2. Port the engine (scoring, lures,
 calibration, astro, thermocline, weather/lake-level parsing) with parity fixtures. 3. Today + 7-Day Forecast.
-4. Spot Session (done 11-10) + Trip History. Then lure picks v2 (personal, similarity/recency-weighted, proven + seasonal + worth-a-try, with reasons) and more per-angler personalization (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
+4. Spot Session + Trip History (both done 11-10). Then lure picks v2 (personal, similarity/recency-weighted, proven + seasonal + worth-a-try, with reasons) and more per-angler personalization (John 11-10). 5. Tackle Box (photos in private bucket `fm-lures`, scan via Edge Function holding
 ANTHROPIC_API_KEY; Cabela's lookup may be blocked without browser-fingerprint impersonation — test early).
 6. Lake Map (Leaflet satellite; bathymetry precomputed in Python, shipped static). 7. Leaderboard, Reports (Excel in
 browser), Punch list. 8. make_import.py (+ one-time GitHub Action copying the 80 Cabela's lure images into the bucket),
@@ -84,6 +84,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   (localStorage `fm.outbox`, retries). Soft plastics have a "Rigged as" picker (`SOFT_PLASTIC_RIGS`, incl. Ned Rig `ned_rig` added 11-10) — the rig is the
   lure_category the picks learn from. Walk-through: `python3 web/tools/session_flow.py OUTDIR` (demo seeds an open
   session for the demo angler, so it exercises Live, cancels, then Setup).
+- Trip History (`HistoryScreen.jsx`, logic `lib/history.js` + `history.test.js`, 11-10): More → Trip History (hash
+  `#more/history`; More pages open via App `page` state, READY set in MoreScreen). Filters apply live and are remembered
+  (localStorage `fm.historyFilters`): Everyone / Just me, date chips (default 30 days), more filters (angler, time of
+  day, location, lure type, specific lure). Sessions grouped by session_id and split into legs (location + conditions
+  snapshot). Tap → view; Edit/Delete only for your own sessions (admins: any) — date, per-leg spot/segment/structure/
+  conditions (changed fields get field_sources "you"), per-lure name/type-rig/color/technique/trailer/notes, fish
+  edit/remove/add (FishSheet `initial` keeps exact weights unless changed); predicted score never re-run. Angler isn't
+  editable (owner = who logged it). One shared outbox (App `useOutbox`) for Session + History.
+  Walk-through: `python3 web/tools/history_flow.py OUTDIR`.
 - Drop shot fix (11-10, John): the auto-tagger put "straight worm" → wacky before drop shot, so both Roboworm FAT
   Straight Worms were tagged wacky_rig_senko and every drop-shot session was logged as wacky. Tagger fixed (drop shot
   first, + "roboworm"); the `data` branch was corrected (43 trip rows + 2 tackle-box items → drop_shot; nothing in the

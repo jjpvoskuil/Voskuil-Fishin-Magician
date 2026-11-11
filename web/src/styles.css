@@ -249,3 +249,15 @@ button.pill { min-height: 30px; }
 body:has(.dock) .toast { bottom: calc(var(--tabbar) + var(--kb, 0px) + 90px); }
 body:has(.dock) .toast.undo { bottom: calc(var(--tabbar) + var(--kb, 0px) + 150px); }
 .pill { white-space: nowrap; }
+
+/* ---- Trip History ---- */
+button.card.hist { display: block; width: 100%; text-align: left; padding: 0; }
+.hist .card-b { display: flex; flex-direction: column; gap: 3px; padding-top: 12px; }
+.hist-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hist-loc { font-size: 16px; }
+.hist-lures { color: var(--text-2); margin-top: 4px; line-height: 1.4; }
+.leg { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.leg:last-of-type { border-bottom: 0; }
+.lure-v { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--card); }
+.field textarea { border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--input); padding: 10px 12px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; }
+.gaps summary { line-height: 1.35; }

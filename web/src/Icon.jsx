@@ -22,6 +22,8 @@ const P = {
   plus: <path d="M12 5v14M5 12h14" />,
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,
+  back: <path d="M15 6l-6 6 6 6" />,
+  edit: <path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4" />,
 };
 export default function Icon({ name, size, className = "icon", ...rest }) {
   return <svg className={className} viewBox="0 0 24 24" aria-hidden="true" style={size ? { width: size, height: size } : undefined} {...rest}>{P[name]}</svg>;

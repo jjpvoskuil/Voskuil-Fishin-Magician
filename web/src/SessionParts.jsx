@@ -134,24 +134,34 @@ export function TrailerSheet({ stub, inventory, onClose, onDone }) {
 
 const LAST = "fm.lastFish";
 /** Log a fish: species preselected (your last one), everything else optional; remembers retrieve. */
-export function FishSheet({ lure, onClose, onSave }) {
+/** Dropdown values for a stored weight/length (edit mode). */
+const lbOz = (w) => { if (!w) return ["", ""]; if (w >= 10.5) return ["10+", ""]; let lb = Math.floor(w), oz = Math.round((w - lb) * 16); if (oz === 16) { lb += 1; oz = 0; } return [String(lb), String(oz)]; };
+const lenSel = (l) => (!l ? "" : l < 12 ? "<12" : l > 26 ? "26+" : String(Math.round(l)));
+
+export function FishSheet({ lure, onClose, onSave, initial }) {
+  return lure ? <FishForm key={initial ? JSON.stringify(initial) : "new"} lure={lure} onClose={onClose} onSave={onSave} initial={initial} /> : null;
+}
+function FishForm({ lure, onClose, onSave, initial }) {
   const last = (() => { try { return JSON.parse(localStorage.getItem(LAST)) || {}; } catch { return {}; } })();
-  const [species, setSpecies] = useState(last.species || "Largemouth Bass");
-  const [other, setOther] = useState("");
-  const [lb, setLb] = useState(""), [oz, setOz] = useState(""), [len, setLen] = useState("");
-  const [hits, setHits] = useState([]);
-  const [style, setStyle] = useState(last.style || ""), [speed, setSpeed] = useState(last.speed || "Medium");
-  if (!lure) return null;
+  const known = initial && FISH_SPECIES_OPTIONS.includes(initial.species);
+  const [species, setSpecies] = useState(initial ? (known ? initial.species : "Other (type in species)") : last.species || "Largemouth Bass");
+  const [other, setOther] = useState(initial && !known ? initial.species || "" : "");
+  const [w0, l0] = [lbOz(initial?.weight_lb), lenSel(initial?.length_in)];
+  const [lb, setLb] = useState(w0[0]), [oz, setOz] = useState(w0[1]), [len, setLen] = useState(l0);
+  const [hits, setHits] = useState(initial?.hit_types || []);
+  const [style, setStyle] = useState(initial ? initial.retrieve_style || "" : last.style || ""), [speed, setSpeed] = useState(initial ? initial.retrieve_speed || "" : last.speed || "Medium");
   const save = () => {
     const weighed = lb !== "" || oz !== "";
-    try { localStorage.setItem(LAST, JSON.stringify({ species, style, speed })); } catch { /* ignore */ }
-    onSave({ species, speciesOther: other, weightLb: weighed ? weightLbForDropdown(lb === "" ? 0 : lb, oz === "" ? 0 : oz) : null,
-      lengthIn: len === "" ? null : lengthInForDropdown(len === "<12" || len === "26+" ? len : Number(len)), hitTypes: hits, retrieveStyle: style || null, retrieveSpeed: speed || null });
+    if (!initial) try { localStorage.setItem(LAST, JSON.stringify({ species, style, speed })); } catch { /* ignore */ }
+    // in edit mode an untouched weight/length keeps its exact stored value (dropdowns are whole oz / whole inches)
+    const weightLb = initial && lb === w0[0] && oz === w0[1] ? initial.weight_lb ?? null : weighed ? weightLbForDropdown(lb === "" ? 0 : lb, oz === "" ? 0 : oz) : null;
+    const lengthIn = initial && len === l0 ? initial.length_in ?? null : len === "" ? null : lengthInForDropdown(len === "<12" || len === "26+" ? len : Number(len));
+    onSave({ species, speciesOther: other, weightLb, lengthIn, hitTypes: hits, retrieveStyle: style || null, retrieveSpeed: speed || null });
   };
   return (
-    <Sheet open title={`Log a fish · ${lure.lure_used}`} onClose={onClose}>
+    <Sheet open title={`${initial ? "Edit fish" : "Log a fish"} · ${lure.lure_used}`} onClose={onClose}>
       <div className="setup">
-        <button className="btn primary wide big" onClick={save}>Save fish</button>
+        <button className="btn primary wide big" onClick={save}>{initial ? "Save changes" : "Save fish"}</button>
         <div className="field">Species
           <div className="chips">{FISH_SPECIES_OPTIONS.map((s) => <button type="button" key={s} className={`chip ${species === s ? "on" : ""}`} aria-pressed={species === s} onClick={() => setSpecies(s)}>{s.replace(" (type in species)", "…")}</button>)}</div>
         </div>

@@ -12,7 +12,6 @@ import { calibrateWeights, locationAdjustments, parseConditions } from "./lib/ca
 import { curateRecommendation, recommend } from "./lib/lures.js";
 import { formatWeightLbOz } from "./lib/leaderboard.js";
 import { windMphForBand } from "./lib/onwater.js";
-import { useOutbox } from "./lib/outbox.js";
 import { dateOf, parseIso, pyFixed } from "./lib/py.js";
 import { segmentTimeRanges } from "./lib/scoring.js";
 import * as S from "./lib/session.js";
@@ -28,8 +27,7 @@ const fishLine = (f) => [t12(f.caught_at), f.count > 1 ? `${f.count} × ${f.spec
 const spotMeta = (s) => [s.location_type, (s.bottom_structure || "").split("|").filter(Boolean).join(", "), s.main_depth_ft && `main area ${s.main_depth_ft} ft`,
   s.transition_depth_ft && `transition ${s.transition_depth_ft} ft (${s.transition_grade || ""})`].filter(Boolean).join(" · ");
 
-export default function SessionScreen({ active, demo, onMenu, db, me, weather, trips, reloadTrips, lures, spots, toast }) {
-  const outbox = useOutbox(db);
+export default function SessionScreen({ active, demo, onMenu, db, me, weather, trips, reloadTrips, lures, spots, toast, outbox }) {
   const [local, setLocal] = useState(null);          // my open session rows (edited here, saved through the outbox)
   const [watching, setWatching] = useState(null);    // session key of someone else's session
   const [sheet, setSheet] = useState(null);
