@@ -5,6 +5,7 @@ import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import LureRec from "./LureRec.jsx";
 import { buildPicks } from "./lib/picks.js";
+import { useElectronics, usePicksMode } from "./lib/prefs.js";
 import { LakeSetupForm, resolveSetup, setupSummary } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, ago, fmtTime, signed } from "./ui.jsx";
 import { calibrateWeights } from "./lib/calibration.js";
@@ -45,7 +46,8 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
   const day = week?.find((d) => d.the_date === pick) || week?.[0];
   const best = day ? day.segments.reduce((b, s) => (s.score > b.score ? s : b), day.segments[0]) : null;
   const seg = day ? day.segments.find((s) => s.name === segPick) || best : null;
-  const r = resolveSetup(setup, spots, week?.[0]?.water_temp_f ?? null);
+  const [electronics] = useElectronics(), [picksMode, setPicksMode] = usePicksMode();
+  const r = resolveSetup(setup, spots, week?.[0]?.water_temp_f ?? null, electronics);
   const [effSeason, effTemp] = day ? effectiveSeasonAndTemp(day, r.waterTemp) : [null, null];
 
   const rec = useMemo(() => {
@@ -56,7 +58,7 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
   }, [day, seg, lures, trips, effSeason, effTemp, r.structure, r.clarity, r.fishDepth, r.forage]);
 
   const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: effTemp, water_clarity: r.clarity, segment_name: seg?.name,
-    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: me?.email, fish_depth_ft: r.fishDepth } }) : null), [rec, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth]);
+    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: picksMode === "me" ? me?.email : null, fish_depth_ft: r.fishDepth } }) : null), [rec, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth, picksMode]);
   const ws = day?.weather_summary;
   return (
     <div className="screen" hidden={!active} id="screen-forecast">
@@ -127,7 +129,7 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
                 ))}
               </div>
               <p className="muted small" style={{ margin: "8px 0 10px" }}>{seg.name}: {fmtTime(seg.start)} – {fmtTime(seg.end)}</p>
-              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={rec} inventory={lures} picks={picks} />}
+              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={rec} inventory={lures} picks={picks} mode={picksMode} setMode={setPicksMode} />}
             </div>
           </section>
           <p className="muted small" style={{ textAlign: "center", margin: "0 8px" }}>Scores are 1 (least active) to 10 (most active), built from pressure trend, moon phase, solunar windows, cloud cover, wind, and season.</p>
@@ -135,7 +137,7 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
       </div>
       <Sheet open={!!sheet} title={sheet?.title} onClose={() => setSheet(null)}>{sheet && <Breakdown breakdown={sheet.breakdown} score={sheet.score} />}</Sheet>
       <Sheet open={setupOpen} title="Lake setup" onClose={() => setSetupOpen(false)}>
-        <LakeSetupForm setup={setup} set={setSetup} spots={spots} defaultTemp={week?.[0]?.water_temp_f ?? null} />
+        <LakeSetupForm setup={setup} set={setSetup} spots={spots} defaultTemp={week?.[0]?.water_temp_f ?? null} electronics={electronics} />
         <button className="btn primary wide" style={{ marginTop: 14 }} onClick={() => setSetupOpen(false)}>Done</button>
       </Sheet>
     </div>

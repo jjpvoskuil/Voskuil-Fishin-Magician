@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Appearance, BUILD, Head } from "./Shell.jsx";
+import { useElectronics } from "./lib/prefs.js";
 
 const PAGES = [["history", "Trip History", "history"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
   ["tackle", "Tackle Box", "tackle"], ["punch", "Punch list", "tools"]];
@@ -13,6 +14,7 @@ export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, 
   const [users, setUsers] = useState(null);
   const [form, setForm] = useState(null); // {email, name, role, isNew}
   const admin = me?.role === "admin";
+  const [electronics, setElectronics] = useElectronics();
   const load = async () => { try { setUsers(await db.listUsers()); } catch (e) { toast(`Couldn't load anglers — ${e.message}`); } };
   useEffect(() => { if (active && users === null) load(); }, [active]);
 
@@ -66,6 +68,16 @@ export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, 
             </form>
           )}
           {!admin && <div className="note muted small" style={{ padding: "10px 14px" }}>Only admins can add or remove anglers.</div>}
+        </section>
+
+        <section className="card">
+          <div className="card-h"><span className="t"><Icon name="wave" />Boat &amp; electronics</span></div>
+          <div className="card-b">
+            <div className="seg">{[[true, "Main boat in use"], [false, "Boat stored"]].map(([v, l]) => (
+              <button key={l} className={electronics === v ? "on" : ""} onClick={() => setElectronics(v)}>{l}</button>))}</div>
+            <p className="muted small" style={{ margin: "8px 0 0" }}>{electronics ? "Water temp and fish depth can be entered from your electronics."
+              : "No electronics: sessions use the estimated water temp and skip fish depth, and are marked that way for the lure picks."}</p>
+          </div>
         </section>
 
         <section className="card">

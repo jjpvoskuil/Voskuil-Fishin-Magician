@@ -20,12 +20,12 @@ export function useLakeSetup() {
 }
 
 /** Resolve the setup into recommend() inputs. defaultTemp = today's estimated water temp. */
-export function resolveSetup(setup, spots, defaultTemp) {
+export function resolveSetup(setup, spots, defaultTemp, electronics = true) {
   const band = visibilityBand(setup.secchi).label;
   const clarity = resolveWaterClarity(setup.secchi, band === "Stained" ? setup.stain : null, setup.stirred);
   const spot = setup.location !== OTHER_LOCATION ? (spots || []).find((s) => s.spot_id === setup.location) : null;
   const structure = spot ? (LOCATION_TYPE_TO_STRUCTURE_TYPE[spot.location_type] || STRUCTURE_TYPES[0]) : setup.structure;
-  return { clarity, band, structure, spot, waterTemp: setup.waterTemp ?? defaultTemp, fishDepth: setup.fishDepth, forage: setup.forage };
+  return { clarity, band, structure, spot, waterTemp: electronics ? setup.waterTemp ?? defaultTemp : defaultTemp, fishDepth: electronics ? setup.fishDepth : null, forage: setup.forage, electronics };
 }
 
 /** Text box with a number keypad that selects its contents on tap (iPhone won't do that for type="number"). */
@@ -47,7 +47,7 @@ export function NumberBox({ label, value, onChange, step = 0.5, min, max, placeh
   );
 }
 
-export function LakeSetupForm({ setup, set, spots, defaultTemp }) {
+export function LakeSetupForm({ setup, set, spots, defaultTemp, electronics = true }) {
   const r = resolveSetup(setup, spots, defaultTemp);
   const vis = visibilityBand(setup.secchi);
   return (
@@ -72,11 +72,13 @@ export function LakeSetupForm({ setup, set, spots, defaultTemp }) {
           <select value={setup.structure} onChange={(e) => set({ structure: e.target.value })}>{STRUCTURE_TYPES.map((o) => <option key={o}>{o}</option>)}</select>
         </label>
       ) : <p className="muted small">Structure: <b>{r.structure}</b> (from this spot's saved type)</p>}
-      <div className="two">
-        <NumberBox label="Water temp (°F)" value={setup.waterTemp} min={32} max={100} placeholder={`${defaultTemp ?? ""} (est.)`} onChange={(v) => set({ waterTemp: v })} />
-        <NumberBox label="Fish depth (ft)" value={setup.fishDepth} step={1} min={0} max={100} onChange={(v) => set({ fishDepth: v ?? 8 })} />
-      </div>
-      <p className="muted small">Nolin has no live water-temperature feed — leave it blank to use today's estimate ({defaultTemp ?? "—"}°F), or enter your own reading. Fish depth = where fish show on your electronics.</p>
+      {electronics ? <>
+        <div className="two">
+          <NumberBox label="Water temp (°F)" value={setup.waterTemp} min={32} max={100} placeholder={`${defaultTemp ?? ""} (est.)`} onChange={(v) => set({ waterTemp: v })} />
+          <NumberBox label="Fish depth (ft)" value={setup.fishDepth} step={1} min={0} max={100} onChange={(v) => set({ fishDepth: v ?? 8 })} />
+        </div>
+        <p className="muted small">Nolin has no live water-temperature feed — leave it blank to use today's estimate ({defaultTemp ?? "—"}°F), or enter your own reading. Fish depth = where fish show on your electronics.</p>
+      </> : <p className="muted small">Water temp: <b>{defaultTemp ?? "—"}°F</b> (estimated — main boat & electronics are off under More, so there's no reading or fish depth).</p>}
       <div className="field">Forage available / being eaten
         <div className="chips">
           {FORAGE_OPTIONS.map((f) => { const on = setup.forage.includes(f); return (
@@ -90,5 +92,5 @@ export function LakeSetupForm({ setup, set, spots, defaultTemp }) {
 }
 
 export function setupSummary(r) {
-  return [r.clarity, r.spot ? r.spot.name : r.structure, `${r.waterTemp}°F`, `fish ${r.fishDepth} ft`, r.forage.length ? r.forage.join(", ") : "no forage set"].join(" · ");
+  return [r.clarity, r.spot ? r.spot.name : r.structure, `${r.waterTemp}°F${r.electronics === false ? " (est.)" : ""}`, r.fishDepth != null ? `fish ${r.fishDepth} ft` : null, r.forage.length ? r.forage.join(", ") : "no forage set"].filter(Boolean).join(" · ");
 }

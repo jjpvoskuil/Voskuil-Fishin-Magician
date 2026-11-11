@@ -38,13 +38,14 @@ const Select = ({ label, value, options, onChange, src }) => (
 );
 
 /** The full conditions form. cond = {values, sources}; onChange(field, value) marks the field as yours. */
-export function ConditionsForm({ cond, onChange }) {
+export function ConditionsForm({ cond, onChange, electronics = true }) {
   const v = cond.values, src = (f) => SOURCE_LABEL(cond.sources[f]);
   const vis = visibilityBand(v.secchi_ft), band = waterTempBand(v.water_temp_f);
   return (
     <div className="setup">
       <div className="two">
-        <NumberBox label={`Water temp (°F)${src("water_temp_f") ? ` · ${src("water_temp_f")}` : ""}`} value={v.water_temp_f} min={32} max={100} onChange={(x) => onChange("water_temp_f", x ?? 60)} />
+        {electronics ? <NumberBox label={`Water temp (°F)${src("water_temp_f") ? ` · ${src("water_temp_f")}` : ""}`} value={v.water_temp_f} min={32} max={100} onChange={(x) => onChange("water_temp_f", x ?? 60)} />
+          : <div className="field">Water temp<div className="static">{v.water_temp_f}°F <span className="muted small">estimated</span></div></div>}
         <NumberBox label={`Visibility (ft)${src("secchi_ft") ? ` · ${src("secchi_ft")}` : ""}`} value={v.secchi_ft} min={0} max={20} onChange={(x) => onChange("secchi_ft", x ?? 2.5)} />
       </div>
       <p className="muted small"><b>{band.label}</b> — {band.detail} <b>{vis.label}</b> — {vis.detail}</p>
@@ -67,7 +68,8 @@ export function ConditionsForm({ cond, onChange }) {
       </div>
       <Steps label="Fish activity" options={FISH_ACTIVITY_OPTIONS} value={v.fish_activity} onChange={(x) => onChange("fish_activity", x)} />
       <Steps label="Forage activity" options={FORAGE_ACTIVITY_OPTIONS} value={v.forage_activity} onChange={(x) => onChange("forage_activity", x)} />
-      <NumberBox label="Depth fish are showing on electronics (ft, optional)" value={v.fish_depth_ft} step={1} min={0} max={100} placeholder="—" onChange={(x) => onChange("fish_depth_ft", x)} />
+      {electronics ? <NumberBox label="Depth fish are showing on electronics (ft, optional)" value={v.fish_depth_ft} step={1} min={0} max={100} placeholder="—" onChange={(x) => onChange("fish_depth_ft", x)} />
+        : <p className="muted small">Main boat & electronics are off (More) — water temp is the estimate and there's no fish-depth reading.</p>}
     </div>
   );
 }

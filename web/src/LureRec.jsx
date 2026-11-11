@@ -55,12 +55,20 @@ export function PicksList({ picks }) {
   </>;
 }
 
-export default function LureRec({ rec, inventory, picks }) {
+/** Everyone's catches (default: best for the spot) vs weighted to your own trips. */
+export function PicksMode({ mode, setMode }) {
+  if (!setMode) return null;
+  return <div className="seg picks-mode">{[["everyone", "Everyone's catches"], ["me", "Just me"]].map(([k, l]) =>
+    <button key={k} type="button" className={mode === k ? "on" : ""} onClick={() => setMode(k)}>{l}</button>)}</div>;
+}
+
+export default function LureRec({ rec, inventory, picks, mode, setMode }) {
   const c = curateRecommendation(rec, inventory);
   return (
     <div className="lurerec">
       {picks && picks.picks.length > 0 ? <>
-        <div className="lr-h">🎣 Your picks for this window</div>
+        <div className="lr-h">🎣 Picks for this window</div>
+        <PicksMode mode={mode} setMode={setMode} />
         <PicksList picks={picks} />
       </> : c.recommended.length > 0 ? <>
         <div className="lr-h">🎣 Top picks from your tackle box</div>

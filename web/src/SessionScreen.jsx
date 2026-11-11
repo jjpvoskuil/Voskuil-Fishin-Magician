@@ -4,8 +4,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
-import LureRec, { TierBadge } from "./LureRec.jsx";
+import LureRec, { PicksMode, TierBadge } from "./LureRec.jsx";
 import { buildPicks } from "./lib/picks.js";
+import { useElectronics, usePicksMode } from "./lib/prefs.js";
 import { ConditionsForm, FishSheet, LurePicker, RigSelect, TrailerSheet, conditionsSummary } from "./SessionParts.jsx";
 import { LOCATION_TYPE_TO_STRUCTURE_TYPE } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, fmtTime, verdict } from "./ui.jsx";
@@ -22,6 +23,9 @@ import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 const DRAFT = "fm.sessionDraft";
 const readDraft = () => { try { return JSON.parse(localStorage.getItem(DRAFT)) || {}; } catch { return {}; } };
 const writeDraft = (d) => { try { localStorage.setItem(DRAFT, JSON.stringify(d)); } catch { /* ignore */ } };
+/** Boat stored (no electronics): water temp is always the estimate, no fish-depth reading. */
+const noElectronics = (on, wd, c) => (on ? c : { values: { ...c.values, water_temp_f: wd.values.water_temp_f ?? c.values.water_temp_f, fish_depth_ft: null },
+  sources: { ...c.sources, water_temp_f: wd.sources.water_temp_f || "estimate", fish_depth_ft: "no electronics" } });
 const STRUCT = (spot) => LOCATION_TYPE_TO_STRUCTURE_TYPE[spot?.location_type] || "Main-lake point";
 const t12 = (hms) => { if (!hms) return "?"; const [h, m] = hms.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
 const fishLine = (f) => [f.caught_at ? t12(f.caught_at) : null, f.count > 1 ? `${f.count} × ${f.species}` : f.species, f.weight_lb ? formatWeightLbOz(f.weight_lb) : null,
@@ -75,6 +79,7 @@ export default function SessionScreen({ active, demo, onMenu, db, me, weather, t
 /* ------------------------------------------------------------------ before you start */
 function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, others, onWatch, onStart, onMenu, demo, db }) {
   const today = lakeToday();
+  const [electronics] = useElectronics(), [picksMode, setPicksMode] = usePicksMode();
   const [draft, setDraftState] = useState(() => readDraft());
   const setDraft = (patch) => setDraftState((d) => { const n = { ...d, ...patch }; writeDraft(n); return n; });
   const [gps, setGps] = useState(null);
@@ -104,9 +109,9 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
   const spot = partnerCond ? sorted.find((s) => s.spot_id === partnerCond.spot_id) || { spot_id: partnerCond.spot_id, name: partnerCond.spot_name, location_type: null }
     : sorted.find((s) => s.spot_id === draft.spot_id) || null;
 
-  const cond = useMemo(() => S.mergeConditions(S.weatherDefaults(bundle, date, date === today ? now : at), S.sharedWaterConditions(trips, date),
+  const cond = useMemo(() => noElectronics(electronics, S.weatherDefaults(bundle, date, date === today ? now : at), S.mergeConditions(S.weatherDefaults(bundle, date, date === today ? now : at), S.sharedWaterConditions(trips, date),
     partnerCond ? { values: partnerCond.values, sources: Object.fromEntries(Object.keys(partnerCond.values).map((k) => [k, `shared:${partner.angler || "partner"}`])) } : { values: {}, sources: {} },
-    { values: draft.cond || {}, sources: Object.fromEntries(Object.keys(draft.cond || {}).map((k) => [k, "you"])) }), [bundle, date, trips, draft.cond, partnerCond]);
+    { values: draft.cond || {}, sources: Object.fromEntries(Object.keys(draft.cond || {}).map((k) => [k, "you"])) })), [bundle, date, trips, draft.cond, partnerCond, electronics]);
   const scoring = useMemo(() => (spot ? S.computeScoring(cond.values, date, bundle, date === today ? now : at, segment, { spotId: spot.spot_id, locAdj, weights }) : null),
     [spot, cond, date, bundle, segment, locAdj, weights]);
   const rec = useMemo(() => (spot && scoring && lures && trips ? recommend({ season: scoring.season, water_temp_f: cond.values.water_temp_f, segment_name: segment,
@@ -114,7 +119,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     forage: cond.values.forage_seen, inventory: lures, trip_history: trips, spot_id: spot.spot_id, fish_activity: cond.values.fish_activity,
     forage_activity: cond.values.forage_activity, wind_mph: windMphForBand(cond.values.wind_band) }) : null), [spot, scoring, lures, trips, cond, segment]);
   const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: cond.values.water_temp_f, water_clarity: scoring.water_clarity,
-    segment_name: segment, structure_type: STRUCT(spot), spot_id: spot.spot_id, wind_band: cond.values.wind_band, me: me.email, fish_depth_ft: cond.values.fish_depth_ft || null } }) : null), [rec]);
+    segment_name: segment, structure_type: STRUCT(spot), spot_id: spot.spot_id, wind_band: cond.values.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: cond.values.fish_depth_ft || null } }) : null), [rec, picksMode]);
   const pending = draft.lures || [];
   const pendingIds = new Set(pending.map((l) => l.item_id).filter(Boolean));
   const addLure = (stub) => { if (stub.item_id && pendingIds.has(stub.item_id)) return; setDraft({ lures: [...pending, stub] }); toast(`Added ${stub.label}`); };
@@ -126,7 +131,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     const startAt = lakeNowNaive(), startDate = date, seg = date === today ? S.guessSegment(startAt, segmentTimeRanges(bundle, date)) : segment;
     const sc = S.computeScoring(cond.values, startDate, bundle, date === today ? startAt : at, seg, { spotId: spot.spot_id, locAdj, weights });
     const base = { ...S.baseConditions(cond.values, cond.sources, sc, new Date(startAt / 1000).toISOString().slice(11, 19), seg, me.name), spot_source: draft.spot_source || "picked",
-      predicted_breakdown: sc.score.breakdown, ...(partnerCond ? { spot_source: "shared", group_id: partnerCond.group_id && !partnerCond.group_id.startsWith("solo:") ? partnerCond.group_id : partnerCond.session_id } : {}),
+      predicted_breakdown: sc.score.breakdown, electronics, ...(partnerCond ? { spot_source: "shared", group_id: partnerCond.group_id && !partnerCond.group_id.startsWith("solo:") ? partnerCond.group_id : partnerCond.session_id } : {}),
       // joining without changing anything keeps the partner's timestamp, so their phone has nothing new to follow
       conditions_set_at: partnerCond && !Object.keys(draft.cond || {}).length ? partnerCond.set_at : isoNaive(startAt) };
     const session = { id: S.newTripId(), date: startDate };
@@ -176,7 +181,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
           <div className="card-h"><span className="t"><Icon name="wave" />Conditions</span><button className="pill" onClick={() => setEditing(!editing)}>{editing ? "Done" : "Edit"}</button></div>
           <div className="card-b">
             {!editing ? <button className="setup-sum" onClick={() => setEditing(true)}>{conditionsSummary(cond.values)} <span className="link">Edit</span></button>
-              : <ConditionsForm cond={cond} onChange={(f, v) => setDraft({ cond: { ...(draft.cond || {}), [f]: v } })} />}
+              : <ConditionsForm electronics={electronics} cond={cond} onChange={(f, v) => setDraft({ cond: { ...(draft.cond || {}), [f]: v } })} />}
             <p className="muted small" style={{ margin: "8px 0 0" }}>{partner ? `Taken from ${partner.angler || "your partner"}'s session — anything you change is saved as yours and shared with them.` : <>Filled from the forecast{Object.values(cond.sources).some((s) => s.startsWith("shared:")) ? " and today's readings from another angler" : ""} — anything you change is saved as yours.</>}</p>
           </div>
         </section>
@@ -192,6 +197,7 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
         {rec && <section className="card">
           <div className="card-h"><span className="t"><Icon name="tackle" />Suggested — tap + to fish it</span></div>
           <div className="card-b">
+            <PicksMode mode={picksMode} setMode={setPicksMode} />
             <QuickPicks picks={picks} added={pendingIds} onAdd={quickAdd} />
             <button className="link" onClick={() => setShowDetails(!showDetails)}>{showDetails ? "Hide" : "Colors, depth, how to fish them, gaps"} ›</button>
             {showDetails && <LureRec rec={rec} inventory={lures} picks={picks} />}
@@ -340,6 +346,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
 }
 
 function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me }) {
+  const [picksMode, setPicksMode] = usePicksMode();
   const [tackle, setTackle] = useState(false);
   const [trailerFor, setTrailerFor] = useState(null);
   const rec = useMemo(() => {
@@ -350,13 +357,14 @@ function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weig
       inventory: lures, trip_history: trips, spot_id: current.spot_id, fish_activity: base.fish_activity, forage_activity: base.forage_activity, wind_mph: windMphForBand(base.wind_band) });
   }, [open, lures, trips, base, current, bundle, weights, locAdj]);
   const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: base.water_temp_f, water_clarity: current.water_clarity,
-    segment_name: current.segment, structure_type: current.structure_type, spot_id: current.spot_id, wind_band: base.wind_band, me: me.email, fish_depth_ft: base.fish_depth_ft || null } }) : null), [rec]);
+    segment_name: current.segment, structure_type: current.structure_type, spot_id: current.spot_id, wind_band: base.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: base.fish_depth_ft || null } }) : null), [rec, picksMode]);
   const pick = (item, category) => { const stub = { label: S.itemLabel(item), category, item_id: item.item_id }; if (S.canTakeTrailer({ category })) setTrailerFor(stub); else onAdd(stub); };
   return <>
     <Sheet open={open && !tackle && !trailerFor} title="Add a lure" onClose={onClose}>
       <div className="setup">
         <button className="btn wide" onClick={() => setTackle(true)}>Search the tackle box</button>
         <div className="lr-h">Suggested for right now</div>
+        <PicksMode mode={picksMode} setMode={setPicksMode} />
         {picks ? <QuickPicks picks={picks} added={openIds} onAdd={pick} /> : <p className="muted">Loading…</p>}
       </div>
     </Sheet>
@@ -369,6 +377,7 @@ function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weig
  *  the current lures update them in place; otherwise the current lures are closed and reopened under the new conditions,
  *  so every row's conditions stay true for the time it covers. */
 function MoveSheet({ open, onClose, rows, setRows, base, current, spots, bundle, weights, locAdj, me, toast }) {
+  const [electronics] = useElectronics();
   const [spotId, setSpotId] = useState(current.spot_id);
   const [edits, setEdits] = useState({});
   useEffect(() => { if (open) { setSpotId(current.spot_id); setEdits({}); } }, [open]);
@@ -377,10 +386,11 @@ function MoveSheet({ open, onClose, rows, setRows, base, current, spots, bundle,
   const cond = { values: { ...S.CONDITION_FIELDS, ...Object.fromEntries(Object.keys(S.CONDITION_FIELDS).map((k) => [k, base[k] ?? S.CONDITION_FIELDS[k]])), ...edits },
     sources: { ...(base.field_sources || {}), ...Object.fromEntries(Object.keys(edits).map((k) => [k, "you"])) } };
   const now = lakeNowNaive(), seg = S.guessSegment(now, segmentTimeRanges(bundle, current.trip_date));
+  if (!electronics) { const c2 = noElectronics(false, S.weatherDefaults(bundle, current.trip_date, now), cond); cond.values = c2.values; cond.sources = c2.sources; }
   const sc = S.computeScoring(cond.values, current.trip_date, bundle, now, seg, { spotId: spot.spot_id, locAdj, weights });
   const apply = () => {
     const newBase = { ...S.baseConditions(cond.values, cond.sources, sc, base.start_time, seg, me.name), spot_source: spotId === current.spot_id ? base.spot_source : "picked",
-      predicted_breakdown: sc.score.breakdown, conditions_set_at: isoNaive(now), group_id: base.group_id || null };
+      predicted_breakdown: sc.score.breakdown, conditions_set_at: isoNaive(now), group_id: base.group_id || null, electronics };
     const { next, changed } = S.relocateRows(rows, { newBase, spot, structure: STRUCT(spot), clarity: sc.water_clarity, segment: seg, predicted: sc.score.score, owner: me.email, now });
     setRows(next, changed); onClose(); toast(spotId === current.spot_id ? "Conditions updated" : `Moved to ${spot.name}`);
   };
@@ -390,7 +400,7 @@ function MoveSheet({ open, onClose, rows, setRows, base, current, spots, bundle,
         <label className="field">Spot<select value={spotId} onChange={(e) => setSpotId(e.target.value)}>
           {[...(spots || [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => <option key={s.spot_id} value={s.spot_id}>{s.name}</option>)}
           {!(spots || []).some((s) => s.spot_id === current.spot_id) && <option value={current.spot_id}>{current.spot_name}</option>}</select></label>
-        <ConditionsForm cond={cond} onChange={(f, v) => setEdits({ ...edits, [f]: v })} />
+        <ConditionsForm electronics={electronics} cond={cond} onChange={(f, v) => setEdits({ ...edits, [f]: v })} />
         <p className="muted small">New {seg} score here: <b className="num">{sc.score.score.toFixed(1)}</b> (was {current.predicted_score}).</p>
         <button className="btn primary wide" onClick={apply}>Update session</button>
       </div>

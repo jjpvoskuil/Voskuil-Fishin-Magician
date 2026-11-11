@@ -87,12 +87,19 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Lure picks v2 (`lib/picks.js` + `picks.test.js`, John 11-10, NEW APP ONLY — core/lures.py unchanged): recommend()
   still supplies the Nolin seasonal pattern; buildPicks() ranks by similarity-weighted personal history: each lure
   stretch weighted by water temp (σ10 °F), time of year (σ35 days, any year), recency (half-life 540 d), clarity,
-  time of day, structure, same spot ×1.4, wind band, and you vs other anglers (others ×0.7); stretches count ≥0.5 h
+  time of day, structure, same spot ×2, wind band, and (Just me mode) other anglers ×0.35; stretches count ≥0.5 h
   (some were logged with seconds-long times); rates shrunk toward your weighted average with 2 "similar hours".
   Tiers: Proven (eff ≥2 h, >1.2× average), Steady (≥5 sessions, catches fish in ≥60–75% of similar sessions — the
   drop shot), Seasonal (pattern first choices), Worth a try (in the pattern, <2.5 similar h); "not producing" =
   ≥2.5 similar h and rarely any fish. Used in Forecast (`LureRec picks`) and Session quick-add (`QuickPicks`).
   Checked on the real log locally (Nov morning 55 °F: ChatterBait + jerkbait Proven, drop shot Steady).
+- Boat & electronics (John 11-10): More → "Main boat in use / Boat stored" (`lib/prefs.js useElectronics`, localStorage
+  `fm.electronics`, per phone). Stored = sessions/Moved use the estimated water temp (not editable) and no fish depth;
+  rows get `conditions.electronics: false`. Boat went into storage 2026-10-20: the 5 data-branch trips from then were
+  marked `electronics:false, water_temp_unreliable:true (+fish_depth_unreliable)`; picks ignore unreliable temps.
+  (Oct 1-19 temps of 70-74 °F were real readings with the boat in use.)
+- Picks mode (John 11-10): default = everyone's catches equally, same spot ×2; "Just me" (`usePicksMode`,
+  `fm.picksMode`) weights other anglers ×0.35. Switch shown above picks in Forecast and Session.
 - Fishing together (John 11-10): in Session setup, another angler's open session today offers "Fishing with X?" → use
   their spot + all conditions (sources `shared:<angler>`), my rows get `conditions.group_id` = their group (anchor =
   first session's id). Every start/move/conditions change stamps `conditions_set_at`; in Live each member polls every

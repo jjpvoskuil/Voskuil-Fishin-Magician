@@ -19,16 +19,18 @@ const gauss = (d, s) => Math.exp(-0.5 * (d / s) ** 2);
 /** How much a past lure stretch should count for today's situation (0..~1.4). */
 export function similarity(row, c, ctx, today) {
   let w = 1;
-  w *= c.water_temp_f != null && ctx.water_temp_f != null ? 0.3 + 0.7 * gauss(Number(c.water_temp_f) - ctx.water_temp_f, 10) : 0.7;
+  const temp = c.water_temp_unreliable ? null : c.water_temp_f; // fall trips logged from memory etc. (marked by hand)
+  w *= temp != null && ctx.water_temp_f != null ? 0.3 + 0.7 * gauss(Number(temp) - ctx.water_temp_f, 10) : 0.7;
   const dd = Math.abs(doy(row.trip_date) - doy(today)), circ = Math.min(dd, 365 - dd);
   w *= 0.08 + 0.92 * gauss(circ, 35);                                         // time of year (any year)
   w *= 0.35 + 0.65 * 0.5 ** ((dayNum(today) - dayNum(row.trip_date)) / 540); // recent seasons count more
   if (ctx.water_clarity) w *= row.water_clarity === ctx.water_clarity ? 1 : 0.65;
   if (ctx.segment_name) w *= row.segment === ctx.segment_name ? 1 : LOW_LIGHT.has(row.segment) === LOW_LIGHT.has(ctx.segment_name) ? 0.8 : 0.6;
   if (ctx.structure_type) w *= row.structure_type === ctx.structure_type ? 1 : 0.75;
-  if (ctx.spot_id && row.spot_id === ctx.spot_id) w *= 1.4;
+  if (ctx.spot_id && row.spot_id === ctx.spot_id) w *= 2; // the spot you're fishing counts double (John 11-10)
   if (ctx.wind_band && c.wind_band) w *= c.wind_band === ctx.wind_band ? 1 : 0.85;
-  if (ctx.me && row.owner) w *= row.owner.toLowerCase() === ctx.me.toLowerCase() ? 1 : 0.7;
+  // default = everyone's catches count the same; "Just me" (ctx.me set) leans on your own trips
+  if (ctx.me && row.owner) w *= row.owner.toLowerCase() === ctx.me.toLowerCase() ? 1 : 0.35;
   return w;
 }
 
@@ -76,8 +78,8 @@ export function buildPicks(rec, { trips, inventory, ctx, today }) {
   // "not producing" = plenty of similar time and it rarely catches anything (slow-but-steady baits aren't cold)
   const cold = Object.values(stats).filter((s) => s.eff >= COLD_MIN_HOURS && (s.wf === 0 || (s.rate < base * 0.5 && s.hit_share < 0.4)));
   const coldKeys = new Set(cold.map((s) => s.key));
-  const taken = new Set(), picks = [];
-  const evidence = (s) => `all-time with it: ${s.fish} fish, ${Math.round(s.hours)} h, ${s.sessions} session${s.sessions === 1 ? "" : "s"}`;
+  const taken = new Set(), picks = [], avgLabel = ctx.me ? "your average" : "everyone's average";
+  const evidence = (s) => `all-time with it${ctx.me ? "" : " (everyone)"}: ${s.fish} fish, ${Math.round(s.hours)} h, ${s.sessions} session${s.sessions === 1 ? "" : "s"}`;
 
   // 1. Proven: best similarity-weighted rates with real evidence, above your average
   const proven = Object.values(stats).filter((s) => s.eff >= PROVEN_MIN_HOURS && s.wf > 0 && s.rate > base * 1.2 && has(s.key) && !coldKeys.has(s.key))
@@ -85,7 +87,7 @@ export function buildPicks(rec, { trips, inventory, ctx, today }) {
   for (const s of proven) {
     taken.add(s.key);
     picks.push({ key: s.key, tier: "proven", rate: s.rate, block: block(s.key), reasons: [
-      `${f1(s.rate)} fish/hr in conditions like these (your average: ${f1(base)}); ${evidence(s)}.`,
+      `${f1(s.rate)} fish/hr in conditions like these (${avgLabel}: ${f1(base)}); ${evidence(s)}.`,
       s.best && s.best.fish > 0 ? `Best similar day: ${md(s.best.date)}${s.best.spot ? ` at ${s.best.spot}` : ""}, ${s.best.fish} fish.` : null,
       recBlocks[s.key] ? "Also fits the Nolin pattern for right now." : null].filter(Boolean) });
   }
@@ -105,7 +107,7 @@ export function buildPicks(rec, { trips, inventory, ctx, today }) {
     const s = stats[b.key]; taken.add(b.key);
     picks.push({ key: b.key, tier: "seasonal", rate: s?.rate ?? null, block: block(b.key), reasons: [
       (b.why || []).find((w) => !w.startsWith("Colors shown")) || "Part of Nolin's documented pattern for this season and water.",
-      s && s.eff >= 0.5 ? `Your record in similar conditions: ${f1(s.rate)} fish/hr (${evidence(s)}).` : "Little history for it in conditions like these yet."].filter(Boolean) });
+      s && s.eff >= 0.5 ? `Record in similar conditions: ${f1(s.rate)} fish/hr (${evidence(s)}).` : "Little history for it in conditions like these yet."].filter(Boolean) });
   }
   // 4. Worth a try: fits the situation, barely fished in conditions like these, not a known dud
   const tryKey = [...rec.second_choice.map((b) => b.key), ...rec.first_choice.map((b) => b.key)]
@@ -123,5 +125,5 @@ export function buildPicks(rec, { trips, inventory, ctx, today }) {
     taken.add(b.key); picks.push({ key: b.key, tier: "seasonal", rate: stats[b.key]?.rate ?? null, block: block(b.key), reasons: [(b.why || []).find((w) => !w.startsWith("Colors shown")) || "Fits the Nolin pattern for right now."] });
   }
   return { picks, base, cold: cold.filter((s) => has(s.key)).sort((a, b) => b.eff - a.eff).slice(0, 3)
-    .map((s) => ({ key: s.key, name: LURE_PROFILES[s.key].name, text: s.fish === 0 ? `0 fish in ${f1(s.hours)} h in similar conditions` : `${f1(s.rate)} fish/hr — well under your ${f1(base)} average here` })) };
+    .map((s) => ({ key: s.key, name: LURE_PROFILES[s.key].name, text: s.fish === 0 ? `0 fish in ${f1(s.hours)} h in similar conditions` : `${f1(s.rate)} fish/hr — well under the ${f1(base)} average here` })) };
 }
