@@ -24,7 +24,7 @@ const GRADES = ["High (steep break)", "Medium", "Low (gradual taper)"];
 const ATTRACTOR_COLORS = { Brush: "#a0522d", "Christmas Trees": "#2e8b57", "Pallet Stack": "#cd853f", Plastic: "#e34a33", "Spider Hump": "#9370db", "Reef Ball": "#aaaaaa", Rock: "#cccccc" };
 const LAKE_CENTER = [37.33, -86.17];
 const FKEY = "fm.mapFilters";
-const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, depth: false };
+const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, depth: false, tries: true };
 const readF = () => { try { return { ...F0, ...JSON.parse(localStorage.getItem(FKEY)) }; } catch { return F0; } };
 const md = (d) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const BASES = {
@@ -38,6 +38,12 @@ const BASES = {
 let contoursPromise = null;
 const loadContours = () => (contoursPromise ||= fetch(`${import.meta.env.BASE_URL}depth/contours.json`).then((r) => { if (!r.ok) throw new Error("no contours yet"); return r.json(); })
   .catch((e) => { contoursPromise = null; throw e; }));
+let suggPromise = null;
+const loadSuggestions = () => (suggPromise ||= fetch(`${import.meta.env.BASE_URL}depth/suggestions.json`).then((r) => { if (!r.ok) throw new Error("none"); return r.json(); })
+  .catch((e) => { suggPromise = null; throw e; }));
+export const TRY_KINDS = { point: ["Point", "Main-lake point", "#ffd54f"], break: ["Steep break / bluff", "Rock face / bluff", "#ff8a65"],
+  swing: ["Channel swing", "Creek channel / ledge", "#ba68c8"], flat: ["Flat by deep water", "Flat", "#81c784"] };
+const metersApart = (a, b) => { const k = Math.cos((a.lat * Math.PI) / 180); return Math.hypot((a.lat - b.lat) * 111320, (a.lon - b.lon) * 111320 * k); };
 const depthColor = (d) => (d < 6 ? "#9be7ff" : d < 12 ? "#4fc3f7" : d < 20 ? "#1e88e5" : d < 30 ? "#1565c0" : "#0d2f8a");
 
 export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, reloadSpots, save, toast, onFishHere, onWatch, weather, lake }) {
@@ -105,6 +111,20 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
     layers.current.depth = g.addTo(m);
     layers.current.spots?.bringToFront?.();
   }, [f.depth, contours, level, zoom]);
+
+  // ---- spots to try (structure from the lidar: points, breaks, channel swings, flats by deep water)
+  const [tries, setTries] = useState(null), [trySel, setTrySel] = useState(null);
+  useEffect(() => { if (f.tries && !tries) loadSuggestions().then((d) => setTries(d.spots)).catch(() => {}); }, [f.tries]);
+  const shownTries = useMemo(() => (tries || []).filter((t) => !list.some((s) => metersApart({ lat: +s.lat, lon: +s.lon }, t) < 120)), [tries, list]);
+  useEffect(() => {
+    const m = map.current; if (!m) return;
+    layers.current.tries?.remove(); layers.current.tries = null;
+    if (!f.tries || !shownTries.length) return;
+    const g = L.layerGroup();
+    for (const t of shownTries) L.marker([t.lat, t.lon], { icon: L.divIcon({ className: "try-pin", html: `<span style="background:${TRY_KINDS[t.kind][2]}">★</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+      .on("click", () => setTrySel(t)).addTo(g);
+    layers.current.tries = g.addTo(m);
+  }, [f.tries, shownTries]);
 
   // ---- saved spots, colored by heat
   useEffect(() => {
@@ -176,6 +196,7 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
         <div className="map-ctl">
           <button className="iconbtn" aria-label={f.satellite ? "Show plain map" : "Show satellite"} onClick={() => setF({ satellite: !f.satellite })}>{f.satellite ? "🗺️" : "🛰️"}</button>
           <button className={`iconbtn ${f.attractors ? "on" : ""}`} aria-label="Fish attractors on or off" onClick={() => setF({ attractors: !f.attractors })}>🪵</button>
+          <button className={`iconbtn ${f.tries ? "on" : ""}`} aria-label="Spots to try on or off" onClick={() => setF({ tries: !f.tries })}>⭐</button>
           <button className={`iconbtn ${f.depth ? "on" : ""}`} aria-label="Depth contours on or off" onClick={() => setF({ depth: !f.depth })}>〰️</button>
           <button className="iconbtn" aria-label="Center on me" onClick={() => (gps ? map.current?.setView([gps.lat, gps.lon], Math.max(map.current.getZoom(), 15)) : saveHere())}>◎</button>
         </div>
@@ -192,6 +213,16 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
           main_depth_ft: null, transition_depth_ft: null, transition_grade: "Medium", notes: "", added_by: me.name };
         if (await persist(spot, `Saved “${name}”`)) { setNewPin(null); setSel(spot.spot_id); }
       }} />
+
+      <Sheet open={!!trySel} title={trySel ? `Worth a try: ${TRY_KINDS[trySel.kind][0]}` : ""} onClose={() => setTrySel(null)}>
+        {trySel && <div className="setup">
+          <p style={{ margin: 0 }}>{trySel.why}</p>
+          {level != null && <p className="muted small" style={{ margin: 0 }}>About <b>{Math.max(0, Math.round(level - trySel.emax))}–{Math.max(0, Math.round(level - trySel.emin))} ft</b> deep at today's level ({level.toFixed(1)} ft){trySel.est ? " — partly estimated depth" : " — measured by lidar"}.</p>}
+          <p className="muted small" style={{ margin: 0 }}>Picked from the lake's shape and the lidar bottom, not from catches — it's a suggestion to explore.</p>
+          <button className="btn primary wide big" onClick={() => { setNewPin({ lat: trySel.lat, lon: trySel.lon, how: "try", type: TRY_KINDS[trySel.kind][1] }); setTrySel(null); }}>📍 Save as my spot</button>
+          <a className="btn wide" href={`https://maps.apple.com/?daddr=${trySel.lat},${trySel.lon}`} target="_blank" rel="noopener noreferrer">Directions ↗</a>
+        </div>}
+      </Sheet>
 
       <Sheet open={!!selSpot && !editing} title={selSpot?.name || ""} onClose={() => setSel(null)}>
         {selSpot && <SpotPanel s={selSpot} st={stats.spots[selSpot.spot_id]} base={stats.base} f={f} onFish={() => onFishHere(selSpot.spot_id)} onEdit={() => setEditing(selSpot)} />}
@@ -225,12 +256,12 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
 function NameSheet({ pin, onClose, onSave }) {
   const [name, setName] = useState(""), [type, setType] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (pin) { setName(""); setType(""); setBusy(false); } }, [pin]);
+  useEffect(() => { if (pin) { setName(""); setType(pin.type || ""); setBusy(false); } }, [pin]);
   if (!pin) return null;
   return (
     <Sheet open title="Name this spot" onClose={onClose}>
       <form className="setup" onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; setBusy(true); await onSave(name.trim(), type); setBusy(false); }}>
-        <p className="muted small" style={{ margin: 0 }}>{pin.how === "gps" ? "📍 Where you are now" : "📍 Where you pressed"} · {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}</p>
+        <p className="muted small" style={{ margin: 0 }}>{pin.how === "gps" ? "📍 Where you are now" : pin.how === "try" ? "⭐ The suggested spot" : "📍 Where you pressed"} · {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}</p>
         <label className="field">Name<input type="text" value={name} autoFocus enterKeyHint="done" placeholder="e.g. Stripe Island Point" onChange={(e) => setName(e.target.value)} /></label>
         <div className="field">Type (optional)<div className="chips">{LOCATION_TYPES.map((t) => <button type="button" key={t} className={`chip ${type === t ? "on" : ""}`} onClick={() => setType(type === t ? "" : t)}>{t}</button>)}</div></div>
         <button className="btn primary wide big" disabled={!name.trim() || busy}>{busy ? "Saving…" : "Save spot"}</button>

@@ -318,3 +318,4 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .rank-row { display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line-soft); width: 100%; }
 .rank-row .grow { flex: 1; min-width: 0; }
 .leaflet-container { font-family: inherit; }
+.try-pin span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; border: 2px solid #fff; color: #3a2a00; font-size: 14px; font-weight: 900; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
