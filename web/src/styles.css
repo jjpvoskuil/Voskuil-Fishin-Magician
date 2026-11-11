@@ -349,3 +349,12 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .lb-sp .num { text-align: right; }
 .lb-row .grow, .lb-hero-b .grow { flex: 1; min-width: 0; }
 .b { font-weight: 700; }
+
+/* Reports */
+.rp-bars { display: flex; flex-direction: column; gap: 8px; }
+.rp-bar { display: grid; grid-template-columns: minmax(90px, 38%) 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+.rp-bar.thin { opacity: .5; }
+.rp-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-track { height: 12px; border-radius: 99px; background: var(--accent-track); overflow: hidden; }
+.rp-track span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.rp-val { text-align: right; white-space: nowrap; min-width: 62px; line-height: 1.15; }

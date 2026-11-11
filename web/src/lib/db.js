@@ -52,8 +52,8 @@ export function supabaseDb(sb, email) {
     saveSaved: async (kind, item) => { const { id, owner, ...data } = item; return ok(await sb.from("fm_saved").upsert({ id, owner, kind, data })); },
     deleteSaved: async (id) => ok(await sb.from("fm_saved").delete().eq("id", id)),
     /** Claude turns a typed question into custom-board settings (fm-board-ask Edge Function) — no numbers come back. */
-    async askBoard(question, choices, today) {
-      const { data, error } = await sb.functions.invoke("fm-board-ask", { body: { question, choices, today } });
+    async askBoard(question, choices, today, mode = "board") {
+      const { data, error } = await sb.functions.invoke("fm-board-ask", { body: { question, choices, today, mode } });
       if (error) {
         let msg = error.message;
         try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch { /* keep the generic message */ }
@@ -150,7 +150,10 @@ export function demoDb(seed, email = "demo@example.com") {
     listSaved: async (kind) => clone((st.saved || []).filter((x) => x.kind === kind)),
     saveSaved: async (kind, item) => up((st.saved ||= []), { ...clone(item), kind }),
     deleteSaved: async (id) => del(st.saved || [], (x) => x.id === id),
-    askBoard: async (question, choices) => { await new Promise((r) => setTimeout(r, 600));
+    askBoard: async (question, choices, today, mode = "board") => { await new Promise((r) => setTimeout(r, 600));
+      if (mode === "report") { const q = question.toLowerCase();
+        return { factor: /temp/.test(q) ? "water_temp_bucket" : /moon/.test(q) ? "moon_illumination_bin" : /pressure/.test(q) ? "pressure_trend_band" : /wind/.test(q) ? "wind_band" : /color/.test(q) ? "color" : "segment",
+          metric: /big/.test(q) ? "biggest_fish" : /total|how many/.test(q) ? "total_fish" : "fish_per_hour", title: question.slice(0, 60), note: "Demo answer — the real app asks Claude to read your request." }; }
       const q = question.toLowerCase(), bass = (choices.species || []).filter((x) => /largemouth|smallmouth|spotted/i.test(x));
       return { measure: /lb|weight|pound/.test(q) ? "lbs" : /biggest|heav/.test(q) ? "biggest" : /hour/.test(q) ? "fish_per_hour" : "fish",
         by: /spot|where/.test(q) ? "spot" : /lure/.test(q) && !/jerk/.test(q) ? "lure" : "angler", species: /bass/.test(q) ? bass : [],

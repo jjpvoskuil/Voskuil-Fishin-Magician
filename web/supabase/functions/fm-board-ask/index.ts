@@ -1,8 +1,9 @@
-// Supabase Edge Function "fm-board-ask" (Fishin Magician leaderboard): turns a typed question such as
-// "most lbs of bass caught on a jerkbait" into custom-board settings. It never sees the trip log and returns no
+// Supabase Edge Function "fm-board-ask" (Fishin Magician leaderboard + reports): turns a typed question such as
+// "most lbs of bass caught on a jerkbait" into custom-board settings, or (mode "report") a request such as
+// "fish per hour by water temperature in the fall" into report settings. It never sees the trip log and returns no
 // numbers — the app computes the board from the log (lib/boards.js). Uses the same secret as fm-lure-scan
 // (ANTHROPIC_API_KEY; optional ANTHROPIC_MODEL). Runs as the signed-in angler and only answers approved anglers.
-//   POST {question, today, choices: {species[], anglers[], spots[], lure_types[[key, name]]}}
+//   POST {question, today, mode?: "board" | "report", choices: {species[], anglers[], spots[], lure_types[[key, name]]}}
 //   → {measure, by, species[], lure_types[], spots[], anglers[], segments[], months[], temp_min, temp_max,
 //      lure_text, color_text, from, to, period, who, title, note}
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -42,6 +43,44 @@ function tool(c) {
       } },
   };
 }
+
+// ---- reports (mode "report"): any factor × metric, like the old Reports page
+const FACTORS = ["spot", "structure_type", "water_color", "secchi_bucket", "water_clarity", "lure", "lure_category", "color", "technique", "segment",
+  "season", "light_condition", "wind_band", "wind_direction", "precipitation", "water_temp_band", "water_temp_bucket", "pressure_trend_band",
+  "moon_illumination_bin", "fish_activity", "forage_activity", "angler", "day_of_week", "date", "week_start"];
+const METRICS = ["total_fish", "fish_per_hour", "biggest_fish", "average_fish_weight", "trip_count"];
+function reportTool(c) {
+  return {
+    name: "set_report",
+    description: "Set up the report (a bar chart of one metric across the values of one factor) that answers the angler's request.",
+    input_schema: { type: "object", additionalProperties: false, required: ["factor", "metric", "title", "note"],
+      properties: {
+        factor: { type: "string", enum: FACTORS, description: "What the bars are. segment = time of day; light_condition = sky; wind_band = wind strength; " +
+          "pressure_trend_band = barometric pressure trend; moon_illumination_bin = moon % the night before; water_temp_bucket = water temperature in " +
+          "custom steps (tempWidth); water_temp_band = broad temperature bands; secchi_bucket = water clarity in feet; lure_category = lure type; " +
+          "season; date = each day; week_start = each week." },
+        metric: { type: "string", enum: METRICS, description: "fish_per_hour = catch rate (best for comparing conditions); total_fish; biggest_fish; average_fish_weight; trip_count." },
+        species: en(c.species), lure_types: arr(en(c.lure_types.map(([k]) => k))), spots: arr(en(c.spots)), anglers: arr(en(c.anglers)),
+        segments: arr({ type: "string", enum: SEGMENTS }),
+        tempWidth: { type: "number", description: "°F per bar for water_temp_bucket (default 2)" }, secchiWidth: { type: "number", description: "ft per bar for secchi_bucket (default 0.5)" },
+        from: { type: "string", description: "YYYY-MM-DD, only for an explicit date range or season of a specific year" }, to: { type: "string", description: "YYYY-MM-DD" },
+        period: { type: "string", enum: ["year", "90", "30", "all", ""], description: "year = this calendar year, 90/30 = last 90/30 days, all = all time, empty = keep what's on screen." },
+        who: { type: "string", enum: ["me", "all", ""], description: "me when the request is about the asker's own fishing (I/my/me)." },
+        title: { type: "string", description: "Short report title, e.g. 'Fish per hour by water temp'." },
+        note: { type: "string", description: "One short sentence on how you read the request, or what part a trip log can't answer." },
+      } },
+  };
+}
+const reportPrompt = (q, today, c) =>
+  `Today is ${today}. Anglers on Nolin River Lake, Kentucky log bass-fishing trips (date, angler, spot, structure, lure, lure type, color, technique, ` +
+  `time of day, sky, wind, precipitation, water temperature and clarity, pressure trend, moon, and each fish's species and weight). ` +
+  `Turn this request into report settings by calling set_report:\n\n"${q}"\n\n` +
+  `Pick filter values only from these lists.\nSpecies logged: ${c.species.join("; ") || "none"}.\n` +
+  `Lure types (key = name): ${c.lure_types.map(([k, n]) => `${k} = ${n}`).join("; ") || "none"}.\n` +
+  `Spots: ${c.spots.join("; ") || "none"}.\nAnglers: ${c.anglers.join("; ") || "none"}.\n` +
+  `Rules: "does X matter / how does X affect / best X" = factor X with metric fish_per_hour unless a size or count is asked for. ` +
+  `A species filter takes one species; for "bass" in general leave species empty. A lure word means every matching lure type. ` +
+  `Leave a filter out when the request doesn't limit it. Answer only by calling set_report.`;
 
 const prompt = (q, today, c) =>
   `Today is ${today}. Anglers on Nolin River Lake, Kentucky log bass-fishing trips (date, angler, spot, lure, lure type, color, time of day, ` +
@@ -86,14 +125,15 @@ Deno.serve(async (req) => {
     const ch = body.choices || {};
     const c = { species: strList(ch.species), anglers: strList(ch.anglers), spots: strList(ch.spots, 120),
       lure_types: (Array.isArray(ch.lure_types) ? ch.lure_types : []).filter((x) => Array.isArray(x) && x.length === 2).map(([k, n]) => [String(k).slice(0, 40), String(n).slice(0, 60)]).slice(0, 60) };
+    const report = body.mode === "report", t = report ? reportTool(c) : tool(c);
     for (let i = 0; i < 2; i++) {
       // tool_choice "auto" (newer models reject forcing a tool); the prompt says to answer only via the tool
-      const msg = await claude({ model: model(), max_tokens: 2048, tools: [tool(c)], tool_choice: { type: "auto" },
-        messages: [{ role: "user", content: prompt(q, today, c) }] });
-      const use = (msg.content || []).find((b) => b.type === "tool_use" && b.name === "set_board");
+      const msg = await claude({ model: model(), max_tokens: 2048, tools: [t], tool_choice: { type: "auto" },
+        messages: [{ role: "user", content: (report ? reportPrompt : prompt)(q, today, c) }] });
+      const use = (msg.content || []).find((b) => b.type === "tool_use" && b.name === t.name);
       if (use) return reply(200, use.input);
     }
-    throw new Friendly("The AI answered without setting up a board — try wording it differently.");
+    throw new Friendly(report ? "The AI answered without setting up a report — try wording it differently." : "The AI answered without setting up a board — try wording it differently.");
   } catch (e) {
     return reply(e instanceof Friendly ? e.status : 500, { error: e instanceof Friendly ? e.message : "Something went wrong: " + String(e).slice(0, 200) });
   }

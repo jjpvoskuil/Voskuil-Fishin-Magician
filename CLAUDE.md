@@ -79,7 +79,7 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   `tools/export_lure_data.py` → `lib/data/lures.data.json` — re-run after editing core/lures.py or core/videos.py),
   `leaderboard.js` (daily_leaderboard + format_weight_lb_oz). Parity: `lures.test.js` vs
   `fixtures/lures.fixtures.json.gz` (`TZ=UTC python3 web/tools/make_lure_fixtures.py`); fixtures are gzipped.
-- Also ported: `lake.js` (USGS level, USACE report parsing + DO saturation). Still to port: reports, rest of activity_log, forecast_freeze (table `fm_score_freeze` exists; Forecast screen applies it).
+- Also ported: `lake.js` (USGS level, USACE report parsing + DO saturation). Still to port: rest of activity_log, forecast_freeze (table `fm_score_freeze` exists; Forecast screen applies it).
 
 ## Screens built
 - Today (`TodayScreen.jsx`, 11-10). Shared live data is loaded once in App (`lib/live.js`: weather + USGS cached in
@@ -189,6 +189,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   Saved boards → table `fm_saved` (kind board|report, private to owner; RLS `test/test_saved.sql`, 10 checks) → ★ tabs.
   Reports must get the same pattern (John 11-11): stock reports + typed custom report + save (kind 'report').
   Shared filter widgets `Multi` / `Pick` now live in ui.jsx.
+- Reports (`ReportsScreen.jsx`, 11-11): engine `lib/reports.js` = port of core/reports.py (parity `reports.test.js` vs
+  `fixtures/reports.fixtures.json.gz` from `TZ=UTC python3 web/tools/make_report_fixtures.py`, sorts forced stable;
+  250 factor×metric cases + moon/pressure predictions). Settings layer `lib/reportspec.js` (STOCK list, cleanReportSpec,
+  runReport: who/me by owner, new-app lure-type + spot filters, period This year / 90 / 30 days / All time or the
+  spec's own from–to). Screen: stock tabs, ★ saved (fm_saved kind "report"), ＋ Custom (Ask = fm-board-ask with
+  mode "report" → tool set_report; or pick Show × By + filters), horizontal bars (n < 4 faded), ⤓ Excel via
+  `write-excel-file/browser` (sheets Report + Trips; iPhone share sheet when available), 🔮 Predict a day (next 7
+  days: moon history lookup always, pressure lookup only inside the forecast window). Reports group by the spot
+  NAME stored on each trip (as the old app did), not the current spot list.
 - App icon (John 11-11, picked "D2 + VO medallion"): Voskuil Outdoors family look shared with Deercast — dark forest
   field #1f2b22, patch band (teal #3d9a88 here, orange #e07b24 on Deercast) with small stars, cream "VO" medallion at
   6 o'clock, leaping largemouth (Deercast: its deer, ring removed). Generator `web/tools/make_icons.py OUTDIR

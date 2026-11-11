@@ -31,6 +31,7 @@ CASES = [
     ("More", ["Tackle Box", "＋ Add by hand"], ["Brand", "Name, color, size"]),
     ("More", ["Leaderboard", "css=.lb-tabs button >> text=Custom"], ["Ask for a board", "Board name"]),
     ("More", ["Leaderboard", "css=.lb-tabs button >> text=Custom", "Filters ›"], ["Lure name contains", "Color contains", "Water from (°F)", "Water to (°F)"]),
+    ("More", ["Reports", "css=.lb-tabs button >> text=Custom"], ["Ask for a report", "Report name"]),
     ("More", ["Trip History", "css=button.card.hist >> nth=1", "Edit"], ["Lure", "Color", "Technique", "Notes"]),
 ]
 bad = 0

@@ -8,6 +8,7 @@ import SessionScreen from "./SessionScreen.jsx";
 import HistoryScreen from "./HistoryScreen.jsx";
 import TackleScreen from "./TackleScreen.jsx";
 import LeaderboardScreen from "./LeaderboardScreen.jsx";
+import ReportsScreen from "./ReportsScreen.jsx";
 import MapScreen from "./MapScreen.jsx";
 import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
@@ -131,6 +132,7 @@ export default function App() {
       <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <LeaderboardScreen {...common} active={tab === "more" && page === "leaderboard"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
+      <ReportsScreen {...common} active={tab === "more" && page === "reports"} trips={trips} weather={weather} onBack={() => setPage(null)} />
       <TabBar tab={tab} onTab={onTab} />
       {toast && <div className="toast" role="status">{toast}</div>}
       {fresh && <div className="toast undo" role="status">New version ready<button onClick={update}>Update</button></div>}
