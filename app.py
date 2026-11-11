@@ -115,6 +115,21 @@ extra either way).
 """
 import streamlit as st
 
+# Cutover 2026-11-11: the app now lives at the phone web app (web/, GitHub Pages). This old Streamlit app only points
+# there — nothing below runs, so nothing can be read from or saved to the old data branch any more.
+st.set_page_config(page_title="Fishin Magician has moved", page_icon="🎣")
+st.markdown("""
+## 🎣 Fishin Magician has moved
+
+The app is now a phone web app, with all your trips, spots, tackle box and punch list already in it:
+
+### [jjpvoskuil.github.io/Voskuil-Fishin-Magician](https://jjpvoskuil.github.io/Voskuil-Fishin-Magician/)
+
+Open it in Safari, sign in with Google, then **Share → Add to Home Screen**. Please don't log trips here any more.
+""")
+st.link_button("Open the new app", "https://jjpvoskuil.github.io/Voskuil-Fishin-Magician/", type="primary")
+st.stop()
+
 from datetime import datetime, timezone
 
 from core.appstate import (
