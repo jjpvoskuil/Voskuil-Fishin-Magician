@@ -24,7 +24,8 @@ const GRADES = ["High (steep break)", "Medium", "Low (gradual taper)"];
 const ATTRACTOR_COLORS = { Brush: "#a0522d", "Christmas Trees": "#2e8b57", "Pallet Stack": "#cd853f", Plastic: "#e34a33", "Spider Hump": "#9370db", "Reef Ball": "#aaaaaa", Rock: "#cccccc" };
 const LAKE_CENTER = [37.33, -86.17];
 const FKEY = "fm.mapFilters";
-const readF = () => { try { return { segments: [], season: "now", mine: false, attractors: true, satellite: true, ...JSON.parse(localStorage.getItem(FKEY)) }; } catch { return { segments: [], season: "now", mine: false, attractors: true, satellite: true }; } };
+const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, depth: false };
+const readF = () => { try { return { ...F0, ...JSON.parse(localStorage.getItem(FKEY)) }; } catch { return F0; } };
 const md = (d) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const BASES = {
   satellite: () => L.layerGroup([
@@ -33,7 +34,13 @@ const BASES = {
   map: () => L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }),
 };
 
-export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, reloadSpots, save, toast, onFishHere, onWatch, weather }) {
+// depth contours (tools/build_contours.py → web/public/depth/contours.json): bottom ELEVATION lines; depth = level − e
+let contoursPromise = null;
+const loadContours = () => (contoursPromise ||= fetch(`${import.meta.env.BASE_URL}depth/contours.json`).then((r) => { if (!r.ok) throw new Error("no contours yet"); return r.json(); })
+  .catch((e) => { contoursPromise = null; throw e; }));
+const depthColor = (d) => (d < 6 ? "#9be7ff" : d < 12 ? "#4fc3f7" : d < 20 ? "#1e88e5" : d < 30 ? "#1565c0" : "#0d2f8a");
+
+export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, reloadSpots, save, toast, onFishHere, onWatch, weather, lake }) {
   const [f, setFState] = useState(readF);
   const setF = (patch) => setFState((x) => { const n = { ...x, ...patch }; try { localStorage.setItem(FKEY, JSON.stringify(n)); } catch { /* ignore */ } return n; });
   const [gps, setGps] = useState(null);         // {lat, lon, acc}
@@ -77,6 +84,27 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
       .bindTooltip(`Fish attractor: ${a.type} (${a.id})`).addTo(g);
     layers.current.attr = g.addTo(m);
   }, [f.attractors]);
+
+  // ---- depth contours, following today's lake level
+  const level = lake?.value?.[lake.value.length - 1]?.elevation_ft ?? null;
+  const [contours, setContours] = useState(null), [zoom, setZoom] = useState(13);
+  useEffect(() => { const m = map.current; if (!m) return; const on = () => setZoom(m.getZoom()); m.on("zoomend", on); return () => m.off("zoomend", on); }, []);
+  useEffect(() => { if (f.depth && !contours) loadContours().then(setContours).catch(() => toast("Depth contours aren't available yet")); }, [f.depth]);
+  useEffect(() => {
+    const m = map.current; if (!m) return;
+    layers.current.depth?.remove(); layers.current.depth = null;
+    if (!f.depth || !contours || level == null) return;
+    const every = zoom >= 15 ? 2 : zoom >= 14 ? 4 : 10;  // fewer lines when zoomed out
+    const g = L.layerGroup();
+    for (const ln of contours.lines) {
+      const d = level - ln.e; if (d < 1) continue;
+      if (Math.round(d) % every > 1 && every > 2) continue;
+      L.polyline(ln.c.map(([lo, la]) => [la, lo]), { color: depthColor(d), weight: d % 10 < 2 ? 2.2 : 1.3, opacity: ln.est ? 0.75 : 0.95, dashArray: ln.est ? "5 6" : null, interactive: true })
+        .bindTooltip(`${Math.round(d)} ft deep${ln.est ? " — estimated" : " — measured (lidar)"}`, { sticky: true }).addTo(g);
+    }
+    layers.current.depth = g.addTo(m);
+    layers.current.spots?.bringToFront?.();
+  }, [f.depth, contours, level, zoom]);
 
   // ---- saved spots, colored by heat
   useEffect(() => {
@@ -148,13 +176,14 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
         <div className="map-ctl">
           <button className="iconbtn" aria-label={f.satellite ? "Show plain map" : "Show satellite"} onClick={() => setF({ satellite: !f.satellite })}>{f.satellite ? "🗺️" : "🛰️"}</button>
           <button className={`iconbtn ${f.attractors ? "on" : ""}`} aria-label="Fish attractors on or off" onClick={() => setF({ attractors: !f.attractors })}>🪵</button>
+          <button className={`iconbtn ${f.depth ? "on" : ""}`} aria-label="Depth contours on or off" onClick={() => setF({ depth: !f.depth })}>〰️</button>
           <button className="iconbtn" aria-label="Center on me" onClick={() => (gps ? map.current?.setView([gps.lat, gps.lon], Math.max(map.current.getZoom(), 15)) : saveHere())}>◎</button>
         </div>
         <div className="map-dock">
           <button className="btn primary big" onClick={saveHere}>📍 Save where I am</button>
           <button className="btn big" onClick={() => setPanel("filters")}>🔥 Hot spots{filtersOn ? ` (${filtersOn})` : ""}</button>
         </div>
-        <div className="map-hint">Press and hold anywhere to pin a spot</div>
+        <div className="map-hint">{f.depth && level != null ? `Depths at today's level ${level.toFixed(1)} ft · solid = measured, dashed = estimated` : "Press and hold anywhere to pin a spot"}</div>
       </div>
 
       <NameSheet pin={newPin} onClose={() => setNewPin(null)} onSave={async (name, type) => {
