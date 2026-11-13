@@ -1,0 +1,24 @@
+# One-off probe (11-12): where can the missed Nolin water-quality surveys (Aug–Oct 2026) be recovered from?
+name: Probe water-quality history
+on: workflow_dispatch
+permissions: { contents: read }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wayback Machine captures of the USACE report
+        run: |
+          curl -sS -m 60 "https://web.archive.org/cdx/search/cdx?url=lrl-wc.usace.army.mil/reports/wq/NRR.html&output=json&from=2024" | head -c 6000; echo
+          curl -sS -m 60 "https://web.archive.org/cdx/search/cdx?url=lrl-wc.usace.army.mil/reports/wq/*&output=json&from=2025&collapse=urlkey" | head -c 4000; echo
+      - name: CWMS Data API — Nolin time series
+        run: |
+          for q in "Nolin" "NRR" "Nolin.*DO" "Nolin.*Temp-Water"; do
+            echo "== like $q"; curl -sS -m 60 -H "Accept: application/json;version=2" "https://cwms-data.usace.army.mil/cwms-data/catalog/TIMESERIES?office=LRL&like=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote('.*'+sys.argv[1]+'.*'))" "$q")&page-size=500" | python3 -c "import json,sys
+          try:
+            d=json.load(sys.stdin); print([e.get('name') for e in d.get('entries',[])][:200])
+          except Exception as e: print('parse', e)"
+          done
+      - name: USACE report folder / other report pages
+        run: |
+          curl -sS -m 60 -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/" | head -c 3000; echo
+          curl -sS -m 60 -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html" | head -c 2500; echo
