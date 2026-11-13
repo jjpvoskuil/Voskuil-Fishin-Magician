@@ -228,6 +228,14 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   image_url). Fixed by Claude: the 26 jpgs are in deercast-data/backups/fishin-magician/lure_photos/ and manual
   workflow `restore-photos.yml` (backup/fishin_restore_photos.py) uploads any missing ones to fm-lures/lures/ (never
   overwrites) — run 11-11: 26 uploaded, backup then saw 26 files. Use the same job after any Storage loss.
+- Water quality history (11-12): Aug 6 – Oct 28 2026 USACE surveys are LOST online (NRR.html only shows the latest;
+  Wayback has no captures Apr–Nov 2026; CWMS has no Nolin DO series and its Nolin temp series are empty in 2026; USGS
+  03310900 = level + rain only). John may request them from the Louisville District Water Quality Team. Since 11-12
+  `deercast-data/.github/workflows/water-quality.yml` (`backup/fishin_wq.py`, approved by John) runs twice a day:
+  upserts the latest survey into fm_water_quality with the app's exact keys/rounding (merge) PLUS `profile`
+  [{depth_ft, water_temp_f, do_mg_l, do_saturation_pct}] and `tailwater`; and keeps USGS 03311000 tailwater daily mean
+  °F (from 15-min IV; USGS has no daily stat) in deercast-data/backups/fishin-magician/tailwater_temp_f.json (from
+  2026-08-01). Tailwater ≈ released water — matches the surface during turnover, cooler when stratified.
 - NEXT after this app (John 11-11): **Deercast shot recovery puts probable deer spots in the lake** — give its recovery
   model real water: Nolin's shoreline from the KyFromAbove lidar water line (as tools/build_contours.py finds it) or
   OSM water polygons; exclude/penalize water cells in Deercast `deercast/recovery.py` + `web/src/lib/recovery.js` (parity).
