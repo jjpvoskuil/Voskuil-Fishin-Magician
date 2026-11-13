@@ -6,19 +6,41 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Wayback Machine captures of the USACE report
+      - name: CWMS — any dissolved-oxygen series in LRL
         run: |
-          curl -sS -m 60 "https://web.archive.org/cdx/search/cdx?url=lrl-wc.usace.army.mil/reports/wq/NRR.html&output=json&from=2024" | head -c 6000; echo
-          curl -sS -m 60 "https://web.archive.org/cdx/search/cdx?url=lrl-wc.usace.army.mil/reports/wq/*&output=json&from=2025&collapse=urlkey" | head -c 4000; echo
-      - name: CWMS Data API — Nolin time series
-        run: |
-          for q in "Nolin" "NRR" "Nolin.*DO" "Nolin.*Temp-Water"; do
-            echo "== like $q"; curl -sS -m 60 -H "Accept: application/json;version=2" "https://cwms-data.usace.army.mil/cwms-data/catalog/TIMESERIES?office=LRL&like=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote('.*'+sys.argv[1]+'.*'))" "$q")&page-size=500" | python3 -c "import json,sys
-          try:
-            d=json.load(sys.stdin); print([e.get('name') for e in d.get('entries',[])][:200])
-          except Exception as e: print('parse', e)"
+          for q in ".*Conc-DO.*" ".*%-Saturation.*" ".*Rough.*DO.*" ".*NRR.*" ".*Nolin-Dam.*" ".*Nolin-Tailwater.*" ".*Nolin.*Conc.*"; do
+            echo "== like $q"
+            curl -sS -m 90 -H "Accept: application/json;version=2" "https://cwms-data.usace.army.mil/cwms-data/catalog/TIMESERIES?office=LRL&like=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$q")&page-size=1000" \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); n=[e.get("name") for e in d.get("entries",[])]; print(len(n), [x for x in n if "olin" in x or "NRR" in x][:60], n[:15])' || true
           done
-      - name: USACE report folder / other report pages
+      - name: CWMS — coverage of the Nolin water-temperature series (Jul 1 – now)
         run: |
-          curl -sS -m 60 -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/" | head -c 3000; echo
-          curl -sS -m 60 -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html" | head -c 2500; echo
+          for ts in "Nolin-Lake.Temp-Water.Inst.15Minutes.0.USGS-rev" "Nolin-Lake.Temp-Water.Inst.15Minutes.0.USGS-raw" "Nolin.Temp-Water.Inst.~1Day.0.lrldlb-rev" "Nolin.Temp-Water.Inst.1Day.0.lrldlb-rev" "Nolin.Temp-Water.Inst.0.0.lrldlb-rev"; do
+            echo "== $ts"
+            curl -sS -m 120 -H "Accept: application/json;version=2" "https://cwms-data.usace.army.mil/cwms-data/timeseries?office=LRL&name=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$ts")&begin=2026-07-01T00:00:00Z&end=2026-11-13T00:00:00Z&page-size=20000" \
+              | python3 -c '
+          import json,sys,datetime as D
+          d=json.load(sys.stdin); v=[x for x in d.get("values",[]) if x[1] is not None]
+          print("units", d.get("units"), "n", len(v))
+          if v:
+            f=lambda t: D.datetime.utcfromtimestamp(t/1000).isoformat()
+            print("first", f(v[0][0]), v[0][1], "last", f(v[-1][0]), v[-1][1])
+            days=sorted({f(x[0])[:10] for x in v}); print("days", len(days), days[:3], "...", days[-3:])
+            print("sample", [(f(x[0]), x[1]) for x in v[::max(1,len(v)//12)]][:12])' || true
+          done
+      - name: USGS — the lake gauge and what it measures
+        run: |
+          curl -sS -m 60 "https://waterservices.usgs.gov/nwis/site/?format=rdb&stateCd=ky&siteName=nolin&siteOutput=expanded&siteStatus=all" | grep -v "^#" | cut -f2,3,5,6 | head -15
+          for s in 03310900 03311000; do
+            echo "== $s parameters"; curl -sS -m 60 "https://waterservices.usgs.gov/nwis/site/?format=rdb&sites=$s&seriesCatalogOutput=true&outputDataTypeCd=iv" | grep -v "^#" | awk -F'\t' '{print $14, $22, $23}' | sort -u | head -20
+            echo "== $s IV Aug1-now (temp 00010, DO 00300, DO% 00301)"; curl -sS -m 90 "https://waterservices.usgs.gov/nwis/iv/?format=json&sites=$s&parameterCd=00010,00300,00301&startDT=2026-08-01&endDT=2026-11-12" | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          for t in d["value"]["timeSeries"]:
+            v=t["values"][0]["value"]; print(t["variable"]["variableName"][:60], len(v), v[0]["dateTime"] if v else None, v[-1]["dateTime"] if v else None)' || true
+          done
+      - name: The USACE report itself, with its missing intermediate certificate
+        run: |
+          curl -sS -m 30 -o /tmp/int.crt "http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt" && openssl x509 -inform der -in /tmp/int.crt -out /tmp/int.pem && cat /etc/ssl/certs/ca-certificates.crt /tmp/int.pem > /tmp/ca.pem
+          curl -sS -m 60 --cacert /tmp/ca.pem -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/NRR.html" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 1500; echo
+          echo "== folder"; curl -sS -m 60 --cacert /tmp/ca.pem -A "Mozilla/5.0" "https://www.lrl-wc.usace.army.mil/reports/wq/" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 1500; echo
