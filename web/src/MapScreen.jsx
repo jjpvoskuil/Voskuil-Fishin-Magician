@@ -15,6 +15,7 @@ import { segmentTimeRanges, SEGMENTS } from "./lib/scoring.js";
 import * as S from "./lib/session.js";
 import { HEAT_LEGEND, heatColor, SEASONS, spotStats } from "./lib/spotstats.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
+import { rankTries } from "./lib/tryrank.js";
 import ATTRACTORS from "./lib/data/attractors.json" with { type: "json" };
 
 export const LOCATION_TYPES = ["Main-lake point", "Secondary / pocket point", "Flat", "Creek channel / ledge", "Rock face / bluff", "Riprap", "Boat dock",
@@ -147,15 +148,18 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   const [tries, setTries] = useState(null), [trySel, setTrySel] = useState(null);
   useEffect(() => { if (f.tries && !tries) loadSuggestions().then((d) => setTries(d.spots)).catch(() => {}); }, [f.tries]);
   const shownTries = useMemo(() => (tries || []).filter((t) => !list.some((s) => metersApart({ lat: +s.lat, lon: +s.lon }, t) < 120)), [tries, list]);
+  // #101: ranked for the Hot-spots filter (structure × how that kind of structure has produced × nearby heat; dry ones out)
+  const rankedTries = useMemo(() => rankTries(shownTries, { spots: list, stats, level }), [shownTries, list, stats, level]);
   useEffect(() => {
     const m = map.current; if (!m) return;
     layers.current.tries?.remove(); layers.current.tries = null;
-    if (!f.tries || !shownTries.length) return;
+    if (!f.tries || !rankedTries.length) return;
     const g = L.layerGroup();
-    for (const t of shownTries) L.marker([t.lat, t.lon], { icon: L.divIcon({ className: "try-pin", html: `<span style="background:${TRY_KINDS[t.kind][2]}">★</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+    for (const t of [...rankedTries].reverse()) L.marker([t.lat, t.lon], { zIndexOffset: t.rank <= 10 ? 500 - t.rank : 0, icon: L.divIcon({ className: `try-pin${t.rank <= 10 ? " top" : ""}`,
+      html: `<span style="background:${TRY_KINDS[t.kind][2]}">${t.rank <= 10 ? t.rank : "★"}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
       .on("click", () => setTrySel(t)).addTo(g);
     layers.current.tries = g.addTo(m);
-  }, [f.tries, shownTries]);
+  }, [f.tries, rankedTries]);
 
   // ---- saved spots, colored by heat
   useEffect(() => {
@@ -218,6 +222,7 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   const persist = async (spot, okMsg) => { if (await save((x) => x.saveSpot(spot), { ok: okMsg })) { reloadSpots(); return true; } return false; };
   const selSpot = list.find((s) => s.spot_id === sel) || null;
   const ranked = list.map((s) => ({ s, st: stats.spots[s.spot_id] })).filter((x) => x.st && x.st.hours >= 1).sort((a, b) => b.st.rate - a.st.rate);
+  const filterText = [f.segments.length ? f.segments.join(", ") : "any time of day", SEASONS[f.season].toLowerCase(), f.mine ? "just me" : "everyone"].join(" · ");
   const filtersOn = (f.segments.length ? 1 : 0) + (f.season !== "any" ? 1 : 0) + (f.mine ? 1 : 0);
 
   return (
@@ -248,9 +253,11 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
 
       <Sheet open={!!trySel} title={trySel ? `Worth a try: ${TRY_KINDS[trySel.kind][0]}` : ""} onClose={() => setTrySel(null)}>
         {trySel && <div className="setup">
+          {trySel.rank && <p style={{ margin: 0 }}><b>#{trySel.rank} of {trySel.n}</b> spots to try for your Hot-spots filter ({filterText})</p>}
           <p style={{ margin: 0 }}>{trySel.why}</p>
+          {trySel.reasons && <ul className="why-list">{trySel.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
           {level != null && <p className="muted small" style={{ margin: 0 }}>About <b>{Math.max(0, Math.round(level - trySel.emax))}–{Math.max(0, Math.round(level - trySel.emin))} ft</b> deep at today's level ({level.toFixed(1)} ft){trySel.est ? " — partly estimated depth" : " — measured by lidar"}.</p>}
-          <p className="muted small" style={{ margin: 0 }}>Picked from the lake's shape and the lidar bottom, not from catches — it's a suggestion to explore.</p>
+          <p className="muted small" style={{ margin: 0 }}>Found from the lake's shape and the lidar bottom; its rank also uses the trip log. Nobody has fished it yet — it's a suggestion to explore.</p>
           <button className="btn primary wide big" onClick={() => { setNewPin({ lat: trySel.lat, lon: trySel.lon, how: "try", type: TRY_KINDS[trySel.kind][1] }); setTrySel(null); }}>📍 Save as my spot</button>
           <a className="btn wide" href={`https://maps.apple.com/?daddr=${trySel.lat},${trySel.lon}`} target="_blank" rel="noopener noreferrer">Directions ↗</a>
         </div>}
@@ -279,6 +286,14 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
               <b className="num">{st.rate.toFixed(1)}/hr</b></button>))
             : <p className="muted small">No logged fishing matches this filter yet — try "Any time".</p>}
           <p className="muted small">Fish per hour from the trip log, pulled toward the lake average ({stats.base.toFixed(1)}/hr) so thin data doesn't look hotter than it is.</p>
+          {rankedTries.length > 0 && <>
+            <div className="lr-h">Best ⭐ spots to try for this filter</div>
+            {rankedTries.slice(0, 5).map((t) => (
+              <button key={`${t.lat},${t.lon}`} className="rank-row" onClick={() => { setPanel(null); setTrySel(t); map.current?.setView([t.lat, t.lon], 16); if (!f.tries) setF({ tries: true }); }}>
+                <i style={{ background: TRY_KINDS[t.kind][2] }} /><span className="grow"><b>{t.rank}. {TRY_KINDS[t.kind][0]}</b><span className="muted small block">{t.reasons[0]}</span></span>
+                {level != null && <b className="num">{Math.max(0, Math.round(level - t.emax))}–{Math.round(level - t.emin)} ft</b>}</button>))}
+            <p className="muted small">Ranked by the structure, how that kind of structure has produced for this filter, and how the saved spots around it have done. Numbers on the map's stars are this order.</p>
+          </>}
         </div>
       </Sheet>
     </div>
