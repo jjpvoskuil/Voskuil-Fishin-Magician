@@ -1,0 +1,21 @@
+name: Probe pre-dam topo maps
+# John 11-14, option B for punch-list #100: look at the 1953/54 USGS sheets before building anything from them.
+# Pushes crops to the side branch "topo-probe" (the sandbox can't download artifacts). Public-domain USGS maps only.
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q rasterio numpy pillow
+      - run: python tools/probe_topo.py out
+      - name: Push to the topo-probe branch
+        run: |
+          cd out && git init -q && git checkout -q -b topo-probe && git add -A
+          git -c user.name="topo probe" -c user.email="actions@github.com" commit -qm "topo probe $(date -u +%F)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" topo-probe
