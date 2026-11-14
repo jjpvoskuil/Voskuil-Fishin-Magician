@@ -57,4 +57,7 @@
 - #100 investigated, not changed: deep contours are estimates capped at 480 ft off the modeled channel; real depth data
   needed (options sent to John).
 - Python suite: 29 failures pre-existing (retired Streamlit pages + frog-gap tests), none new. JS: 53 pass.
+- #100 option B (pre-dam 1953/54 USGS topo maps) built and tested in GitHub Actions: on a lidar holdout it was worse
+  than the current estimate (6.7 vs 4.1 ft median error, worse at every depth) → not used; live map unchanged.
+  Removed a rounded saved-spot coordinate I had put in tools/probe_topo.py + topo_bottom.py (still in git history).
 

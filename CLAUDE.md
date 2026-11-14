@@ -266,6 +266,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - #100 contours: NOT changed yet. Below the lidar water line (~496 ft) depth is estimated with floor 480 ft (John's
   "≤35 ft") and 455 ft only along data/nolin_channel.json (modeled, ±hundreds of m). Baby Back Bass (Matthew: 40–50 ft
   area) models ≤33 ft at summer pool; channel centerline is ~750 m away. Needs real soundings — asked John how.
+- #100 option B TRIED 11-14 (John: "see what B gives us; if garbage, revert"): tools/topo_bottom.py (TOPO=1 in
+  build-contours.yml → branch depth-build-topo, never copied to web/public): 6 pre-dam 1953/54 USGS 1:24k sheets
+  (Dickeys Mills 708534, Bee Spring 803316, Cub Run 803441, Clarkson 708385, Leitchfield 709087, Millerstown 709298),
+  contour px = R−G>22 & R−B>45 & R>120, water = B−R>30; registered to lidar (fit barely above chance: 0.32 vs 0.30
+  within ±3 ft — the 1950s maps' own accuracy is ~±10 ft); pieces labeled against the edge-slope estimate, harmonic fill.
+  HOLDOUT (pretend water line 536 ft, test on 2,964 acres of lidar ground): topo median error 6.7 ft (bias +4.5) vs the
+  current estimate 4.1 ft (bias +0.6); worse in EVERY depth band (30–60 ft below: 12.1 vs 7.5). Baby Back Bass still
+  ~33 ft. Verdict: not better → live map unchanged. A plain harmonic first guess was worse still (19 ft, bias +19).
+  The holdout harness is worth reusing to score any future bottom (e.g. John's soundings, option A).
 
 ## Phone layout fixes (John 11-11, after a real session)
 - Lure picker (`SessionParts.jsx LurePicker`, used in Session setup + Live "Add a lure"): rows were crushed because
