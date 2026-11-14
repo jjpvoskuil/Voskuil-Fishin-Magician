@@ -300,10 +300,59 @@ def debug_overlays(per, Z, ground, x0, y1, pix, outdir):
     log("debug overlays written")
 
 
+def debug_overlay(Z, ground, per, water, x0, y1, pix, outdir):
+    """Alignment diagnostics: wide shift search (±800 ft) per sheet + an overlay PNG (lidar 20-ft contours red, map
+    contour pixels black, map water blue) around mid-lake."""
+    from PIL import Image
+    H, W = Z.shape
+    resid = np.abs(Z - np.round(Z / INTERVAL) * INTERVAL)
+    okg = ground & (Z > 500) & (Z < 760)
+    rep = []
+    for name, cg, inq in per:
+        rr, cc = np.nonzero(cg)
+        if len(rr) > 400000:
+            sel = np.random.default_rng(0).choice(len(rr), 400000, replace=False); rr, cc = rr[sel], cc[sel]
+        best = []
+        for dr in range(-100, 101, 4):
+            for dc in range(-100, 101, 4):
+                r2, c2 = rr + dr, cc + dc
+                k = (r2 >= 0) & (r2 < H) & (c2 >= 0) & (c2 < W); r2, c2 = r2[k], c2[k]
+                g = okg[r2, c2]
+                if g.sum() < 2000:
+                    continue
+                best.append(((resid[r2[g], c2[g]] < 3).mean(), dr, dc))
+        best.sort(reverse=True)
+        rep.append({"sheet": name, "best": [(round(float(a), 3), int(b * pix), int(c * pix)) for a, b, c in best[:3]]})
+        log("wide-search", rep[-1])
+    to_ky = Transformer.from_crs("EPSG:4326", "EPSG:3089", always_xy=True)
+    x, y = to_ky.transform(-86.179, 37.332)
+    r0, c0 = int((y1 - y) / pix), int((x - x0) / pix)
+    h = 380
+    sl = (slice(max(0, r0 - h), r0 + h), slice(max(0, c0 - h), c0 + h))
+    z = Z[sl]
+    img = np.full(z.shape + (3,), 255, np.uint8)
+    shade = np.clip(128 + 40 * np.gradient(np.nan_to_num(z, nan=500))[1], 60, 230).astype(np.uint8)
+    img[..., 0] = img[..., 1] = img[..., 2] = np.where(np.isfinite(z), shade, 255)
+    lid = np.zeros(z.shape, bool)
+    for lv in range(440, 760, 20):
+        lid |= (np.nan_to_num(z) >= lv) & (np.roll(np.nan_to_num(z), 1, 1) < lv)
+        lid |= (np.nan_to_num(z) >= lv) & (np.roll(np.nan_to_num(z), 1, 0) < lv)
+    img[lid] = (230, 40, 40)
+    cm = np.zeros(z.shape, bool)
+    for _, cg, _ in per:
+        cm |= cg[sl].astype(bool)
+    img[cm] = (0, 0, 0)
+    img[water[sl]] = (40, 90, 255)
+    Image.fromarray(img).save(os.path.join(outdir, "overlay_midlake.png"))
+    return rep
+
+
 def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_rc, outdir):
     t0 = time.time()
     H, W = Z.shape
     per, water, cover = sheet_masks(H, W, x0, y1, pix, lake_bbox)
+    os.makedirs(outdir, exist_ok=True)
+    wide = debug_overlay(Z, ground, per, water, x0, y1, pix, outdir)
     if os.environ.get("TOPO_DEBUG") == "1":
         debug_overlays(per, Z, ground, x0, y1, pix, outdir)
         if os.environ.get("TOPO_STOP") == "1":
@@ -324,7 +373,7 @@ def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_
         dam_rc = (int(ir[dam_rc]), int(ic[dam_rc]))
     log(f"river/creek network: {int(skel.sum())} px; sheets cover {cover.mean():.2f} of the grid ({time.time() - t0:.0f}s)")
 
-    report = {"registration": reg}
+    report = {"registration": reg, "wide_search": wide}
     # ---- holdout: pretend the water line is at 536 ft
     dom = ndimage.binary_dilation(lake, iterations=150) & cover
     low = dom & (np.nan_to_num(Z, nan=9999) < HOLDOUT_LINE)
