@@ -1,0 +1,158 @@
+{
+ "dickeys_708534": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.25],PARAMETER[\"central_meridian\",-86.1875],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6779,
+  "h": 8250,
+  "res": [
+   2.0320000000000005,
+   2.032
+  ],
+  "bands": 3,
+  "bounds": [
+   -6993.052343742909,
+   -1965.752227159146,
+   6781.875656257094,
+   14798.247772840854
+  ],
+  "crops": {
+   "midlake_east": {
+    "px_m": 2.0320000000000005,
+    "size": 884
+   },
+   "dam": {
+    "px_m": 2.0320000000000005,
+    "size": 884
+   },
+   "statepark": {
+    "px_m": 2.0320000000000005,
+    "size": 884
+   },
+   "upper": {
+    "px_m": 2.0320000000000005,
+    "size": 884
+   }
+  }
+ },
+ "dickeys_803463": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.25],PARAMETER[\"central_meridian\",-86.1875],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6646,
+  "h": 8125,
+  "res": [
+   2.032,
+   2.032
+  ],
+  "bands": 3,
+  "bounds": [
+   -6767.780048584334,
+   -1891.014921424192,
+   6736.891951415667,
+   14618.985078575808
+  ],
+  "crops": {
+   "midlake_east": {
+    "px_m": 2.032,
+    "size": 884
+   },
+   "dam": {
+    "px_m": 2.032,
+    "size": 884
+   },
+   "statepark": {
+    "px_m": 2.032,
+    "size": 884
+   },
+   "upper": {
+    "px_m": 2.032,
+    "size": 884
+   }
+  }
+ },
+ "beespring_803316": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.25],PARAMETER[\"central_meridian\",-86.3125],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6600,
+  "h": 8217,
+  "res": [
+   2.032,
+   2.0319999999999996
+  ],
+  "bands": 3,
+  "bounds": [
+   -6658.421286720515,
+   -1875.8889141410145,
+   6752.778713279486,
+   14821.055085858981
+  ],
+  "crops": {
+   "dam": {
+    "px_m": 2.032,
+    "size": 884
+   }
+  }
+ },
+ "cubrun_803441": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.25],PARAMETER[\"central_meridian\",-86.0625],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6629,
+  "h": 8113,
+  "res": [
+   2.032,
+   2.032
+  ],
+  "bands": 3,
+  "bounds": [
+   -6808.672025105192,
+   -1965.8517333219552,
+   6661.455974894809,
+   14519.764266678047
+  ],
+  "crops": {
+   "upper": {
+    "px_m": 2.032,
+    "size": 884
+   }
+  }
+ },
+ "cubrun_708478": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.25],PARAMETER[\"central_meridian\",-86.0625],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6904,
+  "h": 8250,
+  "res": [
+   2.032,
+   2.032
+  ],
+  "bands": 3,
+  "bounds": [
+   -6978.687306435712,
+   -1960.7739392065396,
+   7050.2406935642875,
+   14803.22606079346
+  ],
+  "crops": {
+   "upper": {
+    "px_m": 2.032,
+    "size": 884
+   }
+  }
+ },
+ "clarkson_708385": {
+  "crs": "PROJCS[\"unnamed\",GEOGCS[\"NAD27\",DATUM[\"North_American_Datum_1927\",SPHEROID[\"Clarke 1866\",6378206.4,294.978698213898,AUTHORITY[\"EPSG\",\"7008\"]],AUTHORITY[\"EPSG\",\"6267\"]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4267\"]],PROJECTION[\"Polyconic\"],PARAMETER[\"latitude_of_origin\",37.375],PARAMETER[\"central_meridian\",-86.1875],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH]]",
+  "w": 6771,
+  "h": 8254,
+  "res": [
+   2.0319999999999996,
+   2.0319999999999996
+  ],
+  "bands": 3,
+  "bounds": [
+   -7063.859622359111,
+   -1936.014387655352,
+   6694.812377640886,
+   14836.113612344645
+  ],
+  "crops": {
+   "upper": {
+    "px_m": 2.0319999999999996,
+    "size": 884
+   }
+  }
+ }
+}
