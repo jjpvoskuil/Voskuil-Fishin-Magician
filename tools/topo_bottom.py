@@ -14,7 +14,8 @@ Steps, all on build_contours' 8-ft EPSG:3089 grid:
   3. the old river (+ creeks): blue pixels near the lake, skeletonized; elevation along that network = piecewise
      linear between fixed points (lidar where the network is above the water line, the 446-ft pre-dam benchmark at the
      dam, and later the labeled contour crossings);
-  4. first-guess bottom = harmonic (Laplace) fill between the lidar edge and the riverbed;
+  4. first-guess bottom = the 11-11 edge-slope estimate, pulled to the riverbed near the river (a plain harmonic fill
+     between rim and river was ~19 ft too high in the holdout and labeled almost nothing — run 11-14);
   5. each contour piece under the water line gets the 20-ft level nearest the first guess, if it fits well (median
      within 8 ft, little spread); then the fill is solved again with those pieces held at their level (twice);
   6. HOLDOUT CHECK: the same method is run as if the water line were at 536 ft, on lidar-measured ground between the
@@ -234,8 +235,14 @@ def solve_bottom(Z, known, unknown, contour, skel, dam_rc, line_level, levels, p
     river_fix = np.where(skel & unknown & np.isfinite(prof), np.minimum(prof, line_level), np.nan)
 
     boundary = np.where(known & ndimage.binary_dilation(unknown, iterations=2), Z, np.nan)
-    fixed2d = np.where(np.isfinite(river_fix), river_fix, boundary)
-    E = laplace(unknown | np.isfinite(boundary), fixed2d)
+    # first guess = the 11-11 edge-slope estimate (holdout: ~4 ft median error), pulled down to the riverbed near the
+    # river; a plain harmonic fill between rim and river came out ~19 ft too high and labeled almost nothing
+    E = np.where(unknown, old_estimate(Z, known, unknown, line_level, pix), np.nan)
+    rv = np.isfinite(river_fix)
+    if rv.any():
+        d_r, (ir, ic) = ndimage.distance_transform_edt(~rv, sampling=pix, return_indices=True)
+        w = np.exp(-(d_r / 150.0) ** 2)
+        E = np.where(unknown, np.minimum(E, (1 - w) * E + w * river_fix[ir, ic]), np.nan)
     stats = {"tag": tag, "river_fixed_points": len(fixed)}
     # contour pieces under the line
     pieces, n = ndimage.label(contour & unknown, structure=np.ones((3, 3)))
