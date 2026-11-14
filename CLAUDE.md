@@ -276,6 +276,14 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   ~33 ft. Verdict: not better → live map unchanged. A plain harmonic first guess was worse still (19 ft, bias +19).
   The holdout harness is worth reusing to score any future bottom (e.g. John's soundings, option A).
 
+## Map photo + depth reference (John 11-14 evening)
+- Esri World Imagery here shows Nolin drawn down; depth lines were drawn only below TODAY's level (504.7 ft on 11-14),
+  so the 504–515 lidar lines were hidden and lines started at today's edge. Now: default photo = USGS The National Map
+  USGSImageryOnly (NAIP, leaf-on = summer, lake near full pool; served to z16, enlarged beyond) with Esri labels; ☀️/❄️
+  button switches to the sharper Esri winter photo (`f.photo`). With 〰️ on, a "Today / Summer pool 515" switch
+  (`f.depthAt`, SUMMER_POOL_FT) sets the depth reference for lines, labels and star depth text; star ranking's
+  dry-check still uses today's level. Lidar lines 496–514 are measured (solid); estimate only below ~496.
+
 ## Phone layout fixes (John 11-11, after a real session)
 - Lure picker (`SessionParts.jsx LurePicker`, used in Session setup + Live "Add a lure"): rows were crushed because
   `.pick-list` is a height-capped flex column and rows shrank instead of scrolling → `.pick-list > * { flex: none }`;

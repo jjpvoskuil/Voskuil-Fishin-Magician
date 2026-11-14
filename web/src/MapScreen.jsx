@@ -25,10 +25,19 @@ const GRADES = ["High (steep break)", "Medium", "Low (gradual taper)"];
 const ATTRACTOR_COLORS = { Brush: "#a0522d", "Christmas Trees": "#2e8b57", "Pallet Stack": "#cd853f", Plastic: "#e34a33", "Spider Hump": "#9370db", "Reef Ball": "#aaaaaa", Rock: "#cccccc" };
 const LAKE_CENTER = [37.33, -86.17];
 const FKEY = "fm.mapFilters";
-const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, depth: false, tries: true };
+// photo: "summer" = USGS/NAIP leaf-on photo (lake near full pool; sharp to zoom 16) | "sharp" = Esri (winter, low water)
+// depthAt: "today" = live USGS level | "summer" = summer pool 515 ft (John 11-14: see the full 515→496 lidar lines)
+const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, photo: "summer", depth: false, depthAt: "today", tries: true };
+export const SUMMER_POOL_FT = 515;
 const readF = () => { try { return { ...F0, ...JSON.parse(localStorage.getItem(FKEY)) }; } catch { return F0; } };
 const md = (d) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
+const LABELS = () => L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 18, opacity: 0.8 });
 const BASES = {
+  // John 11-14: Esri's photo here was taken with the lake drawn down; the USGS one (NAIP, leaf-on = summer) shows it near
+  // full pool. NAIP is only served to zoom 16, so closer in it's enlarged (softer).
+  summer: () => L.layerGroup([
+    L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 16, attribution: "Imagery: USGS The National Map (NAIP)" }),
+    LABELS()]),
   satellite: () => L.layerGroup([
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 18, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" }),
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 18, opacity: 0.8 })]),
@@ -77,9 +86,9 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   useEffect(() => {
     const m = map.current; if (!m) return;
     layers.current.base?.remove();
-    layers.current.base = BASES[f.satellite ? "satellite" : "map"]().addTo(m);
+    layers.current.base = BASES[!f.satellite ? "map" : f.photo === "sharp" ? "satellite" : "summer"]().addTo(m);
     layers.current.base.bringToBack?.();
-  }, [f.satellite]);
+  }, [f.satellite, f.photo]);
 
   // ---- fish attractors
   useEffect(() => {
@@ -93,7 +102,10 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   }, [f.attractors]);
 
   // ---- depth contours, following today's lake level
-  const level = lake?.value?.[lake.value.length - 1]?.elevation_ft ?? null;
+  const todayLevel = lake?.value?.[lake.value.length - 1]?.elevation_ft ?? null;
+  const atSummer = f.depthAt === "summer";
+  const level = atSummer ? SUMMER_POOL_FT : todayLevel;   // what depths are measured from
+  const levelText = atSummer ? `summer pool (${SUMMER_POOL_FT} ft)` : `today's level (${todayLevel?.toFixed(1)} ft)`;
   const [contours, setContours] = useState(null), [zoom, setZoom] = useState(13);
   useEffect(() => { const m = map.current; if (!m) return; const on = () => setZoom(m.getZoom()); m.on("zoomend", on); return () => m.off("zoomend", on); }, []);
   useEffect(() => { if (f.depth && !contours) loadContours().then(setContours).catch(() => toast("Depth contours aren't available yet")); }, [f.depth]);
@@ -151,7 +163,7 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   useEffect(() => { if (f.tries && !tries) loadSuggestions().then((d) => setTries(d.spots)).catch(() => {}); }, [f.tries]);
   const shownTries = useMemo(() => (tries || []).filter((t) => !list.some((s) => metersApart({ lat: +s.lat, lon: +s.lon }, t) < 120)), [tries, list]);
   // #101: ranked for the Hot-spots filter (structure × how that kind of structure has produced × nearby heat; dry ones out)
-  const rankedTries = useMemo(() => rankTries(shownTries, { spots: list, stats, level }), [shownTries, list, stats, level]);
+  const rankedTries = useMemo(() => rankTries(shownTries, { spots: list, stats, level: todayLevel }), [shownTries, list, stats, todayLevel]);
   useEffect(() => {
     const m = map.current; if (!m) return;
     layers.current.tries?.remove(); layers.current.tries = null;
@@ -234,6 +246,8 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
         <div ref={box} className="map-box" />
         <div className="map-ctl">
           <button className="iconbtn" aria-label={f.satellite ? "Show plain map" : "Show satellite"} onClick={() => setF({ satellite: !f.satellite })}>{f.satellite ? "🗺️" : "🛰️"}</button>
+          {f.satellite && <button className="iconbtn txt" aria-label={f.photo === "sharp" ? "Show the summer (full pool) photo" : "Show the sharper winter photo"}
+            onClick={() => setF({ photo: f.photo === "sharp" ? "summer" : "sharp" })}>{f.photo === "sharp" ? "❄️" : "☀️"}</button>}
           <button className={`iconbtn ${f.attractors ? "on" : ""}`} aria-label="Fish attractors on or off" onClick={() => setF({ attractors: !f.attractors })}>🪵</button>
           <button className={`iconbtn ${f.tries ? "on" : ""}`} aria-label="Spots to try on or off" onClick={() => setF({ tries: !f.tries })}>⭐</button>
           <button className={`iconbtn ${f.depth ? "on" : ""}`} aria-label="Depth contours on or off" onClick={() => setF({ depth: !f.depth })}>〰️</button>
@@ -243,7 +257,11 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
           <button className="btn primary big" onClick={saveHere}>📍 Save where I am</button>
           <button className="btn big" onClick={() => setPanel("filters")}>🔥 Hot spots{filtersOn ? ` (${filtersOn})` : ""}</button>
         </div>
-        <div className="map-hint">{f.depth && level != null ? `Depths at today's level ${level.toFixed(1)} ft · solid = lidar${contours?.lines?.some((l) => l.est === 2) ? ", dotted = 1954 map" : ""}, dashed = estimated` : "Press and hold anywhere to pin a spot"}</div>
+        <div className="map-hint">{f.depth && level != null ? `Depth from ${levelText} · solid = lidar · dashed = estimate` : f.satellite ? `${f.photo === "sharp" ? "❄️ Winter photo, lake drawn down" : "☀️ Summer photo, lake near full pool"} · press and hold to pin a spot` : "Press and hold anywhere to pin a spot"}</div>
+        {f.depth && <div className="map-level seg" role="radiogroup" aria-label="Depths measured from">
+          <button className={!atSummer ? "on" : ""} aria-pressed={!atSummer} onClick={() => setF({ depthAt: "today" })}>Today{todayLevel != null ? ` ${todayLevel.toFixed(1)}` : ""}</button>
+          <button className={atSummer ? "on" : ""} aria-pressed={atSummer} onClick={() => setF({ depthAt: "summer" })}>Summer pool {SUMMER_POOL_FT}</button>
+        </div>}
       </div>
 
       <NameSheet pin={newPin} onClose={() => setNewPin(null)} onSave={async (name, type) => {
@@ -258,7 +276,7 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
           {trySel.rank && <p style={{ margin: 0 }}><b>#{trySel.rank} of {trySel.n}</b> spots to try for your Hot-spots filter ({filterText})</p>}
           <p style={{ margin: 0 }}>{trySel.why}</p>
           {trySel.reasons && <ul className="why-list">{trySel.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
-          {level != null && <p className="muted small" style={{ margin: 0 }}>About <b>{Math.max(0, Math.round(level - trySel.emax))}–{Math.max(0, Math.round(level - trySel.emin))} ft</b> deep at today's level ({level.toFixed(1)} ft){trySel.est ? " — partly estimated depth" : " — measured by lidar"}.</p>}
+          {level != null && <p className="muted small" style={{ margin: 0 }}>About <b>{Math.max(0, Math.round(level - trySel.emax))}–{Math.max(0, Math.round(level - trySel.emin))} ft</b> deep at {levelText}{trySel.est ? " — partly estimated depth" : " — measured by lidar"}.</p>}
           <p className="muted small" style={{ margin: 0 }}>Found from the lake's shape and the lidar bottom; its rank also uses the trip log. Nobody has fished it yet — it's a suggestion to explore.</p>
           <button className="btn primary wide big" onClick={() => { setNewPin({ lat: trySel.lat, lon: trySel.lon, how: "try", type: TRY_KINDS[trySel.kind][1] }); setTrySel(null); }}>📍 Save as my spot</button>
           <a className="btn wide" href={`https://maps.apple.com/?daddr=${trySel.lat},${trySel.lon}`} target="_blank" rel="noopener noreferrer">Directions ↗</a>

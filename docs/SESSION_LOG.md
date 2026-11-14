@@ -60,4 +60,4 @@
 - #100 option B (pre-dam 1953/54 USGS topo maps) built and tested in GitHub Actions: on a lidar holdout it was worse
   than the current estimate (6.7 vs 4.1 ft median error, worse at every depth) → not used; live map unchanged.
   Removed a rounded saved-spot coordinate I had put in tools/probe_topo.py + topo_bottom.py (still in git history).
-
+- Evening (John): map default photo = USGS/NAIP summer (full pool), ☀️/❄️ switch to Esri; depth lines can be measured from summer pool 515 (switch), so all lidar lines 496–515 show from the full shoreline.

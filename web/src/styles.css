@@ -319,7 +319,9 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .map-ctl .iconbtn.on { border-color: var(--accent); border-width: 2px; }
 .map-dock { position: absolute; left: 10px; right: 64px; bottom: 12px; z-index: 500; display: grid; grid-template-columns: 1.3fr 1fr; gap: 8px; }
 .map-dock .btn { box-shadow: 0 2px 8px rgba(0,0,0,.3); min-height: 52px; font-size: 15px; padding: 0 10px; }
-.map-hint { position: absolute; top: 10px; left: 10px; z-index: 500; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
+.map-hint { position: absolute; top: 10px; left: 10px; right: 66px; z-index: 500; background: rgba(0,0,0,.55); color: #fff; font-size: 12px; line-height: 1.3; padding: 4px 10px; border-radius: 14px; pointer-events: none; width: fit-content; }
+.map-level { position: absolute; top: 46px; left: 10px; z-index: 500; background: var(--card); box-shadow: 0 1px 4px rgba(0,0,0,.3); padding: 2px; }
+.map-level button { min-height: 32px; font-size: 13px; padding: 0 10px; white-space: nowrap; }
 .spot-label { background: rgba(0,0,0,.6); color: #fff; border: 0; box-shadow: none; font-weight: 700; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
 .spot-label::before { display: none; }
 .live-pin span { display: inline-block; white-space: nowrap; background: var(--good); color: #fff; font-weight: 800; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); transform: translate(-50%, -150%); }
