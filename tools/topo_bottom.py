@@ -298,7 +298,7 @@ def debug_overlays(per, Z, ground, x0, y1, pix, outdir):
         allc |= cg.astype(bool)
     lid = ground & (np.abs(Z - np.round(Z / INTERVAL) * INTERVAL) < 1.0) & (Z > 500)
     os.makedirs(outdir, exist_ok=True)
-    for name, (lat, lon) in {"midlake_east": (37.332, -86.179), "dam": (37.280, -86.247), "statepark": (37.300, -86.210), "upper": (37.36, -86.13)}.items():
+    for name, (lat, lon) in {"midlake": (37.33, -86.17), "dam": (37.280, -86.247), "statepark": (37.300, -86.210), "upper": (37.36, -86.13)}.items():
         x, y = to_ky.transform(lon, lat); r, c = int((y1 - y) / pix), int((x - x0) / pix)
         h = 300
         sl = (slice(max(0, r - h), r + h), slice(max(0, c - h), c + h))
