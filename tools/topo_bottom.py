@@ -332,7 +332,7 @@ def debug_overlay(Z, ground, per, water, x0, y1, pix, outdir):
         rep.append({"sheet": name, "best": [(round(float(a), 3), int(b * pix), int(c * pix)) for a, b, c in best[:3]]})
         log("wide-search", rep[-1])
     to_ky = Transformer.from_crs("EPSG:4326", "EPSG:3089", always_xy=True)
-    x, y = to_ky.transform(-86.179, 37.332)
+    x, y = to_ky.transform(-86.17, 37.33)   # the app's generic lake center (public); never a saved spot here
     r0, c0 = int((y1 - y) / pix), int((x - x0) / pix)
     h = 380
     sl = (slice(max(0, r0 - h), r0 + h), slice(max(0, c0 - h), c0 + h))
@@ -393,6 +393,14 @@ def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_
     old_ho = old_estimate(Z, ho_known, ho_unknown, HOLDOUT_LINE, pix)
     test = ho_unknown & ground & np.isfinite(Z) & (Z > 497) & (Z < HOLDOUT_LINE - 2) & np.isfinite(E_ho)
     err_new = (E_ho - Z)[test]; err_old = (old_ho - Z)[test]
+    def by_depth(err, depth):
+        out = {}
+        for lo, hi in ((0, 10), (10, 20), (20, 30), (30, 60)):
+            m = (depth >= lo) & (depth < hi)
+            if m.sum() > 1000:
+                out[f"{lo}-{hi}ft_below_line"] = {"cells": int(m.sum()), "median_abs_ft": round(float(np.median(np.abs(err[m]))), 1),
+                                                   "bias_ft": round(float(np.median(err[m])), 1)}
+        return out
     def summ(e):
         a = np.abs(e)
         return {"median_abs_ft": round(float(np.median(a)), 1), "mean_abs_ft": round(float(a.mean()), 1),
@@ -400,6 +408,7 @@ def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_
                 "bias_ft": round(float(np.median(e)), 1)}
     report["holdout"] = {"line_ft": HOLDOUT_LINE, "test_cells": int(test.sum()), "acres": round(float(test.sum() * pix * pix / 43560)),
                          "topo": summ(err_new), "old_estimate": summ(err_old), "solve": st_ho,
+                         "topo_by_depth": by_depth(err_new, HOLDOUT_LINE - Z[test]), "old_by_depth": by_depth(err_old, HOLDOUT_LINE - Z[test]),
                          "coverage": round(float(np.isfinite(E_ho)[ho_unknown & ground & (Z > 497)].mean()), 3), "vertical_offset_ft": round(offset, 2)}
     log("HOLDOUT", json.dumps(report["holdout"]))
 
@@ -412,7 +421,24 @@ def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_
                                  "coverage": round(float(np.isfinite(E)[unseen].mean()), 3),
                                  "min_ft": round(float(np.nanmin(E)), 1) if np.isfinite(E).any() else None,
                                  "minutes": round((time.time() - t0) / 60, 1)}
+    old_real = np.where(unknown, old_estimate(Z, known, unknown, line + 0.5, pix), np.nan)
+    diff = E - old_real
+    v = np.isfinite(diff)
+    report["below_waterline"]["topo_minus_old_ft"] = {p: round(float(np.percentile(diff[v], p)), 1) for p in (5, 25, 50, 75, 95)} if v.any() else None
+    report["below_waterline"]["deeper_than_480_acres"] = {"topo": round(float((E[unknown] < 480).sum() * pix * pix / 43560)),
+                                                          "old": round(float((old_real[unknown] < 480).sum() * pix * pix / 43560))}
     log("BELOW", json.dumps(report["below_waterline"]))
+    try:   # picture: lake below the water line, blue = topo deeper than the old estimate, red = shallower
+        from PIL import Image
+        dd = np.clip(np.nan_to_num(diff), -20, 20)
+        img = np.full(diff.shape + (3,), 235, np.uint8)
+        img[..., 0] = np.where(v, np.clip(235 + dd * 8, 40, 255), 235).astype(np.uint8)
+        img[..., 1] = np.where(v, np.clip(235 - np.abs(dd) * 7, 40, 255), 235).astype(np.uint8)
+        img[..., 2] = np.where(v, np.clip(235 - dd * 8, 40, 255), 235).astype(np.uint8)
+        img[skel] = (0, 0, 0)
+        Image.fromarray(img[::3, ::3]).save(os.path.join(outdir, "topo_vs_old.png"))
+    except Exception as e:
+        log("png failed", e)
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "topo_report.json"), "w") as f:
         json.dump(report, f, indent=1)

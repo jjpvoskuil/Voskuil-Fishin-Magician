@@ -26,8 +26,8 @@ SHEETS = {
     "cubrun_708478": "KY_Cub%20Run_708478_1954_24000_geo.tif",
     "clarkson_708385": "KY_Clarkson_708385_1954_24000_geo.tif",
 }
-# public places: mid-lake by Dog Creek arm, the dam gorge, main lake near the state park (generic map coordinates)
-PLACES = {"midlake_east": (37.332, -86.179), "dam": (37.280, -86.247), "statepark": (37.300, -86.210), "upper": (37.36, -86.13)}
+# public places (no saved spots — repo is public): the app's generic lake center, the dam gorge, main lake near the state park (generic map coordinates)
+PLACES = {"midlake": (37.33, -86.17), "dam": (37.280, -86.247), "statepark": (37.300, -86.210), "upper": (37.36, -86.13)}
 HALF_M = 900  # crop half-size in metres
 
 
