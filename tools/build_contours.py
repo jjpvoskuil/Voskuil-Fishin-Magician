@@ -21,6 +21,7 @@ Writes OUTDIR/contours.json: {generated, source, levels, lines: [{e: elevation_f
 """
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -161,9 +162,23 @@ def main(out):
     halfw = 350.0  # ft: channel influence fades over ~ a long cast or two each side
     floor = GENERAL_FLOOR - (GENERAL_FLOOR - chan_floor[cr, cc]) * np.exp(-(d_ch / halfw) ** 2)
 
+    # option B (John 11-14, TOPO=1): the bottom below the water line from the pre-dam 1953/54 USGS sheets where they
+    # reach; the edge-slope estimate below stays as the fallback (and is what the holdout check compares against)
+    topo_E = None
+    if os.environ.get("TOPO") == "1":
+        from topo_bottom import topo_surface
+        ground = np.isfinite(Z) & ~water
+        topo_E, topo_skel, _ = topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, PIX, (lon0, lat0, lon1, lat1), (dr, dc), out)
+        if topo_skel.any():   # the real old river (and creeks) for the channel-swing suggestions
+            d_ch = np.minimum(d_ch, ndimage.distance_transform_edt(~topo_skel, sampling=PIX))
+
     cap = np.maximum(edge_wl - floor, 1.0)
     depth_below = cap * (1 - np.exp(-edge_slope * d_unseen / cap))
     est = edge_wl - depth_below
+    from_topo = np.zeros((H, W), bool)
+    if topo_E is not None:
+        from_topo = unseen & np.isfinite(topo_E)
+        est = np.where(from_topo, topo_E, est)
     est = ndimage.gaussian_filter(np.where(unseen, est, np.where(seen, Z, TOP)), 3.0)
     surface = np.where(unseen, est, np.where(seen, Z, TOP + 10))   # outside the lake: high, so shore lines close
     print(f"estimated bottom: min {np.nanmin(np.where(unseen, est, np.nan)):.1f} ft, "
@@ -176,7 +191,8 @@ def main(out):
             rr = np.clip(cs[:, 0].round().astype(int), 0, H - 1); ccx = np.clip(cs[:, 1].round().astype(int), 0, W - 1)
             if not lake[rr, ccx].any():
                 continue
-            flag = e < edge_wl[rr, ccx] - 0.3          # below the lidar's water line = estimated
+            # 0 = lidar, 1 = edge-slope estimate, 2 = read from the pre-dam USGS map
+            flag = np.where(e < edge_wl[rr, ccx] - 0.3, np.where(from_topo[rr, ccx], 2, 1), 0)
             # merge flicker: runs shorter than 8 vertices take their neighbors' value
             runs = np.flatnonzero(np.diff(flag.astype(int))) + 1
             bounds = np.concatenate([[0], runs, [len(flag)]])
@@ -195,7 +211,7 @@ def main(out):
                             lon, lat = to_ll.transform(*np.array(ls.coords).T)
                             coords = [[round(a, 5), round(b, 5)] for a, b in zip(lon, lat)]
                             kept_pts += len(coords)
-                            lines.append({"e": int(e), "est": int(bool(flag[start])), "c": coords})
+                            lines.append({"e": int(e), "est": int(flag[start]), "c": coords})
                     start = i
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     (out / "suggestions.json").write_text(json.dumps(suggest(surface, lake, seen, unseen, d_ch, slope, edge_wl, x0, y1, to_ll),
@@ -206,6 +222,9 @@ def main(out):
            "lines": lines}
     p = out / "contours.json"
     p.write_text(json.dumps(doc, separators=(",", ":")))
+    if topo_E is not None:
+        doc["source"] += " Where the 1953/54 pre-dam USGS 1:24,000 topo maps reach, the bottom below it is read from them (est=2)."
+        p.write_text(json.dumps(doc, separators=(",", ":")))
     print(f"wrote {p}: {len(lines)} lines, {kept_pts} points, {p.stat().st_size / 1e6:.1f} MB "
           f"(measured {sum(1 for l in lines if not l['est'])}, estimated {sum(1 for l in lines if l['est'])}) "
           f"in {time.time() - t0:.0f}s")
