@@ -8,6 +8,9 @@ on:
       topo:
         description: "1 = read the bottom below the lidar water line from the pre-dam 1953/54 USGS maps (option B, 11-14); output goes to branch depth-build-topo"
         default: "0"
+      debug:
+        description: "1 = also write topo debug overlays; 2 = overlays only, then stop"
+        default: "0"
 permissions:
   contents: write
 jobs:
@@ -18,13 +21,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -q rasterio pystac-client pyproj numpy scipy scikit-image shapely
-      - run: python tools/build_contours.py out
+      - run: pip install -q rasterio pystac-client pyproj numpy scipy scikit-image shapely pillow
+      - run: python tools/build_contours.py out || [ "${{ inputs.debug }}" = "2" ]
         env:
           TOPO: ${{ inputs.topo }}
+          TOPO_DEBUG: ${{ inputs.debug != '0' && '1' || '0' }}
+          TOPO_STOP: ${{ inputs.debug == '2' && '1' || '0' }}
       - name: Push to the depth-build branch
         run: |
           BR=depth-build; [ "${{ inputs.topo }}" = "1" ] && BR=depth-build-topo
-          cd out && git init -q && git checkout -q -b $BR && git add contours.json suggestions.json && (git add topo_report.json 2>/dev/null || true)
+          cd out && git init -q && git checkout -q -b $BR && git add -A
           git -c user.name="contour builder" -c user.email="actions@github.com" commit -qm "contours $(date -u +%F)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" $BR

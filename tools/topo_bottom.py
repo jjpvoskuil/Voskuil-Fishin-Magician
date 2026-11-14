@@ -281,10 +281,33 @@ def old_estimate(Z, known, unknown, line_level, pix):
     return line_level - cap * (1 - np.exp(-es * d / cap))
 
 
+def debug_overlays(per, Z, ground, x0, y1, pix, outdir):
+    """Red = 1950s map contour pixels, blue = lidar 20-ft contours, purple = both. A few public lake places."""
+    from PIL import Image
+    to_ky = Transformer.from_crs("EPSG:4326", "EPSG:3089", always_xy=True)
+    allc = np.zeros(Z.shape, bool)
+    for _, cg, _ in per:
+        allc |= cg.astype(bool)
+    lid = ground & (np.abs(Z - np.round(Z / INTERVAL) * INTERVAL) < 1.0) & (Z > 500)
+    os.makedirs(outdir, exist_ok=True)
+    for name, (lat, lon) in {"midlake_east": (37.332, -86.179), "dam": (37.280, -86.247), "statepark": (37.300, -86.210), "upper": (37.36, -86.13)}.items():
+        x, y = to_ky.transform(lon, lat); r, c = int((y1 - y) / pix), int((x - x0) / pix)
+        h = 300
+        sl = (slice(max(0, r - h), r + h), slice(max(0, c - h), c + h))
+        im = np.full(allc[sl].shape + (3,), 255, np.uint8)
+        im[lid[sl]] = (60, 110, 255); im[allc[sl]] = (230, 60, 50); im[allc[sl] & lid[sl]] = (130, 0, 160)
+        Image.fromarray(im).save(os.path.join(outdir, f"debug_{name}.png"))
+    log("debug overlays written")
+
+
 def topo_surface(Z, WL, lake, seen, unseen, ground, x0, y1, pix, lake_bbox, dam_rc, outdir):
     t0 = time.time()
     H, W = Z.shape
     per, water, cover = sheet_masks(H, W, x0, y1, pix, lake_bbox)
+    if os.environ.get("TOPO_DEBUG") == "1":
+        debug_overlays(per, Z, ground, x0, y1, pix, outdir)
+        if os.environ.get("TOPO_STOP") == "1":
+            raise SystemExit("TOPO_STOP after debug overlays")
     contour, reg = register(per, Z, ground, pix)
     offs = [r["vertical_offset_ft"] for r in reg if r.get("vertical_offset_ft") is not None and r["within_3ft"] > 2 * r["chance"]]
     offset = float(np.median(offs)) if offs else 0.0
