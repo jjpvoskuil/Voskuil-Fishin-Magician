@@ -9,7 +9,8 @@ import { LIGHT_CONDITIONS, LIGHT_CONDITION_INFO, PRECIPITATION_OPTIONS, STAIN_CO
   visibilityBand, waterTempBand } from "./lib/onwater.js";
 import { FISH_ACTIVITY_OPTIONS, FISH_SPECIES_OPTIONS, FORAGE_ACTIVITY_OPTIONS, HIT_TYPE_OPTIONS, LENGTH_OPTIONS, RETRIEVE_SPEED_OPTIONS,
   RETRIEVE_STYLE_OPTIONS, WEIGHT_LB_OPTIONS, WEIGHT_OZ_OPTIONS, canTakeTrailer, itemLabel, lengthInForDropdown, weightLbForDropdown } from "./lib/session.js";
-import { LURE_CATEGORY_OPTIONS, LURE_PROFILES, isTrailerEligible } from "./lib/lures.js";
+import { isTrailerEligible } from "./lib/lures.js";
+import { RIGS, categoryName, defaultRigFor, rigIdOf, rigKey, styleOf } from "./lib/baits.js";
 import { colorFamiliesIn, inColorFamily, inTypeFamily, typeFamiliesIn } from "./lib/lurefilter.js";
 import * as S from "./lib/session.js";
 
@@ -88,7 +89,7 @@ function LureRow({ it, urls, right, on, disabled, onClick }) {
   return (
     <button className={`row lp-row ${on ? "on" : ""}`} disabled={disabled} aria-pressed={on ?? undefined} onClick={onClick}>
       {img ? <img className="lp-img" src={img} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="lp-img ph"><Icon name="tackle" /></span>}
-      <span className="grow"><b>{it.brand}</b> {it.description}<span className="muted small block">{LURE_PROFILES[it.category]?.name || (it.category ? it.category.replace(/_/g, " ") : "no type")} · qty {it.quantity || "?"}</span></span>
+      <span className="grow"><b>{it.brand}</b> {it.description}<span className="muted small block">{categoryName(it.category) || (it.category ? it.category.replace(/_/g, " ") : "no type")} · qty {it.quantity || "?"}</span></span>
       {right}
     </button>
   );
@@ -97,10 +98,11 @@ const inStock = (i) => Number(i.quantity) > 0 || i.quantity === "" || i.quantity
 const byLabel = (a, b) => itemLabel(a).localeCompare(itemLabel(b));
 
 /** Search the tackle box and pick lures (type + color filters, John 11-11); asks about a trailer for lures that take one. */
-export function LurePicker({ open, onClose, inventory, onPick, already, db }) {
+export function LurePicker({ open, onClose, inventory, onPick, already, db, trips }) {
   const [q, setQ] = useState("");
   const [type, setType] = useState(""), [color, setColor] = useState("");
   const [trailerFor, setTrailerFor] = useState(null);
+  const [rigFor, setRigFor] = useState(null);
   const urls = useLurePhotos(db, inventory, open);
   const stock = useMemo(() => (inventory || []).filter(inStock), [inventory]);
   const types = useMemo(() => typeFamiliesIn(stock), [stock]);
@@ -108,14 +110,16 @@ export function LurePicker({ open, onClose, inventory, onPick, already, db }) {
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
     return stock.filter((i) => inTypeFamily(i, type) && inColorFamily(i, color))
-      .filter((i) => !t || `${i.brand} ${i.description} ${i.category} ${LURE_PROFILES[i.category]?.name || ""}`.toLowerCase().includes(t)).sort(byLabel);
+      .filter((i) => !t || `${i.brand} ${i.description} ${i.category} ${categoryName(i.category) || ""}`.toLowerCase().includes(t)).sort(byLabel);
   }, [stock, q, type, color]);
   const pick = (it) => { const stub = { label: itemLabel(it), category: it.category || null, item_id: it.item_id };
-    if (canTakeTrailer(it)) setTrailerFor(stub); else onPick(stub); };
+    const style = styleOf(it.category);   // soft plastic (#103): ask how it's rigged, like the trailer question for jigs
+    if (style) setRigFor({ stub: { ...stub, bait_style: style }, style, rig: defaultRigFor(it, trips) });
+    else if (canTakeTrailer(it)) setTrailerFor(stub); else onPick(stub); };
   const chips = (label, opts, val, set) => opts.length > 1 && <div className="lp-filter"><span className="muted small b">{label}</span>
     <div className="lp-chips">{["", ...opts].map((o) => <button key={o || "all"} className={`chip ${val === o ? "on" : ""}`} aria-pressed={val === o} onClick={() => set(o)}>{o || "All"}</button>)}</div></div>;
   return <>
-    <Sheet open={open && !trailerFor} title="Add from your tackle box" onClose={onClose}>
+    <Sheet open={open && !trailerFor && !rigFor} title="Add from your tackle box" onClose={onClose}>
       <label className="field" style={{ paddingTop: 10 }}>Search<input type="text" value={q} placeholder="brand, name, color or type" onChange={(e) => setQ(e.target.value)} /></label>
       {chips("Type", types, type, (v) => { setType(v); if (v && color && !stock.some((i) => inTypeFamily(i, v) && inColorFamily(i, color))) setColor(""); })}
       {chips("Color", colors, color, setColor)}
@@ -130,7 +134,29 @@ export function LurePicker({ open, onClose, inventory, onPick, already, db }) {
       <button className="btn primary wide" style={{ marginTop: 10 }} onClick={onClose}>Done</button>
     </Sheet>
     <TrailerSheet db={db} stub={trailerFor} inventory={inventory} onClose={() => setTrailerFor(null)} onDone={(s) => { setTrailerFor(null); onPick(s); }} />
+    <RigSheet ask={rigFor} onClose={() => setRigFor(null)} onDone={(s) => { setRigFor(null); onPick(s); }} />
   </>;
+}
+
+/** After picking a soft plastic (#103): how is it rigged? Preselects how it was rigged last time (else the style's
+ *  usual rig). The rig becomes the lure row's lure_category — what the picks and reports learn from. */
+export function RigSheet({ ask, onClose, onDone }) {
+  const [rig, setRig] = useState(null);
+  useEffect(() => { setRig(ask?.rig || null); }, [ask]);
+  if (!ask) return null;
+  const done = () => onDone({ ...ask.stub, category: rigKey(rig || ask.rig, ask.style) });
+  return (
+    <Sheet open title="How is it rigged?" onClose={onClose}>
+      <div className="setup">
+        <p className="muted small" style={{ margin: 0 }}>{ask.stub.label}</p>
+        <div className="chips rig-chips" role="radiogroup" aria-label="Rig">
+          {RIGS.map((r) => <button type="button" key={r.id} className={`chip ${rig === r.id ? "on" : ""}`} aria-pressed={rig === r.id} onClick={() => setRig(r.id)}>{r.name}</button>)}
+        </div>
+        <button className="btn primary wide big" onClick={done}>Add — {RIGS.find((r) => r.id === rig)?.name || "rigged"}</button>
+        <p className="muted small" style={{ margin: 0 }}>You can change the rig later on the lure's card.</p>
+      </div>
+    </Sheet>
+  );
 }
 
 /** After picking a lure that takes one: tap a trailer from the tackle box (same rows as the lure list), type one, or none. */
@@ -223,12 +249,14 @@ function FishForm({ lure, onClose, onSave, initial }) {
   );
 }
 
-/** "Rigged as" picker for soft plastics (drop shot, wacky, shaky head, Texas, Carolina, weightless). */
-export function RigSelect({ category, onChange }) {
-  if (!S.isSoftPlastic(category)) return null;
+/** "Rigged as" picker for a soft plastic already in the session. `style` = the row's bait style (rows logged before
+ *  #103 have none — their rig key implies one). onChange gets the new engine key. */
+export function RigSelect({ category, style, onChange }) {
+  if (!S.isSoftPlastic(category, style)) return null;
+  const st = style || styleOf(category) || "sp_worm";
   return <label className="rig">Rigged as
-    <select value={category} onChange={(e) => onChange(e.target.value)}>
-      {S.SOFT_PLASTIC_RIGS.map((k) => <option key={k} value={k}>{RIG_NAMES[k] || k}</option>)}
+    <select value={rigIdOf(category) || ""} onChange={(e) => onChange(rigKey(e.target.value, st))}>
+      {!rigIdOf(category) && <option value="">— pick a rig —</option>}
+      {RIGS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
     </select></label>;
 }
-const RIG_NAMES = Object.fromEntries(LURE_CATEGORY_OPTIONS);

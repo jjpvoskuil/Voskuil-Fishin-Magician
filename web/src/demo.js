@@ -48,10 +48,12 @@ export const DEMO_USACE_HTML = `<table><tr><td>Dam Site</td><td>${lakeToday().re
 
 const DEMO_LURES = [
   ["dl1", "Strike King", "KVD Squarebill 1.5 - Sexy Shad", "squarebill_crankbait", "2"], ["dl2", "Z-Man", "ChatterBait Jackhammer - Green Pumpkin", "chatterbait", "1"],
-  ["dl3", "Berkley", "MaxScent Flat Worm - Watermelon Red", "finesse_shaky_head", "5"], ["dl4", "Booyah", "Football Jig - Brown/Orange", "football_jig", "2"],
+  ["dl3", "Berkley", "MaxScent Flat Worm - Watermelon Red", "sp_worm", "5"], ["dl4", "Booyah", "Football Jig - Brown/Orange", "football_jig", "2"],
   ["dl5", "Rapala", "Shadow Rap - Ghost Shad", "suspending_jerkbait", "1"], ["dl6", "Strike King", "Red Eye Shad - Chrome Blue", "lipless_crankbait", "2"],
-  ["dl7", "Heddon", "Zara Spook - Bone", "walking_topwater", "1"], ["dl8", "Yamamoto", "Senko 5in - Green Pumpkin", "wacky_rig_senko", "10"], ["dl8b", "Roboworm", "FAT Straight Worm - Margarita Mutilator, 6in", "drop_shot", "10"],
-  ["dl9", "Strike King", "6XD - Citrus Shad", "deep_diving_crankbait", "1"], ["dl10", "Zoom", "Brush Hog - Black/Blue", "texas_rig_creature", "8"],
+  ["dl7", "Heddon", "Zara Spook - Bone", "walking_topwater", "1"], ["dl8", "Yamamoto", "Senko 5in - Green Pumpkin", "sp_worm", "10"], ["dl8b", "Roboworm", "FAT Straight Worm - Margarita Mutilator, 6in", "sp_worm", "10"],
+  ["dl9", "Strike King", "6XD - Citrus Shad", "deep_diving_crankbait", "1"], ["dl10", "Zoom", "Brush Hog - Black/Blue", "sp_creature", "8"],
+  ["dl11", "Z-Man", "Finesse TRD - Green Pumpkin", "sp_trd", "6"], ["dl12", "Blakemore", "Yum Runner Underspin - Bombshell", "underspin", "1"],
+  ["dl13", "River2Sea", "S-Waver 168 - Rainbow Trout", "hard_swimbait", "1"],
 ];
 export const demoLures = () => DEMO_LURES.map(([item_id, brand, description, category, quantity]) => ({ item_id, brand, description, category, quantity, sku: "", image_url: "", image_filename: "", source: "demo" }));
 export const demoSpots = () => [

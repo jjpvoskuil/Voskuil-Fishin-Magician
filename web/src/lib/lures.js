@@ -5,6 +5,7 @@ import DATA from "./data/lures.data.json" with { type: "json" };
 import { thermoclineCaveat } from "./onwater.js";
 import { median, pyFixed, pyRound } from "./py.js";
 import { parseConditions, tripFishPerHour } from "./calibration.js";
+import { servesKeys } from "./baits.js";
 
 export const { BASE_STAIN_OPTIONS, DEFAULT_BASE_STAIN, WATER_CLARITY_OPTIONS, STRUCTURE_TYPES, FORAGE_OPTIONS, DEFAULT_FORAGE,
   FORAGE_NOTES, FORAGE_LURE_BOOST, LURE_PROFILES, VIDEO_LIBRARY } = DATA;
@@ -159,11 +160,12 @@ export function itemLabel(it) {
 export function groupOwnedByCategory(inventory) {
   const g = {};
   for (const row of inventory || []) {
-    const cat = (row.category || "").trim();
-    if (!(cat in LURE_PROFILES)) continue;
+    // A soft-plastic bait style (#103) counts toward every rig it's commonly fished on; anything else = its own key.
+    const cats = servesKeys((row.category || "").trim());
+    if (!cats.length) continue;
     const qty = pyIntOr(row.quantity, 0);
     if (qty <= 0) continue;
-    (g[cat] ||= []).push({ item_id: row.item_id ?? "", brand: row.brand ?? "", description: row.description ?? "", quantity: qty,
+    for (const cat of cats) (g[cat] ||= []).push({ item_id: row.item_id ?? "", brand: row.brand ?? "", description: row.description ?? "", quantity: qty,
       sku: row.sku ?? "", image_url: row.image_url ?? "", image_filename: row.image_filename ?? "" });
   }
   return g;
@@ -350,7 +352,8 @@ export function guessCategoryFromText(...texts) {
   for (const [cat, phrases] of DATA.CATEGORY_KEYWORD_RULES) if (phrases.some((p) => combined.includes(p))) return cat;
   return "";
 }
-const TRAILER_ELIGIBLE = new Set(["texas_rig_creature", "weightless_soft_plastic"]);
+// + bait styles (#103): creature baits, flukes and paddle tails go on jigs / bladed jigs as trailers.
+const TRAILER_ELIGIBLE = new Set(["texas_rig_creature", "weightless_soft_plastic", "sp_creature", "sp_fluke", "sp_paddle_tail"]);
 export function isTrailerEligible(item) {
   if (!TRAILER_ELIGIBLE.has(item.category)) return false;
   const t = `${item.brand ?? ""} ${item.description ?? ""}`.toLowerCase();

@@ -550,6 +550,40 @@ LURE_PROFILES = {
                          "a real, documented Nolin post-spawn and fall pattern (per Omnia Fishing's Nolin-specific "
                          "pattern data) for shad-imitating baitfish presentations without a hard bill to snag cover.",
     },
+    # Punch-list #102 (Matthew, 2026-11-14): underspin and hard (glide / jointed) swimbait as their own lure types.
+    # General patterns - not Nolin-documented like the entries above.
+    "underspin": {
+        "name": "Underspin",
+        "video_key": "underspin",
+        "vertical_style": "column",
+        "colors": {
+            "Clear": ["Natural shad", "Silver blade / ghost shad"],
+            "Green stained": ["Chartreuse shad", "Gold blade / natural shad"],
+            "Brown stained": ["White / chartreuse", "Gold blade"],
+            "Muddy": ["Chartreuse / white", "Gold blade / black back"],
+        },
+        "trailer": None,
+        "depth_range_ft": (5, 25), "depth_style": "counted down and slow-rolled just above the fish",
+        "presentation": "A jighead with a small blade under it, usually with a paddle-tail swimbait - count it down to "
+                         "suspended or deep fish around shad and slow-roll it so the blade just turns over. A general "
+                         "cool-water and winter pattern, not a Nolin-specific published one.",
+    },
+    "hard_swimbait": {
+        "name": "Hard Swimbait (glide / jointed)",
+        "video_key": "hard_swimbait",
+        "vertical_style": "column",
+        "colors": {
+            "Clear": ["Natural shad", "Ghost / translucent shad"],
+            "Green stained": ["Natural shad", "Gizzard shad"],
+            "Brown stained": ["Gizzard shad", "White / chartreuse"],
+            "Muddy": ["White / chartreuse", "Black back / white"],
+        },
+        "trailer": None,
+        "depth_range_ft": (1, 8), "depth_style": "glided or swum high in the water column",
+        "presentation": "A big hard glide or jointed swimbait - swing it side to side with slow cranks and pauses "
+                         "around points, bluff ends and shad schools, mostly for a bigger bite rather than numbers. A "
+                         "general pattern, not a Nolin-specific published one.",
+    },
 }
 
 
@@ -1488,6 +1522,10 @@ LURE_CATEGORY_OPTIONS = [(key, profile["name"]) for key, profile in LURE_PROFILE
 # feature (core.cabelas_lookup) to auto-tag newly added items.
 _CATEGORY_KEYWORD_RULES = [
     ("hollow_body_frog", ["hollow body frog", "hollow-body frog", " frog"]),
+    # Punch-list #102: checked before swimbait/spinner/fluke so "S-Waver Swimbait" / "Yum Runner Underspin" land right.
+    ("underspin", ["underspin", "under spin", "under-spin"]),
+    ("hard_swimbait", ["glide bait", "glidebait", "s-waver", "hard swimbait", "jointed swimbait", "multi-joint",
+                       "multi joint", "gantarel"]),
     ("buzzbait", ["buzzbait", "buzz bait", "buzz king"]),
     ("walking_topwater", ["walking topwater", "walk the dog", "spook", "walking bait"]),
     ("popper", ["popper"]),

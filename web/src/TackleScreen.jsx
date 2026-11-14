@@ -7,7 +7,10 @@ import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
 import { Sheet } from "./ui.jsx";
 import { newId } from "./lib/db.js";
-import { guessCategoryFromText, itemLabel, LURE_CATEGORY_OPTIONS, LURE_PROFILES, NOT_SUGGESTED_ON_NOLIN } from "./lib/lures.js";
+import { guessCategoryFromText as guessEngineKey, itemLabel, LURE_PROFILES, NOT_SUGGESTED_ON_NOLIN } from "./lib/lures.js";
+import { inventoryTypeOptions, servesKeys, toInventoryCategory } from "./lib/baits.js";
+// The tackle box types soft plastics by bait style (#103), so a tagger guess like "texas_rig_worm" becomes "worm".
+const guessCategoryFromText = (...t) => toInventoryCategory(guessEngineKey(...t));
 import { blobB64, preparePhoto } from "./lib/photo.js";
 import { cabelasSearchUrl, describeScan, groupByType, newItem, savedPicks, typeName, usageByLabel, usageFor } from "./lib/tackle.js";
 
@@ -27,7 +30,7 @@ export default function TackleScreen({ active, db, me, trips, lures, reloadLures
 
   const shown = items.filter((i) => !q.trim() || `${i.brand} ${i.description} ${typeName(i.category)}`.toLowerCase().includes(q.trim().toLowerCase()));
   const groups = groupByType(shown);
-  const owned = new Set(items.filter((i) => Number(i.quantity) > 0).map((i) => i.category));
+  const owned = new Set(items.filter((i) => Number(i.quantity) > 0).flatMap((i) => servesKeys(i.category)));
   const gaps = Object.keys(LURE_PROFILES).filter((k) => !owned.has(k) && !NOT_SUGGESTED_ON_NOLIN.has(k) && savedPicks(k).length);
   const totalQty = items.reduce((a, i) => a + (Number(i.quantity) || 0), 0);
 
@@ -43,7 +46,7 @@ export default function TackleScreen({ active, db, me, trips, lures, reloadLures
       const s = await db.scanLure(await blobB64(photo.full));
       setEdit((e) => e && { ...e, scanning: false, scan: s, draft: !s.visible ? e.draft : { ...e.draft,
         brand: e.draft.brand || s.brand, description: e.draft.description || describeScan(s),
-        category: e.draft.category || s.lure_type || guessCategoryFromText(s.brand, s.product_name, s.search_query) } });
+        category: e.draft.category || toInventoryCategory(s.lure_type) || guessCategoryFromText(s.brand, s.product_name, s.search_query) } });
     } catch (err) { setEdit((e) => e && { ...e, scanning: false, error: err.message }); }
   };
   const saveItem = async () => {
@@ -147,7 +150,7 @@ function ItemSheet({ edit, setEdit, urls, usage, onSave, onRemove, onPhoto, item
         <label className="field">Name, color, size<input type="text" value={d.description || ""} onChange={(e) => set({ description: e.target.value })} /></label>
         <div className="two">
           <label className="field">Type<select value={d.category || ""} onChange={(e) => set({ category: e.target.value })}>
-            <option value="">— pick a type —</option>{LURE_CATEGORY_OPTIONS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+            <option value="">— pick a type —</option>{inventoryTypeOptions(d.category).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
           <div className="field">How many<span className="qty big"><button type="button" onClick={() => set({ quantity: Math.max(0, (Number(d.quantity) || 0) - 1) })}>−</button>
             <b className="num">{Number(d.quantity) || 0}</b><button type="button" onClick={() => set({ quantity: (Number(d.quantity) || 0) + 1 })}>+</button></span></div>
         </div>

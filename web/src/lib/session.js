@@ -11,6 +11,7 @@ import { manualSegmentScore, realtimeContextFromBundle, seasonStage, segmentTime
 import { estimateWaterTempF, hourlyRowsForDate } from "./weather.js";
 import { parseConditions } from "./calibration.js";
 import { LURE_PROFILES } from "./lures.js";
+import { isBaitStyle, isSoftPlasticRigKey, styleOf } from "./baits.js";
 
 export const FISH_ACTIVITY_OPTIONS = ["Inactive / shut down", "Sluggish", "Moderate", "Active", "Very active"];
 export const FORAGE_ACTIVITY_OPTIONS = ["None seen", "Sparse / scattered", "Moderate", "Active / schooling", "Frenzied (busting bait)"];
@@ -26,7 +27,7 @@ export const CONDITION_FIELDS = {
   water_temp_f: 85.0, secchi_ft: 2.5, stain_color: "Green stained", stirred_up: false, wind_band: "Light Ripple", wind_direction: "SW",
   light_condition: "Partly Cloudy", precipitation: "None", forage_seen: ["Threadfin Shad"], fish_activity: "Moderate", forage_activity: "Moderate", fish_depth_ft: 8.0,
 };
-const PER_LURE_KEYS = new Set(["lure_category", "trailer_used", "trailer_name", "trailer_color", "trailer_category", "lure_start_time", "lure_end_time", "fish", "source"]);
+const PER_LURE_KEYS = new Set(["lure_category", "bait_style", "trailer_used", "trailer_name", "trailer_color", "trailer_category", "lure_start_time", "lure_end_time", "fish", "source"]);
 /** fields that come from the water (worth reusing from someone else's session at the lake today) */
 const WATER_FIELDS = ["water_temp_f", "secchi_ft", "stain_color", "stirred_up", "forage_seen", "fish_depth_ft"];
 
@@ -116,7 +117,7 @@ export function lureRow({ base, lure, at, session, spot, structure, clarity, seg
     trip_id: newTripId(), logged_at: new Date().toISOString().replace("Z", ""), trip_date: session.date, segment, spot_id: spot.spot_id, spot_name: spot.name,
     structure_type: structure, water_clarity: clarity, lure_used: lure.label, color_used: "", technique_used: "", fish_caught: 0, biggest_fish_lb: null,
     predicted_score: predicted, notes: "", session_id: session.id, owner,
-    conditions: { ...base, lure_category: lure.category ?? null, trailer_used: tr != null, trailer_name: tr ? tr.label : null, trailer_color: tr ? tr.color : null,
+    conditions: { ...base, lure_category: lure.category ?? null, bait_style: lure.bait_style ?? null, trailer_used: tr != null, trailer_name: tr ? tr.label : null, trailer_color: tr ? tr.color : null,
       trailer_category: tr ? tr.category : null, item_id: lure.item_id ?? null, lure_start_time: hhmmss(at), lure_end_time: null, fish: [], source: "spot_session" },
   };
 }
@@ -169,13 +170,17 @@ export function lastSessionLures(trips, me, inventory) {
     if (seen.has(t.lure_used)) continue; seen.add(t.lure_used);
     const c = parseConditions(t), item = (inventory || []).find((i) => i.item_id === c.item_id || itemLabel(i) === t.lure_used);
     out.push({ label: t.lure_used, category: c.lure_category ?? item?.category ?? null, item_id: item?.item_id ?? c.item_id ?? null,
+      bait_style: c.bait_style ?? styleOf(item?.category) ?? null,
       trailer: c.trailer_used ? { label: c.trailer_name, color: c.trailer_color, category: c.trailer_category, item_id: null } : null });
   }
   return out;
 }
 export function itemLabel(it) { const l = [(it.brand || "").trim(), (it.description || "").trim()].filter(Boolean).join(" - "); return l || it.item_id || "Unnamed item"; }
 /** Whether a lure can take a trailer (old lure_can_take_trailer): yes unless its profile says it never does. */
-export function canTakeTrailer(item) { const p = item ? LURE_PROFILES[item.category] : null; return !p || p.trailer != null; }
+export function canTakeTrailer(item) {
+  if (item && (isBaitStyle(item.category) || isSoftPlasticRigKey(item.category))) return false; // soft plastics get the rig question instead
+  const p = item ? LURE_PROFILES[item.category] : null; return !p || p.trailer != null;
+}
 export const sessionConditions = (row) => Object.fromEntries(Object.entries(parseConditions(row)).filter(([k]) => !PER_LURE_KEYS.has(k)));
 
 /** Nearest saved spot within maxM metres of a GPS fix, or null. */
@@ -192,8 +197,8 @@ export { dateOf, astro };
 
 /** Soft plastics can be rigged several ways, and the rig is what the lure picks learn from — so a session lets you say
  *  how this one is rigged (the Roboworm sessions were drop shot but got logged as wacky; corrected 2026-11-10). */
-export const SOFT_PLASTIC_RIGS = ["drop_shot", "ned_rig", "wacky_rig_senko", "finesse_shaky_head", "texas_rig_worm", "texas_rig_creature", "carolina_rig", "weightless_soft_plastic"];
-export const isSoftPlastic = (category) => SOFT_PLASTIC_RIGS.includes(category);
+// #103 (2026-11-14): rigs + bait styles live in baits.js; a lure row is "soft plastic" when it has a bait style or a rig key.
+export const isSoftPlastic = (category, baitStyle = null) => !!baitStyle || isSoftPlasticRigKey(category);
 export const withRig = (row, category) => ({ ...row, conditions: { ...row.conditions, lure_category: category } });
 
 /** When a session started: its saved start_time, else the earliest lure start (older rows didn't save start_time). */
@@ -246,7 +251,7 @@ export function relocateRows(rows, { newBase, spot, structure, clarity, segment,
     return { next: rows.map((r) => changed.find((c) => c.trip_id === r.trip_id) || r), changed };
   }
   const closed = open.map((r) => retireRow(r, now));
-  const reopened = open.map((r) => lureRow({ base: newBase, lure: { label: r.lure_used, category: r.conditions.lure_category, item_id: r.conditions.item_id,
+  const reopened = open.map((r) => lureRow({ base: newBase, lure: { label: r.lure_used, category: r.conditions.lure_category, bait_style: r.conditions.bait_style ?? null, item_id: r.conditions.item_id,
     trailer: r.conditions.trailer_used ? { label: r.conditions.trailer_name, color: r.conditions.trailer_color, category: r.conditions.trailer_category } : null },
     at: now, session: { id: r.session_id, date: r.trip_date }, spot, structure, clarity, segment, predicted, owner }));
   return { next: [...rows.map((r) => closed.find((c) => c.trip_id === r.trip_id) || r), ...reopened], changed: [...closed, ...reopened] };

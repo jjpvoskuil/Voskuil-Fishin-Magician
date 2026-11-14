@@ -3,12 +3,13 @@
 export const TYPE_FAMILIES = [
   ["Crankbaits", ["squarebill_crankbait", "medium_diving_crankbait", "deep_diving_crankbait", "lipless_crankbait"]],
   ["Jerkbaits", ["suspending_jerkbait"]],
-  ["Bladed & spinners", ["chatterbait", "spinnerbait", "buzzbait", "blade_bait"]],
+  ["Bladed & spinners", ["chatterbait", "spinnerbait", "buzzbait", "blade_bait", "underspin"]],
   ["Jigs", ["football_jig", "swim_jig"]],
   ["Topwater", ["walking_topwater", "popper", "buzzbait", "hollow_body_frog"]],
-  ["Finesse", ["drop_shot", "ned_rig", "finesse_shaky_head", "wacky_rig_senko"]],
-  ["Soft plastics", ["texas_rig_creature", "texas_rig_worm", "carolina_rig", "weightless_soft_plastic", "soft_swimbait", "drop_shot", "ned_rig", "finesse_shaky_head", "wacky_rig_senko"]],
-  ["Swimbaits", ["soft_swimbait", "swim_jig"]],
+  ["Finesse", ["drop_shot", "ned_rig", "finesse_shaky_head", "wacky_rig_senko", "sp_trd"]],
+  // Bait styles (#103) sit in the soft-plastics family; the old rig keys stay so not-yet-retyped items still match.
+  ["Soft plastics", ["sp_worm", "sp_creature", "sp_fluke", "sp_paddle_tail", "sp_trd", "texas_rig_creature", "texas_rig_worm", "carolina_rig", "weightless_soft_plastic", "soft_swimbait", "drop_shot", "ned_rig", "finesse_shaky_head", "wacky_rig_senko"]],
+  ["Swimbaits", ["soft_swimbait", "sp_paddle_tail", "hard_swimbait", "underspin", "swim_jig"]],
   ["Spoons", ["spoon"]],
 ];
 export const COLOR_FAMILIES = [

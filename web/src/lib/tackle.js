@@ -5,10 +5,11 @@ import { parseConditions } from "./calibration.js";
 import { lureHours } from "./history.js";
 import { itemLabel, LURE_PROFILES } from "./lures.js";
 import PICKS from "./data/cabelas_picks.json" with { type: "json" };
+import { BAIT_STYLE_KEYS, categoryName, isBaitStyle } from "./baits.js";
 
 export const cabelasSearchUrl = (q) => `https://www.cabelas.com/SearchDisplay#q=${encodeURIComponent((q || "").trim())}`;
 export const savedPicks = (category) => PICKS[category] || [];
-export const typeName = (k) => (k && LURE_PROFILES[k] ? LURE_PROFILES[k].name : "No type set");
+export const typeName = (k) => categoryName(k) || "No type set";
 
 /** {label: {fish, hours, sessions, last}} for every lure label in the trip log (all anglers, or one owner). */
 export function usageByLabel(trips, owner = null) {
@@ -27,8 +28,8 @@ export const usageFor = (usage, item) => usage[itemLabel(item)] || null;
 
 /** Lure-type groups for the list: [{key, name, items}] in the app's type order, "No type set" last. */
 export function groupByType(items) {
-  const order = Object.keys(LURE_PROFILES), g = {};
-  for (const it of items) (g[it.category && LURE_PROFILES[it.category] ? it.category : ""] ||= []).push(it);
+  const order = [...BAIT_STYLE_KEYS, ...Object.keys(LURE_PROFILES)], g = {};
+  for (const it of items) (g[it.category && (LURE_PROFILES[it.category] || isBaitStyle(it.category)) ? it.category : ""] ||= []).push(it);
   return [...order.filter((k) => g[k]), ...(g[""] ? [""] : [])].map((k) => ({ key: k, name: typeName(k), items: g[k] }));
 }
 
