@@ -1,0 +1,324 @@
+{
+ "registration": [
+  {
+   "sheet": "Dickeys Mills 1954",
+   "shift_ft": [
+    -16.0,
+    16.0
+   ],
+   "within_3ft": 0.324,
+   "chance": 0.3,
+   "vertical_offset_ft": -0.08,
+   "px": 2095827
+  },
+  {
+   "sheet": "Bee Spring 1953",
+   "shift_ft": [
+    -8.0,
+    0.0
+   ],
+   "within_3ft": 0.318,
+   "chance": 0.3,
+   "vertical_offset_ft": -0.41,
+   "px": 633883
+  },
+  {
+   "sheet": "Cub Run 1954",
+   "shift_ft": [
+    8.0,
+    -32.0
+   ],
+   "within_3ft": 0.361,
+   "chance": 0.3,
+   "vertical_offset_ft": -0.14,
+   "px": 496512
+  },
+  {
+   "sheet": "Clarkson 1954",
+   "shift_ft": [
+    -16.0,
+    24.0
+   ],
+   "within_3ft": 0.313,
+   "chance": 0.3,
+   "vertical_offset_ft": -0.69,
+   "px": 404620
+  },
+  {
+   "sheet": "Leitchfield 1954",
+   "shift_ft": [
+    0.0,
+    -16.0
+   ],
+   "within_3ft": 0.417,
+   "chance": 0.3,
+   "vertical_offset_ft": -1.62,
+   "px": 49423
+  },
+  {
+   "sheet": "Millerstown 1954",
+   "shift_ft": [
+    -64.0,
+    48.0
+   ],
+   "within_3ft": 0.34,
+   "chance": 0.3,
+   "vertical_offset_ft": -0.42,
+   "px": 45837
+  }
+ ],
+ "wide_search": [
+  {
+   "sheet": "Dickeys Mills 1954",
+   "best": [
+    [
+     0.321,
+     0,
+     0
+    ],
+    [
+     0.32,
+     -32,
+     0
+    ],
+    [
+     0.318,
+     -32,
+     -32
+    ]
+   ]
+  },
+  {
+   "sheet": "Bee Spring 1953",
+   "best": [
+    [
+     0.316,
+     0,
+     0
+    ],
+    [
+     0.313,
+     0,
+     -32
+    ],
+    [
+     0.312,
+     32,
+     0
+    ]
+   ]
+  },
+  {
+   "sheet": "Cub Run 1954",
+   "best": [
+    [
+     0.361,
+     32,
+     0
+    ],
+    [
+     0.352,
+     0,
+     0
+    ],
+    [
+     0.351,
+     32,
+     32
+    ]
+   ]
+  },
+  {
+   "sheet": "Clarkson 1954",
+   "best": [
+    [
+     0.311,
+     96,
+     -128
+    ],
+    [
+     0.31,
+     -32,
+     0
+    ],
+    [
+     0.309,
+     96,
+     -96
+    ]
+   ]
+  },
+  {
+   "sheet": "Leitchfield 1954",
+   "best": [
+    [
+     0.398,
+     32,
+     0
+    ],
+    [
+     0.397,
+     0,
+     0
+    ],
+    [
+     0.376,
+     32,
+     -32
+    ]
+   ]
+  },
+  {
+   "sheet": "Millerstown 1954",
+   "best": [
+    [
+     0.337,
+     -256,
+     608
+    ],
+    [
+     0.336,
+     -288,
+     608
+    ],
+    [
+     0.336,
+     320,
+     32
+    ]
+   ]
+  }
+ ],
+ "holdout": {
+  "line_ft": 536.0,
+  "test_cells": 2017351,
+  "acres": 2964,
+  "topo": {
+   "median_abs_ft": 6.7,
+   "mean_abs_ft": 8.8,
+   "within_5ft": 0.401,
+   "within_10ft": 0.653,
+   "bias_ft": 4.5
+  },
+  "old_estimate": {
+   "median_abs_ft": 4.1,
+   "mean_abs_ft": 6.0,
+   "within_5ft": 0.563,
+   "within_10ft": 0.806,
+   "bias_ft": 0.6
+  },
+  "solve": {
+   "tag": "holdout",
+   "river_fixed_points": 47,
+   "pass1": {
+    "pieces": 6627,
+    "labeled": 2922,
+    "by_level": {
+     "440": 0,
+     "460": 66,
+     "480": 501,
+     "500": 1100,
+     "520": 1255
+    }
+   },
+   "pass2": {
+    "pieces": 6627,
+    "labeled": 3443,
+    "by_level": {
+     "440": 0,
+     "460": 79,
+     "480": 552,
+     "500": 1262,
+     "520": 1550
+    }
+   }
+  },
+  "topo_by_depth": {
+   "0-10ft_below_line": {
+    "cells": 477253,
+    "median_abs_ft": 3.6,
+    "bias_ft": 2.2
+   },
+   "10-20ft_below_line": {
+    "cells": 522461,
+    "median_abs_ft": 6.1,
+    "bias_ft": 3.6
+   },
+   "20-30ft_below_line": {
+    "cells": 548004,
+    "median_abs_ft": 9.7,
+    "bias_ft": 8.1
+   },
+   "30-60ft_below_line": {
+    "cells": 469633,
+    "median_abs_ft": 12.1,
+    "bias_ft": 10.2
+   }
+  },
+  "old_by_depth": {
+   "0-10ft_below_line": {
+    "cells": 477253,
+    "median_abs_ft": 1.6,
+    "bias_ft": -0.8
+   },
+   "10-20ft_below_line": {
+    "cells": 522461,
+    "median_abs_ft": 3.7,
+    "bias_ft": -0.4
+   },
+   "20-30ft_below_line": {
+    "cells": 548004,
+    "median_abs_ft": 5.8,
+    "bias_ft": 3.1
+   },
+   "30-60ft_below_line": {
+    "cells": 469633,
+    "median_abs_ft": 7.5,
+    "bias_ft": 5.2
+   }
+  },
+  "coverage": 1.0,
+  "vertical_offset_ft": 0.0
+ },
+ "below_waterline": {
+  "line_ft": 498.8,
+  "solve": {
+   "tag": "below-waterline",
+   "river_fixed_points": 101,
+   "pass1": {
+    "pieces": 3758,
+    "labeled": 1191,
+    "by_level": {
+     "420": 0,
+     "440": 0,
+     "460": 66,
+     "480": 1125
+    }
+   },
+   "pass2": {
+    "pieces": 3758,
+    "labeled": 1228,
+    "by_level": {
+     "420": 0,
+     "440": 0,
+     "460": 86,
+     "480": 1142
+    }
+   }
+  },
+  "coverage": 0.999,
+  "min_ft": 449.4,
+  "minutes": 4.1,
+  "topo_minus_old_ft": {
+   "5": -8.0,
+   "25": -1.0,
+   "50": 0.5,
+   "75": 4.7,
+   "95": 11.5
+  },
+  "deeper_than_480_acres": {
+   "topo": 481,
+   "old": 0
+  }
+ }
+}
