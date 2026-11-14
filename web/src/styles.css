@@ -371,6 +371,10 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .rp-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rp-track { height: 12px; border-radius: 99px; background: var(--accent-track); overflow: hidden; }
 .rp-track span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.sc-plot { width: 100%; height: auto; }
+.sc-plot .ax { stroke: var(--line); stroke-width: 1; }
+.sc-plot .tk { fill: var(--muted); font-size: 10px; }
+.sc-plot .dot { fill: var(--accent); fill-opacity: .7; stroke: var(--card); stroke-width: 1; }
 .rp-val { text-align: right; white-space: nowrap; min-width: 62px; line-height: 1.15; }
 
 /* Punch list */

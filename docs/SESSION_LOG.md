@@ -46,3 +46,15 @@
 
 ## 2026-11-12
 - Missed USACE water-quality surveys (Aug 6–Oct 28) can't be recovered online (checked report page, Wayback, CWMS, USGS); contact for a request: Louisville District Water Quality Team. New twice-daily job in deercast-data logs every survey with the full depth profile, plus USGS tailwater daily temps since Aug 1 (104 days). Nov 12 survey: 64.4 °F top to 40 ft, DO 4.33 mg/l (turnover).
+
+## 2026-11-14
+- Pulled the punch list with an on-demand deercast-data backup (Matthew added #99–#103 today; John: keep holding #30).
+- #102/#103 done: underspin + hard (glide) swimbait types; tackle box types soft plastics by bait style (worm,
+  creature, fluke, paddle tail, TRD) and Session asks how it's rigged (rig = what the picks learn from). Tested the
+  live retype SQL on a local copy of today's backup (31 items + 2 S-Waver trips; re-run = no-ops) and sent it to John.
+- #101 done: spots to try ranked for the Hot-spots filter, numbered stars, reasons, top-5 list.
+- #99 done: Reports → Forecast vs catch. Finding: on 2026's 55 days fished the forecast score has no real link to fish/hr.
+- #100 investigated, not changed: deep contours are estimates capped at 480 ft off the modeled channel; real depth data
+  needed (options sent to John).
+- Python suite: 29 failures pre-existing (retired Streamlit pages + frog-gap tests), none new. JS: 53 pass.
+

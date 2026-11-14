@@ -246,6 +246,27 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - Screenshots: `python3 web/tools/screens.py OUTDIR Today[,More…] [--click "Button name"]` (mocks Open-Meteo/USGS
   from the engine fixtures; needs the vite preview running).
 
+## Punch list 11-14 (Matthew's #99–#103; #30 held by John)
+- #102/#103 tackle types (lib/baits.js + test): the tackle box types soft plastics by BAIT STYLE — sp_worm, sp_creature,
+  sp_fluke, sp_paddle_tail, sp_trd (not engine keys; never in LURE_PROFILES) — and two new engine types underspin +
+  hard_swimbait (core/lures.py profiles + tagger rules, re-exported; no curated Cabela's picks/videos yet, tests exempt
+  them). Trip rows still store the RIG as conditions.lure_category (texas_rig_worm/creature by style, drop_shot, ned_rig,
+  finesse_shaky_head, wacky_rig_senko, carolina_rig, weightless_soft_plastic, soft_swimbait = swimbait jighead,
+  underspin) plus conditions.bait_style. Picking a soft plastic in Session opens RigSheet ("How is it rigged?"),
+  preselected: last rig fished with that item > its old rig type > name keywords (Roboworm → drop shot) > style default.
+  groupOwnedByCategory expands a style to STYLE_SERVES keys (picks/gaps). Old rig-typed items keep working (styleOf).
+  Live retype = John runs tackle_retype_2026-11-14.sql (31 items + 2 S-Waver trips → hard_swimbait; sent 11-14, not committed).
+  fm-lure-scan regenerated (26 types) — John must redeploy it for the scanner to know underspin/hard swimbait.
+- #101 (lib/tryrank.js + test): ⭐ spots to try ranked = structure^0.4 × kind^0.4 × nearby^0.2 under the Hot-spots
+  filter (kind = fish/hr of saved spots of that location_type, shrunk 4 h; nearby = saved-spot heat ≤600 m); hidden if
+  <3 ft deep at today's level. Top 10 stars numbered; rank + reasons in the star sheet; top 5 listed in Hot spots.
+- #99 (lib/scorecheck.js + test): Reports tab "Forecast vs catch" — per day fished: mean of distinct (session, segment)
+  predicted_score, fish, angler-hours (session first-in → last-out); scatter + bands + Pearson r. Real log 2026 (55 days):
+  r ≈ −0.01 vs fish/hr, −0.19 vs fish/day — the score hasn't tracked catches. New app only (not in reports.js parity).
+- #100 contours: NOT changed yet. Below the lidar water line (~496 ft) depth is estimated with floor 480 ft (John's
+  "≤35 ft") and 455 ft only along data/nolin_channel.json (modeled, ±hundreds of m). Baby Back Bass (Matthew: 40–50 ft
+  area) models ≤33 ft at summer pool; channel centerline is ~750 m away. Needs real soundings — asked John how.
+
 ## Phone layout fixes (John 11-11, after a real session)
 - Lure picker (`SessionParts.jsx LurePicker`, used in Session setup + Live "Add a lure"): rows were crushed because
   `.pick-list` is a height-capped flex column and rows shrank instead of scrolling → `.pick-list > * { flex: none }`;

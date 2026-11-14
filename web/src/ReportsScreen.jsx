@@ -9,7 +9,8 @@ import { Multi, Pick } from "./ui.jsx";
 import { newId } from "./lib/db.js";
 import { choicesFrom } from "./lib/boards.js";
 import { FACTORS, METRICS, predictByMoon, predictByPressure, SECCHI_BUCKET, SPECIES_METRICS, WATER_TEMP_BUCKET } from "./lib/reports.js";
-import { cleanReportSpec, describeReport, fmtValue, metricName, runReport, STOCK } from "./lib/reportspec.js";
+import { cleanReportSpec, describeReport, fmtValue, metricName, runReport, STOCK, windowFor } from "./lib/reportspec.js";
+import { describeR, scoreCheck } from "./lib/scorecheck.js";
 import { SEGMENTS } from "./lib/scoring.js";
 
 const KEY = "fm.reports";
@@ -142,6 +143,46 @@ function ReportCard({ trips, spec, title, f, me, typeNames }) {
   </section>;
 }
 
+/** #99 (Matthew 11-14): the forecast score vs what was caught, for the days fished. */
+function ScoreCheck({ trips, f, me }) {
+  const [show, setShow] = useState("rate");
+  const win = windowFor({}, f.period);
+  const out = useMemo(() => scoreCheck(trips, { from: win.from, to: win.to, owner: f.who === "me" ? me.email : null }), [trips, win.from, win.to, f.who, me]);
+  const rows = out.bands.map((b) => ({ key: b.key, label: b.label, n: show === "rate" ? (b.rate == null ? 0 : b.days) : b.days,
+    value: show === "rate" ? b.rate ?? 0 : b.fishPerDay }));
+  const max = Math.max(0, ...rows.map((r) => r.value));
+  const r = show === "rate" ? out.rRate : out.rFish;
+  // scatter: x = score 0–10, y = fish/hr or fish that day
+  const pts = out.days.map((d) => ({ x: d.score, y: show === "rate" ? d.rate : d.fish, d })).filter((p) => p.y != null);
+  const ymax = Math.max(1, ...pts.map((p) => p.y)), W = 320, H = 150, P = 26;
+  const X = (x) => P + (Math.max(0, Math.min(10, x)) / 10) * (W - P - 8), Y = (y) => H - 18 - (y / ymax) * (H - 30);
+  return <section className="card">
+    <div className="card-h"><span className="t">Forecast score vs fish caught</span><span className="muted small">{out.days.length} days fished</span></div>
+    <div className="card-b setup" style={{ paddingTop: 10 }}>
+      <div className="seg">{[["rate", "Fish per hour"], ["day", "Fish per day"]].map(([k, l]) => <button key={k} className={show === k ? "on" : ""} onClick={() => setShow(k)}>{l}</button>)}</div>
+      {!out.days.length ? <p className="empty">No days with a forecast score in this period yet.</p> : <>
+        <p style={{ margin: 0 }}><b>{describeR(r)}</b>{r != null && <span className="muted small"> (correlation {r >= 0 ? "+" : ""}{r.toFixed(2)} over {show === "rate" ? out.rateDays : out.days.length} days; ±1 = perfect, 0 = none)</span>}</p>
+        <svg className="sc-plot" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Each day fished: forecast score across, catch up">
+          <line x1={P} y1={H - 18} x2={W - 8} y2={H - 18} className="ax" /><line x1={P} y1={8} x2={P} y2={H - 18} className="ax" />
+          {[0, 2, 4, 6, 8, 10].map((t) => <text key={t} x={X(t)} y={H - 4} className="tk" textAnchor="middle">{t}</text>)}
+          <text x={P - 4} y={Y(ymax) + 4} className="tk" textAnchor="end">{show === "rate" ? ymax.toFixed(1) : Math.round(ymax)}</text>
+          <text x={P - 4} y={H - 18} className="tk" textAnchor="end">0</text>
+          {pts.map((p) => <circle key={p.d.date} cx={X(p.x)} cy={Y(p.y)} r="4.5" className="dot"><title>{`${p.d.date}: score ${p.x.toFixed(1)}, ${p.d.fish} fish${p.d.rate != null ? `, ${p.d.rate.toFixed(2)}/hr` : ""}`}</title></circle>)}
+        </svg>
+        <p className="muted small" style={{ margin: 0 }}>Each dot is a day fished: the forecast score across, {show === "rate" ? "fish per angler-hour" : "fish caught that day"} up.</p>
+        <div className="lr-h">By forecast score</div>
+        <div className="rp-bars">{rows.map((b) => (
+          <div key={b.key} className={`rp-bar ${b.n && b.n < 4 ? "thin" : ""}`}>
+            <span className="rp-lbl">{b.label}</span>
+            <span className="rp-track"><span style={{ width: `${max > 0 && b.n ? Math.max(2, (b.value / max) * 100) : 0}%` }} /></span>
+            <span className="rp-val"><b className="num">{b.n ? (show === "rate" ? `${b.value.toFixed(2)}/hr` : b.value.toFixed(1)) : "–"}</b><span className="muted small block">{b.n} day{b.n === 1 ? "" : "s"}</span></span>
+          </div>))}</div>
+        <p className="muted small" style={{ margin: 0 }}>Score = the forecast saved when each lure went in the water (the time-of-day score), averaged over the day's sessions. Hours = each session's first lure in to last lure out. The scoring itself has been tuned over the season (Sep rebalance, Nov season fix), so older days were scored by older versions. Faded bars rest on fewer than 4 days.</p>
+      </>}
+    </div>
+  </section>;
+}
+
 export default function ReportsScreen({ active, db, me, trips, weather, onBack, onMenu, demo, toast }) {
   const [f, setFState] = useState(read);
   const setF = (p) => setFState((x) => { const n = { ...x, ...p }; try { localStorage.setItem(KEY, JSON.stringify(n)); } catch { /* ignore */ } return n; });
@@ -166,11 +207,12 @@ export default function ReportsScreen({ active, db, me, trips, weather, onBack, 
         </div></section>
         <div className="lb-tabs" role="tablist">
           {STOCK.map((s) => <button key={s.id} role="tab" aria-selected={f.tab === s.id} className={f.tab === s.id ? "on" : ""} onClick={() => setF({ tab: s.id })}>{s.title}</button>)}
+          <button role="tab" aria-selected={f.tab === "forecast"} className={f.tab === "forecast" ? "on" : ""} onClick={() => setF({ tab: "forecast" })}>Forecast vs catch</button>
           {saved.map((r) => <button key={r.id} role="tab" aria-selected={f.tab === `saved:${r.id}`} className={f.tab === `saved:${r.id}` ? "on" : ""} onClick={() => setF({ tab: `saved:${r.id}` })}>★ {r.title}</button>)}
           <button role="tab" aria-selected={f.tab === "custom"} className={f.tab === "custom" ? "on" : ""} onClick={() => setF({ tab: "custom" })}>＋ Custom</button>
         </div>
         {trips === null ? <p className="muted">Loading the trip log…</p> : <>
-          {stock ? <ReportCard trips={trips} spec={spec} title={stock.title} f={f} me={me} typeNames={typeNames} />
+          {f.tab === "forecast" ? <ScoreCheck trips={trips} f={f} me={me} /> : stock ? <ReportCard trips={trips} spec={spec} title={stock.title} f={f} me={me} typeNames={typeNames} />
             : <Builder db={db} me={me} report={report} choices={choices} trips={trips} f={f} toast={toast} weather={weather} setScreen={(p) => setF(p)}
                 onSaved={(item) => { setSaved((l) => [...l.filter((x) => x.id !== item.id), item]); setF({ tab: `saved:${item.id}` }); }}
                 onDeleted={() => { setSaved((l) => l.filter((x) => x.id !== report.id)); setF({ tab: "custom" }); }} />}
