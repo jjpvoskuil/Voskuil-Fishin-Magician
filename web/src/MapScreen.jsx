@@ -107,8 +107,10 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
     for (const ln of contours.lines) {
       const d = level - ln.e; if (d < 1) continue;
       if (Math.round(d) % every > 1 && every > 2) continue;
-      L.polyline(ln.c.map(([lo, la]) => [la, lo]), { color: depthColor(d), weight: d % 10 < 2 ? 2.2 : 1.3, opacity: ln.est ? 0.75 : 0.95, dashArray: ln.est ? "5 6" : null, interactive: true })
-        .bindTooltip(`${Math.round(d)} ft deep${ln.est ? " — estimated" : " — measured (lidar)"}`, { sticky: true }).addTo(g);
+      // est: 0 = lidar, 1 = estimated, 2 = read from the 1954 pre-dam USGS map (#100, 11-14) — dotted, between the two
+      L.polyline(ln.c.map(([lo, la]) => [la, lo]), { color: depthColor(d), weight: d % 10 < 2 ? 2.2 : 1.3, opacity: ln.est === 1 ? 0.75 : 0.9,
+        dashArray: ln.est === 1 ? "5 6" : ln.est === 2 ? "2 4" : null, interactive: true })
+        .bindTooltip(`${Math.round(d)} ft deep${ln.est === 2 ? " — from the 1954 pre-dam USGS map" : ln.est ? " — estimated" : " — measured (lidar)"}`, { sticky: true }).addTo(g);
     }
     layers.current.depth = g.addTo(m);
     layers.current.spots?.bringToFront?.();
@@ -241,7 +243,7 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
           <button className="btn primary big" onClick={saveHere}>📍 Save where I am</button>
           <button className="btn big" onClick={() => setPanel("filters")}>🔥 Hot spots{filtersOn ? ` (${filtersOn})` : ""}</button>
         </div>
-        <div className="map-hint">{f.depth && level != null ? `Depths at today's level ${level.toFixed(1)} ft · solid = measured, dashed = estimated` : "Press and hold anywhere to pin a spot"}</div>
+        <div className="map-hint">{f.depth && level != null ? `Depths at today's level ${level.toFixed(1)} ft · solid = lidar${contours?.lines?.some((l) => l.est === 2) ? ", dotted = 1954 map" : ""}, dashed = estimated` : "Press and hold anywhere to pin a spot"}</div>
       </div>
 
       <NameSheet pin={newPin} onClose={() => setNewPin(null)} onSave={async (name, type) => {

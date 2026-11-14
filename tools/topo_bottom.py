@@ -9,7 +9,7 @@ the old riverbed, and each line piece is labeled on its own against a first-gues
 Steps, all on build_contours' 8-ft EPSG:3089 grid:
   1. each sheet → masks at full resolution: contour pixels (orange-brown: red clearly above green and blue) and
      water pixels (blue), clipped to the sheet's own 7.5' quad (no collar text), warped with max-resampling;
-  2. registration: shift each sheet's contour mask (±48 ft) to where its contour pixels sit on lidar elevations that
+  2. registration: shift each sheet's contour mask (±80 ft) to where its contour pixels sit on lidar elevations that
      are multiples of 20 ft; the vertical offset (NGVD29 vs NAVD88) comes out of the same fit;
   3. the old river (+ creeks): blue pixels near the lake, skeletonized; elevation along that network = piecewise
      linear between fixed points (lidar where the network is above the water line, the 446-ft pre-dam benchmark at the
@@ -106,8 +106,8 @@ def register(per, Z, ground, pix):
     for name, cg, inq in per:
         rr, cc = np.nonzero(cg)
         best = None
-        for dr in range(-6, 7):
-            for dc in range(-6, 7):
+        for dr in range(-10, 11):       # ±80 ft: also absorbs the NAD27→NAD83 shift (no datum grids on the runner)
+            for dc in range(-10, 11):
                 r2, c2 = rr + dr, cc + dc
                 k = (r2 >= 0) & (r2 < H) & (c2 >= 0) & (c2 < W)
                 r2, c2 = r2[k], c2[k]

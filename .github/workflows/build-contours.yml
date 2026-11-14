@@ -22,7 +22,6 @@ jobs:
       - run: python tools/build_contours.py out
         env:
           TOPO: ${{ inputs.topo }}
-          PROJ_NETWORK: "ON"   # NAD27 → NAD83 grid shift for the 1950s sheets
       - name: Push to the depth-build branch
         run: |
           BR=depth-build; [ "${{ inputs.topo }}" = "1" ] && BR=depth-build-topo
