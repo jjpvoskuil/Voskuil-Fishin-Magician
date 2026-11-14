@@ -288,6 +288,7 @@ def old_estimate(Z, known, unknown, line_level, pix):
     return line_level - cap * (1 - np.exp(-es * d / cap))
 
 
+
 def debug_overlays(per, Z, ground, x0, y1, pix, outdir):
     """Red = 1950s map contour pixels, blue = lidar 20-ft contours, purple = both. A few public lake places."""
     from PIL import Image
