@@ -33,6 +33,15 @@ export function groupByType(items) {
   return [...order.filter((k) => g[k]), ...(g[""] ? [""] : [])].map((k) => ({ key: k, name: typeName(k), items: g[k] }));
 }
 
+/** Totals for the end-of-list summary: per type (in list order) lures, in stock, out; plus overall. */
+export function tackleSummary(groups) {
+  const qty = (i) => Math.max(0, Number(i.quantity) || 0);
+  const rows = groups.map((g) => ({ key: g.key, name: g.name, lures: g.items.length,
+    inStock: g.items.reduce((a, i) => a + qty(i), 0), out: g.items.filter((i) => qty(i) === 0).length }));
+  const sum = (k) => rows.reduce((a, r) => a + r[k], 0);
+  return { rows, types: rows.length, lures: sum("lures"), inStock: sum("inStock"), out: sum("out") };
+}
+
 /** New item from the add form (old LureItem shape: brand, description, category, quantity, …). */
 export function newItem(fields, id) {
   const now = new Date().toISOString().slice(0, 19);

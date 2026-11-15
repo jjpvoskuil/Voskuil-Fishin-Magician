@@ -61,3 +61,8 @@
   than the current estimate (6.7 vs 4.1 ft median error, worse at every depth) → not used; live map unchanged.
   Removed a rounded saved-spot coordinate I had put in tools/probe_topo.py + topo_bottom.py (still in git history).
 - Evening (John): map default photo = USGS/NAIP summer (full pool), ☀️/❄️ switch to Esri; depth lines can be measured from summer pool 515 (switch), so all lidar lines 496–515 show from the full shoreline.
+
+## 2026-11-15
+- Tackle Box: "Total lures" summary card after all the type groups (lures, in stock, types, out + per-type table and
+  total row; follows the search). Punch list: this session had no access to deercast-data or Supabase, so John was
+  asked to paste "Copy for Claude".

@@ -157,6 +157,8 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   (`tools/export_cabelas_picks.py` → `lib/data/cabelas_picks.json`, public catalog info). No need to copy the 80
   Cabela's images into the bucket at cutover (they load directly); only the 13 own photos in data/lure_images need
   uploading by make_import.
+  Total lures card (John 11-15): after the type groups, `tackleSummary(groups)` (lib/tackle.js + tackle.test.js) shows
+  lures / in stock / types / out tiles + a per-type table with a Total row; follows the search ("Matching lures").
 - Lake Map (`MapScreen.jsx`, `lib/spotstats.js`, 11-10, phase A): Leaflet, Esri World Imagery satellite by default
   (+ Esri place labels), 🗺️/🛰️ switch to OpenStreetMap, 🪵 fish attractors (KDFWR, `lib/data/attractors.json`, public),
   ◎ center on me, GPS dot (watchPosition only while the map is open). Spot pins = circle markers colored by "heat"

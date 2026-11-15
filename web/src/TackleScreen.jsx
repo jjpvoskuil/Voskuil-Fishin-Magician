@@ -12,7 +12,7 @@ import { inventoryTypeOptions, servesKeys, toInventoryCategory } from "./lib/bai
 // The tackle box types soft plastics by bait style (#103), so a tagger guess like "texas_rig_worm" becomes "worm".
 const guessCategoryFromText = (...t) => toInventoryCategory(guessEngineKey(...t));
 import { blobB64, preparePhoto } from "./lib/photo.js";
-import { cabelasSearchUrl, describeScan, groupByType, newItem, savedPicks, typeName, usageByLabel, usageFor } from "./lib/tackle.js";
+import { cabelasSearchUrl, describeScan, groupByType, newItem, tackleSummary, savedPicks, typeName, usageByLabel, usageFor } from "./lib/tackle.js";
 
 const md = (d) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const usageText = (u) => (u ? `${u.fish} fish · ${u.hours >= 1 ? `${Math.round(u.hours)} h` : `${Math.round(u.hours * 60)} min`} fished${u.last ? ` · last ${md(u.last)}` : ""}` : "Not logged yet");
@@ -33,6 +33,7 @@ export default function TackleScreen({ active, db, me, trips, lures, reloadLures
   const owned = new Set(items.filter((i) => Number(i.quantity) > 0).flatMap((i) => servesKeys(i.category)));
   const gaps = Object.keys(LURE_PROFILES).filter((k) => !owned.has(k) && !NOT_SUGGESTED_ON_NOLIN.has(k) && savedPicks(k).length);
   const totalQty = items.reduce((a, i) => a + (Number(i.quantity) || 0), 0);
+  const sum = tackleSummary(groups);
 
   // ---- scan / add
   const pickPhoto = async (file, forItem = null) => {
@@ -104,6 +105,26 @@ export default function TackleScreen({ active, db, me, trips, lures, reloadLures
                 </span>
               </div>); })}
           </details>))}
+
+        {sum.lures > 0 && <section className="card tsum">
+          <div className="card-h"><span className="t">{q.trim() ? "Matching lures" : "Total lures"}</span></div>
+          <div className="card-b">
+            <div className="tsum-big">
+              <div><b className="num">{sum.lures}</b><span>lures</span></div>
+              <div><b className="num">{sum.inStock}</b><span>in stock</span></div>
+              <div><b className="num">{sum.types}</b><span>types</span></div>
+              <div><b className="num">{sum.out}</b><span>out</span></div>
+            </div>
+            <div className="tbl-wrap"><table className="tbl">
+              <thead><tr><th>Type</th><th className="r">Lures</th><th className="r">In stock</th><th className="r">Out</th></tr></thead>
+              <tbody>
+                {sum.rows.map((r) => <tr key={r.key || "none"}><td>{r.name}</td><td className="r num">{r.lures}</td><td className="r num">{r.inStock}</td><td className="r num">{r.out || "–"}</td></tr>)}
+                <tr className="sub"><td>Total</td><td className="r num">{sum.lures}</td><td className="r num">{sum.inStock}</td><td className="r num">{sum.out || "–"}</td></tr>
+              </tbody>
+            </table></div>
+            {q.trim() && <p className="muted small" style={{ margin: "8px 0 0" }}>Counting only lures that match "{q.trim()}". Whole box: {items.length} lures, {totalQty} in stock.</p>}
+          </div>
+        </section>}
 
         {gaps.length > 0 && <details className="card tgroup">
           <summary className="card-h"><span className="t">🎯 Fill your tackle gaps ({gaps.length} types)</span></summary>
