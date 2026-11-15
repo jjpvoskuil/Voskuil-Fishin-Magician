@@ -32,3 +32,13 @@ test("a kind that produces moves up; a hot spot nearby helps", () => {
   assert.ok(nearHot.parts.nearby > 1.5 && nearHot.reasons.some((x) => x.includes("Hot Point")));
   assert.equal(r[r.length - 1].kind, "flat");
 });
+
+test("why this rank: percentiles and what separated neighbours", () => {
+  const r = rankTries(tries, { spots: [], stats: { base: 0, spots: {} } });
+  assert.equal(r[0].pct.structure, 100);
+  assert.equal(r.at(-1).pct.structure, 0);
+  assert.ok(r[0].vsBelow.mainly[0].startsWith("stronger structure"));
+  assert.equal(r[1].vsAbove.other, 2);
+  assert.equal(r[0].vsAbove, undefined);
+  assert.equal(r.at(-1).vsBelow, undefined);
+});

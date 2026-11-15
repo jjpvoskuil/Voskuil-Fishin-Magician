@@ -260,6 +260,9 @@ backups (private repo, twice weekly), make_restore.py, cutover.
 - #101 (lib/tryrank.js + test): ⭐ spots to try ranked = structure^0.4 × kind^0.4 × nearby^0.2 under the Hot-spots
   filter (kind = fish/hr of saved spots of that location_type, shrunk 4 h; nearby = saved-spot heat ≤600 m); hidden if
   <3 ft deep at today's level. Top 10 stars numbered; rank + reasons in the star sheet; top 5 listed in Hot spots.
+  "Why #N" (John 11-14): star sheet shows each factor as "better than X%" of the other stars (no data = "no fishing
+  logged yet" / "no fished spots nearby", not 0%), plus `compareTries` vs the star just above and just below (each
+  factor's share of the log-score gap: "Ahead of #4: stronger structure…, even with …"; "Behind #2, which has …").
 - #99 (lib/scorecheck.js + test): Reports tab "Forecast vs catch" — per day fished: mean of distinct (session, segment)
   predicted_score, fish, angler-hours (session first-in → last-out); scatter + bands + Pearson r. Real log 2026 (55 days):
   r ≈ −0.01 vs fish/hr, −0.19 vs fish/day — the score hasn't tracked catches. New app only (not in reports.js parity).

@@ -63,6 +63,32 @@ export function rankTries(tries, { spots, stats, level = null } = {}) {
     return { ...t, score, parts: { structure, kind, nearby: near.heat }, reasons };
   }).sort((a, b) => b.score - a.score);
   out.forEach((t, i) => { t.rank = i + 1; t.n = out.length; });
+  // #101 follow-up (John 11-14): why this rank and not higher/lower — each factor as "better than X% of the others",
+  // and what separated it from the spot just above and just below
+  const pct = (key) => { const v = out.map((t) => t.parts[key]).sort((a, b) => a - b);
+    return (x) => (out.length > 1 ? Math.round((100 * v.filter((y) => y < x).length) / (out.length - 1)) : 100); };
+  const P = { structure: pct("structure"), kind: pct("kind"), nearby: pct("nearby") };
+  for (let i = 0; i < out.length; i++) {
+    const t = out[i];
+    t.pct = { structure: P.structure(t.parts.structure), kind: P.kind(t.parts.kind), nearby: P.nearby(t.parts.nearby) };
+    if (i + 1 < out.length) t.vsBelow = compareTries(t, out[i + 1]);
+    if (i > 0) t.vsAbove = compareTries(out[i - 1], t);
+  }
   return out;
+}
+
+export const FACTOR_LABEL = { structure: "Structure", kind: "Kind of spot", nearby: "Nearby catches" };
+const W = { structure: 0.4, kind: 0.4, nearby: 0.2 };
+/** What makes `a` rank above `b`: each factor's share of the score gap (log terms), biggest first, as words. */
+export function compareTries(a, b) {
+  const d = Object.keys(W).map((k) => [k, W[k] * Math.log(a.parts[k] / b.parts[k])]);
+  const total = d.reduce((x, [, v]) => x + v, 0) || 1e-9;
+  const pos = d.filter(([, v]) => v > 0.005).sort((x, y) => y[1] - x[1]);
+  const neg = d.filter(([, v]) => v < -0.005).sort((x, y) => x[1] - y[1]);
+  const say = (k, up) => k === "structure" ? `${up ? "stronger" : "weaker"} structure (${Math.round(a.parts.structure * 100)} vs ${Math.round(b.parts.structure * 100)} out of 100)`
+    : k === "kind" ? (a.kind === b.kind ? "same kind of spot" : `${up ? "better" : "worse"}-producing kind: ${KIND_LABEL[a.kind].toLowerCase()} ${a.parts.kind.toFixed(1)}× vs ${KIND_LABEL[b.kind].toLowerCase()} ${b.parts.kind.toFixed(1)}× average`)
+    : `${up ? "hotter" : "colder"} saved spots around it (${a.parts.nearby.toFixed(2)}× vs ${b.parts.nearby.toFixed(2)}×)`;
+  return { other: b.rank ?? null, aboveRank: a.rank ?? null, close: Math.abs(total) < 0.03,
+    mainly: pos.map(([k]) => say(k, true)), despite: neg.map(([k]) => say(k, false)) };
 }
 const KIND_LABEL = { point: "Points", break: "Steep breaks / bluffs", swing: "Channel swings", flat: "Flats by deep water" };

@@ -395,3 +395,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .lp-chips::-webkit-scrollbar { display: none; }
 .lp-chips .chip { flex: none; }
 .pick-list .row.lp-row.on { background: var(--accent-soft-bg, var(--band)); box-shadow: inset 3px 0 0 var(--accent); }
+
+.rank-why { display: grid; gap: 6px; }
+.rw-row { display: grid; grid-template-columns: 112px 1fr 132px; gap: 8px; align-items: center; font-size: 14px; }
+.rw-v { text-align: right; line-height: 1.2; }

@@ -15,7 +15,7 @@ import { segmentTimeRanges, SEGMENTS } from "./lib/scoring.js";
 import * as S from "./lib/session.js";
 import { HEAT_LEGEND, heatColor, SEASONS, spotStats } from "./lib/spotstats.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
-import { rankTries } from "./lib/tryrank.js";
+import { FACTOR_LABEL, rankTries } from "./lib/tryrank.js";
 import ATTRACTORS from "./lib/data/attractors.json" with { type: "json" };
 
 export const LOCATION_TYPES = ["Main-lake point", "Secondary / pocket point", "Flat", "Creek channel / ledge", "Rock face / bluff", "Riprap", "Boat dock",
@@ -276,6 +276,17 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
           {trySel.rank && <p style={{ margin: 0 }}><b>#{trySel.rank} of {trySel.n}</b> spots to try for your Hot-spots filter ({filterText})</p>}
           <p style={{ margin: 0 }}>{trySel.why}</p>
           {trySel.reasons && <ul className="why-list">{trySel.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+          {trySel.pct && <>
+            <div className="lr-h">Why #{trySel.rank}</div>
+            <div className="rank-why">{Object.keys(FACTOR_LABEL).map((k) => (
+              <div key={k} className="rw-row"><span className="rw-l">{FACTOR_LABEL[k]}</span>
+                {(() => { const none = k !== "structure" && Math.abs(trySel.parts[k] - 1) < 0.01;   // no data = neutral, not "worst"
+                  return <><span className="rp-track"><span style={{ width: none ? 0 : `${Math.max(3, trySel.pct[k])}%` }} /></span>
+                    <span className="rw-v muted small">{none ? (k === "kind" ? "no fishing logged yet" : "no fished spots nearby") : `better than ${trySel.pct[k]}%`}</span></>; })()}</div>))}</div>
+            {trySel.vsBelow && <p className="small" style={{ margin: 0 }}><b>Ahead of #{trySel.vsBelow.other}</b>{trySel.vsBelow.close ? " (nearly a tie)" : ""}: {trySel.vsBelow.mainly.join("; ") || "about even on everything"}{trySel.vsBelow.despite.length ? `, even with ${trySel.vsBelow.despite.join("; ")}` : ""}.</p>}
+            {trySel.vsAbove && <p className="small" style={{ margin: 0 }}><b>Behind #{trySel.vsAbove.aboveRank}</b>{trySel.vsAbove.close ? " (nearly a tie)" : ""}, which has {trySel.vsAbove.mainly.join("; ") || "about the same on everything"}.</p>}
+            <p className="muted small" style={{ margin: 0 }}>Rank weighs structure 40%, how this kind of spot has produced 40%, and the saved spots around it 20%, for your Hot-spots filter. "Better than" compares it with the other {trySel.n - 1} spots to try.</p>
+          </>}
           {level != null && <p className="muted small" style={{ margin: 0 }}>About <b>{Math.max(0, Math.round(level - trySel.emax))}–{Math.max(0, Math.round(level - trySel.emin))} ft</b> deep at {levelText}{trySel.est ? " — partly estimated depth" : " — measured by lidar"}.</p>}
           <p className="muted small" style={{ margin: 0 }}>Found from the lake's shape and the lidar bottom; its rank also uses the trip log. Nobody has fished it yet — it's a suggestion to explore.</p>
           <button className="btn primary wide big" onClick={() => { setNewPin({ lat: trySel.lat, lon: trySel.lon, how: "try", type: TRY_KINDS[trySel.kind][1] }); setTrySel(null); }}>📍 Save as my spot</button>
