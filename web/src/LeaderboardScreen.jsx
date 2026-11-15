@@ -7,6 +7,7 @@ import CustomBoard, { BoardRows } from "./CustomBoard.jsx";
 import { choicesFrom } from "./lib/boards.js";
 import Icon from "./Icon.jsx";
 import { Head } from "./Shell.jsx";
+import { records, summarize } from "./lib/groupstats.js";
 import { buildFrames, CATEGORIES, dailyActivitySeries, formatDateShort, heroStates, seasonLabel, speciesMix } from "./lib/stringer.js";
 
 const KEY = "fm.leaderboard";
@@ -63,7 +64,21 @@ export default function LeaderboardScreen({ active, db, me, trips, spots, onBack
   const { fish, trips: tr } = useMemo(() => buildFrames(rows, names), [rows, names]);
   const states = useMemo(() => heroStates(fish, tr, true), [fish, tr]);
   const cat = CATEGORIES.find(([k]) => k === f.tab) || CATEGORIES[0];
-  const list = useMemo(() => cat[3](fish, tr), [cat, fish, tr]);
+  const recs = useMemo(() => records(rows, names), [rows, names]);
+  const list = useMemo(() => {
+    const l = cat[3](fish, tr);
+    if (cat[0] !== "lures") return l;
+    // Hot Lures rows are lure + color: the drop-down shows that lure in that color, plus a line for all its colors (#104)
+    return l.map((r0) => {
+      const color = r0.secondary.split(" · ")[0], mine = recs.filter((x) => x.lure === r0.primary);
+      const all = summarize(mine), one = summarize(mine.filter((x) => x.color === color));
+      const others = all.uses > one.uses || all.fish > one.fish;
+      const listed = parseInt(r0.secondary.split(" · ")[1], 10);   // the list's "N uses" = logged stints
+      const notes = [others && `All colors of this lure: ${all.fish} fish in ${all.uses} use${all.uses === 1 ? "" : "s"}${all.successRate != null ? ` (${Math.round(all.successRate * 100)}% with fish)` : ""}`,
+        listed && listed !== one.uses && `Here a use = an outing (${one.uses}); the list counts each logged stint (${listed})`];
+      return { ...r0, stats: one, statsNote: notes.filter(Boolean).join(" · ") || null };
+    });
+  }, [cat, fish, tr, recs]);
   const days = useMemo(() => { const d = tr.map((t) => t.date).filter(Boolean).sort(); return d.length ? dailyActivitySeries(fish, d[0], d[d.length - 1]) : []; }, [fish, tr]);
   const mix = useMemo(() => speciesMix(fish), [fish]);
 

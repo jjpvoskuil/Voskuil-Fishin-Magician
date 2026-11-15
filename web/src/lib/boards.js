@@ -6,6 +6,7 @@ import { lureHours } from "./history.js";
 import { formatWeightLbOz } from "./leaderboard.js";
 import { LURE_PROFILES } from "./lures.js";
 import { SEGMENTS } from "./scoring.js";
+import { derive } from "./groupstats.js";
 
 export const MEASURES = [["fish", "Fish caught"], ["lbs", "Total weight"], ["biggest", "Biggest fish"], ["longest", "Longest fish"],
   ["avg_weight", "Average weight"], ["fish_per_hour", "Fish per hour"], ["outings", "Outings"]];
@@ -62,7 +63,7 @@ export function runBoard(rows, spec, spotNames = {}) {
   const lureQ = spec.lure_text.trim().toLowerCase(), colorQ = spec.color_text.trim().toLowerCase();
   const G = new Map(), fishRows = [];
   let total = { fish: 0, trips: 0 };
-  const grp = (key, label) => G.get(key) || (G.set(key, { label, fish: 0, w: 0, weighed: 0, big: null, long: null, hours: 0, outings: new Set(), trips: 0, sub: new Map() }), G.get(key));
+  const grp = (key, label) => G.get(key) || (G.set(key, { label, fish: 0, w: 0, weighed: 0, big: null, long: null, hours: 0, outings: new Set(), hit: new Set(), first: null, last: null, trips: 0, sub: new Map() }), G.get(key));
   for (const r of rows || []) {
     const c = parseConditions(r), d = String(r.trip_date || "");
     if (spec.from && d < spec.from) continue;
@@ -108,12 +109,15 @@ export function runBoard(rows, spec, spotNames = {}) {
       if (f.w > 0 && (!g.big || f.w > g.big.w)) g.big = { ...f, ...ctx };
       if (f.len > 0 && (!g.long || f.len > g.long.len)) g.long = { ...f, ...ctx };
       if (spec.by === "outing") g.sub.set(angler, true);
+      if (f.count > 0) g.hit.add(outing);
+      if (d && (!g.first || d < g.first)) g.first = d; if (d && (!g.last || d > g.last)) g.last = d;
       if (!touched.has(k)) { touched.add(k); g.hours += hours; g.trips += 1; g.outings.add(outing); }
     }
     if (spec.by !== "species" && spec.by !== "fish") {  // trips with no (matching) fish still count their hours and outing
       const [k, label] = keyOf(null);
       if (!touched.has(k)) {
-        const g = grp(k, label); g.hours += hours; g.trips += 1; g.outings.add(outing); if (spec.by === "outing") g.sub.set(angler, true);
+        const g = grp(k, label); g.hours += hours; g.trips += 1; g.outings.add(outing);
+        if (d && (!g.first || d < g.first)) g.first = d; if (d && (!g.last || d > g.last)) g.last = d; if (spec.by === "outing") g.sub.set(angler, true);
       }
     }
   }
@@ -128,7 +132,11 @@ export function runBoard(rows, spec, spotNames = {}) {
     avg_weight: (g) => (g.weighed ? g.w / g.weighed : -1), fish_per_hour: (g) => (g.hours > 0 ? g.fish / g.hours : -1), outings: (g) => g.outings.size }[spec.measure];
   const list = [...G.values()].filter((g) => val(g) > 0 || (spec.measure === "fish_per_hour" && g.hours > 0))
     .sort((a, b) => val(b) - val(a) || b.fish - a.fish || a.label.localeCompare(b.label)).slice(0, MAX_ROWS);
-  const out = list.map((g) => {
+  const statsOf = (g) => derive({ fish: g.fish, lbs: g.w, weighed: g.weighed, hours: g.hours, uses: g.outings.size, usesWithFish: g.hit.size,
+    biggest: g.big, longest: g.long, first: g.first, last: g.last });
+  const out = list.map((g) => ({ ...rowOf(g), key: g.label, stats: statsOf(g) }));
+  return { rows: out, total };
+  function rowOf(g) {
     const extra = spec.by === "outing" ? ` · ${[...g.sub.keys()].join(", ")}` : "";
     switch (spec.measure) {
       case "lbs": return { primary: g.label, secondary: `${g.fish} fish · ${g.weighed} weighed${extra}`, num: lbs(g.w), tag: null };
@@ -139,8 +147,7 @@ export function runBoard(rows, spec, spotNames = {}) {
       case "outings": return { primary: g.label, secondary: `${g.fish} fish · ${g.hours.toFixed(1)} h${extra}`, num: `${g.outings.size} outing${g.outings.size === 1 ? "" : "s"}`, tag: null };
       default: return { primary: g.label, secondary: `${g.w > 0 ? `${lbs(g.w)} · ` : ""}${g.outings.size} outing${g.outings.size === 1 ? "" : "s"}${extra}`, num: `${g.fish} fish`, tag: null };
     }
-  });
-  return { rows: out, total };
+  }
 }
 
 /** Plain-words summary of a spec, e.g. "Total weight by Angler · Largemouth, Spotted · Suspending Jerkbait". */

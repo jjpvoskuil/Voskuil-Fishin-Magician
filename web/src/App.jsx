@@ -9,6 +9,7 @@ import HistoryScreen from "./HistoryScreen.jsx";
 import TackleScreen from "./TackleScreen.jsx";
 import LeaderboardScreen from "./LeaderboardScreen.jsx";
 import ReportsScreen from "./ReportsScreen.jsx";
+import MyStatsScreen from "./MyStatsScreen.jsx";
 import PunchScreen from "./PunchScreen.jsx";
 import PunchSheet, { captureContext } from "./PunchSheet.jsx";
 import MapScreen from "./MapScreen.jsx";
@@ -136,6 +137,7 @@ export default function App() {
       <HistoryScreen {...common} active={tab === "more" && page === "history"} trips={trips} spots={spots.items} outbox={outbox} reloadTrips={reloadTrips} onBack={() => setPage(null)} />
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <LeaderboardScreen {...common} active={tab === "more" && page === "leaderboard"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
+      <MyStatsScreen {...common} active={tab === "more" && page === "mystats"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
       <ReportsScreen {...common} active={tab === "more" && page === "reports"} trips={trips} weather={weather} onBack={() => setPage(null)} />
       <PunchScreen {...common} active={tab === "more" && page === "punch"} version={punchVer} onAdd={(screen) => openNote(screen, "")} onBack={() => setPage(null)} />
       <PunchSheet open={!!noteCtx} ctx={noteCtx} db={db} me={me} toast={setToast} onClose={() => setNoteCtx(null)} onSaved={() => setPunchVer((v) => v + 1)} />

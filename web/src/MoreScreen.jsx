@@ -1,14 +1,14 @@
-// More: the other pages (History, Leaderboard, Reports, Tackle Box, Punch list), the angler list (admins edit it),
+// More: the other pages (History, My Stats, Leaderboard, Reports, Tackle Box, Punch list), the angler list (admins edit it),
 // and the build stamp. Pages that aren't rebuilt yet say so.
 import { useEffect, useState } from "react";
 import Icon from "./Icon.jsx";
 import { Appearance, BUILD, Head } from "./Shell.jsx";
 import { useElectronics } from "./lib/prefs.js";
 
-const PAGES = [["history", "Trip History", "history"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
+const PAGES = [["history", "Trip History", "history"], ["mystats", "My Stats", "user"], ["leaderboard", "Leaderboard", "trophy"], ["reports", "Reports", "chart"],
   ["tackle", "Tackle Box", "tackle"], ["punch", "Punch list", "tools"]];
 
-const READY = new Set(["history", "tackle", "leaderboard", "reports", "punch"]);
+const READY = new Set(["history", "mystats", "tackle", "leaderboard", "reports", "punch"]);
 
 export default function MoreScreen({ active, db, me, demo, onMenu, save, toast, theme, onSignOut, onOpen }) {
   const [users, setUsers] = useState(null);

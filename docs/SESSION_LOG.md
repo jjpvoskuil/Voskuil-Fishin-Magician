@@ -66,3 +66,7 @@
 - Tackle Box: "Total lures" summary card after all the type groups (lures, in stock, types, out + per-type table and
   total row; follows the search). Punch list: this session had no access to deercast-data or Supabase, so John was
   asked to paste "Copy for Claude".
+- John pasted the punch list (open: #30 held, #99, #104, #105). #104 done: tap a Leaderboard row (Hot Lures or any
+  custom board) for its stats (fish, weight, lbs/fish, fish/hr, fish/use, success rate, biggest, longest, dates).
+  #105 done: More → My Stats (breakdowns by lure, type, color, spot, structure, time of day, month, water temp, wind,
+  year; sortable; tap for the same stats). #99 had been built 11-14 (Reports → Forecast vs catch). JS: 58 pass.

@@ -281,6 +281,19 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   ~33 ft. Verdict: not better → live map unchanged. A plain harmonic first guess was worse still (19 ft, bias +19).
   The holdout harness is worth reusing to score any future bottom (e.g. John's soundings, option A).
 
+## Punch list 11-15 (Matthew's #104/#105)
+- Shared stats engine `lib/groupstats.js` (+ test): records() (same row rules as boards: fish list else fish_caught,
+  closed stints ≥0.5 h), summarize(), breakdown(recs, dim) over DIMENSIONS (lure, lure type, color, spot, structure,
+  time of day, month, water temp 5 °F bands (unreliable temps skipped), wind, year), statTiles(). A "use" = one OUTING
+  the thing was fished in; success rate = outings with ≥1 fish ÷ uses. `StatDetail.jsx` = the tile drop-down.
+- #104: Leaderboard rows open a stat drop-down: Hot Lures (lure + color; note line for all colors, and when the
+  Stringer's "N uses" (logged stints, parity with Python — unchanged) differs from outings) and every custom-board
+  row (runBoard rows now carry `key` + `stats` via derive(), so the board's filters apply).
+- #105: More → My Stats (`MyStatsScreen.jsx`, `#more/mystats`, localStorage `fm.myStats`): period This year / 90 days /
+  All time, Just me / Everyone, Overall tiles, breakdown chips, sort Fish / Fish/hr / Success / Weight, tap a row for
+  its tiles, "small sample" under 3 uses.
+- #99 was already built 11-14 (Reports → "Forecast vs catch" tab); John closes it.
+
 ## Map photo + depth reference (John 11-14 evening)
 - Esri World Imagery here shows Nolin drawn down; depth lines were drawn only below TODAY's level (504.7 ft on 11-14),
   so the 504–515 lidar lines were hidden and lines started at today's edge. Now: default photo = USGS The National Map

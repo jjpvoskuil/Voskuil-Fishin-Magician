@@ -3,6 +3,7 @@
 // and adds it to the Leaderboard's tabs.
 import { useEffect, useMemo, useState } from "react";
 import { Multi, Pick } from "./ui.jsx";
+import StatDetail from "./StatDetail.jsx";
 import { newId } from "./lib/db.js";
 import { cleanSpec, describeSpec, GROUPS, MEASURES, MONTHS, runBoard, SEGMENTS } from "./lib/boards.js";
 
@@ -18,14 +19,25 @@ function TempBox({ label, value, onChange }) {
     onChange={(e) => setT(e.target.value)} onBlur={() => onChange(t.trim() === "" ? null : t)} /></label>;
 }
 
+/** Ranked rows. Rows that carry `stats` open a stat drop-down when tapped (punch #104), one at a time. */
 export function BoardRows({ list }) {
+  const [open, setOpen] = useState(null);
+  const sig = list.map((r) => r.primary + r.secondary).join("|");
+  useEffect(() => setOpen(null), [sig]);
   if (!list.length) return <p className="empty">Nothing matches these settings yet.</p>;
-  return list.map((r, n) => (
-    <div key={n} className="lb-row">
+  return list.map((r, n) => {
+    const body = <>
       <span className={`lb-rank ${n === 0 ? "r1" : ""}`}>{n + 1}</span>
       <span className="grow"><b>{r.primary}</b><span className="muted small block">{r.secondary}</span></span>
       <span className="lb-num"><b className="num">{r.num}</b>{r.tag && <span className="pill">{r.tag}</span>}</span>
-    </div>));
+    </>;
+    if (!r.stats) return <div key={n} className="lb-row">{body}</div>;
+    const on = open === n;
+    return <div key={n} className={`lb-item ${on ? "on" : ""}`}>
+      <button className="lb-row lb-tap" aria-expanded={on} onClick={() => setOpen(on ? null : n)}>{body}<span className="lb-chev" aria-hidden="true">›</span></button>
+      {on && <StatDetail stats={r.stats} extra={r.statsNote} />}
+    </div>;
+  });
 }
 
 export default function CustomBoard({ db, me, board, rowsPeriod, rowsWho, names, choices, setPeriodWho, onSaved, onDeleted, toast }) {
