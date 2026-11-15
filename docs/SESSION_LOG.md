@@ -70,3 +70,6 @@
   custom board) for its stats (fish, weight, lbs/fish, fish/hr, fish/use, success rate, biggest, longest, dates).
   #105 done: More → My Stats (breakdowns by lure, type, color, spot, structure, time of day, month, water temp, wind,
   year; sortable; tap for the same stats). #99 had been built 11-14 (Reports → Forecast vs catch). JS: 58 pass.
+- John: forecast score for the day vs fish/hr over all history → Reports → Forecast vs catch now re-scores every day
+  fished with today's engine from archived Open-Meteo forecasts (untuned by default, tuned optional, saved scores
+  still available), plus an "Over time" day-by-day chart next to the scatter, and a "Show all our history" shortcut.

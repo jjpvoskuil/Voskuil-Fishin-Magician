@@ -293,6 +293,16 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   All time, Just me / Everyone, Overall tiles, breakdown chips, sort Fish / Fish/hr / Success / Weight, tap a row for
   its tiles, "small sample" under 3 uses.
 - #99 was already built 11-14 (Reports → "Forecast vs catch" tab); John closes it.
+- Forecast vs catch v2 (John 11-15: day score vs fish/hr over ALL history) → `ScoreCheck.jsx` (moved out of
+  ReportsScreen; options in localStorage `fm.scoreCheck`). Score choice: "Today's engine" (default) = every day fished
+  RE-SCORED by `lib/rescore.js` (+ test): scoreDay() on Open-Meteo Historical Forecast API data (same vars as live,
+  2022 on; earlier → ERA5 archive API without precipitation_probability), one request per year starting 6 days early,
+  in-memory cache per app visit; DEFAULT weights (calibrateWeights learns from these catches → "Tuned" is flattered);
+  "Tuned" = today's calibrated weights; "Saved when logged" = old predicted_score behavior. `scoreDays(.., {dayScore})`
+  + `fishedDates()` in scorecheck.js. Views: "Over time" (scrolling SVG, one 12 px step per day fished, fish/hr bars
+  left axis, score line right 0–10, month/year ticks; starts scrolled to the newest) and "Score vs catch" (scatter).
+  Today's date is missing from the archive until tomorrow (note says so). Not tested against the real API from the
+  sandbox (blocked) — mocked in Playwright; confirm on the phone.
 
 ## Map photo + depth reference (John 11-14 evening)
 - Esri World Imagery here shows Nolin drawn down; depth lines were drawn only below TODAY's level (504.7 ft on 11-14),

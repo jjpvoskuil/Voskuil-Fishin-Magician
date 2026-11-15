@@ -395,6 +395,16 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .sc-plot { width: 100%; height: auto; }
 .sc-plot .ax { stroke: var(--line); stroke-width: 1; }
 .sc-plot .tk { fill: var(--muted); font-size: 10px; }
+.ot-wrap { overflow-x: auto; margin: 0 -4px; -webkit-overflow-scrolling: touch; }
+.sc-plot.ot { width: auto; display: block; }
+.ot .ot-bar { fill: var(--accent-soft); }
+.ot .ot-none { fill: var(--muted); opacity: .5; }
+.ot .ot-line { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
+.ot .ot-dot { fill: var(--warn); }
+.sc-plot .sc-s { fill: var(--warn); }
+.key-bar, .key-line { display: inline-block; width: 12px; vertical-align: middle; border-radius: 2px; }
+.key-bar { height: 9px; background: var(--accent-soft); }
+.key-line { height: 3px; background: var(--warn); }
 .sc-plot .dot { fill: var(--accent); fill-opacity: .7; stroke: var(--card); stroke-width: 1; }
 .rp-val { text-align: right; white-space: nowrap; min-width: 62px; line-height: 1.15; }
 

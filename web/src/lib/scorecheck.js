@@ -12,8 +12,9 @@ import { parseConditions } from "./calibration.js";
 const toMin = (t) => { const m = /^(\d{2}):(\d{2})(?::(\d{2}))?/.exec(t || ""); return m ? +m[1] * 60 + +m[2] + (+m[3] || 0) / 60 : null; };
 const num = (v) => { const n = typeof v === "number" ? v : parseFloat(v); return Number.isFinite(n) ? n : null; };
 
-/** [{date, score, fish, hours, rate, sessions}] oldest first, for days with at least one forecast score. */
-export function scoreDays(trips, { from = "", to = "", owner = null } = {}) {
+/** [{date, score, fish, hours, rate, sessions}] oldest first, for days with at least one forecast score.
+ *  dayScore (optional) = {date: number}: use that day score (the re-scored day, lib/rescore.js) instead of the saved ones. */
+export function scoreDays(trips, { from = "", to = "", owner = null, dayScore = null } = {}) {
   const days = {};
   for (const r of trips || []) {
     const d = r.trip_date; if (!d || (from && d < from) || (to && d > to)) continue;
@@ -29,8 +30,8 @@ export function scoreDays(trips, { from = "", to = "", owner = null } = {}) {
     if (a != null && b != null && b > a) { s.lo = s.lo == null ? a : Math.min(s.lo, a); s.hi = s.hi == null ? b : Math.max(s.hi, b); }
     day.sessions.set(sid, s);
   }
-  return Object.values(days).filter((d) => d.scores.size).map((d) => {
-    const sc = [...d.scores.values()], hours = [...d.sessions.values()].reduce((h, s) => h + (s.lo != null ? (s.hi - s.lo) / 60 : 0), 0);
+  return Object.values(days).filter((d) => (dayScore ? dayScore[d.date] != null : d.scores.size)).map((d) => {
+    const sc = dayScore ? [dayScore[d.date]] : [...d.scores.values()], hours = [...d.sessions.values()].reduce((h, s) => h + (s.lo != null ? (s.hi - s.lo) / 60 : 0), 0);
     return { date: d.date, score: sc.reduce((a, b) => a + b, 0) / sc.length, fish: d.fish, hours, rate: hours >= 0.5 ? d.fish / hours : null, sessions: d.sessions.size };
   }).sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -65,4 +66,16 @@ export function scoreCheck(trips, opts) {
   const days = scoreDays(trips, opts), withRate = days.filter((d) => d.rate != null);
   return { days, bands: scoreBands(days), rFish: pearson(days.map((d) => d.score), days.map((d) => d.fish)),
     rRate: pearson(withRate.map((d) => d.score), withRate.map((d) => d.rate)), rateDays: withRate.length };
+}
+
+/** Every date fished (finished rows), for re-scoring. */
+export function fishedDates(trips, { from = "", to = "", owner = null } = {}) {
+  const out = new Set();
+  for (const r of trips || []) {
+    const d = r.trip_date; if (!d || (from && d < from) || (to && d > to)) continue;
+    if (owner && (r.owner || "").toLowerCase() !== owner.toLowerCase()) continue;
+    const c = parseConditions(r); if (c.source === "spot_session" && !c.lure_end_time) continue;
+    out.add(d);
+  }
+  return [...out].sort();
 }
