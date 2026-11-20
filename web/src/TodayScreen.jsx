@@ -7,6 +7,7 @@ import { Head } from "./Shell.jsx";
 import { Breakdown, ScoreRing, Sheet, ago, fmtTime, signed, verdict } from "./ui.jsx";
 import { calibrateWeights } from "./lib/calibration.js";
 import { NORMAL_SUMMER_POOL_FT } from "./lib/lake.js";
+import { oxygenOutlook } from "./lib/oxygen.js";
 import { buildDailyActivity, buildWeeklyActivity, dailyAwards, formatWeightLbOz, leaderboardTableRows, weekBounds } from "./lib/leaderboard.js";
 import { scoreDay } from "./lib/scoring.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
@@ -31,6 +32,7 @@ export default function TodayScreen({ active, demo, onMenu, weather, lake, water
   const helping = day ? day.overall_breakdown.filter(([l, d]) => l !== "Base" && d > 0).sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => x[0].toLowerCase()) : [];
   const hurting = day ? day.overall_breakdown.filter(([, d]) => d < 0).sort((a, b) => a[1] - b[1]).slice(0, 2).map((x) => x[0].toLowerCase()) : [];
   const level = lake.value?.[lake.value.length - 1];
+  const o2 = useMemo(() => oxygenOutlook(today, water.profile), [today, water.profile]);
   const levelTime = level ? new Date(level.observed_at) : null;
 
   const stats = trips ? (period === "today" ? buildDailyActivity(trips, today) : buildWeeklyActivity(trips, today)) : null;
@@ -108,6 +110,13 @@ export default function TodayScreen({ active, demo, onMenu, weather, lake, water
             <div className="stat"><span className="v">{level ? `${level.elevation_ft} ft` : "—"}</span><span className="k">{level ? `${signed(level.elevation_ft - NORMAL_SUMMER_POOL_FT)} vs pool` : "Lake level"}</span></div>
             <div className="stat"><span className="v">{water.reading ? `${water.reading.do_mg_l} mg/l` : "—"}</span><span className="k">Oxygen</span></div>
             <div className="stat"><span className="v">{water.reading ? `${Math.round(water.reading.do_saturation_pct)}%` : "—"}</span><span className="k">O₂ saturation</span></div>
+          </div>
+          <div className="card-b" style={{ borderTop: "1px solid var(--line-soft)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+              <span className="muted small">Bass-safe oxygen down to</span><span style={{ fontWeight: 700 }}>{o2.headline}</span>
+            </div>
+            <p className="muted small" style={{ margin: "6px 0 0", lineHeight: 1.45 }}>{o2.detail}</p>
+            {o2.warning && <p className="warn" style={{ marginBottom: 0 }}>{o2.warning}</p>}
           </div>
           <div className="card-b muted small" style={{ borderTop: "1px solid var(--line-soft)", lineHeight: 1.45 }}>
             {level ? `Level from USGS ${levelTime.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })}. ` : lake.error ? "Couldn't reach USGS for the lake level just now. " : ""}

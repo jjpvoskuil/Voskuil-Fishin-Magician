@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchForecast } from "./weather.js";
 import { fetchLakeLevels, parseSurfaceWaterQuality } from "./lake.js";
+import { parseDamProfile } from "./oxygen.js";
 
 const read = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full or blocked: fine */ } };
@@ -43,17 +44,18 @@ export const useLakeLevel = () => useCached("fm.lake", getLake, 30 * 60e3);
 
 /** Latest Army Corps surface reading: live from the report (logged once, shared with everyone), else the last one logged. */
 export function useWaterQuality(db) {
-  const [state, setState] = useState({ reading: null, live: false, error: "", loading: true });
+  const [state, setState] = useState({ reading: null, profile: null, live: false, error: "", loading: true });
   const load = useCallback(async () => {
     if (!db) return;
-    let live = null, err = "";
-    try { live = parseSurfaceWaterQuality(await db.usaceHtml()); } catch (e) { err = e.message || String(e); }
+    let live = null, err = "", profile = null;
+    try { const html = await db.usaceHtml(); live = parseSurfaceWaterQuality(html); try { profile = parseDamProfile(html); } catch { /* profile is a bonus */ } }
+    catch (e) { err = e.message || String(e); }
     if (live) {
       try { await db.addWaterQuality(live); } catch { /* logging is best-effort */ }
-      setState({ reading: live, live: true, error: "", loading: false }); return;
+      setState({ reading: live, profile, live: true, error: "", loading: false }); return;
     }
-    try { const log = await db.listWaterQuality(); setState({ reading: log.length ? log[log.length - 1] : null, live: false, error: err, loading: false }); }
-    catch (e) { setState({ reading: null, live: false, error: err || e.message, loading: false }); }
+    try { const log = await db.listWaterQuality(); setState({ reading: log.length ? log[log.length - 1] : null, profile: null, live: false, error: err, loading: false }); }
+    catch (e) { setState({ reading: null, profile: null, live: false, error: err || e.message, loading: false }); }
   }, [db]);
   useRefreshing(load, 6 * 3600e3);
   return state;

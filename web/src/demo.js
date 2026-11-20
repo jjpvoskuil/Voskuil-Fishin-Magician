@@ -44,7 +44,10 @@ export function demoTrips(today = lakeToday()) {
   return trips;
 }
 
-export const DEMO_USACE_HTML = `<table><tr><td>Dam Site</td><td>${lakeToday().replace(/-/g, "").slice(0, 8)}, 0930</td><td>0</td><td>15.4</td><td>9.1</td></tr></table>`;
+const DEMO_DAY = lakeToday().replace(/-/g, "").slice(0, 8);
+// made-up dam profile (surface row first, as the Corps page lists it) so the oxygen-floor line has something to show
+export const DEMO_USACE_HTML = `<table>${[[0, 15.4, 9.1], [5, 15.3, 9.0], [10, 15.1, 8.6], [15, 14.6, 7.2], [20, 13.9, 4.1], [25, 13.2, 1.8], [30, 12.8, 0.6]]
+  .map(([z, t, d]) => `<tr><td>Dam Site</td><td>${DEMO_DAY}, 0930</td><td>${z}</td><td>${t}</td><td>${d}</td></tr>`).join("")}</table>`;
 
 const DEMO_LURES = [
   ["dl1", "Strike King", "KVD Squarebill 1.5 - Sexy Shad", "squarebill_crankbait", "2"], ["dl2", "Z-Man", "ChatterBait Jackhammer - Green Pumpkin", "chatterbait", "1"],

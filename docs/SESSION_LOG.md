@@ -73,3 +73,9 @@
 - John: forecast score for the day vs fish/hr over all history → Reports → Forecast vs catch now re-scores every day
   fished with today's engine from archived Open-Meteo forecasts (untuned by default, tuned optional, saved scores
   still available), plus an "Over time" day-by-day chart next to the scatter, and a "Show all our history" shortcut.
+
+## 2026-11-20
+- John got 1966–2026 temp/DO depth profiles from the Army Corps. Analysis: summer oxygen floor ~17 ft at the dam
+  (Jun–Aug), forms late May, deepens in Sept; fall turnover crash (surface < 5 mg/L) in 22 of 38 years, typical ~Oct 19;
+  Aug floor ~11.5 ft 10 mi up-lake. Added lib/oxygen.js (+ tests with the real 11-12 Corps page) and an oxygen-floor
+  line on Today; the live profile comes from the existing fm-usace-wq fetch. Demo now has a made-up full profile.

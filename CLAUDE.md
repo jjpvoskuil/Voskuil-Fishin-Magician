@@ -75,6 +75,13 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   swimbait, then football jig / blade / lipless — labeled as a general pattern, not Nolin-documented); 60-75 °F
   June–early Sept = Post-Spawn/Summer (was Fall Feed Up). Old bug: Nov 50-60 °F was Pre Spawn (+1.3).
 
+- Oxygen floor (John, 11-20): `web/src/lib/oxygen.js` holds the Army Corps dam-profile climatology John got from the
+  Corps (Nolin_Temp_DO_Data.xlsx, 1989–2026, station NRR20001; analysis dashboard https://claude.ai/artifact/6UVptRni3N3vJ3XYzwaGdU).
+  Today → "Lake right now" shows "Bass-safe oxygen down to": the latest full Dam Site profile from the fm-usace-wq page if
+  ≤10 days old, else the typical half-month value; Oct–mid-Nov = turnover warning. Up-lake floor ≈ a third shallower
+  10 mi up (uplakeFloorFt). Not yet wired: lure caveats/Forecast still use the old month THERMO guess in onwater.js
+  (too shallow in May–June vs the Corps data) — candidate next step.
+
 ## Engine port notes
 - Ported so far (11-10): `lib/py.js` (Python-exact rounding/sum/time helpers), `astro.js`, `weather.js`, `onwater.js`
   (+ thermocline), `scoring.js`, `calibration.js`. Parity: `npm test` runs `engine.test.js` against
