@@ -126,8 +126,8 @@ export default function App() {
     <NoteCtx.Provider value={openNote}>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} reloadTrips={reloadTrips}
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }} />
-      <ForecastScreen {...common} active={tab === "forecast"} weather={weather} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
-      <SessionScreen {...common} active={tab === "session"} weather={weather} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
+      <ForecastScreen {...common} active={tab === "forecast"} weather={weather} water={water} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
+      <SessionScreen {...common} active={tab === "session"} weather={weather} water={water} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
       <MapScreen {...common} active={tab === "map"} trips={trips} spots={spots.items} reloadSpots={spots.reload} weather={weather} lake={lake}
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }}
         onFishHere={(spotId) => { // Session setup reads its draft when it opens

@@ -12,7 +12,8 @@ import { ConditionsForm, FishSheet, LurePicker, RigSelect, TrailerSheet, conditi
 import { LOCATION_TYPE_TO_STRUCTURE_TYPE } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, fmtTime, verdict } from "./ui.jsx";
 import { calibrateWeights, locationAdjustments, parseConditions } from "./lib/calibration.js";
-import { curateRecommendation, recommend } from "./lib/lures.js";
+import { LURE_PROFILES, curateRecommendation, recommend } from "./lib/lures.js";
+import { annotatePicks, applyOxygen, lureOxygenLimit } from "./lib/oxygen.js";
 import { formatWeightLbOz } from "./lib/leaderboard.js";
 import { windMphForBand } from "./lib/onwater.js";
 import { dateOf, isoNaive, parseIso, pyFixed } from "./lib/py.js";
@@ -34,7 +35,7 @@ const fishLine = (f) => [f.caught_at ? t12(f.caught_at) : null, f.count > 1 ? `$
 const spotMeta = (s) => [s.location_type, (s.bottom_structure || "").split("|").filter(Boolean).join(", "), s.main_depth_ft && `main area ${s.main_depth_ft} ft`,
   s.transition_depth_ft && `transition ${s.transition_depth_ft} ft (${s.transition_grade || ""})`].filter(Boolean).join(" · ");
 
-export default function SessionScreen({ active, demo, onMenu, db, me, weather, trips, reloadTrips, lures, spots, toast, outbox, watchReq }) {
+export default function SessionScreen({ active, demo, onMenu, db, me, weather, water, trips, reloadTrips, lures, spots, toast, outbox, watchReq }) {
   const [local, setLocal] = useState(null);          // my open session rows (edited here, saved through the outbox)
   const [watching, setWatching] = useState(null);    // session key of someone else's session
   const [sheet, setSheet] = useState(null);
@@ -59,7 +60,7 @@ export default function SessionScreen({ active, demo, onMenu, db, me, weather, t
 
   if (!active) return <div className="screen" hidden id="screen-session" />;
   const watched = watching ? others.find((s) => s.key === watching) : null;
-  const common = { bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, db };
+  const common = { bundle, weights, locAdj, lures, spots, trips, water, me, toast, setSheet, db };
   return (
     <div className="screen" id="screen-session">
       {watched ? <Watch s={watched} onStop={() => setWatching(null)} onMenu={onMenu} demo={demo} hasOwn={!!(local && local.length)} />
@@ -78,7 +79,7 @@ export default function SessionScreen({ active, demo, onMenu, db, me, weather, t
 }
 
 /* ------------------------------------------------------------------ before you start */
-function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, others, onWatch, onStart, onMenu, demo, db }) {
+function Setup({ bundle, weights, locAdj, lures, spots, trips, water, me, toast, setSheet, others, onWatch, onStart, onMenu, demo, db }) {
   const today = lakeToday();
   const [electronics] = useElectronics(), [picksMode, setPicksMode] = usePicksMode();
   const [draft, setDraftState] = useState(() => readDraft());
@@ -115,12 +116,14 @@ function Setup({ bundle, weights, locAdj, lures, spots, trips, me, toast, setShe
     { values: draft.cond || {}, sources: Object.fromEntries(Object.keys(draft.cond || {}).map((k) => [k, "you"])) })), [bundle, date, trips, draft.cond, partnerCond, electronics]);
   const scoring = useMemo(() => (spot ? S.computeScoring(cond.values, date, bundle, date === today ? now : at, segment, { spotId: spot.spot_id, locAdj, weights }) : null),
     [spot, cond, date, bundle, segment, locAdj, weights]);
-  const rec = useMemo(() => (spot && scoring && lures && trips ? recommend({ season: scoring.season, water_temp_f: cond.values.water_temp_f, segment_name: segment,
+  const ox = useMemo(() => (spot ? lureOxygenLimit(date, water?.profile, spot) : null), [date, water?.profile, spot]);
+  const rec0 = useMemo(() => (spot && scoring && lures && trips ? recommend({ season: scoring.season, water_temp_f: cond.values.water_temp_f, segment_name: segment,
     pressure_trend_24h: scoring.rt.pressure_trend_24h, structure_type: STRUCT(spot), water_clarity: scoring.water_clarity, fish_depth_ft: cond.values.fish_depth_ft || null,
     forage: cond.values.forage_seen, inventory: lures, trip_history: trips, spot_id: spot.spot_id, fish_activity: cond.values.fish_activity,
     forage_activity: cond.values.forage_activity, wind_mph: windMphForBand(cond.values.wind_band) }) : null), [spot, scoring, lures, trips, cond, segment]);
-  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: cond.values.water_temp_f, water_clarity: scoring.water_clarity,
-    segment_name: segment, structure_type: STRUCT(spot), spot_id: spot.spot_id, wind_band: cond.values.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: cond.values.fish_depth_ft || null } }) : null), [rec, picksMode]);
+  const rec = useMemo(() => applyOxygen(rec0, ox, LURE_PROFILES, cond.values.fish_depth_ft || null), [rec0, ox, cond]);
+  const picks = useMemo(() => (rec ? annotatePicks(buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: cond.values.water_temp_f, water_clarity: scoring.water_clarity,
+    segment_name: segment, structure_type: STRUCT(spot), spot_id: spot.spot_id, wind_band: cond.values.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: cond.values.fish_depth_ft || null } }), ox, LURE_PROFILES) : null), [rec, picksMode, ox]);
   const pending = draft.lures || [];
   const pendingIds = new Set(pending.map((l) => l.item_id).filter(Boolean));
   const addLure = (stub) => { if (stub.item_id && pendingIds.has(stub.item_id)) return; setDraft({ lures: [...pending, stub] }); toast(`Added ${stub.label}`); };
@@ -232,6 +235,7 @@ function QuickPicks({ picks, added, onAdd }) {
   return <div className="qp">{picks.picks.map((p) => (
     <div key={p.key} className="qp-b"><span><TierBadge tier={p.tier} /> <b>{p.block.name}</b></span>
       <span className="muted small">{p.reasons[0]}</span>
+      {p.block.oxygen && p.block.oxygen.startsWith("⚠️") && <span className="warn small" style={{ margin: 0 }}>{p.block.oxygen}</span>}
       {p.block.owned_items.map((it) => { const on = added.has(it.item_id); return (
         <div key={it.item_id} className="qp-i"><span className="grow small">{it.brand} – {it.description}{it._item_fish_per_hour ? <span className="ok"> · {pyFixed(it._item_fish_per_hour, 1)} fish/hr</span> : null}</span>
           <button className={on ? "btn small-btn" : "btn primary small-btn"} disabled={on} onClick={() => onAdd(it, p.key)}>{on ? "✓ Added" : "+ Add"}</button></div>); })}
@@ -246,7 +250,7 @@ function NoSpots({ db, toast }) {
 }
 
 /* ------------------------------------------------------------------ live session */
-function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo, reloadTrips, onWatch, db }) {
+function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, water, me, toast, setSheet, outbox, onEnded, onCancel, onMenu, demo, setUndo, reloadTrips, onWatch, db }) {
   const [fishFor, setFishFor] = useState(null);
   const [picker, setPicker] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -335,7 +339,7 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
     <div className="dock dock2"><button className="btn primary big" onClick={() => setConfirm({ text: `End this session? ${totalFish} fish will be saved.`, ok: "End session", run: end })}>■ End session</button>
       <button className="btn danger" onClick={() => setConfirm({ text: "Cancel this session? Everything logged in it (lures and fish) will be deleted. This can't be undone.", ok: "Delete session", danger: true, run: () => onCancel(rows.map((r) => r.trip_id)) })}>Cancel</button></div>
     <FishSheet lure={fishFor} onClose={() => setFishFor(null)} onSave={(f) => logFish(fishFor, f)} />
-    <AddLureSheet db={db} me={me} open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
+    <AddLureSheet db={db} me={me} water={water} spots={spots} open={picker} onClose={() => setPicker(false)} lures={lures} trips={trips} base={base} current={current} bundle={bundle} weights={weights} locAdj={locAdj} onAdd={addLure} openIds={new Set(open.map((r) => r.conditions.item_id).filter(Boolean))} />
     <MoveSheet open={moving} onClose={() => setMoving(false)} rows={rows} setRows={setRows} base={base} current={current} spots={spots} bundle={bundle} weights={weights} locAdj={locAdj} me={me} toast={toast} />
     <Sheet open={!!confirm} title="Are you sure?" onClose={() => setConfirm(null)}>
       {confirm && <div className="setup"><p>{confirm.text}</p>
@@ -345,19 +349,21 @@ function Live({ rows, setRows, bundle, weights, locAdj, lures, spots, trips, me,
   </>;
 }
 
-function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me, db }) {
+function AddLureSheet({ open, onClose, lures, trips, base, current, bundle, weights, locAdj, onAdd, openIds, me, db, water, spots }) {
   const [picksMode, setPicksMode] = usePicksMode();
   const [tackle, setTackle] = useState(false);
   const [trailerFor, setTrailerFor] = useState(null);
-  const rec = useMemo(() => {
+  const rec0 = useMemo(() => {
     if (!open || !lures || !trips) return null;
     const sc = S.computeScoring(base, current.trip_date, bundle, lakeNowNaive(), current.segment, { spotId: current.spot_id, locAdj, weights });
     return recommend({ season: sc.season, water_temp_f: base.water_temp_f ?? 85, segment_name: current.segment, pressure_trend_24h: sc.rt.pressure_trend_24h,
       structure_type: current.structure_type, water_clarity: current.water_clarity, fish_depth_ft: base.fish_depth_ft || null, forage: base.forage_seen,
       inventory: lures, trip_history: trips, spot_id: current.spot_id, fish_activity: base.fish_activity, forage_activity: base.forage_activity, wind_mph: windMphForBand(base.wind_band) });
   }, [open, lures, trips, base, current, bundle, weights, locAdj]);
-  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: base.water_temp_f, water_clarity: current.water_clarity,
-    segment_name: current.segment, structure_type: current.structure_type, spot_id: current.spot_id, wind_band: base.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: base.fish_depth_ft || null } }) : null), [rec, picksMode]);
+  const ox = useMemo(() => lureOxygenLimit(current.trip_date, water?.profile, (spots || []).find((s) => s.spot_id === current.spot_id) || null), [current, water?.profile, spots]);
+  const rec = useMemo(() => applyOxygen(rec0, ox, LURE_PROFILES, base.fish_depth_ft || null), [rec0, ox, base]);
+  const picks = useMemo(() => (rec ? annotatePicks(buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: base.water_temp_f, water_clarity: current.water_clarity,
+    segment_name: current.segment, structure_type: current.structure_type, spot_id: current.spot_id, wind_band: base.wind_band, me: picksMode === "me" ? me.email : null, fish_depth_ft: base.fish_depth_ft || null } }), ox, LURE_PROFILES) : null), [rec, picksMode, ox]);
   const pick = (item, category) => { const stub = { label: S.itemLabel(item), category, item_id: item.item_id, bait_style: styleOf(item.category) }; if (S.canTakeTrailer({ category })) setTrailerFor(stub); else onAdd(stub); };
   return <>
     <Sheet open={open && !tackle && !trailerFor} title="Add a lure" onClose={onClose}>

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { floorFromProfile, milesFromDam, oxygenOutlook, parseDamProfile, seasonFor, uplakeFloorFt } from "./oxygen.js";
+import { applyOxygen, floorFromProfile, lureOxygenLimit, milesFromDam, oxygenOutlook, parseDamProfile, seasonFor, uplakeFloorFt } from "./oxygen.js";
 
 const real = readFileSync(new URL("./fixtures/usace_nrr_2026-11-12.html", import.meta.url), "utf8");
 
@@ -39,4 +39,25 @@ test("outlook: fresh profile beats the typical year; stale falls back", () => {
   assert.equal(oxygenOutlook("2027-10-20", null).kind, "unsettled");
   assert.equal(oxygenOutlook("2027-02-01", null).kind, "ok");
   assert.equal(oxygenOutlook("2027-04-05", null).headline, "Not limited");
+});
+
+test("lure advice: deep baits demoted below the floor, notes, fish-depth caveat", async () => {
+  const { LURE_PROFILES, recommend } = await import("./lures.js");
+  const upLake = { lat: 37.350833, lon: -86.081389 }, dam = { lat: 37.2792, lon: -86.2469 };
+  const oxUp = lureOxygenLimit("2027-07-20", null, upLake), oxDam = lureOxygenLimit("2027-07-20", null, dam);
+  assert.equal(oxDam.limit_ft, 17); assert.equal(oxUp.limit_ft, 12);
+  const rec = recommend({ season: "summer_peak", water_temp_f: 84, segment_name: "Midday", pressure_trend_24h: 0, structure_type: "Main-lake point" });
+  assert.ok(rec.first_choice.some((b) => b.key === "deep_diving_crankbait"));
+  const r = applyOxygen(rec, oxUp, LURE_PROFILES, 25);
+  assert.ok(!r.first_choice.some((b) => b.key === "deep_diving_crankbait")); // 15-25 ft runs below a 12 ft floor
+  assert.equal(r.second_choice[r.second_choice.length - 1].key === "deep_diving_crankbait" || r.second_choice.some((b) => b.key === "deep_diving_crankbait"), true);
+  assert.match(r.second_choice.find((b) => b.key === "deep_diving_crankbait").oxygen, /^⚠️ Runs 15–25 ft/);
+  assert.match(r.rationale[0], /around 12 ft at this spot \(~10 mi up/);
+  assert.match(r.rationale[1], /marking fish around 25 ft, below/);
+  const d = applyOxygen(rec, oxDam, LURE_PROFILES, null);
+  assert.ok(d.first_choice.some((b) => b.key === "deep_diving_crankbait")); // spans the 17 ft floor: kept, with a note
+  assert.match(d.first_choice.find((b) => b.key === "deep_diving_crankbait").oxygen, /Keep it above ~17 ft/);
+  assert.equal(applyOxygen(rec, lureOxygenLimit("2027-01-10"), LURE_PROFILES), rec); // winter: unchanged
+  const turn = lureOxygenLimit("2026-11-18", parseDamProfile(real), dam);
+  assert.equal(turn.kind, "low"); assert.equal(turn.limit_ft, 38);
 });

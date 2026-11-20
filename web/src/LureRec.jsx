@@ -13,6 +13,7 @@ export function LureBlock({ block, offColor, bare }) {
       {!bare && <h4>{block.name}</h4>}
       {block.why.length > 0 && <p className="muted small">💡 Why: {block.why.join(" ")}</p>}
       {block.note && <p className="lure-note">{block.note}</p>}
+      {block.oxygen && <p className={block.oxygen.startsWith("⚠️") ? "warn small" : "muted small"} style={{ margin: "4px 0" }}>{block.oxygen}</p>}
       {block.owned_items.length > 0 ? (
         <div className="owned">
           <b className="ok">✅ In your tackle box{offColor ? " (other colors than today's chart)" : ""}:</b>

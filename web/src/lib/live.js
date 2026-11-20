@@ -54,7 +54,13 @@ export function useWaterQuality(db) {
       try { await db.addWaterQuality(live); } catch { /* logging is best-effort */ }
       setState({ reading: live, profile, live: true, error: "", loading: false }); return;
     }
-    try { const log = await db.listWaterQuality(); setState({ reading: log.length ? log[log.length - 1] : null, profile: null, live: false, error: err, loading: false }); }
+    try {
+      const log = await db.listWaterQuality(), last = log.length ? log[log.length - 1] : null;
+      // the twice-daily water-quality job also logs the full profile — use it when the Corps page can't be reached
+      const prof = last && Array.isArray(last.profile) && last.profile.length >= 3
+        ? { observed_at: last.observed_at, rows: last.profile.map((r) => ({ depth_ft: Number(r.depth_ft), temp_f: r.water_temp_f ?? null, do_mg_l: Number(r.do_mg_l) })).sort((a, b) => a.depth_ft - b.depth_ft) } : null;
+      setState({ reading: last, profile: prof, live: false, error: err, loading: false });
+    }
     catch (e) { setState({ reading: null, profile: null, live: false, error: err || e.message, loading: false }); }
   }, [db]);
   useRefreshing(load, 6 * 3600e3);

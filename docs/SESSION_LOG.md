@@ -79,3 +79,7 @@
   (Jun–Aug), forms late May, deepens in Sept; fall turnover crash (surface < 5 mg/L) in 22 of 38 years, typical ~Oct 19;
   Aug floor ~11.5 ft 10 mi up-lake. Added lib/oxygen.js (+ tests with the real 11-12 Corps page) and an oxygen-floor
   line on Today; the live profile comes from the existing fm-usace-wq fetch. Demo now has a made-up full profile.
+- Lure advice now uses the oxygen floor (John: "do the switch over on lure advice"): lib/oxygen.js lureOxygenLimit /
+  applyOxygen / annotatePicks, wired into Forecast + Session (setup, Add a lure). Deep baits that run entirely below
+  the floor at the spot are demoted with a ⚠️ note; e.g. July 10 mi up-lake: floor ~12 ft → deep crank 15–25 ft demoted.
+  JS: 66 pass.

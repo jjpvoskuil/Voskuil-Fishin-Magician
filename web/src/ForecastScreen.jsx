@@ -10,14 +10,15 @@ import { LakeSetupForm, resolveSetup, setupSummary } from "./LakeSetup.jsx";
 import { Breakdown, Sheet, ago, fmtTime, signed } from "./ui.jsx";
 import { calibrateWeights } from "./lib/calibration.js";
 import { applyFreeze } from "./lib/freeze.js";
-import { recommend } from "./lib/lures.js";
+import { LURE_PROFILES, recommend } from "./lib/lures.js";
+import { annotatePicks, applyOxygen, lureOxygenLimit } from "./lib/oxygen.js";
 import { effectiveSeasonAndTemp, scoreWeek } from "./lib/scoring.js";
 import { titleWords } from "./lib/py.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 
 const dayLabel = (d, opts) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
 
-export default function ForecastScreen({ active, demo, onMenu, db, me, weather, trips, lures, spots, setup, setSetup }) {
+export default function ForecastScreen({ active, demo, onMenu, db, me, weather, water, trips, lures, spots, setup, setSetup }) {
   const today = lakeToday();
   const [frozen, setFrozen] = useState(null);
   const [pick, setPick] = useState(today);
@@ -56,9 +57,11 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
       structure_type: r.structure, water_clarity: r.clarity, fish_depth_ft: r.fishDepth, forage: r.forage,
       inventory: lures, trip_history: trips, wind_mph: day.weather_summary.avg_wind_mph });
   }, [day, seg, lures, trips, effSeason, effTemp, r.structure, r.clarity, r.fishDepth, r.forage]);
+  const ox = useMemo(() => (day ? lureOxygenLimit(day.the_date, water?.profile, r.spot) : null), [day, water?.profile, r.spot]);
+  const recO2 = useMemo(() => applyOxygen(rec, ox, LURE_PROFILES, r.fishDepth), [rec, ox, r.fishDepth]);
 
-  const picks = useMemo(() => (rec ? buildPicks(rec, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: effTemp, water_clarity: r.clarity, segment_name: seg?.name,
-    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: picksMode === "me" ? me?.email : null, fish_depth_ft: r.fishDepth } }) : null), [rec, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth, picksMode]);
+  const picks = useMemo(() => (recO2 ? annotatePicks(buildPicks(recO2, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: effTemp, water_clarity: r.clarity, segment_name: seg?.name,
+    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: picksMode === "me" ? me?.email : null, fish_depth_ft: r.fishDepth } }), ox, LURE_PROFILES) : null), [recO2, ox, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth, picksMode]);
   const ws = day?.weather_summary;
   return (
     <div className="screen" hidden={!active} id="screen-forecast">
@@ -129,7 +132,7 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
                 ))}
               </div>
               <p className="muted small" style={{ margin: "8px 0 10px" }}>{seg.name}: {fmtTime(seg.start)} – {fmtTime(seg.end)}</p>
-              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={rec} inventory={lures} picks={picks} mode={picksMode} setMode={setPicksMode} />}
+              {!rec ? <p className="muted">Loading your tackle box…</p> : <LureRec rec={recO2} inventory={lures} picks={picks} mode={picksMode} setMode={setPicksMode} />}
             </div>
           </section>
           <p className="muted small" style={{ textAlign: "center", margin: "0 8px" }}>Scores are 1 (least active) to 10 (most active), built from pressure trend, moon phase, solunar windows, cloud cover, wind, and season.</p>

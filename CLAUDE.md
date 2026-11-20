@@ -79,8 +79,15 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   Corps (Nolin_Temp_DO_Data.xlsx, 1989–2026, station NRR20001; analysis dashboard https://claude.ai/artifact/6UVptRni3N3vJ3XYzwaGdU).
   Today → "Lake right now" shows "Bass-safe oxygen down to": the latest full Dam Site profile from the fm-usace-wq page if
   ≤10 days old, else the typical half-month value; Oct–mid-Nov = turnover warning. Up-lake floor ≈ a third shallower
-  10 mi up (uplakeFloorFt). Not yet wired: lure caveats/Forecast still use the old month THERMO guess in onwater.js
-  (too shallow in May–June vs the Corps data) — candidate next step.
+  10 mi up (uplakeFloorFt). Fallback when the Corps page can't be reached: the last fm_water_quality row's `profile`
+  (logged twice a day by deercast-data's water-quality job).
+  Lure advice (John 11-20, NEW APP ONLY — recommend()/Python parity untouched): `lureOxygenLimit(date, profile, spot)`
+  → limit = 5 mg/L floor scaled by the spot's miles from the dam (turnover: where a fresh profile drops under 3 mg/L;
+  Oct–mid-Nov typical = no limit, just a line). `applyOxygen(rec)` adds the rationale line, `block.oxygen` notes
+  (⚠️ when the bait's whole depth range is at/below the limit → moved to the end of the second choices; "keep it above"
+  when it spans it), and a caveat when marked fish are >2 ft below the limit; `annotatePicks` adds the notes to picks.
+  Used in Forecast, Session setup and Live "Add a lure". The old month THERMO table in onwater.js/core/thermocline.py
+  is now unused by the screens (kept for parity tests).
 
 ## Engine port notes
 - Ported so far (11-10): `lib/py.js` (Python-exact rounding/sum/time helpers), `astro.js`, `weather.js`, `onwater.js`

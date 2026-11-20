@@ -122,3 +122,55 @@ export function oxygenOutlook(todayStr, profile = null) {
       : `Typical for this time of year (${SEASON_SOURCE}): oxygen runs out at about ${ft(s.floor_ft)} near the dam (most years ${ft(s.low_ft)}–${ft(s.high_ft)}), shallower up the lake. No fresh Corps profile in the last ${PROFILE_FRESH_DAYS} days.`,
     warning };
 }
+
+// ---------------------------------------------------------------- lure advice (John 11-20: "switch the lure advice over")
+/** The depth limit to plan lures around at a spot on a date: {limit_ft|null, kind, line (rationale text)|null}.
+ *  "floor" = 5 mg/L floor scaled for how far up the lake the spot is; "low" (turnover, surface already < 5) = where it
+ *  drops under 3 mg/L in the fresh profile; "ok"/"unsettled" = no limit (unsettled still explains why). */
+export function lureOxygenLimit(dateStr, profile = null, spot = null) {
+  const o = oxygenOutlook(dateStr, profile);
+  const miles = spot ? milesFromDam(Number(spot.lat), Number(spot.lon)) : null;
+  const where = miles != null && miles >= 1 ? ` at this spot (~${Math.round(miles)} mi up from the dam)` : " near the dam";
+  const src = o.source === "profile" ? "the latest Corps profile" : `Corps records for this time of year`;
+  if (o.kind === "floor" && o.floor_ft != null) {
+    const lim = Math.round(uplakeFloorFt(o.floor_ft, Number.isFinite(miles) ? miles : 0));
+    return { limit_ft: lim, kind: "floor", line: `Oxygen runs out around ${lim} ft${where}, per ${src} — baits are checked against that: keep them working above it, on the top and edge of the break, not below.` };
+  }
+  if (o.kind === "low") {
+    const f3 = profile ? floorFromProfile(profile.rows, 3.0) : null;
+    return { limit_ft: f3 ? Math.round(f3) : null, kind: "low", line: `Turnover: oxygen is low top to bottom right now (per ${src})${f3 ? `, and drops off fast below about ${Math.round(f3)} ft` : ""}. Expect sluggish, scattered fish — slow down and favor the upper water column.` };
+  }
+  if (o.kind === "unsettled") return { limit_ft: null, kind: "unsettled", line: "Turnover season: oxygen at depth swings from year to year right now — if fish seem shut down, try shallower and slower." };
+  return { limit_ft: null, kind: o.kind, line: null };
+}
+
+/** One lure block's oxygen note for a depth limit, or null. `range` = the profile's depth_range_ft. */
+export function oxygenNote(range, limit) {
+  if (limit == null || !range) return null;
+  const [lo, hi] = range;
+  if (hi === 0) return null; // topwater
+  if (lo >= limit) return `⚠️ Runs ${lo}–${hi} ft, at or below today's oxygen floor (~${limit} ft) here — few active bass down there. Use it only on the top of the break, or pick a shallower bait.`;
+  if (hi > limit) return `Keep it above ~${limit} ft — below that, oxygen is too low for active bass today.`;
+  return null;
+}
+const blockBelow = (range, limit) => limit != null && range && range[1] !== 0 && range[0] >= limit;
+
+/** rec from recommend() → same shape with oxygen notes on each block (block.oxygen), baits that run entirely below the
+ *  limit moved to the end of the second choices, a rationale line, and a caveat if the marked fish are below it. */
+export function applyOxygen(rec, ox, profiles, fishDepth = null) {
+  if (!rec || !ox || (!ox.line && ox.limit_ft == null)) return rec;
+  const lim = ox.limit_ft, ann = (b) => ({ ...b, oxygen: oxygenNote(profiles[b.key]?.depth_range_ft, lim) });
+  let first = rec.first_choice.map(ann), second = rec.second_choice.map(ann);
+  const below = (b) => blockBelow(profiles[b.key]?.depth_range_ft, lim);
+  const moved = [...first.filter(below), ...second.filter(below)];
+  first = first.filter((b) => !below(b)); second = [...second.filter((b) => !below(b)), ...moved];
+  if (!first.length && second.length) first = [second.shift()];
+  const rationale = [...(ox.line ? [ox.line] : []), ...rec.rationale];
+  if (lim != null && fishDepth != null && fishDepth > lim + 2) rationale.splice(1, 0, `Heads up: you're marking fish around ${Math.round(fishDepth)} ft, below today's oxygen floor (~${lim} ft) — likely baitfish, another species, or bass passing through. Target the fish suspended near ${lim} ft or shallower.`);
+  return { ...rec, first_choice: first, second_choice: second, rationale };
+}
+/** Same notes on picks (picks.js may build blocks the plan didn't have). */
+export function annotatePicks(picks, ox, profiles) {
+  if (!picks || !ox || ox.limit_ft == null) return picks;
+  return { ...picks, picks: picks.picks.map((p) => ({ ...p, block: { ...p.block, oxygen: p.block.oxygen ?? oxygenNote(profiles[p.key]?.depth_range_ft, ox.limit_ft) } })) };
+}
