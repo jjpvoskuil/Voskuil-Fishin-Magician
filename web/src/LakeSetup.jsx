@@ -11,7 +11,7 @@ export const LOCATION_TYPE_TO_STRUCTURE_TYPE = {
   "Cove / pocket (shallow cover)": "Cove / pocket (shallow cover)", "Standing timber": "Standing timber", "Roadbed / old ford": "Flat", "Other": "Main-lake point",
 };
 const KEY = "fm.setup";
-const DEFAULTS = { secchi: 2.5, stain: STAIN_COLOR_OPTIONS[0], stirred: false, location: OTHER_LOCATION, structure: STRUCTURE_TYPES[0], waterTemp: null, fishDepth: 8, forage: [] };
+const DEFAULTS = { secchi: 2.5, stain: STAIN_COLOR_OPTIONS[0], stirred: false, location: OTHER_LOCATION, structure: STRUCTURE_TYPES[0], waterTemp: null, fishDepth: null, forage: [] }; // blank fish depth = aim where our log marked fish (lib/fishdepth.js)
 
 export function useLakeSetup() {
   const [setup, setState] = useState(() => { try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY)) || {}) }; } catch { return DEFAULTS; } });
@@ -75,9 +75,9 @@ export function LakeSetupForm({ setup, set, spots, defaultTemp, electronics = tr
       {electronics ? <>
         <div className="two">
           <NumberBox label="Water temp (°F)" value={setup.waterTemp} min={32} max={100} placeholder={`${defaultTemp ?? ""} (est.)`} onChange={(v) => set({ waterTemp: v })} />
-          <NumberBox label="Fish depth (ft)" value={setup.fishDepth} step={1} min={0} max={100} onChange={(v) => set({ fishDepth: v ?? 8 })} />
+          <NumberBox label="Fish depth (ft)" value={setup.fishDepth} step={1} min={0} max={100} placeholder="— (from log)" onChange={(v) => set({ fishDepth: v ?? null })} />
         </div>
-        <p className="muted small">Nolin has no live water-temperature feed — leave it blank to use today's estimate ({defaultTemp ?? "—"}°F), or enter your own reading. Fish depth = where fish show on your electronics.</p>
+        <p className="muted small">Nolin has no live water-temperature feed — leave it blank to use today's estimate ({defaultTemp ?? "—"}°F), or enter your own reading. Fish depth = where fish show on your electronics; leave it blank and the lure plans aim where your log marked fish in conditions like these.</p>
       </> : <p className="muted small">Water temp: <b>{defaultTemp ?? "—"}°F</b> (estimated — main boat & electronics are off under More, so there's no reading or fish depth).</p>}
       <div className="field">Forage available / being eaten
         <div className="chips">

@@ -65,12 +65,12 @@ export function outings(trips, { from = "", to = "", owner = null } = {}) {
     const a = toMin(c.lure_start_time), b = toMin(c.lure_end_time);
     if (a != null && b != null && b > a) { o.lo = o.lo == null ? a : Math.min(o.lo, a); o.hi = o.hi == null ? b : Math.max(o.hi, b); }
     if (r.spot_id) o.spots[r.spot_id] = (o.spots[r.spot_id] || 0) + 1;
-    const fd = num(c.fish_depth_ft); if (fd != null && fd > 0 && !c.fish_depth_unreliable && c.electronics !== false) o.depths.push(fd);
+    const fd = num(c.fish_depth_ft); if (fd != null && fd > 0 && !c.fish_depth_unreliable && c.electronics !== false && c.field_sources?.fish_depth_ft !== "default") o.depths.push(fd); // 8 ft = the form's default, not a reading
     by.set(id, o);
   }
-  return [...by.values()].map((o) => {
+  return [...by.entries()].map(([key, o]) => {
     const ds = [...o.depths].sort((a, b) => a - b);
-    return { date: o.date, owner: o.owner, spot_id: Object.entries(o.spots).sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+    return { key, date: o.date, owner: o.owner, spot_id: Object.entries(o.spots).sort((a, b) => b[1] - a[1])[0]?.[0] || null,
       hours: o.lo != null ? (o.hi - o.lo) / 60 : 0, fish: o.fish, fish_depth: ds.length ? ds[Math.floor((ds.length - 1) / 2)] : null };
   }).filter((o) => o.hours >= MIN_H).sort((a, b) => a.date.localeCompare(b.date));
 }

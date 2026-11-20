@@ -14,6 +14,8 @@ import { formatWeightLbOz } from "./lib/leaderboard.js";
 import { segmentTimeRanges, SEGMENTS } from "./lib/scoring.js";
 import * as S from "./lib/session.js";
 import { HEAT_LEGEND, heatColor, SEASONS, spotStats } from "./lib/spotstats.js";
+import { likeLabel, rowFilter } from "./lib/wheretofish.js";
+import { useLakeCtx, useTodayLake } from "./WhereReport.jsx";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 import { FACTOR_LABEL, rankTries } from "./lib/tryrank.js";
 import ATTRACTORS from "./lib/data/attractors.json" with { type: "json" };
@@ -27,7 +29,7 @@ const LAKE_CENTER = [37.33, -86.17];
 const FKEY = "fm.mapFilters";
 // photo: "summer" = USGS/NAIP leaf-on photo (lake near full pool; sharp to zoom 16) | "sharp" = Esri (winter, low water)
 // depthAt: "today" = live USGS level | "summer" = summer pool 515 ft (John 11-14: see the full 515→496 lidar lines)
-const F0 = { segments: [], season: "now", mine: false, attractors: true, satellite: true, photo: "summer", depth: false, depthAt: "today", tries: true };
+const F0 = { segments: [], season: "like", mine: false, attractors: true, satellite: true, photo: "summer", depth: false, depthAt: "today", tries: true };
 export const SUMMER_POOL_FT = 515;
 const readF = () => { try { return { ...F0, ...JSON.parse(localStorage.getItem(FKEY)) }; } catch { return F0; } };
 const md = (d) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
@@ -56,7 +58,7 @@ export const TRY_KINDS = { point: ["Point", "Main-lake point", "#ffd54f"], break
 const metersApart = (a, b) => { const k = Math.cos((a.lat * Math.PI) / 180); return Math.hypot((a.lat - b.lat) * 111320, (a.lon - b.lon) * 111320 * k); };
 const depthColor = (d) => (d < 6 ? "#9be7ff" : d < 12 ? "#4fc3f7" : d < 20 ? "#1e88e5" : d < 30 ? "#1565c0" : "#0d2f8a");
 
-export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, reloadSpots, save, toast, onFishHere, onWatch, weather, lake }) {
+export default function MapScreen({ active, db, me, demo, onMenu, trips, waterLog, spots, reloadSpots, save, toast, onFishHere, onWatch, weather, lake }) {
   const [f, setFState] = useState(readF);
   const setF = (patch) => setFState((x) => { const n = { ...x, ...patch }; try { localStorage.setItem(FKEY, JSON.stringify(n)); } catch { /* ignore */ } return n; });
   const [gps, setGps] = useState(null);         // {lat, lon, acc}
@@ -67,7 +69,9 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
   const box = useRef(null), map = useRef(null), layers = useRef({});
   const today = lakeToday();
   const list = spots || [];
-  const stats = useMemo(() => spotStats(trips, { segments: f.segments, season: f.season, owner: f.mine ? me.email : null }, today), [trips, f.segments, f.season, f.mine, me, today]);
+  const lakeCtx = useLakeCtx(waterLog), lakeNow = useTodayLake(lakeCtx, weather);
+  const likePred = useMemo(() => (f.season === "like" && lakeCtx && lakeNow ? rowFilter(trips, lakeCtx, { like: lakeNow }) : null), [f.season, lakeCtx, lakeNow, trips]);
+  const stats = useMemo(() => spotStats(trips, { segments: f.segments, season: f.season, owner: f.mine ? me.email : null, pred: likePred }, today), [trips, f.segments, f.season, f.mine, me, today, likePred]);
   const live = useMemo(() => (trips ? S.openSessions(trips).filter((o) => o.owner !== me.email && o.rows[0].trip_date === today) : []), [trips, me, today]);
   const nowSeg = S.guessSegment(lakeNowNaive(), segmentTimeRanges(weather?.value, today));
 
@@ -306,9 +310,10 @@ export default function MapScreen({ active, db, me, demo, onMenu, trips, spots, 
             <button className={`chip ${!f.segments.length ? "on" : ""}`} onClick={() => setF({ segments: [] })}>Any</button>
             {SEGMENTS.map((g) => { const on = f.segments.includes(g); return <button key={g} className={`chip ${on ? "on" : ""}`} onClick={() => setF({ segments: on ? f.segments.filter((x) => x !== g) : [...f.segments, g] })}>{g}{g === nowSeg ? " (now)" : ""}</button>; })}
           </div></div>
-          <div className="field">Time of year<div className="chips">{Object.entries(SEASONS).map(([k, l]) => <button key={k} className={`chip ${f.season === k ? "on" : ""}`} onClick={() => setF({ season: k })}>{l}</button>)}</div></div>
+          <div className="field">Time of year / lake<div className="chips">{Object.entries(SEASONS).map(([k, l]) => <button key={k} className={`chip ${f.season === k ? "on" : ""}`} onClick={() => setF({ season: k })}>{l}</button>)}</div></div>
           <div className="seg">{[[false, "Everyone's catches"], [true, "Just me"]].map(([v, l]) => <button key={l} className={f.mine === v ? "on" : ""} onClick={() => setF({ mine: v })}>{l}</button>)}</div>
-          <button className="link" onClick={() => setF({ segments: [nowSeg], season: "now" })}>Right now: {nowSeg}, this time of year ›</button>
+          <button className="link" onClick={() => setF({ segments: [nowSeg], season: "like" })}>Right now: {nowSeg}, lake like today ›</button>
+          {f.season === "like" && lakeNow && <p className="muted small" style={{ margin: "4px 0 0" }}>Today's lake: {likeLabel(lakeNow)} ({lakeNow.measured ? "latest Army Corps check" : "typical for the date"}). Spots rank by how they fished in outings like that.</p>}
           <div className="legend">{HEAT_LEGEND.map(([c, l]) => <span key={l}><i style={{ background: c }} />{l}</span>)}</div>
           <div className="lr-h">Best spots for this filter</div>
           {ranked.length ? ranked.slice(0, 8).map(({ s, st }, i) => (

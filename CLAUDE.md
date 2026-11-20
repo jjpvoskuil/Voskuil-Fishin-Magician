@@ -96,6 +96,20 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   by floor depth band, and by phase (stratified = top−bottom ≥3.6 °F; turnover = surface <5 mg/L or floor <40 ft; mixed).
   Real log 11-20 (123 outings Aug 9–Nov 11): 2+ ft above the floor 2.9/hr vs at/below 1.3; turnover 0.7 vs summer 2.0.
   41 of 121 marked depths are exactly 8 ft (default or habit? asked John).
+  8 ft = the session form's starting value (old app too); old rows can't tell a reading from the default, new rows
+  with field_sources.fish_depth_ft "default" are skipped (o2catch.outings).
+- Where to fish + Fish depth (John 11-20, new app only). `lib/lakectx.js` = lake phase per date (Corps profiles via
+  o2catch, else calendar `guessPhase`) + outing water temp (logged with electronics, else Corps surface); `todayLake`.
+  `lib/wheretofish.js`: outings ranked per spot / spot type in a condition (Like today = same phase, water ±6 °F;
+  or phase × 10 °F band), shrunk 2 h to the condition's average; "hardly tried" = kinds with <3 outings;
+  `rowFilter` → Lake Map 🔥 "Like today's lake" chip (SEASONS.like, now the map default; spotStats `f.pred`), so
+  spot heat, the ranked list and ⭐ ranking follow today's lake. `lib/fishdepth.js`: fish/hr by 3-ft marked-depth band,
+  by month / water temp / phase (median marked, best band with 3+ outings, floor at the spots); `expectedDepth`
+  (phase ×1/×0.25, doy σ21 d, temp σ6 °F, × fish/hr, weighted median, ≥4 outings, capped 1 ft above the O₂ limit) is
+  used by Forecast, Session setup and Add a lure when NO depth is entered (Lake setup fish depth now defaults blank
+  "— (from log)"; Session ignores a depth whose source is "default"); `withLogDepth` relabels "you're marking" text.
+  Screens: Reports tabs "Where to fish" (`WhereReport.jsx`, also exports useLakeCtx/useTodayLake) + "Fish depth"
+  (`DepthReport.jsx`). App loads `useWaterLog` once (lib/live.js) and passes waterLog to Forecast/Session/Map/Reports.
 
 ## Engine port notes
 - Ported so far (11-10): `lib/py.js` (Python-exact rounding/sum/time helpers), `astro.js`, `weather.js`, `onwater.js`

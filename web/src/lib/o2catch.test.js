@@ -41,7 +41,7 @@ test("outings and the report", () => {
     { ...row({ d: "2026-08-23", s: "5" }), conditions: { lure_start_time: "07:00:00" } }, // still on the water
   ];
   const o = outings(trips); assert.equal(o.length, 3);
-  assert.deepEqual(o[0], { date: "2026-08-21", owner: "a@x", spot_id: "sp", hours: 2, fish: 3, fish_depth: 12 });
+  assert.deepEqual(o[0], { key: "a@x|1", date: "2026-08-21", owner: "a@x", spot_id: "sp", hours: 2, fish: 3, fish_depth: 12 });
   const r = o2Catch(trips, { spots });
   assert.equal(r.matched, 3);
   const st = r.byPhase.find((x) => x.key === "stratified"); assert.equal(st.outings, 2); assert.equal(st.fish, 12); assert.equal(st.rate, 12 / 5);

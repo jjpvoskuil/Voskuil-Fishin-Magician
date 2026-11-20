@@ -12,6 +12,8 @@ import { FACTORS, METRICS, predictByMoon, predictByPressure, SECCHI_BUCKET, SPEC
 import { cleanReportSpec, describeReport, fmtValue, metricName, runReport, STOCK, windowFor } from "./lib/reportspec.js";
 import ScoreCheck from "./ScoreCheck.jsx";
 import O2Check from "./O2Check.jsx";
+import WhereReport from "./WhereReport.jsx";
+import DepthReport from "./DepthReport.jsx";
 import { SEGMENTS } from "./lib/scoring.js";
 
 const KEY = "fm.reports";
@@ -144,7 +146,7 @@ function ReportCard({ trips, spec, title, f, me, typeNames }) {
   </section>;
 }
 
-export default function ReportsScreen({ active, db, me, trips, weather, onBack, onMenu, demo, toast }) {
+export default function ReportsScreen({ active, db, me, trips, weather, waterLog, spots, onBack, onMenu, demo, toast }) {
   const [f, setFState] = useState(read);
   const setF = (p) => setFState((x) => { const n = { ...x, ...p }; try { localStorage.setItem(KEY, JSON.stringify(n)); } catch { /* ignore */ } return n; });
   // reports group by the spot name saved on each trip (as the old app did)
@@ -170,11 +172,15 @@ export default function ReportsScreen({ active, db, me, trips, weather, onBack, 
           {STOCK.map((s) => <button key={s.id} role="tab" aria-selected={f.tab === s.id} className={f.tab === s.id ? "on" : ""} onClick={() => setF({ tab: s.id })}>{s.title}</button>)}
           <button role="tab" aria-selected={f.tab === "forecast"} className={f.tab === "forecast" ? "on" : ""} onClick={() => setF({ tab: "forecast" })}>Forecast vs catch</button>
           <button role="tab" aria-selected={f.tab === "oxygen"} className={f.tab === "oxygen" ? "on" : ""} onClick={() => setF({ tab: "oxygen" })}>Oxygen &amp; catch</button>
+          <button role="tab" aria-selected={f.tab === "where"} className={f.tab === "where" ? "on" : ""} onClick={() => setF({ tab: "where" })}>Where to fish</button>
+          <button role="tab" aria-selected={f.tab === "depth"} className={f.tab === "depth" ? "on" : ""} onClick={() => setF({ tab: "depth" })}>Fish depth</button>
           {saved.map((r) => <button key={r.id} role="tab" aria-selected={f.tab === `saved:${r.id}`} className={f.tab === `saved:${r.id}` ? "on" : ""} onClick={() => setF({ tab: `saved:${r.id}` })}>★ {r.title}</button>)}
           <button role="tab" aria-selected={f.tab === "custom"} className={f.tab === "custom" ? "on" : ""} onClick={() => setF({ tab: "custom" })}>＋ Custom</button>
         </div>
         {trips === null ? <p className="muted">Loading the trip log…</p> : <>
-          {f.tab === "forecast" ? <ScoreCheck trips={trips} f={f} me={me} setScreen={(p) => setF(p)} /> : f.tab === "oxygen" ? <O2Check db={db} trips={trips} f={f} me={me} setScreen={(p) => setF(p)} /> : stock ? <ReportCard trips={trips} spec={spec} title={stock.title} f={f} me={me} typeNames={typeNames} />
+          {f.tab === "forecast" ? <ScoreCheck trips={trips} f={f} me={me} setScreen={(p) => setF(p)} /> : f.tab === "oxygen" ? <O2Check db={db} trips={trips} f={f} me={me} setScreen={(p) => setF(p)} />
+            : f.tab === "where" ? <WhereReport trips={trips} spots={spots} waterLog={waterLog} weather={weather} f={f} me={me} setScreen={(p) => setF(p)} />
+            : f.tab === "depth" ? <DepthReport trips={trips} spots={spots} waterLog={waterLog} weather={weather} f={f} me={me} setScreen={(p) => setF(p)} /> : stock ? <ReportCard trips={trips} spec={spec} title={stock.title} f={f} me={me} typeNames={typeNames} />
             : <Builder db={db} me={me} report={report} choices={choices} trips={trips} f={f} toast={toast} weather={weather} setScreen={(p) => setF(p)}
                 onSaved={(item) => { setSaved((l) => [...l.filter((x) => x.id !== item.id), item]); setF({ tab: `saved:${item.id}` }); }}
                 onDeleted={() => { setSaved((l) => l.filter((x) => x.id !== report.id)); setF({ tab: "custom" }); }} />}

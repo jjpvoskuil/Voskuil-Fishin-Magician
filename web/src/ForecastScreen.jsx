@@ -12,13 +12,15 @@ import { calibrateWeights } from "./lib/calibration.js";
 import { applyFreeze } from "./lib/freeze.js";
 import { LURE_PROFILES, recommend } from "./lib/lures.js";
 import { annotatePicks, applyOxygen, lureOxygenLimit } from "./lib/oxygen.js";
+import { expectedDepth, withLogDepth } from "./lib/fishdepth.js";
+import { useLakeCtx } from "./WhereReport.jsx";
 import { effectiveSeasonAndTemp, scoreWeek } from "./lib/scoring.js";
 import { titleWords } from "./lib/py.js";
 import { lakeNowNaive, lakeToday } from "./lib/weather.js";
 
 const dayLabel = (d, opts) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
 
-export default function ForecastScreen({ active, demo, onMenu, db, me, weather, water, trips, lures, spots, setup, setSetup }) {
+export default function ForecastScreen({ active, demo, onMenu, db, me, weather, water, waterLog, trips, lures, spots, setup, setSetup }) {
   const today = lakeToday();
   const [frozen, setFrozen] = useState(null);
   const [pick, setPick] = useState(today);
@@ -51,17 +53,23 @@ export default function ForecastScreen({ active, demo, onMenu, db, me, weather, 
   const r = resolveSetup(setup, spots, week?.[0]?.water_temp_f ?? null, electronics);
   const [effSeason, effTemp] = day ? effectiveSeasonAndTemp(day, r.waterTemp) : [null, null];
 
+  const ox = useMemo(() => (day ? lureOxygenLimit(day.the_date, water?.profile, r.spot) : null), [day, water?.profile, r.spot]);
+  const lakeCtx = useLakeCtx(waterLog);
+  // no fish depth entered → aim at where our log marked fish on good outings in conditions like this day's (Fish depth report)
+  const logDepth = useMemo(() => (day && lakeCtx && r.fishDepth == null ? expectedDepth(trips, lakeCtx, { date: day.the_date, tempF: effTemp, floorFt: ox?.limit_ft ?? null }) : null),
+    [day, lakeCtx, r.fishDepth, trips, effTemp, ox]);
+  const depthUsed = r.fishDepth ?? logDepth?.depth_ft ?? null;
   const rec = useMemo(() => {
     if (!day || !seg || !lures || !trips) return null;
-    return recommend({ season: effSeason, water_temp_f: effTemp, segment_name: seg.name, pressure_trend_24h: seg.pressure_trend_24h,
-      structure_type: r.structure, water_clarity: r.clarity, fish_depth_ft: r.fishDepth, forage: r.forage,
+    const out = recommend({ season: effSeason, water_temp_f: effTemp, segment_name: seg.name, pressure_trend_24h: seg.pressure_trend_24h,
+      structure_type: r.structure, water_clarity: r.clarity, fish_depth_ft: depthUsed, forage: r.forage,
       inventory: lures, trip_history: trips, wind_mph: day.weather_summary.avg_wind_mph });
-  }, [day, seg, lures, trips, effSeason, effTemp, r.structure, r.clarity, r.fishDepth, r.forage]);
-  const ox = useMemo(() => (day ? lureOxygenLimit(day.the_date, water?.profile, r.spot) : null), [day, water?.profile, r.spot]);
+    return r.fishDepth == null && logDepth ? withLogDepth(out, logDepth) : out;
+  }, [day, seg, lures, trips, effSeason, effTemp, r.structure, r.clarity, r.fishDepth, r.forage, depthUsed, logDepth]);
   const recO2 = useMemo(() => applyOxygen(rec, ox, LURE_PROFILES, r.fishDepth), [rec, ox, r.fishDepth]);
 
   const picks = useMemo(() => (recO2 ? annotatePicks(buildPicks(recO2, { trips, inventory: lures, today: lakeToday(), ctx: { water_temp_f: effTemp, water_clarity: r.clarity, segment_name: seg?.name,
-    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: picksMode === "me" ? me?.email : null, fish_depth_ft: r.fishDepth } }), ox, LURE_PROFILES) : null), [recO2, ox, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, r.fishDepth, picksMode]);
+    structure_type: r.structure, spot_id: r.spot?.spot_id || null, me: picksMode === "me" ? me?.email : null, fish_depth_ft: depthUsed } }), ox, LURE_PROFILES) : null), [recO2, ox, trips, lures, effTemp, r.clarity, seg, r.structure, r.spot, me, depthUsed, picksMode]);
   const ws = day?.weather_summary;
   return (
     <div className="screen" hidden={!active} id="screen-forecast">

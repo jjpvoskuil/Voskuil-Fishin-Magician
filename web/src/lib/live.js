@@ -82,3 +82,11 @@ export function useList(db, method) {
   useRefreshing(load, 10 * 60e3);
   return { ...state, reload: load };
 }
+
+/** Every logged water-quality row (with full Corps profiles since 11-12), loaded once — for the reports, the map and
+ *  the depth the lure advice expects. null while loading. */
+export function useWaterLog(db) {
+  const [log, setLog] = useState(null);
+  useEffect(() => { if (!db) return; let live = true; db.listWaterQuality().then((l) => live && setLog(l)).catch(() => live && setLog([])); return () => { live = false; }; }, [db]);
+  return log;
+}

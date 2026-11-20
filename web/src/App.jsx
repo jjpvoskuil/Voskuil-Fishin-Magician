@@ -17,7 +17,7 @@ import { useOutbox } from "./lib/outbox.js";
 import TodayScreen from "./TodayScreen.jsx";
 import ForecastScreen from "./ForecastScreen.jsx";
 import { useLakeSetup } from "./LakeSetup.jsx";
-import { useLakeLevel, useList, useTrips, useWaterQuality, useWeather } from "./lib/live.js";
+import { useLakeLevel, useList, useTrips, useWaterLog, useWaterQuality, useWeather } from "./lib/live.js";
 import { demoSeed, DEMO_EMAIL } from "./demo.js";
 import { demoDb, supabaseDb } from "./lib/db.js";
 import { resolveTheme } from "./lib/theme.js";
@@ -82,7 +82,7 @@ export default function App() {
   const db = useMemo(() => (session ? (demo ? demoDb(demoSeed, session.user.email) : supabaseDb(supabase, session.user.email)) : null), [session?.user?.email, demo]);
   useEffect(() => { if (!db) return; db.whoami().then(setMe, (e) => setError(e.message)); }, [db]);
   const approvedDb = me ? db : null; // shared data loads only once we know this person is on the list
-  const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), { trips, reload: reloadTrips } = useTrips(approvedDb);
+  const weather = useWeather(), lake = useLakeLevel(), water = useWaterQuality(approvedDb), waterLog = useWaterLog(approvedDb), { trips, reload: reloadTrips } = useTrips(approvedDb);
   const outbox = useOutbox(approvedDb); // one save queue for Session and History
   const lures = useList(approvedDb, "listLures"), spots = useList(approvedDb, "listSpots");
   const [setup, setSetup] = useLakeSetup();
@@ -126,9 +126,9 @@ export default function App() {
     <NoteCtx.Provider value={openNote}>
       <TodayScreen {...common} active={tab === "today"} weather={weather} lake={lake} water={water} trips={trips} reloadTrips={reloadTrips}
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }} />
-      <ForecastScreen {...common} active={tab === "forecast"} weather={weather} water={water} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
-      <SessionScreen {...common} active={tab === "session"} weather={weather} water={water} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
-      <MapScreen {...common} active={tab === "map"} trips={trips} spots={spots.items} reloadSpots={spots.reload} weather={weather} lake={lake}
+      <ForecastScreen {...common} active={tab === "forecast"} weather={weather} water={water} waterLog={waterLog} trips={trips} lures={lures.items} spots={spots.items} setup={setup} setSetup={setSetup} />
+      <SessionScreen {...common} active={tab === "session"} weather={weather} water={water} waterLog={waterLog} trips={trips} reloadTrips={reloadTrips} lures={lures.items} spots={spots.items} outbox={outbox} watchReq={watchReq} />
+      <MapScreen {...common} active={tab === "map"} trips={trips} waterLog={waterLog} spots={spots.items} reloadSpots={spots.reload} weather={weather} lake={lake}
         onWatch={(key) => { setWatchReq({ key, at: Date.now() }); onTab("session"); }}
         onFishHere={(spotId) => { // Session setup reads its draft when it opens
           try { const d = JSON.parse(localStorage.getItem("fm.sessionDraft") || "{}"); localStorage.setItem("fm.sessionDraft", JSON.stringify({ ...d, spot_id: spotId, spot_source: "map", together: null })); } catch { /* ignore */ }
@@ -138,7 +138,7 @@ export default function App() {
       <TackleScreen {...common} active={tab === "more" && page === "tackle"} trips={trips} lures={lures.items} reloadLures={lures.reload} onBack={() => setPage(null)} />
       <LeaderboardScreen {...common} active={tab === "more" && page === "leaderboard"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
       <MyStatsScreen {...common} active={tab === "more" && page === "mystats"} trips={trips} spots={spots.items} onBack={() => setPage(null)} />
-      <ReportsScreen {...common} active={tab === "more" && page === "reports"} trips={trips} weather={weather} onBack={() => setPage(null)} />
+      <ReportsScreen {...common} active={tab === "more" && page === "reports"} trips={trips} weather={weather} waterLog={waterLog} spots={spots.items} onBack={() => setPage(null)} />
       <PunchScreen {...common} active={tab === "more" && page === "punch"} version={punchVer} onAdd={(screen) => openNote(screen, "")} onBack={() => setPage(null)} />
       <PunchSheet open={!!noteCtx} ctx={noteCtx} db={db} me={me} toast={setToast} onClose={() => setNoteCtx(null)} onSaved={() => setPunchVer((v) => v + 1)} />
       <TabBar tab={tab} onTab={onTab} />

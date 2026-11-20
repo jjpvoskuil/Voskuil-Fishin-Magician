@@ -5,7 +5,7 @@ import { parseConditions } from "./calibration.js";
 import { lureHours } from "./history.js";
 import { LURE_PROFILES } from "./lures.js";
 
-export const SEASONS = { any: "Any time", now: "This time of year", spring: "Spring (Mar–May)", summer: "Summer (Jun–Aug)", fall: "Fall (Sep–Nov)", winter: "Winter (Dec–Feb)" };
+export const SEASONS = { like: "Like today's lake", any: "Any time", now: "This time of year", spring: "Spring (Mar–May)", summer: "Summer (Jun–Aug)", fall: "Fall (Sep–Nov)", winter: "Winter (Dec–Feb)" };
 const SEASON_MONTHS = { spring: [3, 4, 5], summer: [6, 7, 8], fall: [9, 10, 11], winter: [12, 1, 2] };
 const SHRINK = 2, MIN_STINT = 0.5;
 const doy = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(+iso.slice(0, 4), 0, 1)) / 864e5;
@@ -14,6 +14,7 @@ const doy = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slic
 export function passes(r, f, today) {
   if (f.owner && (r.owner || "").toLowerCase() !== f.owner.toLowerCase()) return false;
   if (f.segments?.length && !f.segments.includes(r.segment)) return false;
+  if (f.season === "like") return f.pred ? f.pred(r) : true; // lake phase + water temp (lib/wheretofish.js rowFilter)
   if (f.season && f.season !== "any") {
     if (f.season === "now") { const d = Math.abs(doy(r.trip_date) - doy(today)); if (Math.min(d, 365 - d) > 30) return false; }
     else if (!SEASON_MONTHS[f.season].includes(+r.trip_date.slice(5, 7))) return false;

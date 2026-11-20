@@ -86,3 +86,6 @@
 - Corps vs our catches (John 11-20): fish marked >2 ft above the Corps oxygen floor at the spot 2.9–3.2 fish/hr vs
   1.2–1.4 at/below; worst week = shallowest floor (Aug 17, ~9.5 ft, 0.8/hr); turnover 0.7–1.1 vs summer ~2.0; logged
   water temps avg 0.9 °F under the Corps surface. One season — confounded with cooling. Built Reports → Oxygen & catch.
+- Built Where to fish + Fish depth reports (John: "1 and 2"), the Map's "Like today's lake" filter (default), and log-
+  based target depth for lure plans when none is entered. Found the 8 ft cluster = the form's default; Lake setup fish
+  depth now starts blank. 73 JS tests pass.
