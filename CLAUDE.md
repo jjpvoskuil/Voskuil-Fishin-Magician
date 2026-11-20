@@ -88,6 +88,14 @@ backups (private repo, twice weekly), make_restore.py, cutover.
   when it spans it), and a caveat when marked fish are >2 ft below the limit; `annotatePicks` adds the notes to picks.
   Used in Forecast, Session setup and Live "Add a lure". The old month THERMO table in onwater.js/core/thermocline.py
   is now unused by the screens (kept for parity tests).
+- Reports → "Oxygen & catch" tab (John 11-20, `O2Check.jsx`, engine `lib/o2catch.js` + test, new app only): outings
+  (session, ≥0.5 h) matched to Corps dam profiles = `lib/data/corps_profiles.json` (2026 so far; regenerate from a new
+  Corps workbook with `python3 web/tools/corps_profiles.py FILE.xlsx [FROM_YEAR]`) + every fm_water_quality row with a
+  `profile` (fills in by itself). Interpolated between stratified checks ≤24 days apart, else nearest ≤10 days. Shows
+  fish/hr by marked fish depth vs the spot's floor (6+ above / 2–6 above / ±2 / 2+ below), week by week with the floor,
+  by floor depth band, and by phase (stratified = top−bottom ≥3.6 °F; turnover = surface <5 mg/L or floor <40 ft; mixed).
+  Real log 11-20 (123 outings Aug 9–Nov 11): 2+ ft above the floor 2.9/hr vs at/below 1.3; turnover 0.7 vs summer 2.0.
+  41 of 121 marked depths are exactly 8 ft (default or habit? asked John).
 
 ## Engine port notes
 - Ported so far (11-10): `lib/py.js` (Python-exact rounding/sum/time helpers), `astro.js`, `weather.js`, `onwater.js`

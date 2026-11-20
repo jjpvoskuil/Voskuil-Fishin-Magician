@@ -83,3 +83,6 @@
   applyOxygen / annotatePicks, wired into Forecast + Session (setup, Add a lure). Deep baits that run entirely below
   the floor at the spot are demoted with a ⚠️ note; e.g. July 10 mi up-lake: floor ~12 ft → deep crank 15–25 ft demoted.
   JS: 66 pass.
+- Corps vs our catches (John 11-20): fish marked >2 ft above the Corps oxygen floor at the spot 2.9–3.2 fish/hr vs
+  1.2–1.4 at/below; worst week = shallowest floor (Aug 17, ~9.5 ft, 0.8/hr); turnover 0.7–1.1 vs summer ~2.0; logged
+  water temps avg 0.9 °F under the Corps surface. One season — confounded with cooling. Built Reports → Oxygen & catch.

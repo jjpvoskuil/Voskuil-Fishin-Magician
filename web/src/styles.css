@@ -398,6 +398,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .ot-wrap { overflow-x: auto; margin: 0 -4px; -webkit-overflow-scrolling: touch; }
 .sc-plot.ot { width: auto; display: block; }
 .ot .ot-bar { fill: var(--accent-soft); }
+.ot .ot-bar.o2-turn { fill: var(--warn); opacity: .6; }
 .ot .ot-none { fill: var(--muted); opacity: .5; }
 .ot .ot-line { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
 .ot .ot-dot { fill: var(--warn); }
